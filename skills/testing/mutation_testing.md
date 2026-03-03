@@ -16,6 +16,7 @@ Mutation testing evaluates the **effectiveness** of a test suite by introducing 
 ## Principles
 
 - **Coverage is necessary but not sufficient:** 100% line coverage does not mean the tests catch bugs. Mutation testing measures test *strength*, not just test *reach*.
+- **Agentic Hallucination Defense:** Autonomous agents are prone to writing "sham tests" that achieve 100% line coverage but mock out the core logic (testing nothing). Mutation testing mathematically breaks the code to prove the agent's tests actually assert behavior.
 - **Verifiability (AAIG L1):** Mutation scores provide a programmatically measurable quality gate that complements coverage metrics.
 - **Efficiency (AAIG L1):** Mutation testing is computationally expensive. Apply it strategically -- target critical code paths and business logic, not boilerplate or generated code.
 

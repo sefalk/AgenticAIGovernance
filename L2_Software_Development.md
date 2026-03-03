@@ -32,6 +32,8 @@ This artifact derives domain-specific rules for software development from the Le
 
 **R-SD-07:** All builds SHALL be reproducible. Given the same source code and dependency versions, the build output must be identical (or functionally equivalent for non-deterministic compilers).
 
+**R-SD-24:** Proof of Failure (Testing Validity): To prevent "hallucinated success," an agent SHALL NOT write the implementation code to fix a bug unless it first writes a test that *fails* in the current environment, proving both the bug's existence and the test's validity.
+
 ### From: Transparency/Traceability (L1)
 
 **R-SD-08:** Every code change SHALL be linked to a tracked work item (issue, ticket, or task). Unlinked changes SHALL NOT be integrated into the primary branch without explicit justification in the commit message.

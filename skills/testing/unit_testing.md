@@ -16,10 +16,11 @@ Unit testing verifies the correctness of individual units of code (functions, me
 ## Principles
 
 - **Isolation:** Each test verifies exactly one unit. External dependencies (databases, APIs, file systems, clocks) are replaced with test doubles.
-- **Determinism:** A unit test must produce the same result every time, regardless of execution order, system state, or environment. Flaky tests are treated as bugs.
+- ** Determinism:** A unit test must produce the same result every time, regardless of execution order, system state, or environment. Flaky tests are treated as bugs.
 - **Speed:** The full unit test suite should run in seconds, not minutes. Tests that require network calls, disk I/O, or heavy setup are integration tests, not unit tests.
 - **Traceability (AAIG L1):** Every test must be traceable to a requirement, specification, or behavioral expectation. Tests without a clear "why" are noise, not safety.
 - **Verifiability (AAIG L1):** Test results must be programmatically verifiable -- pass/fail with clear failure messages, not manual inspection.
+- **Proof of Failure (Agentic TDD):** An agent must prove a test is valid by watching it fail *before* implementing the fix. Writing tests that pass immediately without verifying the Red phase is considered an anti-pattern (Hallucinated Success).
 
 ## Techniques & Patterns
 
