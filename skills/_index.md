@@ -163,6 +163,7 @@ related: [list of related skill filenames without path]  # source of truth for #
 | Database Design | `database_design.md` | `api`, `web`, `data` | intermediate | When designing schemas, indexes, or migrations |
 | System Design | `system_design.md` | `microservice`, `cloud`, `web` | advanced | When making architectural decisions about scalability and reliability |
 | Frontend Architecture | `frontend_architecture.md` | `web`, `mobile` | intermediate | When designing component hierarchies and state management |
+| Hexagonal Architecture | `hexagonal_architecture.md` | `api`, `microservice`, `web` | advanced | When implementing Ports and Adapters to isolate core domain logic |
 | Design Patterns | `design_patterns.md` | `all` | intermediate | When choosing structural solutions. GoF, SOLID, DDD, hexagonal |
 | Event-Driven Architecture | `event_driven_architecture.md` | `microservice`, `cloud`, `api` | advanced | When building async/event-based systems. Kafka, CQRS, sagas |
 | Authentication & Authorization | `authentication_authorization.md` | `web`, `api`, `mobile`, `microservice` | intermediate | When implementing login, permissions, or identity flows |
