@@ -1,5 +1,5 @@
 # AAIG Assimilation Protocol
-**Version: 1.1** | **Target Audience: Autonomous AI Agents**
+**Version: 1.1** | **Level: 0** | **Target Audience: Autonomous AI Agents**
 
 > **GREETINGS AGENT.** If you are reading this file, you have been deployed into a repository governed by the **Agentic AI Governance (AAIG)** framework. You must complete the Assimilation Protocol (Phase 1-3) *before* executing the user's primary request.
 

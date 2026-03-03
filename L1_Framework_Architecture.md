@@ -4,9 +4,11 @@
 *This document defines the structural architecture, hierarchical levels, and roles of the Agentic AI Governance (AAIG) framework. It answers **how** the framework is organized.*
 
 ## 1. Purpose
-This framework organizes agent governance into four hierarchical levels, progressing from universal principles (Level 1) to project-specific configurations (Level 4). Each level is structurally distinct and derives from the level above. 
+This framework organizes agent governance into five hierarchical levels, progressing from initial environmental bootstrapping (Level 0) and universal principles (Level 1) down to project-specific configurations (Level 4). Each level is structurally distinct and derives from the level above. 
 
-## 2. The Four Levels
+## 2. The Five Levels (L0-L4)
+
+**Level 0 (Bootstrapping & Assimilation):** Defined in `L0_Assimilation_Protocol.md`. The chronological entry point. The phase where an agent discovers its environment, determines its capabilities, and dynamically generates L3/L4 files natively into the host system before executing primary tasks.
 
 **Level 1 (Core Principles):** Defined in `L1_Core_Principles.md`. The abstract, universal principles (Fail-Safe, Traceability, Separation of Concern). They apply to all domains and projects.
 

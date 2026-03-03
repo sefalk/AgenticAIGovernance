@@ -46,12 +46,13 @@ If you are using an LLM to automatically review Pull Requests via GitHub Actions
 
 ---
 
-## 🏗️ How It Works (The 4 Levels)
+## 🏗️ How It Works (The 5 Levels)
 
-AAIG solves the "Agent Abstraction Problem" by separating high-level philosophy from low-level implementation across 4 tiers:
+AAIG solves the "Agent Abstraction Problem" by separating high-level philosophy from low-level implementation across 5 hierarchical tiers:
 
+*   **Level 0: Bootstrapping (`L0_Assimilation_Protocol.md`)** - The entry point where agents scan the host environment to determine their own sandbox capabilities.
+*   **The Blueprint (`L1_Framework_Architecture.md`)** - Defines how the 5 levels interlock and how agent roles function.
 *   **Level 1: Core Principles (`L1_Core_Principles.md`)** - Universal behavioral rules like *Separation of Concern* and *Fail-Safe*. They rarely change.
-*   **The Blueprint (`L1_Framework_Architecture.md`)** - Defines how the 4 levels interlock and how agent roles function.
 *   **Level 2: Domain Rules (`L2_Software_Development.md`)** - The L1 principles translated into concrete `SHALL / SHALL NOT` rules specifically for building software.
 *   **Level 3: Workflows (Optional)** - Explicit, step-by-step algorithms mapping how specific tasks (e.g., "Deploy to Prod") should be executed.
 *   **The Skills Toolbox (`/skills/`)** - A library of contextual skills. You don't load all skills into the agent's context window. The agent loads `frontend_architecture.md` only when touching the UI, saving tokens while enforcing rigorous, specialized Quality Gates.
