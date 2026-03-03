@@ -164,6 +164,8 @@ related: [list of related skill filenames without path]  # source of truth for #
 | System Design | `system_design.md` | `microservice`, `cloud`, `web` | advanced | When making architectural decisions about scalability and reliability |
 | Frontend Architecture | `frontend_architecture.md` | `web`, `mobile` | intermediate | When designing component hierarchies and state management |
 | Hexagonal Architecture | `hexagonal_architecture.md` | `api`, `microservice`, `web` | advanced | When implementing Ports and Adapters to isolate core domain logic |
+| Context Curation | `context_curation.md` | `all` | advanced | Teaching agents how to manage LLM token limits and context boundaries |
+| Idempotent Operations | `idempotent_operations.md` | `api`, `microservice`, `data`, `cloud` | intermediate | Teaching agents to design retry-safe mutations |
 | Design Patterns | `design_patterns.md` | `all` | intermediate | When choosing structural solutions. GoF, SOLID, DDD, hexagonal |
 | Event-Driven Architecture | `event_driven_architecture.md` | `microservice`, `cloud`, `api` | advanced | When building async/event-based systems. Kafka, CQRS, sagas |
 | Authentication & Authorization | `authentication_authorization.md` | `web`, `api`, `mobile`, `microservice` | intermediate | When implementing login, permissions, or identity flows |
@@ -177,6 +179,7 @@ related: [list of related skill filenames without path]  # source of truth for #
 | Infrastructure as Code | `infrastructure_as_code.md` | `cloud` | advanced | When managing cloud resources declaratively. Terraform, Pulumi |
 | Mobile Development | `mobile_development.md` | `mobile` | intermediate | When building pipelines, distributing, or fixing architecture for iOS/Android apps |
 | Monitoring & Observability | `monitoring_observability.md` | `api`, `web`, `microservice`, `cloud` | intermediate | When you need visibility into production. Logs, metrics, traces, SLOs |
+| LLM Observability | `llm_observability.md` | `all` | intermediate | Instrumenting autonomous workflows to trace prompt and token data |
 | Structured Logging | `structured_logging.md` | `all` | foundational | When standardizing log outputs. JSON logs, correlation IDs, log levels |
 | Configuration Management | `configuration_management.md` | `all` | foundational | When managing runtime settings. Env vars, feature flags, 12-factor |
 | Version Control | `version_control.md` | `all` | foundational | When interacting with Git. Atomic commits, branch strategy, squashing history |
