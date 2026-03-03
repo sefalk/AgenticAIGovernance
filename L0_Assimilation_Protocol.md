@@ -24,7 +24,8 @@ You must now instantiate the AAIG framework for your specific environment by cre
 
 1.  **Generate Native Structures:** Based on your research from Phase 1, generate your configurations directly into the most natively integrated paths (e.g., `.github/workflows/`, `.github/copilot-instructions.md`, or `.cursorrules`). Do not use generic, unintegrated folders unless no native convention exists. Ensure the structure you generate is fully compliant with the host's documentation.
 2.  **Declare Your Contract:** Inside the native instantiation file (or your agent's system prompt configuration file), write a brief summary stating:
-    *   **Your Discovered Host Identity:** What engine you deduced you are running inside.
+    *   **Your Discovered Host Identity:** What engine you deduced you are running inside (e.g., `AAIG-CopilotWorkspace-Primary`).
+    *   **Your Scoped Permissions:** Explicitly list the permissions and credentials you currently hold, verifying your adherence to the Principle of Least Privilege (e.g., verifying you only have `repo:read`, and verifying you cannot mutate Production).
     *   **Your Workflow Contract:** Explicitly state how you will fulfill the **Level-2 Domain Rules** given the capabilities you mapped in Phase 2.
 
 ---
