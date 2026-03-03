@@ -53,7 +53,13 @@ AAIG solves the "Agent Abstraction Problem" by separating high-level philosophy 
 *   **Level 0: Bootstrapping (`L0_Assimilation_Protocol.md`)** - The entry point where agents scan the host environment to determine their own sandbox capabilities.
 *   **The Blueprint (`L1_Framework_Architecture.md`)** - Defines how the 5 levels interlock and how agent roles function.
 *   **Level 1: Core Principles (`L1_Core_Principles.md`)** - Universal behavioral rules like *Separation of Concern* and *Fail-Safe*. They rarely change.
-*   **Level 2: Domain Rules (`L2_Software_Development.md`)** - The L1 principles translated into concrete `SHALL / SHALL NOT` rules specifically for building software.
+*   **Level 2: Domain Rules** - The L1 principles translated into concrete `SHALL / SHALL NOT` rules for specific domains:
+    *   `L2_Software_Development.md` — Building software
+    *   `L2_Data_Engineering.md` — Data pipelines, ETL, warehouses
+    *   `L2_ML_Operations.md` — ML model lifecycle, training, deployment
+    *   `L2_Infrastructure.md` — IaC, cloud resources, platform engineering
+    *   `L2_Technical_Writing.md` — Agent-produced documentation
+    *   `L2_Security_Operations.md` — Security audits, incident response
 *   **Level 3: Workflows (Optional)** - Explicit, step-by-step algorithms mapping how specific tasks (e.g., "Deploy to Prod") should be executed.
 *   **The Skills Toolbox (`/skills/`)** - A library of contextual skills. You don't load all skills into the agent's context window. The agent loads `frontend_architecture.md` only when touching the UI, saving tokens while enforcing rigorous, specialized Quality Gates.
 
