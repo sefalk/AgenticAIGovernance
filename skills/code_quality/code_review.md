@@ -1,6 +1,5 @@
 ---
-title: Agentic Code Review
-description: Automated evaluation of pull requests via static analysis, diff analysis, and ADR compliance checks
+category: code_quality
 applies_to: [all]
 complexity: intermediate
 maturity: draft

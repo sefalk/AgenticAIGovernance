@@ -169,6 +169,7 @@ related: [list of related skill filenames without path]  # source of truth for #
 | Design Patterns | `design_patterns.md` | `all` | intermediate | When choosing structural solutions. GoF, SOLID, DDD, hexagonal |
 | Event-Driven Architecture | `event_driven_architecture.md` | `microservice`, `cloud`, `api` | advanced | When building async/event-based systems. Kafka, CQRS, sagas |
 | Authentication & Authorization | `authentication_authorization.md` | `web`, `api`, `mobile`, `microservice` | intermediate | When implementing login, permissions, or identity flows |
+| Multi-Agent Coordination | `multi_agent_coordination.md` | `all` | advanced | Protocols for concurrent agents: branch isolation, advisory locks, context handoffs |
 
 ### DevOps & Deployment (`devops/`)
 

@@ -14,6 +14,8 @@ This artifact derives domain-specific rules for software development from the Le
 
 ## Derived Rules
 
+> **Note:** Rule IDs are grouped by their parent L1 principle, not assigned sequentially. Gaps in numbering (e.g., no R-SD-16 through R-SD-20) are intentional and do not indicate missing rules.
+
 ### From: Review Principle (L1)
 
 **R-SD-01:** All code changes SHALL be reviewed before integration into the primary deliverable branch. The review must produce a reviewable artifact (e.g., PR review comments, review document, self-review log).
@@ -94,7 +96,7 @@ These rules apply to all software development projects governed by the AAIG fram
 
 The Skills Toolbox provides detailed implementation guidance for many of these rules:
 - R-SD-01, R-SD-03 → `code_review.md`
-- R-SD-04 → `unit_testing.md`, `integration_testing.md`
+- R-SD-04, R-SD-24 → `unit_testing.md`, `integration_testing.md`, `mutation_testing.md`
 - R-SD-05 → `static_analysis.md`
 - R-SD-06 → `ci_cd.md`
 - R-SD-10, R-SD-12 → `dependency_management.md`
@@ -102,3 +104,5 @@ The Skills Toolbox provides detailed implementation guidance for many of these r
 - R-SD-13 → `secure_coding.md`
 - R-SD-14 → `error_handling.md`
 - R-SD-17 → `configuration_management.md`
+- R-SD-21, R-SD-22, R-SD-23 → `version_control.md`, `code_review.md`
+- R-SD-25, R-SD-26 → `human_escalation.md`

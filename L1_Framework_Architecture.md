@@ -35,7 +35,7 @@ When fewer agents are available than roles require, roles may be combined with t
 *   Conflicts between agents, or between an agent and its own verification logic, escalate directly to the human User.
 As the agent team grows, roles must be separated according to the Separation of Concern principle.
 
-## 4. Concurrency
+## 5. Concurrency
 
 When multiple workflows execute in parallel, each workflow operates as an independent instance. Each agent must check for open parallel workflows modifying the same artifacts before beginning work. Conflict detection is the responsibility of the agent initiating the modification.
 
