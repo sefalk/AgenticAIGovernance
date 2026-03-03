@@ -50,8 +50,8 @@ This skill defines the mechanical operations of version control. For Autonomous 
 | **Detached HEAD Panic** | Agents entering detached HEAD state and making unbranch commits that get garbage collected. | Always ensure you are on a named branch (`git checkout -b <name>`) before committing. |
 
 ## See Also
-*   [Agentic Code Review](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/code_quality/code_review.md)
-*   [CI/CD](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/devops/ci_cd.md)
+*   [Agentic Code Review](../code_quality/code_review.md)
+*   [CI/CD](../devops/ci_cd.md)
 
 ## References
 *   [Conventional Commits Specification](https://www.conventionalcommits.org/)

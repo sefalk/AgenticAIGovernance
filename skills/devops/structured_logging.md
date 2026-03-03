@@ -56,8 +56,8 @@ To ensure system logs are machine-readable, searchable, and rich with context, t
 | **Info Spam** | Logging every single HTTP request at `INFO` level overwhelms the log aggregator, inflating costs and hiding real errors. | Sample successful requests, or log access logs separately from application lifecycle logs. |
 
 ## See Also
-*   [Monitoring & Observability](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/devops/monitoring_observability.md)
-*   [Compliance & Regulatory](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/security/compliance_regulatory.md)
+*   [Monitoring & Observability](../devops/monitoring_observability.md)
+*   [Compliance & Regulatory](../security/compliance_regulatory.md)
 
 ## References
 *   [12-Factor App: Logs](https://12factor.net/logs)

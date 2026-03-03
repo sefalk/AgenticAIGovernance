@@ -47,5 +47,5 @@ Every call to an LLM provider (OpenAI, Anthropic, etc.) must be wrapped to inter
 | **Discarding Prompts on Success** | Only logging the LLM context when an error occurs means you cannot study *why* an agent succeeds to optimize future prompts. | Sample or log all executions, not just failures. |
 
 ## See Also
-*   [Monitoring & Observability](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/devops/monitoring_observability.md)
-*   [Structured Logging](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/devops/structured_logging.md)
+*   [Monitoring & Observability](../devops/monitoring_observability.md)
+*   [Structured Logging](../devops/structured_logging.md)

@@ -49,9 +49,9 @@ This skill teaches agents how to structure applications using Hexagonal Architec
 | **Skipping Ports for "Simplicity"** | Injecting a concrete Postgres class directly into a Use Case prevents test mocking and locks the application to that database. | Always rely on abstractions (Secondary Ports). |
 
 ## See Also
-*   [API Design](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/architecture/api_design.md)
-*   [System Design](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/architecture/system_design.md)
-*   [Unit Testing](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/testing/unit_testing.md)
+*   [API Design](../architecture/api_design.md)
+*   [System Design](../architecture/system_design.md)
+*   [Unit Testing](../testing/unit_testing.md)
 
 ## References
 *   [Hexagonal Architecture by Alistair Cockburn](https://alistair.cockburn.us/hexagonal-architecture/)

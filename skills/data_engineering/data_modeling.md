@@ -53,8 +53,8 @@ To structure data so it is simultaneously cost-efficient to query, intuitive for
 | **Updating the Raw Data** | Someone realizes historical data was wrong and runs an `UPDATE` statement directly on the raw ingested layer. | Maintain raw data immutably. Fix history via a documented, reproducible dbt transformation. |
 
 ## See Also
-*   [Data Pipeline Design](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/data_engineering/data_pipeline_design.md)
-*   [Data Quality](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/data_engineering/data_quality.md)
+*   [Data Pipeline Design](../data_engineering/data_pipeline_design.md)
+*   [Data Quality](../data_engineering/data_quality.md)
 
 ## References
 *   [dbt Best Practices](https://docs.getdbt.com/docs/build/project-structure)

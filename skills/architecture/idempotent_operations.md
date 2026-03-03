@@ -43,5 +43,5 @@ This skill teaches agents to design systems that are resilient to automated retr
 | **Non-Retryable Shell Commands** | An agent script runs `echo "config" >> file.conf`. Run twice, the config is duplicated. | Make scripts idempotent (e.g., use `sed` or check if the string exists before appending). |
 
 ## See Also
-*   [API Design](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/architecture/api_design.md)
-*   [Error Handling](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/code_quality/error_handling.md)
+*   [API Design](../architecture/api_design.md)
+*   [Error Handling](../code_quality/error_handling.md)

@@ -43,5 +43,5 @@ This skill teaches agents and prompt engineers how to manage the Context Window 
 | **Monolithic Instruction Prompts** | Giving the agent a 5-page prompt telling it every rule for the whole company. | Distil instructions into domain-specific, dynamically loaded skills (like this one). |
 
 ## See Also
-*   [Task Decomposition](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/project_management/task_decomposition.md)
-*   [System Design](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/architecture/system_design.md)
+*   [Task Decomposition](../project_management/task_decomposition.md)
+*   [System Design](../architecture/system_design.md)

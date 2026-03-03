@@ -31,7 +31,7 @@ To move beyond generic "system is up/down" ping checks, providing deep, actionab
 *   **Histograms:** For measuring distributions like latency (`http_request_duration_seconds`). Always define explicit buckets (e.g., `[0.1, 0.5, 1.0, 5.0]`) to calculate p95 and p99 percentiles accurately. Do not use generic averages.
 
 ### 3. Log Aggregation and Correlation
-*   *See also: [Structured Logging](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/devops/structured_logging.md)*
+*   *See also: [Structured Logging](../devops/structured_logging.md)*
 *   Ensure that the current `trace_id` from the OpenTelemetry context is automatically injected into the structured JSON log payload. This allows tools like Datadog, Grafana/Loki, or Kibana to instantly pivot from a slow trace directly to the logs for that exact request.
 
 ### 4. Dashboards & SLAs/SLOs
@@ -52,8 +52,8 @@ To move beyond generic "system is up/down" ping checks, providing deep, actionab
 | **Black Box Monitoring** | Relying purely on an external ping to `/healthz` provides zero context when the app starts throwing 500s. | Instrument internal code boundaries (DB queries, Redis cache hits) using Traces. |
 
 ## See Also
-*   [Structured Logging](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/devops/structured_logging.md)
-*   [System Design](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/architecture/system_design.md)
+*   [Structured Logging](../devops/structured_logging.md)
+*   [System Design](../architecture/system_design.md)
 
 ## References
 *   [OpenTelemetry Documentation](https://opentelemetry.io/docs/)

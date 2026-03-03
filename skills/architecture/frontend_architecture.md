@@ -55,8 +55,8 @@ To structure complex client-side applications so they remain maintainable, perfo
 | **Tying UI to APIs** | The UI component directly parses deeply nested API JSON structures, breaking when the backend changes. | Map API responses to UI-friendly domain models at the network boundary. |
 
 ## See Also
-*   [E2E Testing](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/testing/e2e_testing.md)
-*   [Accessibility Testing](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/testing/accessibility_testing.md)
+*   [E2E Testing](../testing/e2e_testing.md)
+*   [Accessibility Testing](../testing/accessibility_testing.md)
 
 ## References
 *   [Thinking in React](https://react.dev/learn/thinking-in-react)

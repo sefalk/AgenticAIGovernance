@@ -55,8 +55,8 @@ To ensure systems are architected and implemented to meet legal and industry reg
 | **Implicit Consent** | Pre-checked boxes or "by using this site you agree" are legally invalid under GDPR. | Require explicit, active opt-in for each processing purpose. |
 
 ## See Also
-*   [Data Modeling](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/data_engineering/data_modeling.md)
-*   [Secure Coding](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/security/secure_coding.md)
+*   [Data Modeling](../data_engineering/data_modeling.md)
+*   [Secure Coding](../security/secure_coding.md)
 
 ## References
 *   [GDPR Official Text](https://gdpr-info.eu/)

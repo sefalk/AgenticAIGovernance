@@ -54,7 +54,7 @@ To treat code review as a rigorous, automatable verification step ensuring code 
 | **Arguing over formatting** | Leaving 20 comments on trailing commas wastes compute and time. | Fail the build if `prettier --check` fails. Format validation belongs in the pipeline, not the review. |
 
 ## See Also
-*   [Static Analysis](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/code_quality/static_analysis.md)
+*   [Static Analysis](../code_quality/static_analysis.md)
 
 ## References
 *   [Google Engineering Practices: Code Review](https://google.github.io/eng-practices/review/reviewer/)

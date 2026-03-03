@@ -52,8 +52,8 @@ To manage the unique lifecycle of mobile applications (iOS/Android), including n
 | **Blocking Main Thread** | Heavy JSON parsing or database queries on the UI thread causes "jank" and frozen screens. | Offload all I/O and heavy computation to background threads/web workers. |
 
 ## See Also
-*   [Frontend Architecture](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/architecture/frontend_architecture.md)
-*   [CI/CD](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/devops/ci_cd.md)
+*   [Frontend Architecture](../architecture/frontend_architecture.md)
+*   [CI/CD](../devops/ci_cd.md)
 
 ## References
 *   [Apple Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines/)

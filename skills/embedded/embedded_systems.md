@@ -51,8 +51,8 @@ To ensure firmware and embedded software are reliable, deterministic, secure, an
 | **Assuming Hardware Works** | Assuming a sensor always responds or an I2C bus never locks up leads to infinite `while(1)` loops. | Always implement timeouts on hardware polling and bus transactions. |
 
 ## See Also
-*   [Secure Coding](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/security/secure_coding.md)
-*   [CI/CD](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/devops/ci_cd.md)
+*   [Secure Coding](../security/secure_coding.md)
+*   [CI/CD](../devops/ci_cd.md)
 
 ## References
 *   [MISRA C Guidelines](https://www.misra.org.uk/)
