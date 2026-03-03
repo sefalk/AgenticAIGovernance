@@ -64,6 +64,8 @@ This artifact derives domain-specific rules for software development from the Le
 
 **R-SD-15:** All external service calls SHALL have timeouts configured. Calls without timeouts SHALL NOT be permitted in production code.
 
+**R-SD-26:** Human Escalation Protocol: When an agent encounters an unrecoverable error, unresolvable ambiguity, or exceeds its computational budget, it SHALL NOT continuously retry or hallucinate solutions. It SHALL immediately halt execution, generate a structured `ESCALATION.md` detailing the blocker, and explicitly request human intervention.
+
 ### From: Separation of Concern (L1)
 
 **R-SD-16:** Application layers (presentation, business logic, data access) SHALL be separated. Direct database queries from presentation layer code SHALL NOT be permitted.
@@ -79,6 +81,8 @@ This artifact derives domain-specific rules for software development from the Le
 ### From: Efficiency / Pragmatism (L1)
 
 **R-SD-20:** Code duplication SHALL be removed when it crosses the "Rule of Three" threshold (three or more identical or near-identical implementations). Premature extraction of single-use abstractions SHALL be avoided.
+
+**R-SD-25:** Resource Governance & Iteration Limits: Agents SHALL NOT execute open-ended action loops. If a pre-defined iteration limit or computational token budget is reached without success, the task SHALL fail with an escalation per R-SD-26.
 
 ---
 

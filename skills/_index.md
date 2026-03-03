@@ -199,6 +199,7 @@ related: [list of related skill filenames without path]  # source of truth for #
 | Task Decomposition | `task_decomposition.md` | `all` | foundational | WBS, INVEST criteria, estimation techniques, dependency mapping |
 | Stakeholder Communication | `stakeholder_communication.md` | `all` | foundational | Stakeholder maps, status reports, escalation framework |
 | Risk Management | `risk_management.md` | `all` | intermediate | Risk register, scoring matrix, response strategies, contingency planning |
+| Human Escalation Protocol | `human_escalation.md` | `all` | foundational | Agent-specific workflow for cleanly halting tasks and requesting human unblocking via ESCALATION.md |
 
 ### Security (`security/`)
 
