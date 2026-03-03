@@ -178,6 +178,7 @@ related: [list of related skill filenames without path]  # source of truth for #
 | Monitoring & Observability | `monitoring_observability.md` | `api`, `web`, `microservice`, `cloud` | intermediate | When you need visibility into production. Logs, metrics, traces, SLOs |
 | Structured Logging | `structured_logging.md` | `all` | foundational | When standardizing log outputs. JSON logs, correlation IDs, log levels |
 | Configuration Management | `configuration_management.md` | `all` | foundational | When managing runtime settings. Env vars, feature flags, 12-factor |
+| Version Control | `version_control.md` | `all` | foundational | When interacting with Git. Atomic commits, branch strategy, squashing history |
 
 ### Data Engineering (`data_engineering/`)
 
