@@ -16,6 +16,8 @@ This framework organizes agent governance into four hierarchical levels, progres
 
 **Level 4 (Project Instantiation):** Takes generic Level-3 workflows and binds them to project-specific constraints (tech stack, quality gate thresholds). 
 
+*Note regarding L3/L4 split:* While conceptually distinct, Level-3 workflows and Level-4 project bindings may be physically combined into a single execution file (e.g., an agent prompt like `.cursorrules` or `.github/copilot-instructions.md`) to maximize token efficiency and pragmatism in real-world agent environments.
+
 **Proper Derivation:** An artifact is "properly derived" when it explicitly references its parent-level artifact, has passed the review process, carries a version identifier, and does not contradict ancestor-level Statements.
 
 ## 3. Key Roles
@@ -23,13 +25,12 @@ This framework organizes agent governance into four hierarchical levels, progres
 *   **Primary Agent:** The agent executing the task, responsible for producing the deliverable and proposing quality gates.
 *   **Reviewer:** Evaluates the Primary Agent's output against applicable rules and quality gates. In multi-agent setups, the Reviewer must not be the same agent as the Primary.
 *   **Quality-Owner:** The agent or human responsible for approving quality gate definitions. Defaults to the human User.
-*   **AI Arbiter:** An independent agent that resolves conflicts between the Primary and Reviewer.
 
 ## 4. Bootstrapping & Role Combination
 When fewer agents are available than roles require, roles may be combined with the following constraints:
 *   The human User implicitly assumes the Reviewer and Quality-Owner roles for tasks requiring peer review if no second agent is available.
 *   For low-impact tasks (e.g., linting fixes), a single agent may fulfill the review requirement via structured self-review.
-*   The Arbiter role is suspended and conflicts escalate directly to the human User.
+*   Conflicts between agents, or between an agent and its own verification logic, escalate directly to the human User.
 As the agent team grows, roles must be separated according to the Separation of Concern principle.
 
 ## 4. Concurrency

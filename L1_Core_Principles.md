@@ -17,8 +17,8 @@
 **Mechanism:**
 - (a) **Mandatory review scope:** Reviews are mandatory for architecture decisions, implementation/design plans, and integration into the project's primary deliverable branch or output (e.g., merging into Main for software, publishing for data products, release for project deliverables).
 - (b) **Review process:** Each non-trivial output must undergo an independent review cycle: produce, critique, refine -- iterated until convergence or the iteration limit. The review may be performed by a separate agent (peer review) or by the producing agent itself (self-review). Regardless of mode, the review must produce a **standalone, reviewable artifact** documenting each critique, each change, and each rationale. This artifact is what makes the review auditable and is the mechanism that enforces rigor.
-- (c) **Iteration limit and override:** The default iteration limit is 3 review cycles. This default may be overridden per-workflow at Level 3 or per-project at Level 4.
-- (d) **Escalation chain:** If the reviewing parties cannot reach consensus within the iteration limit, the process pauses and escalates first to a third, independent AI Arbiter. If the Arbiter cannot resolve the conflict, it escalates to the human User for a final decision.
+- (c) **Convergence & Iteration:** Agents must intensely iterate and debate the output until only *minor* findings remain (convergence). This process regularly takes many iterations; arbitrary low iteration limits belong at L4, not L1. All debate, findings, and resolutions must be persisted in the review artifact (e.g., an implementation plan or action log).
+- (d) **Escalation chain:** If the reviewing parties (or a self-reviewing agent and its programmatic quality gates) become completely deadlocked and cannot reach convergence, the process pauses and escalates directly to the human User for a final decision.
 - (e) **Risk classification and audit:** Task risk classification (high/low impact) must be declared by the Primary Agent at task start, justified in the action log, and is subject to audit during the Continuous Improvement retrospective.
 
 ### Separation of Concern
