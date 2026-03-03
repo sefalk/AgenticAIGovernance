@@ -8,7 +8,7 @@ This directory contains optional, detailed skill templates that agents may invok
 
 ## How Agents Should Use This Toolbox
 
-1. **Discover:** During Environment Discovery, scan for this `skills/` directory co-located with `AgenticAIGovernance.md`.
+1. **Discover:** During Environment Discovery, scan for this `skills/` directory co-located with `L1_Core_Principles.md`.
 2. **Assess:** Use the Skill Selection Heuristic (below) to identify relevant skills based on project domain, tech stack, and task.
 3. **Load on demand:** Load only the skills needed for the current task. Do not load all skills at once -- this preserves token budget and focus.
 4. **Partial loading:** If you only need specific guidance (e.g., tool recommendations, CI thresholds), load only the relevant section of a skill. Each skill's sections are independently useful:

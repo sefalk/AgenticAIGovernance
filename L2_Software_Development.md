@@ -1,6 +1,6 @@
 **Version: 1.0 | Date: 2026-02-26**
 **Level: 2 | Domain: Software Development**
-**Derived from:** [AgenticAIGovernance.md](../AgenticAIGovernance.md) (Level 1, v3.6)
+**Derived from:** [L1_Core_Principles.md](../L1_Core_Principles.md) (Level 1, v3.8)
 
 ---
 

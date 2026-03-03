@@ -41,7 +41,7 @@ To treat code review as a rigorous, automatable verification step ensuring code 
 *   **Coverage Threshold:** The PR diff cannot reduce the total repository test coverage below the minimum threshold (e.g., 80% line coverage via Istanbul/JaCoCo).
 *   **CI Green:** No code review begins until the pipeline (build, test, lint) reports a green status.
 *   **ADR Verification:** If `package.json` adds a new high-impact dependency, the review system checks for a corresponding `docs/adr/` entry.
-*   **Semantic Passing:** A secondary AI agent must provide a structured JSON response evaluating the PR against the specific [Level-2 Domain Rules](file:///d:/Dokumente/Projekte/AgenticAIGovernance/Level2-SoftwareDevelopment.md).
+*   **Semantic Passing:** A secondary AI agent must provide a structured JSON response evaluating the PR against the specific [Level-2 Domain Rules](file:///d:/Dokumente/Projekte/AgenticAIGovernance/L2_Software_Development.md).
 
 ## Anti-Patterns
 
@@ -54,7 +54,7 @@ To treat code review as a rigorous, automatable verification step ensuring code 
 
 ## See Also
 *   [Static Analysis](file:///d:/Dokumente/Projekte/AgenticAIGovernance/skills/code_quality/static_analysis.md)
-*   [Level-2 Agentic Software Development Rules](file:///d:/Dokumente/Projekte/AgenticAIGovernance/Level2-SoftwareDevelopment.md)
+*   [Level-2 Agentic Software Development Rules](file:///d:/Dokumente/Projekte/AgenticAIGovernance/L2_Software_Development.md)
 
 ## References
 *   [Google Engineering Practices: Code Review](https://google.github.io/eng-practices/review/reviewer/)
