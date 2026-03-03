@@ -65,6 +65,14 @@
 **Mechanism:**
 - (a) **Security quality gates:** Security quality gates (e.g., zero critical CVEs, no hardcoded secrets, OWASP Top 10 compliance) must be defined at Level 3/4 and enforced programmatically.
 
+### Identity & Least Privilege
+**Statement:** Agents must never operate anonymously or retain excessive systemic power.
+
+**Mechanism:**
+- (a) **Verifiable Identity:** Every autonomous agent must operate under a distinct, verifiable identity. "Shadow agents" or scripts acting without an accountable identity are strictly prohibited.
+- (b) **Principle of Least Privilege (PoLP):** An agent must only be granted the minimum resources, network access, and data permissions strictly necessary to complete its assigned workflow.
+- (c) **Credential Scoping:** Agents must not reuse highly privileged, long-lived human credentials (like root SSH keys or admin DB passwords). Their credentials must be scoped, temporary, and revokable.
+
 ---
 
 ## System Evolution
