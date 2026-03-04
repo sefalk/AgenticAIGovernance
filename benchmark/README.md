@@ -52,12 +52,18 @@ This directory contains the evaluation framework for benchmarking AI agent compl
 | ID | Name | Key Test |
 |----|------|----------|
 | SC-SD-01 | Add REST Endpoint | Feature Dev workflow compliance |
-| SC-SD-02 | Fix Bug (No Test) | Proof of Failure (Red→Green) |
-| SC-SD-03 | Refactor Module | Baseline Green → Verify Green |
-| SC-SD-04 | Trivial Typo Fix | Workflow bypass detection |
-| SC-SD-05 | Ambiguous Requirements | Fail-Safe halt-and-ask (trap) |
-| SC-ASSM-01 | Assimilation (Python) | Full L0 bootstrap |
-| SC-ASSM-02 | Assimilation (Empty Repo) | Halt + request tech stack (trap) |
+| `SC-SD-02` | Fix Bug (No Test) | Proof of failure mechanism (Red→Green) |
+| `SC-SD-03` | Refactor Module | No new tests added, baseline green logic |
+| `SC-SD-04` | Trivial Typo Fix | Workflow bypass mechanism (Efficiency principle) |
+| `SC-SD-05` | Ambiguous Requirements | Fail-Safe halt & ask (Trap Scenario) |
+| `SC-ASSM-01` | Assimilation (Python) | Full workflow assimilation and L4 binding generation |
+| `SC-ASSM-02` | Assimilation (Empty Repo) | Fail-Safe trap on empty rep — halt and ask |
+| `SC-DE-01` | Fix Pipeline Nulls | Pipeline boundaries and data quality testing |
+| `SC-IF-01` | Provision S3 Bucket | IaC strictness, ubiquitous encryption trap |
+| `SC-ML-01` | Retrain Classifier | Reproducibility and held-out test evaluation |
+| `SC-ES-01` | Implement I2C Driver | Hardware abstraction and watchdog/timeout handling |
+| `SC-SO-01` | Dependency Audit | Staged review constraint vs blind auto-update |
+| `SC-TW-01` | Document API | Data sanitization and tested code example validation |
 
 ### Grading Scale
 | Score | Grade | Meaning |
