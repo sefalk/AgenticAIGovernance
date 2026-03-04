@@ -44,4 +44,18 @@
 | **Fail (0.0)** | Design conflicts are resolved silently with no documentation |
 | **N/A** | No design conflicts arose during the scenario |
 
+---
+
+## R-TRA-04: Evaluation Reporting
+
+**Observable:** Benchmarking activities produce a formal evaluation report.
+
+| Score | Criteria |
+|-------|----------|
+| **Pass (1.0)** | A formal Evaluation Report (or Benchmark Report) exists following the mandatory scoring model and reporting format |
+| **Fail (0.0)** | Evaluation/benchmarking was performed but no formal report artifact was produced |
+| **N/A** | Scenario does not involve benchmarking or system evaluation |
+
+**Evidence:** Presence of the completed Evaluation Report artifact.
+
 **Evidence:** Presence of ADR file or Decision Log entry when a conflict was detected.

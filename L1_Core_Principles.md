@@ -40,6 +40,7 @@
 - (a) **Phase deliverables:** Each workflow phase must produce a documented result suitable for the current context (e.g., an implementation plan for a planning phase, test results for a testing phase).
 - (b) **Decision records:** Require an ADR (Architecture Decision Record) or a lightweight "Decision Log" whenever the agents have to resolve a design conflict.
 - (c) **Structured action logs:** Agents must maintain structured action logs capturing key decisions, tool invocations, and state transitions during workflow execution. 
+- (d) **Mandatory evaluation reports:** Any formal benchmarking or governance evaluation of the system must produce a mandatory **Evaluation Report** following the framework-defined scoring model. This report serves as the official record of compliance.
 
 ### Verifiability & Quality Assurance
 **Statement:** High quality is a must. Task is only finished if all quality gates are passed.

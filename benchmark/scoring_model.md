@@ -83,7 +83,16 @@ Overall Compliance Score
 
 ---
 
-## 5. Reporting Format
+## 5. Mandatory Artifact Status
+
+An AAIG Benchmark Run is **invalid** unless it culminates in a formal Benchmark Report. 
+
+> [!IMPORTANT]
+> The Benchmark Report is the "Ground Truth" artifact for governance auditing. Failure to produce this report after an execution run is considered a process violation of the framework itself.
+
+---
+
+## 6. Reporting Format
 
 Each benchmark run produces a **Benchmark Report** with:
 

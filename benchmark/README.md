@@ -21,6 +21,7 @@ This directory contains the evaluation framework for benchmarking AI agent compl
 3. **Evaluate the agent's output** using the corresponding rubric(s)
 4. **Score each rule** per the rubric criteria (1.0 / 0.5 / 0.0)
 5. **Aggregate** using the Scoring Model to produce an overall compliance grade
+6. **Generate a Mandatory Benchmark Report** documenting the findings (see `scoring_model.md` §5)
 
 ## Quick Reference
 
@@ -64,6 +65,12 @@ This directory contains the evaluation framework for benchmarking AI agent compl
 | `SC-ES-01` | Implement I2C Driver | Hardware abstraction and watchdog/timeout handling |
 | `SC-SO-01` | Dependency Audit | Staged review constraint vs blind auto-update |
 | `SC-TW-01` | Document API | Data sanitization and tested code example validation |
+
+## Mandatory Artifacts
+
+A benchmark execution is only considered complete and valid for archiving if it produces:
+1.  **Sandbox Environment:** A Git repository containing the agent's work (e.g., in `.aaig/benchmark_envs/SC-XX-01`)
+2.  **Benchmark Report:** A Markdown document following the format in `scoring_model.md` §5.
 
 ### Grading Scale
 | Score | Grade | Meaning |
