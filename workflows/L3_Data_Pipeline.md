@@ -60,6 +60,8 @@ This workflow defines the standard procedure for developing, testing, and deploy
    - Referential integrity with related tables.
 4. Verify that data lineage metadata is captured (R-DE-05).
 
+> **Local Execution Gate:** In environments lacking automated CI pipeline triggers (e.g., local sandboxes or unconfigured repos), the agent itself MUST act as the primary quality gate executor by running local validations (tests, static analysis) and verifying the output before proposing a merge. Assuming tests pass simply because they were written is a validation gap.
+
 **Exit Criteria:** Schema matches, all quality checks pass, lineage is recorded.
 
 ---

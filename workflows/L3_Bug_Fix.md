@@ -58,6 +58,8 @@ This workflow enforces the **Proof of Failure** principle (R-SD-24) for all bug 
 
 > **Legacy Qualifier:** In Legacy Codebases (as identified during L0 Assimilation), coverage thresholds apply to the **DIFF ONLY**, not the entire project. Use `--changed-files-coverage` or equivalent. Do not block a bug fix because the global repository coverage is low.
 
+> **Local Execution Gate:** In environments lacking automated CI pipeline triggers (e.g., local sandboxes or unconfigured repos), the agent itself MUST act as the primary quality gate executor by running local validations (tests, static analysis) and verifying the output before proposing a merge. Assuming tests passes simply because they were written is a validation gap.
+
 5. Commit the fix with message: `fix: <bug-description> [GREEN]`.
 
 **Exit Criteria:** Code is implemented, all tests pass, diff coverage meets threshold.

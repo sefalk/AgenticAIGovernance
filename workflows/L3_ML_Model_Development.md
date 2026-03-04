@@ -74,6 +74,8 @@ This workflow defines the standard procedure for developing, evaluating, and dep
    - If discriminatory performance is detected, document the finding and mitigate before deployment.
 4. Document feature importances for explainability.
 
+> **Local Execution Gate:** In environments lacking automated CI pipeline triggers (e.g., local sandboxes or unconfigured repos), the agent itself MUST act as the primary quality gate executor by running local validations (tests, evaluators) and verifying the output before proposing a merge. Assuming models are sound simply because they matched validation metrics is a validation gap.
+
 **Exit Criteria:** Test metrics beat baseline and threshold, bias check passed or mitigated.
 
 ---

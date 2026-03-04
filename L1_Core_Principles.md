@@ -59,6 +59,11 @@
 **Mechanism:**
 - (a) **Trigger conditions:** The agent must invoke Fail-Safe when it lacks context, encounters a failing programmatic quality gate it does not understand, or falls outside its defined Separation of Concern.
 - (b) **Halt behavior:** The agent must complete or safely abort the current atomic action, then halt. No new actions may be initiated until the user responds.
+- (c) **Clarification Template:** When halting due to ambiguity, the agent **shall** provide a structured clarification request in its output or `WIP.md`. This request must include:
+    - **Context:** What specific lack of information caused the halt.
+    - **Options:** At least 2-3 viable implementation paths or decisions.
+    - **Impact:** The consequence of each path (e.g., costs, complexity, performance).
+    - **Recommendation:** The agent's preferred path with justification.
 
 ### Safety & Security
 **Statement:** All code and data handled must adhere to the highest safety and security standards.
