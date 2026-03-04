@@ -52,4 +52,18 @@ The framework includes an optional **Skills Toolbox** (`/skills/`)—a library o
 
 When multiple Level-3 workflows are available, the agent must classify the task and select the appropriate workflow based on entry criteria. If none match, the agent falls back to a generic default sequence: Plan -> Review Plan -> Execute -> Verify -> Review Output.
 
+**Multi-Workflow Orchestration:** When a single task spans multiple domains (e.g., ML + Infrastructure + Software Dev), decompose it into sub-tasks, one per workflow. Apply the **dependency rule**: if Workflow B requires an artifact from Workflow A (e.g., GPU cluster must exist before model training), run A first, then B. If sub-tasks are independent, run them in parallel branches using the Branch-Per-Agent-Isolation pattern (`multi_agent_coordination.md`). Document the sub-task dependency graph in the `WIP.md` or implementation plan before starting.
+
 **Workflow Bypasses:** For low-impact, deterministic tasks (like running a code formatter or updating a typo), passing programmatic Quality Gates is sufficient—full review cycles and extensive artifact generation may be bypassed under the Efficiency principle. For high-impact tasks, the human User must be in the review loop from the first iteration.
+
+## 8. Governance Change Protocol
+
+Changes to **Level 0 or Level 1** documents (this file, `L0_Assimilation_Protocol.md`, `L1_Core_Principles.md`, `L1_Framework_Architecture.md`) are uniquely high-risk because they can propagate inconsistencies to all downstream L2/L3/L4 artifacts.
+
+These changes require:
+1. **Mandatory human User review** — self-review by the proposing agent is explicitly prohibited for L0/L1 changes.
+2. **Cross-level impact assessment** — the agent MUST document which L2 rules and L3 workflows are affected by the change before merging.
+3. **Version bump** — increment the `Version` field in the modified file.
+4. **Changelog entry** — document what changed and why in a `GOVERNANCE_CHANGELOG.md` at the repository root.
+
+Changes to **Level 2 and below** follow the standard Review Principle (L1).

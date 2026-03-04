@@ -33,6 +33,8 @@ This workflow enforces the **Proof of Failure** principle (R-SD-24) for all bug 
 ### Phase 2: Red — Write the Failing Test
 **Entry Criteria:** Phase 1 is complete.
 
+> **Hotfix Exception:** In a declared P1 production emergency (active data loss or complete service outage) where the human User has explicitly authorized bypassing the standard process, the Proof-of-Failure cycle may be skipped. The agent SHALL: (1) apply the minimal fix directly, (2) support deployment immediately, (3) write the missing `[RED]` test within 24 hours of incident resolution. The skipped test MUST be tracked as a mandatory follow-up—not optional. This exception is logged in `.aaig/ESCALATION.md`.
+
 1. Write a test that captures the **expected correct behavior** for the specific scenario described in the bug report.
 2. Run the test: `[L4-DEFINED: test command]`.
 3. **The test MUST FAIL.** This is the critical gate. If the test passes, it means either:
@@ -77,8 +79,9 @@ This workflow enforces the **Proof of Failure** principle (R-SD-24) for all bug 
 1. Create a Pull Request linking to the bug report (R-SD-08).
 2. The PR must clearly show the **two-commit sequence**: `[RED]` then `[GREEN]` (and optionally `[REFACTOR]`). This sequence is the audit proof that Proof of Failure was followed.
 3. Review and merge per the Feature Development workflow (Phase 4-5).
+4. **Retrospective (shall):** On merge, produce a brief retrospective note (inline in the PR or as a comment): what caused the bug, what made it harder to find than expected, and any improvements to testing or rules that would have caught it earlier. If framework improvements are identified, open a governance issue.
 
-**Exit Criteria:** Fix is merged, bug report is closed.
+**Exit Criteria:** Fix is merged, bug report is closed, retrospective is recorded.
 
 ---
 
@@ -91,3 +94,5 @@ This workflow enforces the **Proof of Failure** principle (R-SD-24) for all bug 
 | Test passes after fix | mandatory | `[L4-DEFINED: test command]` |
 | No regressions | 0 new failures | `[L4-DEFINED: test command]` |
 | Two-commit audit trail | mandatory | PR review |
+| Retrospective recorded | mandatory | PR merge review |
+

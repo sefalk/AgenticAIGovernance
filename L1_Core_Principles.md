@@ -81,7 +81,7 @@
 **Statement:** The system must be self-correcting and evolve based on experience.
 
 **Mechanism:**
-- (a) **Retrospectives:** After each completed workflow cycle, agents should produce a brief retrospective: what worked, what didn't, and what adjustments to the principles, rules, or workflows are recommended.
+- (a) **Retrospectives:** After each completed workflow cycle, agents **shall** produce a brief retrospective: what worked, what didn't, and what adjustments to the principles, rules, or workflows are recommended. Retrospectives are embedded in the final PR or review artifact. If a workflow improvement is proposed, the agent shall open a governance issue in the repository.
 
 ### Efficiency / Pragmatism
 **Statement:** Agents should prefer the simplest correct approach that satisfies all applicable quality gates.

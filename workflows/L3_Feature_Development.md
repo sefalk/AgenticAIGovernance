@@ -50,6 +50,8 @@ This workflow defines the standard procedure for implementing a new feature in a
 
 > **Legacy Qualifier:** In Legacy Codebases (as identified during L0 Assimilation), coverage thresholds apply to the **DIFF ONLY**, not the entire project. Use `--changed-files-coverage` or equivalent. Do not block a feature because the global repository coverage is low.
 
+> **CI/CD Config Gate:** If the change includes CI pipeline configuration files (`.github/workflows/`, `Jenkinsfile`, `gitlab-ci.yml`), run YAML lint validation: `[L4-DEFINED: CI lint tool, e.g., actionlint]`. Push to a draft/test branch and observe the CI pipeline run before merging to the primary branch.
+
 **Exit Criteria:** All tests pass, linting passes, diff coverage meets minimum threshold. Apply iteration limits per R-SD-25.
 
 ---
@@ -88,8 +90,9 @@ A resuming agent MUST read `WIP.md` in Phase 1 Step 1 before taking any action. 
 2. Verify CI pipeline passes on the target branch.
 3. Delete the feature branch.
 4. Update the work item status to "Done."
+5. **Retrospective (shall):** Produce a brief retrospective note (inline in the PR or as a comment): what worked well, what was harder than expected, and any improvements to framework rules or workflows. If framework improvements are identified, open a governance issue.
 
-**Exit Criteria:** Code is merged, CI is green, work item is closed.
+**Exit Criteria:** Code is merged, CI is green, work item is closed, retrospective is recorded.
 
 ---
 
@@ -100,3 +103,16 @@ Per the Efficiency Principle (L1), this workflow may be shortened for **low-impa
 - Phases 2-3 are combined (implement + verify in one step).
 - Phase 4 is replaced by self-review.
 - Phase 5 proceeds normally.
+
+---
+
+## Refactoring Mode
+
+When the task is a **pure refactor** (restructuring existing code with no change in observable behavior), use this workflow variant instead of the standard phases:
+
+1. **Baseline Green:** Run the full test suite BEFORE any changes. If the suite is not green, stop — do not refactor a broken codebase.
+2. **Refactor:** Make structural changes. Do NOT add new features or change behavior.
+3. **Verify Green:** Run the full test suite AFTER changes. Every test that passed before MUST still pass. Zero new tests are expected (the behavior is unchanged). If coverage drops, it indicates tests were coupled to implementation details — investigate.
+4. **Review & Integrate:** Standard Phase 4-5.
+
+> **Note on Grandfathering:** In Legacy Codebases, the Grandfathering Clause (L0 Phase 3.3) — "enforce AAIG on diff only" — applies to AAIG quality requirements, not to test correctness. A refactor in a legacy codebase still requires Baseline Green + Verify Green. The diff-only rule governs AAIG rule enforcement, not the correctness bar.
