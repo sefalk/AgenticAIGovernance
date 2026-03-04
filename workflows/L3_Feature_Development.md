@@ -116,3 +116,15 @@ When the task is a **pure refactor** (restructuring existing code with no change
 4. **Review & Integrate:** Standard Phase 4-5.
 
 > **Note on Grandfathering:** In Legacy Codebases, the Grandfathering Clause (L0 Phase 3.3) — "enforce AAIG on diff only" — applies to AAIG quality requirements, not to test correctness. A refactor in a legacy codebase still requires Baseline Green + Verify Green. The diff-only rule governs AAIG rule enforcement, not the correctness bar.
+
+---
+
+## Task Cancellation Protocol
+
+When the human User cancels an in-progress task (L1 Meta-Rule 2: human authority):
+
+1. **Mark the WIP as cancelled:** Commit a final update to `WIP.md` on the current branch: set `Status: CANCELLED` and record the reason.
+2. **Preserve the history:** Open a Pull Request titled `[ABANDONED] <branch-name> — cancelled by user` and immediately close it without merging. This preserves the partial work in remote history for audit and reference.
+3. **Delete the branch:** Delete the local and remote branch after the closed PR exists.
+4. **Ensure no resumption:** The `CANCELLED` status in the closed PR's `WIP.md` ensures no future agent accidentally resumes the branch via the WIP check in Phase 1 Step 1.
+

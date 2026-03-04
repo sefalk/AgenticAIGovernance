@@ -35,6 +35,8 @@ This workflow enforces the **Proof of Failure** principle (R-SD-24) for all bug 
 
 > **Hotfix Exception:** In a declared P1 production emergency (active data loss or complete service outage) where the human User has explicitly authorized bypassing the standard process, the Proof-of-Failure cycle may be skipped. The agent SHALL: (1) apply the minimal fix directly, (2) support deployment immediately, (3) write the missing `[RED]` test within 24 hours of incident resolution. The skipped test MUST be tracked as a mandatory follow-up—not optional. This exception is logged in `.aaig/ESCALATION.md`.
 
+> **Performance Regression Exception:** For performance regressions (where the defect is latency or throughput degradation, not functional incorrectness), the RED/GREEN cycle is adapted: (1) establish a **profiling baseline** using `[L4-DEFINED: profiling tool, e.g., py-spy, async-profiler, perf]` before any changes, (2) identify the bottleneck via profiling — not by creating a timing assertion, (3) fix the bottleneck, (4) verify the profile confirms the bottleneck is eliminated. Timing-based CI assertions are a **secondary** gate with a generous threshold (`[L4-DEFINED: perf tolerance, default 3x baseline]`); they SHALL NOT be the primary pass/fail gate due to CI environment variability.
+
 1. Write a test that captures the **expected correct behavior** for the specific scenario described in the bug report.
 2. Run the test: `[L4-DEFINED: test command]`.
 3. **The test MUST FAIL.** This is the critical gate. If the test passes, it means either:
@@ -95,4 +97,16 @@ This workflow enforces the **Proof of Failure** principle (R-SD-24) for all bug 
 | No regressions | 0 new failures | `[L4-DEFINED: test command]` |
 | Two-commit audit trail | mandatory | PR review |
 | Retrospective recorded | mandatory | PR merge review |
+
+---
+
+## Task Cancellation Protocol
+
+When the human User cancels an in-progress task (Meta-Rule 2: human authority):
+
+1. **Mark the WIP as cancelled:** Commit a final update to `WIP.md` on the current branch with `Status: CANCELLED` and the reason.
+2. **Preserve the history:** Open a Pull Request titled `[ABANDONED] <branch-name> — cancelled by user` and immediately close it (do not merge). This preserves the partial work in the remote history for reference without polluting the base branch.
+3. **Delete the branch:** Delete the local and remote branch after the closed PR is created.
+4. **Ensure no resumption:** The `CANCELLED` status in `WIP.md` (visible in the closed PR history) ensures no future agent accidentally resumes the branch via the WIP check in Phase 1.
+
 

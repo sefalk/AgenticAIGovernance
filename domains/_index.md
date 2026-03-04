@@ -11,6 +11,7 @@ This directory contains Level-2 Domain Rule documents derived from `L1_Core_Prin
 1. **Identify the project domain** during Phase 1 of the Assimilation Protocol (read package manifests, file extensions, directory structure).
 2. **Load the matching L2 document(s).** Most projects map to one primary domain, but multi-discipline projects (e.g., an ML API) may require loading multiple.
 3. **Do not load all domains.** Only load the domains relevant to the current task — this preserves token budget.
+4. **Monorepo Scoping:** In monorepos where multiple stacks co-exist, load only the domain(s) applicable to the *specific service or directory* targeted by the current task. Do not load all domains simultaneously. See `L0_Assimilation_Protocol.md` Phase 3 for the scoping heuristic.
 
 ## Domain Selection Guide
 
@@ -22,17 +23,19 @@ This directory contains Level-2 Domain Rule documents derived from `L1_Core_Prin
 | Terraform/Pulumi/CloudFormation, cloud resource management | [L2_Infrastructure.md](L2_Infrastructure.md) | `R-IF-` |
 | Documentation tasks (READMEs, API docs, ADRs, changelogs) | [L2_Technical_Writing.md](L2_Technical_Writing.md) | `R-TW-` |
 | Security audits, vulnerability scanning, incident response | [L2_Security_Operations.md](L2_Security_Operations.md) | `R-SO-` |
+| Firmware, C/C++/Rust, RTOS, microcontroller, ARM, CMake, embedded | [L2_Embedded_Systems.md](L2_Embedded_Systems.md) | `R-ES-` |
 
 ## Domain Catalog
 
 | Domain | File | Rules | Key Themes | Workflows |
 |--------|------|-------|------------|-----------|
-| Software Development | `L2_Software_Development.md` | 26 | Code review, testing, identity, escalation | Feature Dev, Bug Fix, Code Review |
+| Software Development | `L2_Software_Development.md` | 27 | Code review, testing, identity, escalation, dep pinning | Feature Dev, Bug Fix, Code Review |
 | Data Engineering | `L2_Data_Engineering.md` | 15 | Idempotency, lineage, PII masking, freshness SLAs | Data Pipeline |
-| ML Operations | `L2_ML_Operations.md` | 15 | Reproducibility, bias/fairness, drift monitoring | — |
+| ML Operations | `L2_ML_Operations.md` | 15 | Reproducibility, bias/fairness, drift monitoring | ML Model Dev |
 | Infrastructure | `L2_Infrastructure.md` | 15 | IaC-only, plan-before-apply, drift detection | Deployment |
-| Technical Writing | `L2_Technical_Writing.md` | 12 | Tested examples, `[VERIFY]` markers, ADR templates | — |
-| Security Operations | `L2_Security_Operations.md` | 15 | Authorized scanning, forensic preservation, retrospectives | Incident Response |
+| Technical Writing | `L2_Technical_Writing.md` | 12 | Tested examples, `[VERIFY]` markers, ADR templates | Technical Writing |
+| Security Operations | `L2_Security_Operations.md` | 15 | Authorized scanning, forensic preservation, retrospectives | Incident Response, Security Audit |
+| Embedded Systems | `L2_Embedded_Systems.md` | 15 | WCET, HIL testing, watchdog, HAL, memory safety | Feature Dev (Refactoring Mode) |
 
 ## Adding New Domains
 

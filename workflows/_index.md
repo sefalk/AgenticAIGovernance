@@ -28,6 +28,7 @@ This directory contains Level-3 Workflow templates derived from Level-2 Domain R
 | Write docs, create API reference, draft ADR or runbook, update changelog | [L3_Technical_Writing.md](L3_Technical_Writing.md) | Technical Writing |
 | Refactor existing code (no new behavior) | Use [L3_Feature_Development.md](L3_Feature_Development.md) **Refactoring Mode** section | Software Dev |
 | Conduct a GDPR / HIPAA / SOC2 compliance audit, map PII data flows | ⚠️ **No dedicated workflow.** Use generic fallback. Read `skills/security/compliance_regulatory.md`. `L3_Compliance_Audit.md` is a known planned workflow. | Security Ops |
+| Modify a database schema (add/drop/alter columns, indexes, constraints) | Use [L3_Feature_Development.md](L3_Feature_Development.md) **with critical caveat:** for tables > `[L4-DEFINED: row threshold]` rows or live traffic, HALT and plan a **zero-downtime migration** (expand-contract pattern) before any `ALTER TABLE`. Naive migrations can cause production table locks. `L3_Database_Migration.md` is a known planned workflow. | Software Dev |
 
 > **Fallback:** If no workflow matches, use the generic default sequence: **Plan → Review Plan → Execute → Verify → Review Output** (defined in `L1_Framework_Architecture.md`).
 

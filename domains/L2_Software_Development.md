@@ -86,6 +86,8 @@ This artifact derives domain-specific rules for software development from the Le
 
 **R-SD-25:** Resource Governance & Iteration Limits: Agents SHALL NOT execute open-ended action loops. If a pre-defined iteration limit or computational token budget is reached without success, the task SHALL fail with an escalation per R-SD-26.
 
+**R-SD-27:** Dependency Upgrade Policy: When a dependency upgrade causes cascading test failures that cannot be resolved within the iteration limit (R-SD-25), the agent SHALL: (1) revert to the last fully-green state, (2) prepare a **targeted upgrade plan** documenting each package, its current version, its proposed version, and the reason for the change, (3) present the plan to the human User for approval before re-attempting. Wholesale `upgrade-all` commands SHALL NOT be used without a rollback plan. A partial upgrade that leaves some packages at their previous version is an acceptable outcome when approved by the human User.
+
 ---
 
 ## Applicability
