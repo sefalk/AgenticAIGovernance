@@ -1,0 +1,43 @@
+# Domain Rules — Manifest & Selection Guide
+
+**Version: 1.0 | Date: 2026-03-04**
+
+## Purpose
+
+This directory contains Level-2 Domain Rule documents derived from `L1_Core_Principles.md`. Each document translates universal L1 principles into concrete `SHALL / SHALL NOT` constraints for a specific professional domain.
+
+## How Agents Should Use This Directory
+
+1. **Identify the project domain** during Phase 1 of the Assimilation Protocol (read package manifests, file extensions, directory structure).
+2. **Load the matching L2 document(s).** Most projects map to one primary domain, but multi-discipline projects (e.g., an ML API) may require loading multiple.
+3. **Do not load all domains.** Only load the domains relevant to the current task — this preserves token budget.
+
+## Domain Selection Guide
+
+| If the project contains... | Load | Rule Prefix |
+|---|---|---|
+| Application source code, tests, CI/CD pipelines | [L2_Software_Development.md](L2_Software_Development.md) | `R-SD-` |
+| ETL/ELT pipelines, dbt models, data warehouses, Airflow DAGs | [L2_Data_Engineering.md](L2_Data_Engineering.md) | `R-DE-` |
+| ML model training, experiment tracking, model serving | [L2_ML_Operations.md](L2_ML_Operations.md) | `R-ML-` |
+| Terraform/Pulumi/CloudFormation, cloud resource management | [L2_Infrastructure.md](L2_Infrastructure.md) | `R-IF-` |
+| Documentation tasks (READMEs, API docs, ADRs, changelogs) | [L2_Technical_Writing.md](L2_Technical_Writing.md) | `R-TW-` |
+| Security audits, vulnerability scanning, incident response | [L2_Security_Operations.md](L2_Security_Operations.md) | `R-SO-` |
+
+## Domain Catalog
+
+| Domain | File | Rules | Key Themes | Workflows |
+|--------|------|-------|------------|-----------|
+| Software Development | `L2_Software_Development.md` | 26 | Code review, testing, identity, escalation | Feature Dev, Bug Fix, Code Review |
+| Data Engineering | `L2_Data_Engineering.md` | 15 | Idempotency, lineage, PII masking, freshness SLAs | Data Pipeline |
+| ML Operations | `L2_ML_Operations.md` | 15 | Reproducibility, bias/fairness, drift monitoring | — |
+| Infrastructure | `L2_Infrastructure.md` | 15 | IaC-only, plan-before-apply, drift detection | Deployment |
+| Technical Writing | `L2_Technical_Writing.md` | 12 | Tested examples, `[VERIFY]` markers, ADR templates | — |
+| Security Operations | `L2_Security_Operations.md` | 15 | Authorized scanning, forensic preservation, retrospectives | Incident Response |
+
+## Adding New Domains
+
+1. Create a new `L2_<DomainName>.md` file in this directory.
+2. Follow the structure of existing L2 documents: Version header, Derived-from link, rules grouped by L1 principle, and a Skills Toolbox mapping.
+3. Choose a unique rule prefix (e.g., `R-XX-`) to avoid collisions.
+4. Add an entry to the catalog above.
+5. Submit for review per the AAIG Review Principle.
