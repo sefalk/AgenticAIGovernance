@@ -20,12 +20,13 @@ This workflow defines the standard procedure for a **proactive** security assess
 ### Phase 1: Scope & Authorization
 **Entry Criteria:** User requests a security audit or assessment.
 
-1. Define the **audit scope**:
+1. **Check for an existing WIP contract:** If a `WIP.md` file exists on the current branch, read it first and resume from the last completed step.
+2. Define the **audit scope**:
    - Which components/repositories are in scope?
    - Which environments? (dev, staging, production)
    - What compliance frameworks apply? (e.g., OWASP Top 10, SOC2, GDPR)
-2. **Verify authorization** (R-SO-07): Confirm with the user that scanning is permitted against the target environment. Log the authorization.
-3. Check that scanning tools have up-to-date signatures/rules (R-SO-09).
+3. **Verify authorization** (R-SO-07): Confirm with the user that scanning is permitted against the target environment. Log the authorization.
+4. Check that scanning tools have up-to-date signatures/rules (R-SO-09).
 
 **Exit Criteria:** Scope is documented, authorization is confirmed, tools are current.
 

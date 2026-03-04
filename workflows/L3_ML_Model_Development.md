@@ -20,7 +20,8 @@ This workflow defines the standard procedure for developing, evaluating, and dep
 ### Phase 1: Problem & Data Preparation
 **Entry Criteria:** A business requirement exists that requires a predictive model (classification, regression, recommendation, etc.).
 
-1. Define the **prediction target** and **success metrics** (R-ML-02). Document:
+1. **Check for an existing WIP contract:** If a `WIP.md` file exists on the current branch, read it first and resume from the last completed step.
+2. Define the **prediction target** and **success metrics** (R-ML-02). Document:
    - What is being predicted (target variable).
    - Which metrics will be used (e.g., F1 for classification, RMSE for regression).
    - What is the minimum acceptable performance threshold: `[L4-DEFINED: baseline metric]`.

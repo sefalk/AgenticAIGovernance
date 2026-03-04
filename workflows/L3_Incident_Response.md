@@ -22,8 +22,9 @@ This workflow defines the standard procedure for responding to security incident
 ### Phase 1: Detect & Classify
 **Entry Criteria:** An anomaly is observed (alert, log anomaly, user report, automated scan finding).
 
-1. **Gather initial evidence:** Collect relevant logs, alerts, and metrics. Do NOT modify any production resources at this stage.
-2. **Classify severity:**
+1. **Check for an existing WIP contract:** If a `WIP.md` file exists on the current branch (i.e., incident response was already underway), read it first to understand the current phase and last documented state.
+2. **Gather initial evidence:** Collect relevant logs, alerts, and metrics. Do NOT modify any production resources at this stage.
+3. **Classify severity:**
 
 | Severity | Criteria | Response Time |
 |----------|----------|---------------|
@@ -32,7 +33,7 @@ This workflow defines the standard procedure for responding to security incident
 | **P3 — Medium** | Vulnerability discovered but not yet exploited, potential exposure | `[L4-DEFINED: ≤ 24 hours]` |
 | **P4 — Low** | Informational finding, best-practice deviation, no active risk | `[L4-DEFINED: next sprint]` |
 
-3. **Escalate immediately** for P1/P2 incidents. Agents SHALL NOT attempt autonomous remediation of Critical or High severity incidents (R-SO-13). Notify the human User and await instructions.
+4. **Escalate immediately** for P1/P2 incidents. Agents SHALL NOT attempt autonomous remediation of Critical or High severity incidents (R-SO-13). Notify the human User and await instructions. Write an `ESCALATION.md` to `.aaig/ESCALATION.md` for async review.
 
 **Exit Criteria:** Incident is classified, initial evidence is preserved, human is notified for P1/P2.
 

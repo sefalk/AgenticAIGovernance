@@ -3,6 +3,8 @@
 **Level: 4 | Domain: [Your Domain]**
 **Derived from:** [L2_Software_Development.md](domains/L2_Software_Development.md) (Level 2)
 
+> **Deployment:** During L0 Assimilation (Phase 3), this file must be placed at **`.aaig/L4_Config.md`** in the repository root so CI pipeline bots and non-interactive agents can discover project-specific configuration without terminal access. It may also be placed at a native IDE path (e.g., `.cursor/rules/L4_Config.md`) in addition.
+
 ---
 
 > This is a **template**. Copy this file into your project and fill in the bracketed values to bind the AAIG framework to your specific tech stack, team, and CI environment.

@@ -20,10 +20,11 @@ This workflow defines the standard procedure for developing, testing, and deploy
 ### Phase 1: Design & Schema
 **Entry Criteria:** A data requirement exists (new source integration, new mart/table, schema change).
 
-1. Define the **source-to-target mapping:** which source tables/APIs feed which target tables.
-2. Document the **expected schema** of the output (column names, types, nullability, uniqueness constraints) (R-DE-04).
-3. Declare the **pipeline dependency graph** explicitly (R-DE-15). No implicit timing-based dependencies.
-4. If the pipeline touches PII, classify the fields and document the masking/anonymization strategy (R-DE-08).
+1. **Check for an existing WIP contract:** If a `WIP.md` file exists on the current branch, read it first and resume from the last completed step.
+2. Define the **source-to-target mapping:** which source tables/APIs feed which target tables.
+3. Document the **expected schema** of the output (column names, types, nullability, uniqueness constraints) (R-DE-04).
+4. Declare the **pipeline dependency graph** explicitly (R-DE-15). No implicit timing-based dependencies.
+5. If the pipeline touches PII, classify the fields and document the masking/anonymization strategy (R-DE-08).
 
 **Exit Criteria:** Schema design and dependency graph are documented.
 
@@ -108,3 +109,20 @@ This workflow defines the standard procedure for developing, testing, and deploy
 │ Mart / Serve │  ← Business logic applied, ready for consumption
 └─────────────┘
 ```
+
+---
+
+## Mid-Task Interruption Protocol
+
+If the agent must end a session before completing all phases, commit a `WIP.md` to the current branch:
+
+```markdown
+# Work In Progress
+**Last Phase Completed:** [Phase N]
+**Last Step Completed:** [exact step]
+**Next Step:** [exact next step]
+**Open Decisions:** [unresolved choices]
+**Blockers:** [blockers preventing progress]
+```
+
+A resuming agent reads `WIP.md` in Phase 1 Step 1. The file is deleted when the PR is merged.

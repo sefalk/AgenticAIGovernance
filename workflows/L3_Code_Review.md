@@ -20,9 +20,10 @@ This workflow defines the structured procedure for reviewing code changes (Pull 
 ### Phase 1: Pre-Review Checks (Automated)
 **Entry Criteria:** A PR/MR has been submitted and CI has completed.
 
-1. **CI Status Gate:** If the CI pipeline (build, test, lint) is not green, REJECT the review immediately. No code review begins until programmatic gates pass (R-SD-06).
-2. **Size Gate:** If the PR exceeds `[L4-DEFINED: max PR size, default 500 lines]` of functional code changes, request decomposition. Monolithic PRs exhaust context windows and reduce review quality.
-3. **Linked Work Item:** Verify the PR references a tracked issue/ticket (R-SD-08). If unlinked, flag for justification.
+1. **Check for an existing WIP contract:** If a `WIP.md` file exists on the current branch, read it first and resume accordingly.
+2. **CI Status Gate:** If the CI pipeline (build, test, lint) is not green, REJECT the review immediately. No code review begins until programmatic gates pass (R-SD-06).
+3. **Size Gate:** If the PR exceeds `[L4-DEFINED: max PR size, default 500 lines]` of functional code changes, request decomposition. Monolithic PRs exhaust context windows and reduce review quality.
+4. **Linked Work Item:** Verify the PR references a tracked issue/ticket (R-SD-08). If unlinked, flag for justification.
 
 **Exit Criteria:** CI is green, PR is within size limits, work item is linked.
 
