@@ -40,6 +40,11 @@ def on_rm_error(func, path, exc_info):
 
 def setup_environment(env_dir, scenario_id):
     """Provisions a mock Git repository based on the domain prefix."""
+    
+    # SECURITY: Ensure we never delete anything outside of the designated sandbox
+    if not env_dir.resolve().is_relative_to(BASE_TEST_ENV_DIR.resolve()):
+        raise PermissionError(f"CRITICAL SAFETY ABORT: Attempted to modify directory outside sandbox: {env_dir}")
+        
     if env_dir.exists():
         shutil.rmtree(env_dir, onerror=on_rm_error)
     os.makedirs(env_dir, exist_ok=True)
