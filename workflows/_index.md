@@ -25,6 +25,7 @@ This directory contains Level-3 Workflow templates derived from Level-2 Domain R
 | Train an ML model, build a recommendation engine, evaluate predictions | [L3_ML_Model_Development.md](L3_ML_Model_Development.md) | ML Operations |
 | Respond to a security incident, investigate a breach | [L3_Incident_Response.md](L3_Incident_Response.md) | Security Ops |
 | Audit for security, scan for vulnerabilities, assess security posture | [L3_Security_Audit.md](L3_Security_Audit.md) | Security Ops |
+| Write docs, create API reference, draft ADR or runbook, update changelog | [L3_Technical_Writing.md](L3_Technical_Writing.md) | Technical Writing |
 
 > **Fallback:** If no workflow matches, use the generic default sequence: **Plan → Review Plan → Execute → Verify → Review Output** (defined in `L1_Framework_Architecture.md`).
 
@@ -40,6 +41,7 @@ This directory contains Level-3 Workflow templates derived from Level-2 Domain R
 | ML Model Dev | `L3_ML_Model_Development.md` | 6 | Baseline comparison & bias evaluation | `L2_ML_Operations.md` |
 | Incident Response | `L3_Incident_Response.md` | 5 | Agent Autonomy Boundaries table | `L2_Security_Operations.md` |
 | Security Audit | `L3_Security_Audit.md` | 5 | Proactive SAST/SCA/DAST scanning | `L2_Security_Operations.md` |
+| Technical Writing | `L3_Technical_Writing.md` | 5 | Mandatory code-example verification | `L2_Technical_Writing.md` |
 
 ## Adding New Workflows
 

@@ -17,13 +17,13 @@ This workflow defines the standard procedure for implementing a new feature in a
 
 ## Phases
 
-### Phase 1: Branch & Plan
-**Entry Criteria:** A tracked work item (issue/ticket) exists and is assigned.
+### Phase 1: Plan
+**Entry Criteria:** A ticket, issue, or user request describing the feature exists.
 
-1. Create a feature branch from `[L4-DEFINED: primary branch]` following the convention `[L4-DEFINED: branch naming]` (e.g., `feat/<ticket-id>-<slug>`).
-2. Read the work item requirements. If ambiguous, invoke **Fail-Safe** and request clarification.
-3. Produce an **Implementation Plan** covering: affected files, approach, test strategy, and risk assessment.
-4. If the task is classified as **high-impact** (new architecture, breaking API changes, data migrations): the plan MUST be reviewed before proceeding (R-SD-01). For low-impact tasks, self-review is acceptable.
+1. **Check for an existing WIP contract:** If a `WIP.md` file exists on the current branch, read it first to determine the last completed phase, last completed step, and the next action. Resume from there instead of starting from Phase 1.
+2. Create a feature branch: `[L4-DEFINED: branch naming, e.g., feat/<ticket-id>-<description>]`.
+3. Write a brief implementation plan: what will be built, what files will be touched, what tests are needed.
+4. Get plan confirmation if the change is high-impact (R-SD-26: Fail-Safe / Ask First).
 
 **Exit Criteria:** An approved (or self-reviewed) Implementation Plan exists.
 
@@ -53,6 +53,21 @@ This workflow defines the standard procedure for implementing a new feature in a
 **Exit Criteria:** All tests pass, linting passes, diff coverage meets minimum threshold. Apply iteration limits per R-SD-25.
 
 ---
+
+## Mid-Task Interruption Protocol
+
+If the agent must end a session before completing all phases, it MUST commit a `WIP.md` file to the current branch before closing:
+
+```markdown
+# Work In Progress
+**Last Phase Completed:** [Phase N]
+**Last Step Completed:** [exact step description]
+**Next Step:** [exact next step to execute]
+**Open Decisions:** [any unresolved design choices]
+**Blockers:** [any blockers preventing progress]
+```
+
+A resuming agent MUST read `WIP.md` in Phase 1 Step 1 before taking any action. The `WIP.md` file is deleted when the PR is merged.
 
 ### Phase 4: Review
 **Entry Criteria:** Phase 3 quality gates pass.

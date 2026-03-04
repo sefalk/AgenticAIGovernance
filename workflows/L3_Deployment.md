@@ -36,11 +36,11 @@ This workflow defines the standard procedure for applying infrastructure changes
    - Resources to be **created** (count and types).
    - Resources to be **modified** (highlight in-place vs. replacement).
    - Resources to be **destroyed** (critical attention required).
-3. If any **destructive operations** are present (resource deletion, replacement), flag them explicitly and require confirmation:
-   - For non-production environments: agent self-confirmation is acceptable.
-   - For production environments: **human User approval is MANDATORY** (R-IF-11).
+3. **Destructive Change Gate:** If the plan contains any **DESTROY** operations on stateful resources (databases, object storage, message queues, caches, secrets stores), the agent MUST **HALT IMMEDIATELY** and request explicit written human confirmation before proceeding to Phase 3. This gate applies **regardless of environment** — including development and staging. Log the confirmation.
+4. For non-destructive changes in non-production environments: agent self-confirmation is acceptable.
+5. For any production environment changes (destructive or not): **human User approval is MANDATORY** (R-IF-11).
 
-**Exit Criteria:** Plan is reviewed, destructive operations are acknowledged, production changes have human approval.
+**Exit Criteria:** Plan is reviewed, Destructive Change Gate is cleared (human confirmation logged for stateful destroys), production changes have human approval.
 
 ---
 

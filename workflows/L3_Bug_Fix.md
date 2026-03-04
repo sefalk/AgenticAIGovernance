@@ -17,13 +17,14 @@ This workflow enforces the **Proof of Failure** principle (R-SD-24) for all bug 
 
 ## Phases
 
-### Phase 1: Reproduce & Isolate
-**Entry Criteria:** A bug report (issue/ticket) or observed failure exists.
+### Phase 1: Reproduce the Bug
+**Entry Criteria:** A bug report, error log, or failing user step description exists.
 
-1. Read the bug report. Identify the expected behavior vs. actual behavior.
-2. Reproduce the bug locally by running the existing test suite or triggering the failing scenario manually.
-3. If the bug cannot be reproduced, investigate further (up to 3 attempts per R-SD-25). If still unreproducible, escalate per R-SD-26.
-4. Identify the minimal reproduction case: the smallest input or state that triggers the bug.
+1. **Check for an existing WIP contract:** If a `WIP.md` file exists on the current branch, read it first to resume from the last completed step.
+2. Read the bug report and gather reproduction steps. Identify the expected behavior vs. actual behavior.
+3. Set up a local reproduction environment. Reproduce the bug locally by running the existing test suite or triggering the failing scenario manually.
+4. If the bug cannot be reproduced, investigate further (up to 3 attempts per R-SD-25). If still unreproducible, escalate per R-SD-26.
+5. Identify the minimal reproduction case: the smallest input or state that triggers the bug.
 
 **Exit Criteria:** Bug is confirmed reproducible with a documented reproduction case.
 
