@@ -1,7 +1,7 @@
 # Ignore agent working directories
 .agents/
 
-benchmark/
+
 .aaig/locks/
 .aaig/handoffs/
 .aaig/docs/
