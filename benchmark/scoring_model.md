@@ -108,13 +108,16 @@ Each benchmark run produces a **Benchmark Report** with:
 | L4 | 0.90 | 5%  | 0.045 |
 | **Total** | | | **0.822** |
 
-## Findings
+## Findings & Feedback
 ### Failures
 - [List of failed rules with scenario reference]
 
 ### Partial Passes
 - [List of partially met rules with explanation]
 
-## Recommendations
-- [Improvement suggestions]
+### Actionable Agent Feedback
+- [Specific execution advice on how the agent can achieve 100% on the partial/failed quality gates in the future]
+
+### Framework & Benchmark Feedback
+- [Observations on rubric clarity, scenario design flaws, or missing L3 workflow instructions discovered during the run]
 ```

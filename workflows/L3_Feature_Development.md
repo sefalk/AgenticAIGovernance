@@ -48,6 +48,8 @@ This workflow defines the standard procedure for implementing a new feature in a
 2. Verify all tests pass.
 3. Check code coverage: ensure the change meets the minimum threshold `[L4-DEFINED: coverage threshold]` (R-SD-06).
 
+> **Local Execution Gate:** In environments lacking automated CI pipeline triggers (e.g., local sandboxes or unconfigured repos), the agent itself MUST act as the primary quality gate executor by running local validations (tests, static analysis) and verifying the output before proposing a merge. Assuming tests pass simply because they were written is a validation gap.
+
 > **Legacy Qualifier:** In Legacy Codebases (as identified during L0 Assimilation), coverage thresholds apply to the **DIFF ONLY**, not the entire project. Use `--changed-files-coverage` or equivalent. Do not block a feature because the global repository coverage is low.
 
 > **CI/CD Config Gate:** If the change includes CI pipeline configuration files (`.github/workflows/`, `Jenkinsfile`, `gitlab-ci.yml`), run YAML lint validation: `[L4-DEFINED: CI lint tool, e.g., actionlint]`. Push to a draft/test branch and observe the CI pipeline run before merging to the primary branch.
