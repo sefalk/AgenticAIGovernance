@@ -1,6 +1,6 @@
 **Version: 1.0 | Date: 2026-03-04**
 **Level: 3 | Domain: Data Engineering**
-**Derived from:** [L2_Data_Engineering.md](../L2_Data_Engineering.md) (Level 2)
+**Derived from:** [L2_Data_Engineering.md](../domains/L2_Data_Engineering.md) (Level 2)
 **Operationalizes:** R-DE-01, R-DE-02, R-DE-04, R-DE-05, R-DE-10, R-DE-12, R-DE-13, R-DE-15
 
 ---

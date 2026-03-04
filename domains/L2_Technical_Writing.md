@@ -1,6 +1,6 @@
 **Version: 1.0 | Date: 2026-03-04**
 **Level: 2 | Domain: Technical Writing**
-**Derived from:** [L1_Core_Principles.md](L1_Core_Principles.md) (Level 1, v3.8)
+**Derived from:** [L1_Core_Principles.md](../L1_Core_Principles.md) (Level 1, v3.8)
 
 ---
 

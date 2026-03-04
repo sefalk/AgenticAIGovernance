@@ -12,7 +12,7 @@ By treating "Governance as Markdown," you ensure your AI agents read, understand
 
 The entire framework is purely file-based. There are no binaries to install. To govern an AI agent in your repository:
 
-1.  **Drop the files in your repo:** Copy `L1_Core_Principles.md`, `L1_Framework_Architecture.md`, `L2_Software_Development.md`, `L0_Assimilation_Protocol.md`, and the `/skills` folder into the root (or an `.agents/` folder) of your project repository.
+1.  **Drop the files in your repo:** Copy the core framework files (`L0_Assimilation_Protocol.md`, `L1_Core_Principles.md`, `L1_Framework_Architecture.md`, `L4_Project_Template.md`) and the `/domains`, `/workflows`, and `/skills` folders into your project repository.
 2.  **Trigger Assimilation:** Point your Agent to the Assimilation Protocol (see Deployment Guide below). The agent will actively discover your environment and self-configure the governance rules to match its capabilities.
 3.  **Customize the Rules:** Edit the YAML frontmatter in the `skills/*.md` files, or tweak the Level-2 Domain Rules, to match your specific tech stack.
 
@@ -41,7 +41,7 @@ For autonomous agents that have native file-system access (like Copilot Workspac
 
 ### 3. CI/CD Pipeline Bots (e.g., PR Reviewers)
 If you are using an LLM to automatically review Pull Requests via GitHub Actions:
-1. Pass the contents of `L2_Software_Development.md` and `skills/code_quality/code_review.md` directly into the System Prompt of the LLM API call.
+1. Pass the contents of `domains/L2_Software_Development.md` and `skills/code_quality/code_review.md` directly into the System Prompt of the LLM API call.
 2. Instruct the bot: *"Evaluate the following unified diff against the principles defined in these governance documents."*
 
 ---
@@ -53,7 +53,7 @@ AAIG solves the "Agent Abstraction Problem" by separating high-level philosophy 
 *   **Level 0: Bootstrapping (`L0_Assimilation_Protocol.md`)** - The entry point where agents scan the host environment to determine their own sandbox capabilities.
 *   **The Blueprint (`L1_Framework_Architecture.md`)** - Defines how the 5 levels interlock and how agent roles function.
 *   **Level 1: Core Principles (`L1_Core_Principles.md`)** - Universal behavioral rules like *Separation of Concern* and *Fail-Safe*. They rarely change.
-*   **Level 2: Domain Rules** - The L1 principles translated into concrete `SHALL / SHALL NOT` rules for specific domains:
+*   **Level 2: Domain Rules (`/domains/`)** - The L1 principles translated into concrete `SHALL / SHALL NOT` rules for specific domains:
     *   `L2_Software_Development.md` — Building software
     *   `L2_Data_Engineering.md` — Data pipelines, ETL, warehouses
     *   `L2_ML_Operations.md` — ML model lifecycle, training, deployment

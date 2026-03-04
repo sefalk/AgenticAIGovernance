@@ -1,6 +1,6 @@
 **Version: 1.0 | Date: 2026-03-04**
 **Level: 3 | Domain: Software Development**
-**Derived from:** [L2_Software_Development.md](../L2_Software_Development.md) (Level 2)
+**Derived from:** [L2_Software_Development.md](../domains/L2_Software_Development.md) (Level 2)
 **Operationalizes:** R-SD-04, R-SD-14, R-SD-24, R-SD-25, R-SD-26
 
 ---

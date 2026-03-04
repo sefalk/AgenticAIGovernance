@@ -1,6 +1,6 @@
 **Version: 1.0 | Date: 2026-03-04**
 **Level: 3 | Domain: Infrastructure**
-**Derived from:** [L2_Infrastructure.md](../L2_Infrastructure.md) (Level 2)
+**Derived from:** [L2_Infrastructure.md](../domains/L2_Infrastructure.md) (Level 2)
 **Operationalizes:** R-IF-01, R-IF-02, R-IF-03, R-IF-06, R-IF-07, R-IF-11, R-IF-12
 
 ---
