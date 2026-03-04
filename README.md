@@ -60,7 +60,13 @@ AAIG solves the "Agent Abstraction Problem" by separating high-level philosophy 
     *   `L2_Infrastructure.md` — IaC, cloud resources, platform engineering
     *   `L2_Technical_Writing.md` — Agent-produced documentation
     *   `L2_Security_Operations.md` — Security audits, incident response
-*   **Level 3: Workflows (Optional)** - Explicit, step-by-step algorithms mapping how specific tasks (e.g., "Deploy to Prod") should be executed.
+*   **Level 3: Workflows (`/workflows/`)** - Generic, step-by-step procedures that agents adapt during assimilation:
+    *   `L3_Feature_Development.md` — Branch → Plan → Implement → Test → Review → Merge
+    *   `L3_Bug_Fix.md` — Proof of Failure: Red → Green → Refactor
+    *   `L3_Code_Review.md` — Static Analysis → Semantic Review → Decision
+    *   `L3_Deployment.md` — Plan → Preview → Apply → Smoke Test → Monitor
+    *   `L3_Data_Pipeline.md` — Schema → Develop → Validate → Deploy → Monitor
+    *   `L3_Incident_Response.md` — Detect → Contain → Remediate → Post-Mortem
 *   **The Skills Toolbox (`/skills/`)** - A library of contextual skills. You don't load all skills into the agent's context window. The agent loads `frontend_architecture.md` only when touching the UI, saving tokens while enforcing rigorous, specialized Quality Gates.
 
 ## 🤝 Contributing

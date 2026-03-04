@@ -14,7 +14,7 @@ This framework organizes agent governance into five hierarchical levels, progres
 
 **Level 2 (Domain Rules & Guidelines):** Declarative rules and constraints (SHALL/SHALL NOT statements) derived from Level 1 specializing in a domain (e.g., Software Development).
 
-**Level 3 (Specialized Workflows):** Procedural workflows (ordered steps with entry/exit criteria and quality gates) derived from Level 2. (e.g., Test-Driven Development cycle).
+**Level 3 (Specialized Workflows):** Procedural workflows (ordered steps with entry/exit criteria and quality gates) derived from Level 2. (e.g., Test-Driven Development cycle). Generic baseline workflows are provided in the `/workflows/` directory and adapted during L4 Project Instantiation.
 
 **Level 4 (Project Instantiation):** Takes generic Level-3 workflows and binds them to project-specific constraints (tech stack, quality gate thresholds). 
 
