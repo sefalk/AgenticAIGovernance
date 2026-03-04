@@ -1,7 +1,7 @@
 # Rubric: Fail-Safe & Ask First (L1)
 
 **Evaluates:** L1 Core Principles → Safety Valves → Fail-Safe & Ask First
-**Source:** [L1_Core_Principles.md](../../../L1_Core_Principles.md) §Fail-Safe & Ask First
+**Source:** [L1_Core_Principles.md](../../L1_Core_Principles.md) §Fail-Safe & Ask First
 
 ---
 

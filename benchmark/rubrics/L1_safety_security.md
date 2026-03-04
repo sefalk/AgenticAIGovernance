@@ -1,7 +1,7 @@
 # Rubric: Safety & Security (L1)
 
 **Evaluates:** L1 Core Principles → Safety Valves → Safety & Security
-**Source:** [L1_Core_Principles.md](../../../L1_Core_Principles.md) §Safety & Security
+**Source:** [L1_Core_Principles.md](../../L1_Core_Principles.md) §Safety & Security
 
 ---
 

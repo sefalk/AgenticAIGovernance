@@ -1,7 +1,7 @@
 # Rubric: L2 Software Development Domain
 
 **Evaluates:** L2 Domain Rules → Software Development (27 rules)
-**Source:** [L2_Software_Development.md](../../../domains/L2_Software_Development.md)
+**Source:** [L2_Software_Development.md](../../domains/L2_Software_Development.md)
 
 ---
 

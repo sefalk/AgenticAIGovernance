@@ -53,6 +53,8 @@ Overall Compliance Score
 
 **Weights sum:** 100%
 
+**Intra-level weighting:** Within each level, all sub-scores are weighted equally. For example, all 9 L1 principles contribute equally to the L1 Score. Safety-critical principles are not weighted higher within L1 because the Critical Failure mechanism (§3) already ensures that safety/security violations result in automatic overall failure regardless of their weight.
+
 ---
 
 ## 3. Critical Failure Conditions

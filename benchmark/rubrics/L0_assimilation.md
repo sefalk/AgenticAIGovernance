@@ -1,7 +1,7 @@
 # Rubric: L0 Assimilation Protocol
 
 **Evaluates:** L0 Bootstrapping — Does the agent correctly discover, map, and instantiate the AAIG framework?
-**Source:** [L0_Assimilation_Protocol.md](../../../L0_Assimilation_Protocol.md)
+**Source:** [L0_Assimilation_Protocol.md](../../L0_Assimilation_Protocol.md)
 
 ---
 

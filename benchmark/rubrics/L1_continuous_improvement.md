@@ -1,7 +1,7 @@
 # Rubric: Continuous Improvement (L1)
 
 **Evaluates:** L1 Core Principles → System Evolution → Continuous Improvement
-**Source:** [L1_Core_Principles.md](../../../L1_Core_Principles.md) §Continuous Improvement
+**Source:** [L1_Core_Principles.md](../../L1_Core_Principles.md) §Continuous Improvement
 
 ---
 

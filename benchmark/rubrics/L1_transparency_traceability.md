@@ -1,7 +1,7 @@
 # Rubric: Transparency / Traceability (L1)
 
 **Evaluates:** L1 Core Principles → Documentation & Verification → Transparency/Traceability
-**Source:** [L1_Core_Principles.md](../../../L1_Core_Principles.md) §Transparency/Traceability
+**Source:** [L1_Core_Principles.md](../../L1_Core_Principles.md) §Transparency/Traceability
 
 ---
 

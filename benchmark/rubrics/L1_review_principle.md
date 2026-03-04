@@ -1,7 +1,7 @@
 # Rubric: Review Principle (L1)
 
 **Evaluates:** L1 Core Principles → Process Governance → Review Principle
-**Source:** [L1_Core_Principles.md](../../../L1_Core_Principles.md) §Review Principle
+**Source:** [L1_Core_Principles.md](../../L1_Core_Principles.md) §Review Principle
 
 ---
 

@@ -1,7 +1,7 @@
 # Rubric: Efficiency / Pragmatism (L1)
 
 **Evaluates:** L1 Core Principles → System Evolution → Efficiency / Pragmatism
-**Source:** [L1_Core_Principles.md](../../../L1_Core_Principles.md) §Efficiency / Pragmatism
+**Source:** [L1_Core_Principles.md](../../L1_Core_Principles.md) §Efficiency / Pragmatism
 
 ---
 

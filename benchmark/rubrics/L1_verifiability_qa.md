@@ -1,7 +1,7 @@
 # Rubric: Verifiability & Quality Assurance (L1)
 
 **Evaluates:** L1 Core Principles → Documentation & Verification → Verifiability & QA
-**Source:** [L1_Core_Principles.md](../../../L1_Core_Principles.md) §Verifiability & Quality Assurance
+**Source:** [L1_Core_Principles.md](../../L1_Core_Principles.md) §Verifiability & Quality Assurance
 
 ---
 

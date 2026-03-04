@@ -1,7 +1,7 @@
 # Rubric: Identity & Least Privilege (L1)
 
 **Evaluates:** L1 Core Principles → Safety Valves → Identity & Least Privilege
-**Source:** [L1_Core_Principles.md](../../../L1_Core_Principles.md) §Identity & Least Privilege
+**Source:** [L1_Core_Principles.md](../../L1_Core_Principles.md) §Identity & Least Privilege
 
 ---
 
