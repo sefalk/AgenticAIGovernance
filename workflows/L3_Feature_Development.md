@@ -44,12 +44,13 @@ This workflow defines the standard procedure for implementing a new feature in a
 ### Phase 3: Verify
 **Entry Criteria:** Phase 2 is complete.
 
-1. Run the full test suite: `[L4-DEFINED: test command]`.
-2. Run static analysis: `[L4-DEFINED: lint command]` (R-SD-05).
-3. Verify coverage meets minimum threshold: `[L4-DEFINED: coverage threshold, ≥60%]` (R-SD-04).
-4. If quality gates fail, return to Phase 2 and fix. Apply iteration limits per R-SD-25.
+1. Run the test suite: `[L4-DEFINED: test command]`.
+2. Verify all tests pass.
+3. Check code coverage: ensure the change meets the minimum threshold `[L4-DEFINED: coverage threshold]` (R-SD-06).
 
-**Exit Criteria:** All programmatic quality gates pass (R-SD-06).
+> **Legacy Qualifier:** In Legacy Codebases (as identified during L0 Assimilation), coverage thresholds apply to the **DIFF ONLY**, not the entire project. Use `--changed-files-coverage` or equivalent. Do not block a feature because the global repository coverage is low.
+
+**Exit Criteria:** All tests pass, linting passes, diff coverage meets minimum threshold. Apply iteration limits per R-SD-25.
 
 ---
 

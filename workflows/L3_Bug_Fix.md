@@ -47,11 +47,15 @@ This workflow enforces the **Proof of Failure** principle (R-SD-24) for all bug 
 **Entry Criteria:** Phase 2 failing test is committed.
 
 1. Write the minimal fix that makes the failing test pass without breaking other tests.
-2. Run the full test suite: `[L4-DEFINED: test command]`.
-3. If the fix introduces regressions, iterate (within R-SD-25 limits).
-4. Commit the fix with message: `fix: <bug-description> [GREEN]`.
+2. Run the test suite: `[L4-DEFINED: test command]`.
+3. Verify all tests pass, including the new test added in Phase 2.
+4. Check code coverage: ensure the change meets the minimum threshold `[L4-DEFINED: coverage threshold]` (R-SD-06).
 
-**Exit Criteria:** The previously failing test now passes. All other tests still pass.
+> **Legacy Qualifier:** In Legacy Codebases (as identified during L0 Assimilation), coverage thresholds apply to the **DIFF ONLY**, not the entire project. Use `--changed-files-coverage` or equivalent. Do not block a bug fix because the global repository coverage is low.
+
+5. Commit the fix with message: `fix: <bug-description> [GREEN]`.
+
+**Exit Criteria:** Code is implemented, all tests pass, diff coverage meets threshold.
 
 ---
 

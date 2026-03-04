@@ -53,6 +53,8 @@ This workflow defines the standard procedure for applying infrastructure changes
    - Attempt rollback if safe, or escalate per R-SD-26.
 3. Verify the state file is updated in the remote backend (R-IF-05).
 
+> **Bootstrap Exception:** For initial infrastructure provisioning where no CI pipeline exists yet, a direct CLI apply is permitted with explicit human User approval. The first apply MUST include the CI pipeline infrastructure itself (e.g., GitHub Actions runners, IAM roles for CI), closing the bootstrap loop so all subsequent applies go through CI (R-IF-06).
+
 **Exit Criteria:** Apply completes successfully, state is consistent.
 
 ---

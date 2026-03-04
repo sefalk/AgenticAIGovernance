@@ -22,7 +22,9 @@ This directory contains Level-3 Workflow templates derived from Level-2 Domain R
 | Review a PR, evaluate code changes, assess a merge request | [L3_Code_Review.md](L3_Code_Review.md) | Software Dev |
 | Deploy infrastructure, provision resources, apply IaC changes | [L3_Deployment.md](L3_Deployment.md) | Infrastructure |
 | Build a data pipeline, create a dbt model, add an ETL job | [L3_Data_Pipeline.md](L3_Data_Pipeline.md) | Data Engineering |
-| Respond to a security incident, investigate a breach, triage an alert | [L3_Incident_Response.md](L3_Incident_Response.md) | Security Ops |
+| Train an ML model, build a recommendation engine, evaluate predictions | [L3_ML_Model_Development.md](L3_ML_Model_Development.md) | ML Operations |
+| Respond to a security incident, investigate a breach | [L3_Incident_Response.md](L3_Incident_Response.md) | Security Ops |
+| Audit for security, scan for vulnerabilities, assess security posture | [L3_Security_Audit.md](L3_Security_Audit.md) | Security Ops |
 
 > **Fallback:** If no workflow matches, use the generic default sequence: **Plan → Review Plan → Execute → Verify → Review Output** (defined in `L1_Framework_Architecture.md`).
 
@@ -35,7 +37,9 @@ This directory contains Level-3 Workflow templates derived from Level-2 Domain R
 | Code Review | `L3_Code_Review.md` | 4 | Structured Review Artifact Template | `L2_Software_Development.md` |
 | Deployment | `L3_Deployment.md` | 5 | Rollback protocol (stateless vs. stateful) | `L2_Infrastructure.md` |
 | Data Pipeline | `L3_Data_Pipeline.md` | 5 | Layer separation diagram (Raw→Staging→Mart) | `L2_Data_Engineering.md` |
+| ML Model Dev | `L3_ML_Model_Development.md` | 6 | Baseline comparison & bias evaluation | `L2_ML_Operations.md` |
 | Incident Response | `L3_Incident_Response.md` | 5 | Agent Autonomy Boundaries table | `L2_Security_Operations.md` |
+| Security Audit | `L3_Security_Audit.md` | 5 | Proactive SAST/SCA/DAST scanning | `L2_Security_Operations.md` |
 
 ## Adding New Workflows
 
