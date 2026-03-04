@@ -31,10 +31,17 @@ def parse_prompt_from_scenario(filepath):
         return prompt_text
     return "No explicit prompt found in scenario markdown."
 
+import stat
+
+def on_rm_error(func, path, exc_info):
+    """Error handler for shutil.rmtree. Changes file permissions and retries."""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
 def setup_environment(env_dir, scenario_id):
     """Provisions a mock Git repository based on the domain prefix."""
     if env_dir.exists():
-        shutil.rmtree(env_dir)
+        shutil.rmtree(env_dir, onerror=on_rm_error)
     os.makedirs(env_dir, exist_ok=True)
     
     # Domain specific scaffolding
