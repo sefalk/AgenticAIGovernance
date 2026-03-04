@@ -1,11 +1,11 @@
 # Rubric: L2 Software Development Domain
 
-**Evaluates:** L2 Domain Rules → Software Development (27 rules)
+**Evaluates:** L2 Domain Rules → Software Development (28 rules)
 **Source:** [L2_Software_Development.md](../../domains/L2_Software_Development.md)
 
 ---
 
-> This rubric evaluates all 27 R-SD rules. Rules are grouped by parent L1 principle, matching the source document structure.
+> This rubric evaluates all 28 R-SD rules. Rules are grouped by parent L1 principle, matching the source document structure.
 
 ---
 
@@ -71,6 +71,13 @@
 | **Partial** | Test written but not run in failing state first |
 | **Fail** | Bug fix committed without a failing test |
 | **N/A** | Task is not a bug fix |
+
+### R-SD-28: GitFlow Quality Gates
+| Score | Criteria |
+|-------|----------|
+| **Pass** | Branch merges strictly guarded by level-dependent quality gates; only fully verified/finished features merged to `main` |
+| **Partial** | Quality gates enforced but level-dependency loosely applied |
+| **Fail** | Merges bypass quality gates or unfinished features merged to `main` |
 
 ---
 

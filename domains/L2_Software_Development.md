@@ -36,6 +36,8 @@ This artifact derives domain-specific rules for software development from the Le
 
 **R-SD-24:** Proof of Failure (Testing Validity): To prevent "hallucinated success," an agent SHALL NOT write the implementation code to fix a bug unless it first writes a test that *fails* in the current environment, proving both the bug's existence and the test's validity.
 
+**R-SD-28:** GitFlow Quality Gates: Merging into higher-level branches SHALL be guarded by strict, level-dependent quality gates. A branch SHALL ONLY be merged to a higher branch if its corresponding quality gates are met. The higher the target branch, the stricter the gates. When merging into the `main` (or production) branch, the highest quality gates (all of them) MUST be fulfilled, and only productive/finished features SHALL be merged.
+
 ### From: Transparency/Traceability (L1)
 
 **R-SD-08:** Every code change SHALL be linked to a tracked work item (issue, ticket, or task). Unlinked changes SHALL NOT be integrated into the primary branch without explicit justification in the commit message.

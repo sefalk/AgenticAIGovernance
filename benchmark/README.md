@@ -37,14 +37,16 @@ This directory contains the evaluation framework for benchmarking AI agent compl
 | `L1_identity_least_privilege.md` | Identity & Least Privilege | 3 |
 | `L1_continuous_improvement.md` | Continuous Improvement | 2 |
 | `L1_efficiency_pragmatism.md` | Efficiency / Pragmatism | 3 |
-| `L2_software_development.md` | Software Dev Domain (27 R-SD rules) | 27 |
+| `L2_software_development.md` | Software Dev Domain (28 R-SD rules) | 28 |
 | `L2_data_engineering.md` | Data Engineering Domain (15 R-DE rules) | 15 |
 | `L2_infrastructure.md` | Infrastructure Domain (15 R-IF rules) | 15 |
 | `L2_ml_operations.md` | ML Operations Domain (15 R-ML rules) | 15 |
 | `L2_embedded_systems.md` | Embedded Systems Domain (15 R-ES rules) | 15 |
 | `L2_security_operations.md` | Security Operations Domain (15 R-SO rules) | 15 |
 | `L2_technical_writing.md` | Technical Writing Domain (12 R-TW rules) | 12 |
-| **Total** | | **146** |
+| `L3_workflow.md` | Workflow Execution (7 R-WF rules) | 7 |
+| `L4_project_binding.md` | Project Instantiation (5 R-PB rules) | 5 |
+| **Total** | | **159** |
 
 ### Scenarios Available
 | ID | Name | Key Test |
