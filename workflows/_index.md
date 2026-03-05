@@ -1,6 +1,6 @@
 # Workflows — Manifest & Selection Guide
 
-**Version: 1.0 | Date: 2026-03-04**
+**Version: 1.1 | Date: 2026-03-05**
 
 ## Purpose
 
@@ -8,10 +8,10 @@ This directory contains Level-3 Workflow templates derived from Level-2 Domain R
 
 ## How Agents Should Use This Directory
 
-1. **Classify the task** the user has requested (new feature, bug fix, infra change, etc.).
-2. **Select the matching workflow** using the trigger table below.
-3. **Load only the selected workflow.** Do not load all workflows — this preserves token budget.
-4. **Bind placeholders** to project-specific values from the L4 Project Instantiation file.
+1. **Full-Spectrum Deployment:** During L0 Assimilation (Phase 3), **all** L3 workflow files in this directory are deployed into the environment so they are always available.
+2. **Classify the task:** When the User issues a request, classify the task (new feature, bug fix, infra change, etc.).
+3. **Select on-demand:** Use the trigger table below to select the matching workflow.
+4. **Load & Bind:** Load the selected workflow and bind its `[L4-DEFINED]` placeholders to the project-specific values from the L4 Contract.
 
 ## Workflow Selection Guide
 

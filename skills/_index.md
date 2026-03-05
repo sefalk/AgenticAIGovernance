@@ -1,6 +1,6 @@
 # Skills Toolbox -- Manifest & Usage Guide
 
-**Version: 2.4 | Date: 2026-02-26**
+**Version: 2.5 | Date: 2026-03-05**
 
 ## Purpose
 
@@ -8,15 +8,15 @@ This directory contains optional, detailed skill templates that agents may invok
 
 ## How Agents Should Use This Toolbox
 
-1. **Discover:** During Environment Discovery, scan for this `skills/` directory co-located with `L1_Core_Principles.md`.
-2. **Assess:** Use the Skill Selection Heuristic (below) to identify relevant skills based on project domain, tech stack, and task.
-3. **Load on demand:** Load only the skills needed for the current task. Do not load all skills at once -- this preserves token budget and focus.
-4. **Partial loading:** If you only need specific guidance (e.g., tool recommendations, CI thresholds), load only the relevant section of a skill. Each skill's sections are independently useful:
+1. **Full-Spectrum Deployment:** During L0 Assimilation (Phase 3), the **entire** `skills/` directory is deployed into the environment. 
+2. **Active Specializations:** During assimilation, the User selects which skills are actively prioritized via the **Specialization Prompt**. These are recorded in the L4 Contract and integrated into the agent's active context.
+3. **On-Demand Activation:** Non-selected skills remain deployed but dormant. Use the Skill Selection Heuristic (below) to identify newly relevant skills as the project evolves, and activate them on-demand by updating the L4 Contract.
+4. **Partial reading:** If you only need specific guidance (e.g., tool recommendations, CI thresholds) from a dormant skill without fully activating it, you may read just that section. Each skill's sections are independently useful:
    - **Quality Gates** -- for threshold definitions only
    - **Techniques & Patterns** -- for implementation guidance
    - **Anti-Patterns** -- for review/validation
    - **References** -- for tool/library discovery
-5. **Apply:** Use loaded skills as expert guidance when producing Level-2 rules, Level-3 workflows, or Level-4 project bindings.
+5. **Apply:** Use active and referenced skills as expert guidance when producing Level-2 rules, Level-3 workflows, or Level-4 project bindings.
 6. **Override:** Skills may be refined or overridden at Level 3 or Level 4 to match project-specific requirements.
 
 ## When to Skip Skills
