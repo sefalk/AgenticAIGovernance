@@ -60,6 +60,8 @@ This workflow defines the standard procedure for producing agent-authored docume
 2. Resolve all `[VERIFY]` markers: look up the fact in the source code, docs, or specification, replace the marker with the verified information.
 3. If a `[VERIFY]` item cannot be resolved, escalate to the human User before publishing (R-TW-05, R-SD-26).
 
+> **Local Execution Gate:** In environments lacking automated CI pipeline triggers (e.g., local sandboxes or unconfigured repos), the agent itself MUST act as the primary quality gate executor by running local validations (doctests, link checks) and verifying the output before proposing a merge. Assuming examples work simply because they were written is a validation gap.
+
 **Exit Criteria:** All code examples execute successfully, zero unresolved `[VERIFY]` markers.
 
 ---

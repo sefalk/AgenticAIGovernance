@@ -49,13 +49,25 @@ Map R-SD rules to your specific CI tooling:
 | Rule | Enforcement Mechanism |
 |------|-----------------------|
 | R-SD-04 (Tests) | [e.g., `pytest --cov=src --cov-fail-under=85` in GitHub Actions] |
-| R-SD-05 (Static Analysis) | [e.g., `ruff check .` + `mypy src/` in pre-commit hooks] |
+| R-SD-05 (Static Analysis) | [e.g., ruff check . + mypy src/ in pre-commit hooks] |
 | R-SD-06 (Quality Gates) | [e.g., GitHub Actions required status checks on `main`] |
 | R-SD-09 (Commit Format) | [e.g., `commitlint` with Conventional Commits] |
 | R-SD-10 (Lockfile) | [e.g., `pnpm-lock.yaml` checked into VCS] |
 | R-SD-12 (CVE Scan) | [e.g., `npm audit --audit-level=high` / Snyk] |
 
-## 5. Loaded Skills
+## 5. Tool Mapping
+
+Explicitly map the tools your project uses to resolve ambiguity for the agent:
+
+| Category | Tool / Command |
+|----------|----------------|
+| **Unit Testing** | [e.g., `pytest`, `npm test`, `cargo test`] |
+| **Linting** | [e.g., `flake8`, `eslint`, `rustfmt`] |
+| **Static Analysis** | [e.g., `mypy`, `sonarqube`] |
+| **Type Checking** | [e.g., `tsc`, `pyright`] |
+| **Security Audit** | [e.g., `npm audit`, `snyk`] |
+
+## 6. Loaded Skills
 
 List the skills from the `skills/` toolbox that are active for this project. Derived from the Skill Selection Heuristic in `skills/_index.md`:
 
@@ -66,7 +78,7 @@ List the skills from the `skills/` toolbox that are active for this project. Der
 | [e.g., `containerization`] | [e.g., Deployed via Docker on AWS ECS] |
 | [e.g., `secrets_management`] | [e.g., Handles Stripe API keys] |
 
-## 6. Project-Specific Overrides
+## 7. Project-Specific Overrides
 
 Document any deviations from default AAIG rules with justification:
 

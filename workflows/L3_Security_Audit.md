@@ -41,6 +41,8 @@ This workflow defines the standard procedure for a **proactive** security assess
 4. If applicable, run **Dynamic Application Security Testing (DAST)**: `[L4-DEFINED: DAST tool]` (e.g., OWASP ZAP) against a staging environment.
 5. Collect all raw scan outputs as timestamped reports (R-SO-04).
 
+> **Local Execution Gate:** In environments lacking automated CI pipeline triggers (e.g., local sandboxes or unconfigured repos), the agent itself MUST act as the primary quality gate executor by running local validations (scanners, audits) and verifying the output before proposing a merge. Assuming findings are clean simply because tools were executed is a validation gap.
+
 **Exit Criteria:** All applicable scan types have completed and raw reports are archived.
 
 ---
