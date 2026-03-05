@@ -10,7 +10,7 @@ All changes to **Level 0** and **Level 1** governance documents are recorded her
 
 | Document | Old Version | New Version |
 |----------|-------------|-------------|
-| `L0_Assimilation_Protocol.md` | 1.1 | 1.2 |
+| `L0_Assimilation_Protocol.md` | 1.1 | 1.3 |
 | `L1_Framework_Architecture.md` | 1.0 | 1.1 |
 
 **Supporting Documents Updated:**
@@ -30,6 +30,7 @@ The Assimilation Protocol was redesigned from **selective loading** (load only d
 - **Selective loading restrictions removed:** The "Do NOT load all [X]" prohibitions were removed from L0 Step 2, `domains/_index.md`, `workflows/_index.md`, and `skills/_index.md`. All domains, workflows, and skills are now deployed fully.
 - **Specialization Prompt added** (L0 Phase 3, Step 3): An interactive step where the agent presents all available domains and skills, and the User selects active specializations — or states "all."
 - **On-Demand Activation** mechanism defined: Dormant capabilities can be activated at any time without re-running the Assimilation Protocol.
+- **Native Multi-Agent Orchestration added** (L0 Phase 3, Step 6): Mandates that environments natively supporting subagents (e.g., GitHub Copilot) must explicitly map AAIG Workflows and Reviewer roles to native subagents.
 - **L4 Template** updated with "Active Specializations" (Section 6) and "Deployed Capabilities (Dormant)" (Section 8).
 
 ### Why
