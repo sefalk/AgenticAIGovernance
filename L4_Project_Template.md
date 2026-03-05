@@ -1,5 +1,5 @@
 # Level 4 — Project Instantiation Template
-**Version: 1.0 | Date: 2026-03-04**
+**Version: 1.1 | Date: 2026-03-05**
 **Level: 4 | Domain: [Your Domain]**
 **Derived from:** [L2_Software_Development.md](domains/L2_Software_Development.md) (Level 2)
 
@@ -67,12 +67,13 @@ Explicitly map the tools your project uses to resolve ambiguity for the agent:
 | **Type Checking** | [e.g., `tsc`, `pyright`] |
 | **Security Audit** | [e.g., `npm audit`, `snyk`] |
 
-## 6. Loaded Skills
+## 6. Active Specializations
 
-List the skills from the `skills/` toolbox that are active for this project. Derived from the Skill Selection Heuristic in `skills/_index.md`:
+List the domains and skills selected by the User during the **Specialization Prompt** (L0 Phase 3, Step 3). These are actively prioritized by the agent:
 
-| Skill | Reason |
-|-------|--------|
+| Domain / Skill | Reason |
+|----------------|--------|
+| [e.g., `L2_Software_Development`] | [e.g., Primary project domain] |
 | [e.g., `unit_testing`] | [e.g., Core testing for all modules] |
 | [e.g., `api_design`] | [e.g., REST API is the primary interface] |
 | [e.g., `containerization`] | [e.g., Deployed via Docker on AWS ECS] |
@@ -85,6 +86,16 @@ Document any deviations from default AAIG rules with justification:
 | Override | Default | Project Value | Justification |
 |----------|---------|---------------|---------------|
 | [e.g., R-SD-08 work-item linking] | Mandatory | Optional for `chore:` commits | [e.g., Trivial formatting commits don't need tickets] |
+
+## 8. Deployed Capabilities (Dormant)
+
+All AAIG domains and skills are deployed during Full-Spectrum Assimilation. Those not selected in the Specialization Prompt are listed here for reference. They can be activated on-demand without re-assimilation:
+
+| Domain / Skill | Status | Notes |
+|----------------|--------|-------|
+| [e.g., `L2_ML_Operations`] | Dormant | [e.g., No ML workload currently; available if needed] |
+| [e.g., `L2_Data_Engineering`] | Dormant | |
+| [e.g., `L2_Infrastructure`] | Dormant | |
 
 ---
 

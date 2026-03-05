@@ -1,5 +1,5 @@
 # AAIG Framework Architecture
-**Version: 1.0 | Date: 2026-03-03**
+**Version: 1.1 | Date: 2026-03-05**
 
 *This document defines the structural architecture, hierarchical levels, and roles of the Agentic AI Governance (AAIG) framework. It answers **how** the framework is organized.*
 
@@ -8,7 +8,7 @@ This framework organizes agent governance into five hierarchical levels, progres
 
 ## 2. The Five Levels (L0-L4)
 
-**Level 0 (Bootstrapping & Assimilation):** Defined in `L0_Assimilation_Protocol.md`. The chronological entry point. The phase where an agent discovers its environment, determines its capabilities, and dynamically generates L3/L4 files natively into the host system before executing primary tasks.
+**Level 0 (Bootstrapping & Assimilation):** Defined in `L0_Assimilation_Protocol.md`. The chronological entry point. The phase where an agent discovers its environment, determines its capabilities, deploys the **full AAIG capability set** into the host system, and uses a **Specialization Prompt** to let the User select which capabilities are actively prioritized. Non-selected capabilities remain deployed but dormant, available for on-demand activation without re-assimilation.
 
 **Level 1 (Core Principles):** Defined in `L1_Core_Principles.md`. The abstract, universal principles (Fail-Safe, Traceability, Separation of Concern). They apply to all domains and projects.
 
@@ -48,7 +48,7 @@ Operational artifacts (action logs, ADRs) are not level-classified but must stil
 
 ## 7. Skills Toolbox & Workflow Selection
 
-The framework includes an optional **Skills Toolbox** (`/skills/`)—a library of detailed skill templates. Skills are expert-knowledge resources invoked during Level-2, Level-3, or Level-4 derivation.
+The framework includes a **Skills Toolbox** (`/skills/`)—a library of detailed skill templates. Skills are expert-knowledge resources invoked during Level-2, Level-3, or Level-4 derivation. During Full-Spectrum Assimilation (L0 Phase 3), all skills are deployed. The User's **Specialization Prompt** selection determines which are **Active** (loaded into the native IDE integration folder) and which are **Deployed (Dormant)** (listed in a reference manifest, available for on-demand activation).
 
 When multiple Level-3 workflows are available, the agent must classify the task and select the appropriate workflow based on entry criteria. If none match, the agent falls back to a generic default sequence: Plan -> Review Plan -> Execute -> Verify -> Review Output.
 

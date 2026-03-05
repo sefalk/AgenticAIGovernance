@@ -1,6 +1,6 @@
 # Domain Rules — Manifest & Selection Guide
 
-**Version: 1.0 | Date: 2026-03-04**
+**Version: 1.1 | Date: 2026-03-05**
 
 ## Purpose
 
@@ -8,10 +8,10 @@ This directory contains Level-2 Domain Rule documents derived from `L1_Core_Prin
 
 ## How Agents Should Use This Directory
 
-1. **Identify the project domain** during Phase 1 of the Assimilation Protocol (read package manifests, file extensions, directory structure).
-2. **Load the matching L2 document(s).** Most projects map to one primary domain, but multi-discipline projects (e.g., an ML API) may require loading multiple.
-3. **Do not load all domains.** Only load the domains relevant to the current task — this preserves token budget.
-4. **Monorepo Scoping:** In monorepos where multiple stacks co-exist, load only the domain(s) applicable to the *specific service or directory* targeted by the current task. Do not load all domains simultaneously. See `L0_Assimilation_Protocol.md` Phase 3 for the scoping heuristic.
+1. **Full-Spectrum Deployment:** During L0 Assimilation (Phase 3), **all** L2 domain files in this directory are deployed into the environment. This ensures governance capabilities are always available, even as project requirements evolve.
+2. **Active Specializations:** The User selects which domains are actively prioritized via the **Specialization Prompt** during assimilation. Active domains are recorded in the L4 Contract. Non-selected domains remain deployed but dormant.
+3. **On-Demand Activation:** At any time, a dormant domain can be activated by the agent or User without re-running the Assimilation Protocol. Simply reference the domain and update the L4 Contract's Active Specializations list.
+4. **Monorepo Context:** In monorepos where multiple stacks co-exist, the agent notes the primary service directory for the current task context, but the full domain set remains available.
 
 ## Domain Selection Guide
 
