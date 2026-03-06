@@ -1,5 +1,5 @@
 # AAIG Assimilation Protocol
-**Version: 1.3** | **Level: 0** | **Target Audience: Autonomous AI Agents**
+**Version: 1.4** | **Level: 0** | **Target Audience: Autonomous AI Agents**
 
 > **GREETINGS AGENT.** If you are reading this file, you have been deployed into a repository governed by the **Agentic AI Governance (AAIG)** framework. You must complete the Assimilation Protocol (Phase 1-3) *before* executing the user's primary request.
 
@@ -20,28 +20,33 @@ Map your discovered capabilities against the AAIG requirement levels.
 *   **Offline / Air-Gapped Environments:** Probe for internet access (e.g., `curl -s --max-time 5 https://example.com`). If the probe fails, declare **Offline Mode** in your L4 Contract: (1) skip web search in Phase 1 Step 4, (2) list all network-dependent quality gates that cannot be run (e.g., `npm audit`, CVE scanning, remote MLflow tracking) under a `deferred_gates` key in the L4 Contract, (3) every deferred gate MUST be reviewed by the human User before release.
 *   **Log Substitution:** If your host environment natively maintains conversational or action logs, declare that you will use them as your Transparency/Traceability action log. Do not duplicate logging in text files unless the host lacks this capability.
 
-## ⚙️ Phase 3: Full-Spectrum Deployment & Integration
-You must now deploy the **complete** AAIG framework into your environment. Unlike selective loading, Full-Spectrum Assimilation ensures all governance capabilities are present from the start, eliminating the need for future re-assimilation when requirements change. The User controls which capabilities are actively prioritized via the **Specialization Prompt** (Step 3).
+## ⚙️ Phase 3: Deep Integration & Compilation
+You must now deploy and *natively integrate* the complete AAIG framework into your environment. You are not merely copying markdown files; you are **compiling semantic rules into native configurations**. The `.aaig/` directory acts as your immutable source of truth, but the host environment (e.g., `.github/agents/`) must be configured to natively execute those truths.
 
 1.  **Initialize Protocol (Empty Projects):** If the repository lacks architectural manifests, you MUST HALT and request a "Tech Stack Definition and Project Goal" from the User before writing any code. Do not hallucinate a starting stack.
-2.  **Full-Spectrum Domain & Skill Deployment:** Deploy **all** L2 domain rule files from `domains/` and **all** applicable skills from `skills/` into the environment. In monorepo scenarios, note the primary service directory relevant to the current task, but still deploy the full capability set — the Specialization Prompt (Step 3) controls what is actively prioritized. Document the deployment in the L4 Contract.
+2.  **Full-Spectrum Domain & Skill Deployment:** Deploy **all** L2 domain rule files from `domains/`, **all** L3 workflows from `workflows/`, and **all** skills from `skills/` into the `.aaig/` directory. Document the deployment in the L4 Contract.
 3.  **Specialization Prompt:** Present the User with an interactive selection of available capabilities. This step mitigates context overload by letting the User define what is actively prioritized:
-    *   **Present Domains:** List all available L2 domains (from `domains/_index.md`) with a one-line description of each.
-    *   **Present Skill Categories:** List the major skill categories (from `skills/_index.md`) relevant to the deployed domains.
+    *   **Present Domains/Skills:** List all available L2 domains and major skill categories with a one-line description of each.
     *   **User Selection:** The User selects specific domains/skills to activate, **or** states **"all"** to activate everything.
-    *   **Record Selection:** Record the User's selection in the L4 Contract as **Active Specializations**. All non-selected capabilities are marked as **Deployed (Dormant)** — they remain available for on-demand activation at any time without re-assimilation.
-    *   **On-Demand Activation:** At any point during work, the agent or the User may activate a dormant capability by referencing it. No protocol restart is required — simply load the relevant L2/skill file and update the L4 Contract's Active Specializations list.
-4.  **Native Skill Integration:** If your host IDE/Engine supports an integrated skill/rules folder (e.g., `.cursor/rules/`, `.github/copilot-instructions/`), map, copy, or reference the **Active Specialization** skill files from AAIG's `skills/` directory into that native integration folder so the environment discovers them on-demand. Dormant skills should be listed in a reference manifest but not actively loaded into the native folder to manage context size.
-5.  **Grandfathering Clause (Legacy Codebases):** If entering a mature, low-coverage legacy codebase, do NOT attempt massive, unprompted refactoring to force AAIG compliance. Instead, enforce AAIG rules strictly on the *Diff* (the new code you are adding/modifying). Maintain the existing ecosystem.
-6.  **Native Multi-Agent Orchestration:** If the host environment natively supports subagents, specialized personas, or distinct workflow routing (e.g., GitHub Copilot agents, custom GPTs), you MUST map **Active Specialization** L3 workflows and skills to distinct native subagents. Most importantly, you must instantiate a distinct "Reviewer" subagent with specialized evaluation prompts to natively fulfill the L1 Independent Review and Separation of Concern principles.
-7.  **Generate Native Structures:** Based on your research from Phase 1, generate your core L4 configurations directly into the most natively integrated paths. Do not use generic, unintegrated folders unless no native convention exists. The L4 configuration file MUST also be placed at the well-known discoverable path **`.aaig/L4_Config.md`** in the repository root, in addition to any native location. This allows CI pipeline bots and other non-interactive agents to discover project-specific configuration without terminal access.
-8.  **Initialize the AAIG Runtime Directory:** Create the `.aaig/` directory with subdirectories `locks/` and `handoffs/` if they do not already exist. Add `.aaig/locks/` and `.aaig/handoffs/` to `.gitignore` (ephemeral runtime files must not be committed). Commit a `.aaig/.gitkeep` file to anchor the directory in the repository so other agents can rely on its existence.
-9.  **Declare Your Contract:** Inside the native instantiation file (or your agent's system prompt configuration file), write a brief summary stating:
-    *   **Your Discovered Host Identity:** What engine you deduced you are running inside (e.g., `AAIG-CopilotWorkspace-Primary`).
-    *   **Your Scoped Permissions:** Explicitly list the permissions and credentials you currently hold, verifying your adherence to the Principle of Least Privilege (e.g., verifying you only have `repo:read`, and verifying you cannot mutate Production).
-    *   **Your Active Specializations:** List the domains and skills the User selected in the Specialization Prompt.
-    *   **Your Workflow Contract:** Explicitly state how you will fulfill the **Level-2 Domain Rules** given the capabilities you mapped in Phase 2.
+    *   **Record Selection:** Record the User's selection in the L4 Contract as **Active Specializations**. All non-selected capabilities are **Deployed (Dormant)** — available for on-demand activation without re-assimilation.
+4.  **Native Compilation:** If your host IDE/Engine supports an integrated rules/memory folder (e.g., `.cursor/rules/`, `.github/copilot-instructions.md`), you MUST compile the **Active Specializations** into natively optimized formats. Do not lazily copy markdown if the engine supports richer configurations (like YAML headers, JSON schemas, or explicit tool definitions). The native configuration must actively enforce the AAIG rules.
+5.  **Grandfathering Clause (Legacy Codebases):** If entering a mature codebase, do NOT attempt massive, unprompted refactoring to force AAIG compliance. Instead, enforce AAIG rules strictly on the *Diff*. Maintain the existing ecosystem.
+6.  **Native Multi-Agent Orchestration:** If the host environment natively supports subagents or specialized personas (e.g., GitHub Copilot `.agent.md` files), you MUST map **Active Specialization** L3 workflows and roles to distinct native subagents. 
+    *   You must generate rich native configuration files (including YAML headers for `name`, `description`, `instructions`, and `tools` if supported).
+    *   You MUST instantiate at least one distinct "Reviewer" subagent with specialized evaluation prompts to natively fulfill the AAIG L1 Independent Review and Separation of Concern principles.
+7.  **Generate Native Structures:** Generate your core L4 configurations directly into the most natively integrated paths. The L4 Config MUST also be placed at the well-known path **`.aaig/L4_Config.md`** so CI pipeline bots and non-interactive agents can discover project-specific configurations.
+8.  **Initialize the AAIG Runtime:** Create the `.aaig/locks/` and `.aaig/handoffs/` subdirectories. Add them to `.gitignore` (ephemeral runtime files must not be committed). Commit a `.aaig/.gitkeep` to anchor the directory.
+9.  **Declare Your Contract:** Inside the native instantiation file (or chat), write a brief summary stating your Discover Host Identity, Scoped Permissions, Active Specializations, and Workflow Contract.
+
+## ⚖️ Phase 4: Iterative Peer-Reviewed Validation
+Before executing the User's primary request, the newly generated integration must be audited for compliance.
+
+1.  **Presentation:** The Primary agent (Assimilator) must present its generated native configuration (e.g., the `.github/agents/` configurations) to a secondary, independent Reviewer agent.
+2.  **Audit Criteria:** The Reviewer must evaluate the integration explicitly against the `L1_Core_Principles.md`. 
+    *   *Check 1:* Is Separation of Concern structurally enforced (e.g., a Maker agent cannot approve its own work)?
+    *   *Check 2:* Are Quality Gates natively wired (e.g., does the native configuration invoke the correct test/lint tools)?
+3.  **Iteration Loop:** The Reviewer outputs its findings. The Primary agent must resolve them and re-submit the native configurations. This loop continues until the Reviewer signs off with zero major architectural findings. 
 
 ---
 **ASSIMILATION COMPLETE.**
-*You may now read `L1_Core_Principles.md` to understand your core L1 behavioral constraints, and `L1_Framework_Architecture.md` to understand the 5-level structure. Then proceed with the User's primary request.*
+*You may now read `L1_Core_Principles.md` to understand your core L1 behavioral constraints. Then proceed with the User's primary request.*
