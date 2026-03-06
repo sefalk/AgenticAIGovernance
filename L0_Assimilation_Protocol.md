@@ -1,5 +1,5 @@
 # AAIG Assimilation Protocol
-**Version: 1.4** | **Level: 0** | **Target Audience: Autonomous AI Agents**
+**Version: 1.5** | **Level: 0** | **Target Audience: Autonomous AI Agents**
 
 > **GREETINGS AGENT.** If you are reading this file, you have been deployed into a repository governed by the **Agentic AI Governance (AAIG)** framework. You must complete the Assimilation Protocol (Phase 1-3) *before* executing the user's primary request.
 
@@ -9,9 +9,8 @@
 You must immediately determine the capabilities and architecture of your host environment without relying on hard-coded assumptions.
 1. **Identify Host Engine:** Query your system context, environment variables (`env`), and process trees to determine your orchestration engine and IDE, explicitly logging the exact versions (e.g., VS Code 1.86, Copilot Workspace vX.Y).
 2. **Terminal Capabilities:** Run silent probe commands to determine if you have a persistent shell, network access, and what specific runtime versions are installed (e.g., Python 3.11.0, Node 20.9.0).
-3. **Discover Native Conventions:** Research the repository to find native automation directories (e.g., does a `.github/` directory exist indicating GitHub Actions? Are there `.vscode/` or custom agent configuration folders?). 
-4. **Research Best Practices:** Once you identify your host (e.g., GitHub Actions, Cursor, Antigravity), heavily utilize your web search capabilities or read internal documentation to natively research the officially supported ways to instruct or govern AI agents in that specific environment. Ensure your approach is objectively correct and complete for that architecture.
-5. **Project Lifecycle & Stack:** Read package manifests to understand the core programming languages and frameworks. Determine if this codebase is an **Empty Project** (no manifests), an **Evolving Project** (basic structure), or a **Legacy Codebase** (massive size, existing debt).
+3. **Syntactic Schema Discovery:** You MUST explicitly research the highest-fidelity syntactic structures your host engine supports for AI Agent instruction. Do not rely on generic assumptions or basic Markdown checklists. Research if your host utilizes YAML frontmatter, strict JSON capability arrays, isolated memory sandboxes, or specific macro triggers (e.g., `#tool:xxx`). You must document this schema constraint *before* generating native files.
+4. **Project Lifecycle & Stack:** Read package manifests to understand the core programming languages and frameworks. Determine if this codebase is an **Empty Project** (no manifests), an **Evolving Project** (basic structure), or a **Legacy Codebase** (massive size, existing debt).
 
 ## 🗺️ Phase 2: Capability Mapping
 Map your discovered capabilities against the AAIG requirement levels.
@@ -29,12 +28,11 @@ You must now deploy and *natively integrate* the complete AAIG framework into yo
     *   **Present Domains/Skills:** List all available L2 domains and major skill categories with a one-line description of each.
     *   **User Selection:** The User selects specific domains/skills to activate, **or** states **"all"** to activate everything.
     *   **Record Selection:** Record the User's selection in the L4 Contract as **Active Specializations**. All non-selected capabilities are **Deployed (Dormant)** — available for on-demand activation without re-assimilation.
-4.  **Native Compilation:** If your host IDE/Engine supports an integrated rules/memory folder (e.g., `.cursor/rules/`, `.github/copilot-instructions.md`), you MUST compile the **Active Specializations** into natively optimized formats. Do not lazily copy markdown if the engine supports richer configurations (like YAML headers, JSON schemas, or explicit tool definitions). The native configuration must actively enforce the AAIG rules.
+4.  **Native Compilation (Capability Maximization):** You MUST compile the **Active Specializations** into natively optimized formats targeting the exact syntactic schema discovered in Phase 1. Do not lazily copy markdown if the engine supports richer configurations. You must actively map AAIG concepts to the *maximum* capability boundaries of your host (e.g., utilizing strict native permissions, IDE automation hooks, or sandboxed execution scopes) to ensure AAIG rules cannot be easily bypassed.
 5.  **Grandfathering Clause (Legacy Codebases):** If entering a mature codebase, do NOT attempt massive, unprompted refactoring to force AAIG compliance. Instead, enforce AAIG rules strictly on the *Diff*. Maintain the existing ecosystem.
-6.  **Native Multi-Agent Orchestration:** If the host environment natively supports subagents or specialized personas (e.g., GitHub Copilot `.agent.md` files), you MUST map **Active Specialization** L3 workflows and roles to distinct native subagents. 
-    *   You must generate rich native configuration files (including YAML headers for `name`, `description`, `instructions`, and `tools` if supported).
+6.  **Native Multi-Agent Orchestration:** If the host environment natively supports specialized personas or subagents, you MUST decompose the Active Specializations (L3 workflows and skills) into distinct, tightly-scoped native personas. 
+    *   You must generate rich native configuration files adhering perfectly to the syntax discovered in Phase 1 (e.g., proper configuration headers, strict declarative tool arrays).
     *   You MUST instantiate at least one distinct "Reviewer" subagent with specialized evaluation prompts to natively fulfill the AAIG L1 Independent Review and Separation of Concern principles.
-7.  **Generate Native Structures:** Generate your core L4 configurations directly into the most natively integrated paths. The L4 Config MUST also be placed at the well-known path **`.aaig/L4_Config.md`** so CI pipeline bots and non-interactive agents can discover project-specific configurations.
 8.  **Initialize the AAIG Runtime:** Create the `.aaig/locks/` and `.aaig/handoffs/` subdirectories. Add them to `.gitignore` (ephemeral runtime files must not be committed). Commit a `.aaig/.gitkeep` to anchor the directory.
 9.  **Declare Your Contract:** Inside the native instantiation file (or chat), write a brief summary stating your Discover Host Identity, Scoped Permissions, Active Specializations, and Workflow Contract.
 
@@ -42,9 +40,10 @@ You must now deploy and *natively integrate* the complete AAIG framework into yo
 Before executing the User's primary request, the newly generated integration must be audited for compliance.
 
 1.  **Presentation:** The Primary agent (Assimilator) must present its generated native configuration (e.g., the `.github/agents/` configurations) to a secondary, independent Reviewer agent.
-2.  **Audit Criteria:** The Reviewer must evaluate the integration explicitly against the `L1_Core_Principles.md`. 
-    *   *Check 1:* Is Separation of Concern structurally enforced (e.g., a Maker agent cannot approve its own work)?
-    *   *Check 2:* Are Quality Gates natively wired (e.g., does the native configuration invoke the correct test/lint tools)?
+2.  **Audit Criteria:** The Reviewer must evaluate the integration explicitly against the `L1_Core_Principles.md` and the host-specific constraints.
+    *   *Check 1 (Syntactic Validity):* Does the generated configuration perfectly parse against the host engine's required syntax (e.g., correctly structured YAML/JSON, valid macro syntax)?
+    *   *Check 2 (Separation of Concern):* Is Separation of Concern structurally enforced (e.g., are Maker agents technically blocked from possessing approval capabilities/tools)?
+    *   *Check 3 (Quality Gates):* Are Quality Gates natively wired (e.g., does the native configuration structurally invoke the correct test/lint tools before permitting a handoff)?
 3.  **Iteration Loop:** The Reviewer outputs its findings. The Primary agent must resolve them and re-submit the native configurations. This loop continues until the Reviewer signs off with zero major architectural findings. 
 
 ---

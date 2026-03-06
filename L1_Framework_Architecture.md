@@ -1,5 +1,5 @@
 # AAIG Framework Architecture
-**Version: 1.2 | Date: 2026-03-06**
+**Version: 1.3 | Date: 2026-03-06**
 
 *This document defines the structural architecture, hierarchical levels, and roles of the Agentic AI Governance (AAIG) framework. It answers **how** the framework is organized.*
 
@@ -8,7 +8,7 @@ This framework organizes agent governance into five hierarchical levels, progres
 
 ## 2. The Five Levels (L0-L4)
 
-**Level 0 (Bootstrapping & Assimilation):** Defined in `L0_Assimilation_Protocol.md`. The chronological entry point. The phase where an agent discovers its environment, determines its capabilities, and **natively compiles** the full AAIG capability set into the host system's configuration formats. The User's **Specialization Prompt** selection determines active vs dormant capabilities. The assimilation concludes with a mandatory **Iterative Peer-Reviewed Validation** against L1 principles.
+**Level 0 (Bootstrapping & Assimilation):** Defined in `L0_Assimilation_Protocol.md`. The chronological entry point. The phase where an agent actively researchers the host's exact syntactic schema, discovers its capabilities, and **natively compiles** the full AAIG capability set into those exact configuration formats. The User's **Specialization Prompt** selection determines active vs dormant capabilities. The assimilation concludes with a mandatory **Iterative Peer-Reviewed Validation** ensuring syntactic perfection and L1 compliance.
 
 **Level 1 (Core Principles):** Defined in `L1_Core_Principles.md`. The abstract, universal principles (Fail-Safe, Traceability, Separation of Concern). They apply to all domains and projects.
 
