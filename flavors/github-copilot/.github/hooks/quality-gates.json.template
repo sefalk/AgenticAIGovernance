@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/hooks",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": "echo 'TODO: Replace with your formatter, e.g.: ruff format --quiet $TOOL_INPUT_FILE_PATH'",
+        "windows": "echo TODO: Replace with your formatter, e.g.: ruff format --quiet %TOOL_INPUT_FILE_PATH%",
+        "timeout": 15
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "echo 'TODO: Replace with your test runner, e.g.: pytest tests/ -q --tb=no'",
+        "windows": "echo TODO: Replace with your test runner, e.g.: pytest tests/ -q --tb=no",
+        "timeout": 60
+      }
+    ]
+  }
+}

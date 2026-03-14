@@ -1,0 +1,656 @@
+# Changelog
+
+All notable changes to the Agent Framework are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## Versioning Rules
+
+- **Major** — breaking changes: removed files, renamed agents, changed contract
+  formats, restructured directories
+- **Minor** — new capabilities: new skills, new instructions, new prompts, new
+  templates, new agents
+- **Patch** — fixes: typos, threshold corrections, frontmatter fixes, doc
+  clarifications
+
+---
+
+## [1.15.0] -- 2026-03-11
+
+### Changed
+
+- **Idea 40 -- Deploy Mechanism Improvements** — Comprehensive overhaul of both
+  deploy scripts (`deploy.ps1` and `deploy.sh`) based on peer review (planner +
+  code-critic). All improvements applied to both scripts for full parity.
+
+  - **D2: Fix -Diff exit code bug** — `-Diff` mode now wrapped in try/catch
+    (PowerShell) to prevent `$ErrorActionPreference = 'Stop'` from converting
+    non-terminating errors into exit code 1. Explicit `exit 0` added at end of
+    both Diff and Deploy modes.
+
+  - **D3+D9: Manifest annotation system** — `.af-manifest` now supports
+    annotations at end of line: `path  [annotation1, annotation2]`. Three
+    annotations defined:
+    - `[customizable]` — file contains project-specific content; protected on update
+    - `[optional]` — directory or file may not exist in AF source; no warning
+    - `[vscode]` — file deployed to `.vscode/` instead of `.github/`
+    Eliminates hardcoded `$CustomizableFiles` array and hardcoded `.vscode/toolsets.jsonc`
+    special case. Both are now driven entirely by manifest annotations.
+
+  - **D4: Content diff on CONFLICT** — When a CONFLICT is detected (both AF and
+    project changed), `Show-ContentDiff` / `show_content_diff` displays up to 15
+    lines of diff output. Uses `git diff --no-index` when available, falls back to
+    `Compare-Object` (PowerShell) or `diff -u` (bash).
+
+  - **D5: Manifest validation** — After parsing, deploy scripts warn about manifest
+    entries pointing to missing directories or files. `[optional]` entries are
+    silently skipped. Catches manifest drift early.
+
+  - **D6: Ephemeral backup** — Before overwriting files (UPDATE or Force), copies
+    the existing file to `.af-backup-{timestamp}/`. If deploy completes with 0
+    conflicts, the backup directory is automatically deleted. If conflicts remain,
+    the backup persists with its path printed in the summary.
+
+  - **D8: Bash parity** — `deploy.sh` completely rewritten to match `deploy.ps1`
+    capabilities: full 3-way merge via `.af-hashes`, `--update-hashes` mode,
+    PRESERVE/CONFLICT states, manifest annotation parsing, content diff on
+    conflict, manifest validation, and ephemeral backup. Previously, `deploy.sh`
+    had no 3-way merge and silently overwrote project customizations (data loss
+    risk for UC2 on Linux/macOS).
+
+  - **Customizable file handling improved** — Customizable files now participate
+    in 3-way merge to provide better status messages:
+    - AF changed, project unchanged → `PROTECT (AF has changes -- review manually)`
+    - AF unchanged, project changed → `PRESERVE (project customization)`
+    - Both changed → `CONFLICT` with content diff
+    Previously all cases showed generic `PROTECT` message.
+
+## [1.14.0] -- 2026-03-11
+
+- **Idea 39 Iteration 2 -- Agent-Scoped Phase Gate Expansion** -- Adds
+  machine-verified phase gates to test-writer, refactorer, and documenter.
+  - **`test-writer:SubagentStop`** (P1a + H5) — Red phase gate: blocks if all
+    tests pass (tests must FAIL to prove a requirement gap). Also checks
+    provenance markers on newly created test files.
+  - **`test-writer:PreToolUse`** (H2) — TDD phase isolation: blocks the
+    test-writer from editing production code under `mpusage/`. Prevents the
+    most fundamental TDD invariant violation.
+  - **`refactorer:SubagentStop`** (H1) — Refactor phase gate: blocks if tests
+    fail OR if new `.py` files were created under `mpusage/`/`tests/`. Scoped
+    `git status` to avoid false positives on pre-existing untracked files.
+  - **`refactorer:PreToolUse`** (H4) — Preventative layer: blocks
+    `createFile`/`createDirectory` calls. Defence-in-depth with Stop hook.
+  - **`documenter:SubagentStop`** (P1c) — Artifact gate: blocks documenter if
+    workflow log YAML or retro snippet is missing for the current workflow-id.
+  - Peer-reviewed: planner (6 new proposals) + code-critic (4 approved,
+    1 approved with conditions, 1 rejected). H6 rejected (SubagentStart
+    routing unverified, redundant with coordinator prompting).
+  - Global Stop hook Gate 2 (workflow artifacts advisory) now complemented
+    by documenter:SubagentStop hard gate — Gate 2 retained as session-end
+    safety net.
+  - **VS Code `Stop` event bug:** `Stop` hooks in `.agent.md` frontmatter
+    crash subagent invocation. 7 of 8 events work; only `Stop` is broken.
+    **Workaround:** use `SubagentStop` instead of `Stop` — functionally
+    equivalent for subagent-only agents. All agents verified working.
+
+## [1.13.0] -- 2026-03-11
+
+### Added
+
+- **Idea 39 -- Agent-Scoped Hooks (Iteration 1: Green Gate)** -- VS Code now
+  supports hooks in `.agent.md` frontmatter that fire only when that agent is
+  active. An agent's `Stop` hook should fire as `SubagentStop` when invoked as
+  a subagent, but a VS Code bug crashes `Stop`; use `SubagentStop` instead.
+  - **New `implementer:SubagentStop` hook scripts** (`implementer-stop.ps1/.sh`)
+    — runs the test suite when the implementer subagent completes. Blocks the
+    implementer from returning if tests fail (Green phase gate).
+  - **Global Stop hook Gate 1 retired** — pytest enforcement removed from
+    `stop-tests.ps1/.sh` (handled by per-agent SubagentStop hook at phase exit).
+    Global Stop hook retains Gate 2 (workflow artifact advisory).
+  - **`implementer.agent.md`** updated with `hooks.SubagentStop` in YAML
+    frontmatter.
+  - Requires `chat.useCustomAgentHooks: true` in `.vscode/settings.json`.
+  - Peer-reviewed: planner (8 proposals) + code-critic (3 rejected, 3 approved
+    with conditions, 1 deferred). P1b unanimously approved as highest ROI.
+
+### Future iterations (from peer discussion)
+
+- **P1a** `test-writer:Stop` — Red gate (tests must FAIL).
+- **P1c** `documenter:Stop` — artifact existence gate.
+- **P4** `coordinator:PreCompact` — workflow checkpoint before context compaction.
+
+---
+
+## [1.12.0] -- 2026-03-10
+
+### Added
+
+- **Idea 37 -- Bookend Compliance Pattern** -- New `compliance-checker` agent
+  (11th agent) acts as a mandatory workflow watchdog. Invoked at two bookend
+  checkpoints: pre-flight (before Step 1) and post-flight (after Step 7).
+  - **Pre-flight checks:** branch not on main/master, plan directory resolved,
+    WIP state consistent.
+  - **Post-flight checks:** plan file marked COMPLETED, workflow log YAML
+    exists, retro snippet exists, provenance markers present. Reports missing
+    artifacts to the coordinator — the coordinator handles remediation by
+    invoking the documenter (only it has the full workflow context).
+  - **Read-only design:** compliance-checker detects gaps but never creates
+    files. The documenter needs rich context (step summaries, critic findings,
+    metrics) that only exists in the coordinator's conversation history.
+  - **Stop hook enhanced** (Layer 3 safety net): `stop-tests.ps1` and
+    `stop-tests.sh` now also check for workflow artifacts (log YAML, retro
+    snippet, plan status) at session end. Emits advisory WARNING if missing
+    — does not block.
+  - **3-layer enforcement model:** (1) Coordinator instructions → (2)
+    Compliance-checker bookends → (3) Stop hook detection. Each layer
+    catches failures the previous layer missed.
+  - Updated coordinator workflow diagrams, state machine, phase checkpoints,
+    and narration examples.
+  - Added compliance-checker exit gates to quality-gates.instructions.md.
+  - Updated MANIFEST.md, README.md, skills/INDEX.md.
+
+---
+
+## [1.11.0] -- 2026-03-10
+
+### Changed
+
+- **Idea 38 -- Autonomous Local Git Execution** -- Coordinator now executes
+  local git operations (branch creation, staging, committing) at reviewed
+  checkpoints. Remote and destructive operations remain human-controlled.
+  Unanimously approved by planner + code-critic peer discussion.
+  - **Cardinal Rule replaced** with local/remote principle in
+    `git-workflow.instructions.md`. Local git is coordinator-executed;
+    remote git is human-controlled.
+  - **Coordinator agent** gains permitted-command list, branch guard
+    (never commit on main/master), explicit staging rules, and
+    post-command verification protocol.
+  - **Block-dangerous hook** expanded: `git push` (any form), `git merge`,
+    `git branch -d/-D`, `git rebase` now trigger confirmation prompt.
+    Previously only `--force` push and `--hard` reset were blocked.
+  - **Documenter** no longer suggests git commits (responsibility fully
+    moved to coordinator).
+  - **MANIFEST.md** §7 Git Conventions updated to reflect two-tier model.
+
+---
+
+## [1.10.0] -- 2026-03-10
+
+### Added
+
+- **Idea 36 -- Researcher Agent** -- New 10th agent (`researcher.agent.md`)
+  for external research and domain expertise. Unanimously approved by planner
+  + code-critic peer discussion.
+  - **Role:** Fetch and synthesize external documentation — third-party APIs,
+    versioned library docs, external standards not in the codebase or skills.
+  - **Tool profile:** Read-only + `fetch`. No write access. Most constrained
+    agent in the framework.
+  - **User-invocable:** Yes — standalone domain questions and coordinator
+    pre-flight research.
+  - **Coordinator integration:** Conditional pre-flight step before planner.
+    Invoked only when task involves external APIs/libraries/standards not
+    covered by existing skills. Anti-invocation rules prevent over-use.
+  - **Security:** Structured artifact output only (no raw content forwarding),
+    no autonomous URL following, source scope constraints. Human review gate
+    for Standard+ tiers.
+  - **Quality gates:** 3 HARD (citations, no secrets, structured output),
+    1 SOFT (source authority), 1 ADVISORY (retrieval timestamps).
+  - **Skills assigned:** data-pipeline-design, data-modeling, data-quality.
+
+### Changed
+
+- **coordinator.agent.md** -- Added researcher to agents list, Worker Agents
+  table, workflow diagram. Added "Research Pre-Flight" section with invocation
+  criteria and anti-invocation rules.
+- **MANIFEST.md** -- Added researcher to Worker Agent Roles and Handoff Data
+  Requirements tables.
+- **skills/INDEX.md** -- Added researcher to Agent Skill Matrix.
+- **quality-gates.instructions.md** -- Added Researcher per-agent exit gates.
+- **README.md** -- Agent count 9→10, added researcher to file map.
+
+## [1.9.0] -- 2026-03-10
+
+### Changed
+
+- **Idea 35 -- Plan and WIP Artefact Redesign** -- Plans and WIP files now
+  follow clear naming, location, and lifecycle conventions.
+  - **Plan naming:** unique per-workflow filenames using
+    `{type}-{YYYY-MM-DD}-{slug}.md` (e.g., `feat-2026-03-10-bucketing-v2.md`).
+    Type prefix: `feat`, `fix`, `refactor`, `adr`, `review`.
+    Slug derived from branch name.
+  - **Plan location:** `docs/plans/` (default). Coordinator discovers existing
+    conventions at Step 0 (e.g., `docs/designs/`, `docs/rfcs/`).
+  - **WIP naming:** keeps literal `WIP.md` (ephemeral, easy to find).
+  - **WIP location:** `docs/plans/WIP.md` (co-located with plans, not project root).
+  - **Coordinator determines filename** (knows date + branch name).
+  - **Archival eliminated:** plans live in their final location from creation.
+    Removed unimplemented "archives to `.github/logs/`" step.
+  - **WIP template:** added `Plan File` reference field so `/resume` can
+    locate the associated plan.
+  - **Convention discovery:** coordinator Step 0 checks for existing `docs/`
+    structure before defaulting.
+
+### Files Modified (12)
+
+- `agents/coordinator.agent.md` -- Step 0 convention discovery, Step 1 plan
+  naming logic, Session Interruption WIP path
+- `agents/planner.agent.md` -- return format mentions unique filenames
+- `agents/documenter.agent.md` -- references plan file path instead of PLAN.md
+- `instructions/git-workflow.instructions.md` -- naming convention, location,
+  WIP section, archival removed
+- `instructions/quality-gates.instructions.md` -- plan file references
+- `MANIFEST.md` -- Planning Documents section, artifact lifecycle table,
+  handoff data table
+- `prompts/resume.prompt.md` -- WIP discovery in docs/plans/
+- `prompts/draft-pr-description.prompt.md` -- plan file in docs/plans/
+- `prompts/simulate.prompt.md` -- plan file reference
+- `TROUBLESHOOTING.md` -- WIP.md location guidance
+- `templates/PLAN.md` -- naming convention comments
+- `templates/WIP.md` -- Plan File field, location comments
+
+## [1.8.0] -- 2026-03-10
+
+### Added
+
+- **Idea 34 — AF Deployment Scripts** — Created `deploy.ps1` (Windows) and
+  `deploy.sh` (macOS/Linux) for safe, repeatable AF deployment into projects.
+  - Install mode: copies AF-owned files to project `.github/` + `.vscode/`
+  - Dry-run mode (`-DryRun`/`--dry-run`): preview changes without writing
+  - Diff mode (`-Diff`/`--diff`): bidirectional comparison for both UC1
+    (update check) and UC2 (feedback collection)
+  - Force mode (`-Force`/`--force`): overwrite customized files
+  - Customizable file protection: `copilot-instructions.md` and
+    `architecture.instructions.md` are never overwritten on update
+  - Version tracking via `.github/.af-version`
+
+### Changed
+
+- **README.md** — Quick Setup now references deploy scripts instead of manual
+  copy. Manual instructions preserved as collapsible fallback. Added
+  "Updating the AF" subsection. Deploy scripts added to file map.
+- **`.af-manifest`** — Added `.af-manifest` and `.af-version` as deployment
+  metadata entries.
+
+---
+
+## [1.7.3] — 2026-03-10
+
+### Changed
+
+- **U-08 — Workflow-lifecycle merged into coordinator** — Deleted standalone
+  `instructions/workflow-lifecycle.instructions.md` (~120 lines, `applyTo: **`).
+  All unique content merged into `coordinator.agent.md`:
+  - Workflow States table + state transition diagram added to Execution Protocol
+  - Session Interruption enhanced with detailed 6-step checkpoint protocol
+    (commit in-progress changes, use template, include step history)
+  - Task Cancellation enhanced with PR preservation and branch cleanup steps
+  - Escalation handling and resume logic were already present — no duplication
+  Savings: ~120 lines no longer loaded for every non-coordinator agent.
+
+### Removed
+
+- `instructions/workflow-lifecycle.instructions.md` — content lives in
+  coordinator.agent.md (the only consumer).
+
+---
+
+## [1.7.2] — 2026-03-10
+
+### Changed
+
+- **U-01 — Arbiter tool contradiction resolved** — Removed `test-runner` from
+  arbiter’s tool list; updated description to say "does NOT modify files or
+  run tests." Coordinator Worker Agents table updated to "Read-only advisory."
+  Body already said "No execution — do NOT run tests"; now frontmatter agrees.
+- **U-02 — Planner read-only wording clarified** — Body constraint changed
+  from "read-only tools only" to "read-only for files" with explicit note that
+  terminal commands and test-failure inspection are allowed for analysis.
+- **U-03 — Skill table completed** — copilot-instructions.md skill table
+  expanded from 9 skills to all 16 active skills with correct consumer
+  mappings. Added cross-reference to `skills/INDEX.md` as canonical source.
+- **U-04 — Gate Summary aligned** — MANIFEST § 13 Gate Summary template now
+  includes the `Skills Read:` line, matching quality-gates.instructions.md.
+- **U-05 — Pre-Delivery Checklist deduplication** — MANIFEST § 11 body
+  replaced with a single-source-of-truth pointer to copilot-instructions.md
+  § Pre-Delivery Checklist, eliminating the duplicate that had already drifted.
+
+---
+
+## [1.7.1] — 2026-03-10
+
+### Changed
+
+- **G-07 — Secret scan hardened** — PostToolUse secret-scan hook now exits
+  with code 1 (blocking) when secrets are detected. Previously advisory-only
+  (exit 0), which contradicted MANIFEST § 5 Gate 4 (HARD security gate).
+  Both `.ps1` and `.sh` scripts updated.
+- **G-06 — CVE scanning operationalized** — Code-critic Step 6 now instructs
+  running `pip-audit` in terminal when new dependencies are added. R-SD-12
+  mapping in MANIFEST § 12 updated to reference `pip-audit`.
+- **G-10 — Layer override exemption** — Pure documentation changes (docstrings,
+  comments) in domain core files no longer trigger the Standard tier override.
+  Only logic changes count.
+
+### Added
+
+- **G-02 — Early-exit logging** — Coordinator writes a minimal YAML log
+  when a workflow fails before Step 7, ensuring steps 1–6 are not lost.
+- **G-03 — R-SD-23 cross-reference** — `provenance.instructions.md` now
+  references governance L1 Principle 3 and domain rule R-SD-23.
+- **G-04 — Mutation testing labeled** — MANIFEST § 2 Tier 3 (mutation tests)
+  explicitly labeled as aspirational with a note about future tooling.
+- **G-09 — Governance action items** — Documenter retro snippets gain a
+  `## Governance Action` section for proposing workflow/governance
+  improvements with affected L2 rule or AF element.
+- **G-11 — R-SD-03 mapped** — Added R-SD-03 (code review scope) to
+  MANIFEST § 12 cross-reference table, mapped to code-critic Steps 1–7.
+- **G-12 — Lockfile check** — Code-critic Step 6 now checks for lockfile
+  presence when new dependencies are added (R-SD-10).
+
+### Fixed
+
+- **G-01 — toolsets.jsonc** — Confirmed to exist at `.vscode/toolsets.jsonc`
+  (was missed in audit due to gitignored path). No action needed.
+- **G-05 — Context budget RED** — Already mandates halt ("HARD gate — Do NOT
+  continue"); confirmed correct after Idea 31 recalibration.
+- **G-08 — Credential scoping** — Already acknowledged as open gap in
+  MANIFEST § 7. No action until CI/CD integration.
+
+---
+
+## [1.7.0] — 2026-03-09
+
+### Added
+
+- **Idea 29 — Skill Pruning** — 22 unassigned skills moved to
+  `skills/_available/`. INDEX.md split into "Active Skills (16)" and
+  "Available for Activation (22)". `/validate-framework` deep-scans only
+  active skills (light scan for `_available/`). `/onboard-project` evaluates
+  available skills against project tech stack and recommends activation.
+- **Idea 30 — Non-Destructive Install** — `.af-manifest` created listing
+  AF-owned paths. README Quick Setup documents file ownership boundary (AF
+  does NOT overwrite workflows, CODEOWNERS, dependabot.yml). `/onboard-project`
+  gains conflict detection (Steps 7-8): enumerates existing `.github/` files,
+  offers to merge `copilot-instructions.md`, respects ownership boundary.
+- **Idea 31 — Token Budget Feasibility** — Context budget heuristics
+  recalibrated: ≥7 calls → YELLOW, ≥10 → RED (was ≥5/≥7, which triggered
+  RED on every normal Full TDD workflow). `/simulate` gains Context
+  Feasibility section (SINGLE-SESSION / MULTI-SESSION / AT-RISK). Advisory
+  (SOFT) — does not block execution.
+- **Idea 33 — Gate Audit Trail** — Coordinator cross-references gate claims
+  against actual tool invocations. Unverifiable HARD gate claims downgraded
+  to BLOCKED. Standard tier: SOFT enforcement. Deep tier: HARD enforcement.
+  Narrated via progress protocol.
+
+---
+
+## [1.6.0] — 2026-03-09
+
+### Added
+
+- **Idea 24 — Supervised Execution Mode** — New `--supervised` flag for
+  coordinator. Pauses after each step, presents output summary + verdict +
+  gate summary, and waits for human "continue" or feedback. Trust ramp:
+  simulate → supervised → autonomous.
+- **Idea 27 — Partial Failure State Machine** — Workflow states enum
+  (PLANNING through COMPLETED, FAILED_{step}, SKIPPED_{step}) documented
+  in `workflow-lifecycle.instructions.md`. WIP.md template gains Step
+  History table with per-step state, retry count, and outcome. Final
+  Report gains Workflow Health section (skipped steps, retries, degraded
+  gates).
+- **Idea 28 — Skill Compliance Gate** — `Skills Read:` line added as SOFT
+  gate for producer agents (test-writer, implementer, refactorer) in
+  `quality-gates.instructions.md`. Critic flags missing/empty declarations.
+  Gate Summary format updated with `Skills Read` field.
+
+---
+
+## [1.5.0] — 2026-03-09
+
+### Added
+
+- **Idea 22 — Smoke Test Playbook** — New `/smoke-test` slash command runs a
+  canned `clamp(value, lo, hi)` task through the full TDD pipeline. Per-step
+  health report (PASS/FAIL/SKIPPED) with raw output on failures. Disposable
+  `agent/smoke-test` branch. References TROUBLESHOOTING.md on failure.
+- **Idea 32 — Human Troubleshooting Guide** — New `TROUBLESHOOTING.md` with
+  symptom → cause → fix tables covering: setup issues, workflow selection,
+  subagent failures, gate failures, escalation, resume, and hook issues.
+  Written for the human project owner, no agent jargon.
+
+---
+
+## [1.4.0] — 2026-03-09
+
+### Added
+
+- **Idea 25 — Verdict Parsing Hardening** — Coordinator now parses verdicts
+  defensively: case-insensitive search, accepts any formatting, unparseable
+  verdicts treated as BLOCKED (never silently APPROVED). MANIFEST § 13
+  updated to document defensive parsing.
+- **Idea 26 — Rejection Feedback Contract** — MANIFEST § 13 gains a
+  Rejection Feedback Contract (findings, blocking_count, retry_guidance).
+  Coordinator validates rejection fields before re-invoking makers. Both
+  critic agents (code-critic, test-critic) updated with severity-tagged
+  findings and rejection detail section in return format.
+- **Idea 23 — Progress Narration Protocol** — Coordinator emits structured
+  one-line status updates after each subagent returns. Emoji-coded step
+  progress with verdict, retry count, and context budget indicators.
+
+---
+
+## [1.3.1] — 2026-03-09
+
+### Added
+
+- **Ideas 22–33** — 12 new improvement ideas from team brainstorm (planner,
+  code-critic, test-critic). Organised into 4 implementation phases:
+  Phase 1 (pre-flight): verdict hardening, rejection feedback, narration.
+  Phase 2 (first run): smoke test, troubleshooting guide.
+  Phase 3 (trust): supervised mode, state machine, skill compliance.
+  Phase 4 (maturity): skill pruning, install safety, token feasibility, audit trail.
+
+---
+
+## [1.3.0] — 2026-03-09
+
+### Summary
+
+Autonomy review (Idea 20). Peer-reviewed by planner + code-critic. Addressed
+the key gap: subagents ran under-informed because the coordinator didn't inject
+skills, thresholds, or retro context into prompts.
+
+### Added
+
+- **Subagent Context Injection** — coordinator prepends a structured context
+  block to every subagent prompt: complexity tier, target layers, quality
+  thresholds, retro lessons, and skill-read reminders (A1 + A2)
+- **Prompt taxonomy** — README now classifies 12 prompts into 3 tiers:
+  workflow entry points (coordinator-routed), post-workflow reporting, and
+  standalone utilities (A3)
+
+### Changed
+
+- **`coordinator.agent.md`** — all 7 subagent prompt templates now include
+  `{context_block}` with tier, thresholds, layers, retro lessons, and
+  explicit skill-read instructions; retro consultation now unconditional
+  across all workflows (was Full TDD only); updated description to reflect
+  primary entry point role
+- **`prompts/resume.prompt.md`** — added `agent: coordinator` to route
+  through coordinator Step 0 instead of standalone discovery (A5)
+- **`prompts/validate-framework.prompt.md`** — Step 2 now flags uncustomized
+  `applyTo` defaults like `src/**/*.py` as WARN (A6)
+- **`README.md`** — slash commands section reorganised into 3-tier taxonomy
+
+### Design Decisions
+
+- **GOVERNANCE.md NOT auto-injected** — 300+ lines would waste context budget.
+  Relevant rules are embedded in agent prompts and critic checklists. Drift
+  risk mitigated by `/validate-framework`.
+- **Standalone utility prompts kept standalone** — `/audit-config`,
+  `/validate-framework`, `/find-skill`, `/simulate`, `/onboard-project`,
+  `/retro-summary` are legitimately user-triggered maintenance operations
+  that don't need coordinator orchestration.
+- **Git stays human-controlled** — L1 §7 (Least Privilege). No change.
+
+---
+
+## [1.2.0] — 2026-03-09
+
+### Summary
+
+Governance audit of all 9 L1 Core Principles. Three-agent parallel review
+(planner, code-critic, test-critic) produced 12 recommendations — all
+implemented. Hook coverage expanded from 2 → 4 lifecycle events.
+
+### Added
+
+- **PostToolUse hook** — `scan-secrets.ps1/.sh` scans edited files for
+  hardcoded secrets using gitleaks or regex fallback (advisory, never blocks)
+- **Stop hook** — `stop-tests.ps1/.sh` runs `pytest tests/ -q --tb=line`
+  before session ends with graceful fallback
+- **Worker Uncertainty Protocol** — BLOCKED status format with structured
+  triggers added to test-writer, implementer, refactorer
+- **Over-engineering check** — added to code-critic Step 4 checklist
+
+### Changed
+
+- **`agent-hooks.json`** — 4 active hooks (was 2): SessionStart, PreToolUse,
+  PostToolUse, Stop
+- **`coordinator.agent.md`** — Step 0 reads `retros/auto/` for Full TDD
+  workflows; Step 7 trivial tier skips documenter subagent
+- **`documenter.agent.md`** — YAML log schema gains `review_details` field
+  for persisting critic findings (severity, description, resolution)
+- **`implementer.agent.md`** — removed `web/fetch` tool; added
+  `human-escalation` skill
+- **`test-writer.agent.md`** — added `human-escalation` skill
+- **`refactorer.agent.md`** — added `human-escalation` skill
+- **`quality-gates.instructions.md`** — retro snippet generation promoted
+  to HARD gate for documenter
+- **`skills/INDEX.md`** — `human-escalation` references updated (arbiter →
+  test-writer, implementer, refactorer, arbiter)
+- **`GOVERNANCE.md`** — R-SD-26 corrected: "present structured escalation
+  summary" replaces "generate ESCALATION.md"
+- **`MANIFEST.md`** — hooks table reflects 4 active hooks; credential
+  scoping (R-SD-21/22) documented as deferred open gap
+- **`README.md`** — hooks file tree and summary table updated
+
+### Governance Audit Results
+
+All 9 L1 Core Principles scored **PARTIALLY ENFORCED** — strong design but
+enforcement relied on prompt guidance, not deterministic checks. The 12
+recommendations address the gaps:
+
+| # | Principle | Recommendation |
+|---|---|---|
+| R1 | Verifiability | Activate Stop hook (test gate) |
+| R2 | Safety | Activate PostToolUse hook (secret scan) |
+| R3 | Transparency | Persist critic findings in YAML log |
+| R4 | Fail-Safe | Worker Uncertainty Protocol |
+| R5 | Fail-Safe | Human-escalation skill for all producers |
+| R6 | Continuous Improvement | Retro snippet as HARD gate |
+| R7 | Continuous Improvement | Coordinator retro consultation |
+| R8 | Separation of Concern | Fix R-SD-26 ESCALATION.md reference |
+| R9 | Efficiency | Trivial tier minimal doc path |
+| R10 | Least Privilege | Remove web/fetch from implementer |
+| R11 | Least Privilege | Document credential scoping gap |
+| R12 | Review | Over-engineering check for code-critic |
+
+---
+
+## [1.1.0] — 2025-07-16
+
+### Summary
+
+Batch 2 and 3 improvements — new prompts, workflow memory, context awareness,
+skill discoverability, and versioning infrastructure.
+
+### Added
+
+- **`/draft-pr-description`** prompt — generate PR text from PLAN.md + YAML log
+  + gate summary (Idea 13)
+- **`/find-skill`** prompt — semantic search across the skill library (Idea 17)
+- **`skills/INDEX.md`** — auto-generated index of all 38 skills with agent
+  matrix and unassigned skills list (Idea 17)
+- **`/retro-summary`** prompt — pull-model aggregator for workflow lessons (Idea 11)
+- **`/resume`** prompt — discover paused workflows from WIP.md files (Idea 16)
+- **`/audit-config`** prompt — detect drift between AF config and project state (Idea 12)
+- **`/simulate`** prompt — dry-run workflow prediction without execution (Idea 19)
+- **`VERSION`** file and **`CHANGELOG.md`** — semver tracking (Idea 18)
+- **Context Budget Awareness** — GREEN/YELLOW/RED self-assessment protocol in
+  coordinator with HARD gate on RED (Idea 15)
+- **Retro snippet generation** — documenter auto-generates `retros/auto/{id}.md`
+  after each workflow (Idea 11)
+
+### Changed
+
+- **`coordinator.agent.md`** — added Context Budget Awareness section
+- **`documenter.agent.md`** — added responsibility #5 (retro snippet),
+  expanded write permissions to `retros/auto/`, added return format entry
+
+### Deferred
+
+- **Idea 14** (Custom Workflow Definitions) — deferred until existing workflows
+  have been exercised ≥3 times end-to-end
+
+### Ideas Completed
+
+| Idea | Summary |
+|---|---|
+| 11 | Workflow Memory & Auto-Retro (pull model) |
+| 12 | Config Drift Detection (`/audit-config`) |
+| 13 | CI/PR Integration (`/draft-pr-description`) |
+| 14 | Custom Workflows — DEFERRED |
+| 15 | Context Budget Awareness |
+| 16 | Workflow Resume (`/resume`) |
+| 17 | Skill Discovery Index (`/find-skill`) |
+| 18 | Framework Versioning & Changelog |
+| 19 | Dry-Run / Simulation (`/simulate`) |
+
+---
+
+## [1.0.0] — 2026-03-09
+
+### Summary
+
+Initial release after completing Ideas 1–10. The framework is self-contained,
+internally consistent, and ready for adoption.
+
+### Added
+
+- **9 agents** — coordinator + 8 generic workers (planner, test-writer,
+  test-critic, implementer, refactorer, code-critic, arbiter, documenter)
+- **38 skills** — domain knowledge modules referenced by agents on demand
+- **7 instructions** — auto-applied rules (architecture, copilot-authoring,
+  git-workflow, provenance, quality-gates, testing, workflow-lifecycle)
+- **6 prompts** — slash commands (onboard-project, validate-framework,
+  tdd-feature, quick-fix, review-code, workflow-summary)
+- **2 templates** — PLAN.md, WIP.md
+- **Hooks** — SessionStart (git context), PreToolUse (formatter/linter)
+- **GOVERNANCE.md** — L1 Core Principles, Meta-Rules, L2 Domain Rules (R-SD-01
+  through R-SD-27), L3 Workflow definitions
+- **MANIFEST.md** — 13 sections covering TDD, architecture, maker-checker,
+  quality gates, escalation, git conventions, hooks, model prioritisation,
+  tool sets, pre-delivery checklist, governing rules cross-reference,
+  inter-agent contracts
+- **Quality gate system** — HARD/SOFT/ADVISORY taxonomy, Trivial/Standard/Deep
+  complexity tiers, per-agent exit gate tables, Gate Summary reporting format
+
+### Foundation (Ideas 1–10)
+
+| Idea | Summary |
+|---|---|
+| 1 | AF self-contained — zero AAIG references |
+| 2a | Git workflow with atomic commits |
+| 2b | Persisted planning documents (PLAN.md) |
+| 3 | Structural peer review — all file types validated |
+| 4 | Automated project onboarding (`/onboard-project`) |
+| 5 | Pydantic skill for Python domain models |
+| 6 | Dynamic agent creation → WONTFIX |
+| 7 | Agents generic — shells + skill references |
+| 8 | Documentation/logging streamlining + inter-agent contracts |
+| 9 | Quality gate system — taxonomy, tiers, per-agent exit gates |
+| 10 | AF self-validation (`/validate-framework`) |
+
+> copilot:generated | implementer | 2026-03-09

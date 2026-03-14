@@ -1,0 +1,52 @@
+# AF-Owned Files
+#
+# Files and directories in .github/ that are owned by the Agent Framework.
+# Non-AF files (workflows, CODEOWNERS, dependabot.yml, etc.) are NOT owned
+# by AF and will never be overwritten by AF installation or updates.
+#
+# This manifest enables safe updates: only listed paths are touched.
+#
+# Annotation syntax: path  [annotation1, annotation2]
+#   [customizable] — project may modify; protected on update
+#   [optional]     — may not exist in AF source; no warning if missing
+#   [vscode]       — deployed to .vscode/ instead of .github/
+
+# Agents
+agents/
+
+# Hooks
+hooks/
+
+# Instructions
+instructions/
+
+# Prompts
+prompts/
+
+# Skills
+skills/
+
+# Templates
+templates/
+
+# Logs (session-scoped, not committed)
+logs/                                                    [optional]
+
+# Retros
+retros/                                                  [optional]
+
+# Root-level AF files
+MANIFEST.md
+GOVERNANCE.md
+TROUBLESHOOTING.md
+copilot-instructions.md                                  [customizable]
+
+# Deployment metadata (managed by deploy script)
+.af-manifest
+.af-version                                              [optional]
+
+# Per-file attribute overrides (files within directories)
+instructions/architecture.instructions.md                [customizable]
+
+# VS Code files (deployed to .vscode/ instead of .github/)
+toolsets.jsonc                                           [optional, vscode]
