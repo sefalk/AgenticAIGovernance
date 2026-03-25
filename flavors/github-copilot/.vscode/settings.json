@@ -1,0 +1,11 @@
+// Minimal VS Code settings required for the Agent Framework.
+// Projects should extend this with their own settings.
+{
+    // REQUIRED: enables agent hook scripts (.github/hooks/)
+    "chat.useCustomAgentHooks": true,
+
+    // Recommended: enable pytest integration
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": ["tests"],
+    "python.testing.unittestEnabled": false
+}

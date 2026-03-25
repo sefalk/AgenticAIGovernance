@@ -17,6 +17,7 @@ tools:
   - read/problems
   - todo
   - execute/runTests
+  - execute/runTask
   - execute/testFailure
   - edit/editFiles
   - edit/createFile
@@ -25,11 +26,8 @@ tools:
   - execute/getTerminalOutput
   - pylance-mcp-server/pylanceFileSyntaxErrors
   - pylance-mcp-server/pylanceImports
-  - pylance-mcp-server/pylanceInvokeRefactoring
   - pylance-mcp-server/pylanceRunCodeSnippet
   - pylance-mcp-server/pylanceSyntaxErrors
-  - pylance-mcp-server/pylanceInstalledTopLevelModules
-  - ms-python.python/configurePythonEnvironment
 hooks:
   SubagentStop:
     - type: command
@@ -110,6 +108,21 @@ producing best-effort output:
 ```
 
 Consult the **human-escalation** skill for the full halt protocol.
+
+## Testing Scope
+
+**Budget:** Unlimited domain runs. One adapters run (only if adapter code
+changed). One `all` run at the very end only.
+
+**Workflow:**
+1. After each subtask → run `tests: domain` (or `tests: domain + fail-fast`)
+2. If you modified adapter code → run `tests: adapters` once
+3. **Do NOT run `tests: all`** — the stop hook validates the full suite automatically
+4. Before running any scope, check `.github/test-log.json` — skip if scope
+   passed recently and no relevant code changed since
+
+**Rule:** Never call pytest directly. Use `run_task` for pre-defined scenarios,
+`run_in_terminal` with the canonical script only for `-Filter` / `-File`.
 
 ## Return Format
 

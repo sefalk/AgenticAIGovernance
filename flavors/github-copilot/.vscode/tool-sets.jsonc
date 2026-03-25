@@ -1,0 +1,84 @@
+{
+  // Custom tool sets for GitHub Copilot agents.
+  // Reference these names in agent/prompt YAML `tools:` fields.
+  // Docs: https://code.visualstudio.com/docs/copilot/agents/agent-tools
+  //
+  // NOTE: These tool sets are defined for convenience but agents currently
+  // list tools individually for explicit control. These sets can be used to
+  // replace individual tool lists in agents when the setup stabilises.
+  // Example: tools: [reader, dev] instead of listing each tool.
+
+  "reader": {
+    "tools": [
+      "codebase",
+      "readFile",
+      "listDirectory",
+      "textSearch",
+      "fileSearch",
+      "problems",
+      "usages",
+      "changes",
+      "testFailure",
+      "fetch",
+      "githubRepo"
+    ],
+    "description": "Read-only tools for analyzing code, searching, and gathering context",
+    "icon": "book"
+  },
+
+  "python-analysis": {
+    "tools": [
+      "pylanceFileSyntaxErrors",
+      "pylanceSyntaxErrors",
+      "pylanceImports",
+      "pylanceInstalledTopLevelModules",
+      "pylanceInvokeRefactoring",
+      "pylanceRunCodeSnippet",
+      "pylancePythonEnvironments",
+      "pylanceWorkspaceUserFiles",
+      "pylanceSettings"
+    ],
+    "description": "Pylance tools for Python analysis, refactoring, and code execution",
+    "icon": "symbol-python"
+  },
+
+  "python-environment": {
+    "tools": [
+      "configurePythonEnvironment",
+      "getPythonEnvironmentDetails",
+      "getPythonExecutableDetails",
+      "installPythonPackages"
+    ],
+    "description": "Python environment management (configure, inspect, install packages)",
+    "icon": "package"
+  },
+
+  "dev": {
+    "tools": [
+      "editFiles",
+      "createFile",
+      "createDirectory",
+      "runTests",
+      "runInTerminal",
+      "getTerminalOutput",
+      "runSubagent",
+      "todo"
+    ],
+    "description": "Development tools for editing, testing, and executing code",
+    "icon": "tools"
+  },
+
+  "notebooks": {
+    "tools": [
+      "editNotebook",
+      "runCell",
+      "getNotebookSummary",
+      "readNotebookCellOutput",
+      "configureNotebook",
+      "notebookInstallPackages",
+      "notebookListPackages"
+    ],
+    "description": "Jupyter notebook tools for data science workflows",
+    "icon": "notebook"
+  }
+}

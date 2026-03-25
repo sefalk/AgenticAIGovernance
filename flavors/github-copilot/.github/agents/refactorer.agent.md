@@ -17,11 +17,9 @@ tools:
   - read/problems
   - todo
   - execute/runTests
+  - execute/runTask
   - execute/testFailure
   - edit/editFiles
-  - edit/createFile
-  - edit/createDirectory
-  - execute/runInTerminal
   - execute/getTerminalOutput
   - pylance-mcp-server/pylanceFileSyntaxErrors
   - pylance-mcp-server/pylanceImports
@@ -108,6 +106,20 @@ Return format when blocked:
 ```
 
 Consult the **human-escalation** skill for the full halt protocol.
+
+## Testing Scope
+
+**Budget:** Unlimited domain runs. Zero adapters. Zero all.
+
+**Workflow:**
+1. Before refactoring → check `.github/test-log.json` for baseline (do NOT
+   run `tests: all` to establish baseline — the log has it)
+2. After each refactoring step → run `tests: domain` only
+3. **Do NOT run `tests: all`** — the stop hook runs the full suite automatically
+   when you finish. Running it yourself wastes ~20 minutes.
+
+**Rule:** Use `run_task` for `tests: domain`. Accept the stop hook as your
+full-suite validation.
 
 ## Return Format
 

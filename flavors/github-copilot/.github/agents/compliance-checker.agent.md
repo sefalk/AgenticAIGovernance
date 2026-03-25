@@ -11,6 +11,7 @@ tools:
   - search/textSearch
   - search/fileSearch
   - search/listDirectory
+  - search/changes
   - read/readFile
   - read/problems
 ---

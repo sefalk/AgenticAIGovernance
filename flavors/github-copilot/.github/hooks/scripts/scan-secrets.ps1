@@ -89,5 +89,24 @@ if ($findings.Count -gt 0) {
     exit 1
 }
 
+# --- Provenance marker check (SOFT advisory -- Idea 37a) ---
+# Check if new/modified Python files have required copilot: provenance markers.
+# Advisory only -- does not block. Documenter post-flight is the HARD gate.
+if ($ext -eq '.py') {
+    $firstLines = Get-Content $filePath -TotalCount 5 -ErrorAction SilentlyContinue | Out-String
+    if ($firstLines -and $firstLines -notmatch 'copilot:(generated|modified)') {
+        $advisory = @{
+            gate = "provenance-check"
+            status = "WARN"
+            file = $filePath
+            detail = "No copilot:generated or copilot:modified marker found in first 5 lines. " +
+                "If this file was created or substantially modified by an agent, add a provenance marker. " +
+                "See instructions/provenance.instructions.md."
+        } | ConvertTo-Json -Compress
+        Write-Output $advisory
+        exit 0
+    }
+}
+
 Write-Output '{}'
 exit 0

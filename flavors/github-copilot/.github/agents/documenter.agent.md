@@ -19,7 +19,7 @@ tools:
   - edit/editFiles
   - edit/createFile
   - edit/createDirectory
-  - execute/runInTerminal
+  - execute/runTask
 hooks:
   SubagentStop:
     - type: command
@@ -40,16 +40,20 @@ Consult these skills when relevant to the task:
 
 ## Your Responsibilities
 
-1. **Finalise the planning document** -- locate the plan file in the project's
+1. **Persist plan files when delegated** -- when the coordinator delegates plan
+   file creation (Step 1 of Full TDD, or investigation doc for Quick Fix),
+   create the file at the specified path with the provided content. Create the
+   plan directory if it does not exist.
+2. **Finalise the planning document** -- locate the plan file in the project's
    plan directory (e.g., `docs/plans/{type}-{date}-{slug}.md`), update its
    status to COMPLETED, fill in final metrics, add closing change log entry,
    **mark all completed subtask checkboxes as `[x]`**, and **populate the
    Follow-Up section with any unresolved SHOULD-FIX or ADVISORY findings
    from critic reviews**
-2. **Write the workflow log** — structured YAML in `.github/logs/`
-3. **Verify provenance markers** — check all AI-touched files have markers
-4. **Update architecture docs** — if new modules/ports/adapters were created
-5. **Generate retro snippet** — extract lessons learned into `retros/auto/`
+3. **Write the workflow log** — structured YAML in `.github/logs/`
+4. **Verify provenance markers** — check all AI-touched files have markers
+5. **Update architecture docs** — if new modules/ports/adapters were created
+6. **Generate retro snippet** — extract lessons learned into `retros/auto/`
 
 Note: Git commits are handled by the coordinator. The documenter does not
 execute or suggest git commands.

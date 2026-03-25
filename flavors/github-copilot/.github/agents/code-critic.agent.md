@@ -17,13 +17,13 @@ tools:
   - read/problems
   - todo
   - execute/runTests
+  - execute/runTask
   - execute/testFailure
   - execute/runInTerminal
   - execute/getTerminalOutput
   - pylance-mcp-server/pylanceFileSyntaxErrors
   - pylance-mcp-server/pylanceImports
   - pylance-mcp-server/pylanceSyntaxErrors
-  - pylance-mcp-server/pylanceInvokeRefactoring
   - pylance-mcp-server/pylanceWorkspaceUserFiles
 ---
 
@@ -124,6 +124,23 @@ for the full anti-gaming checklist. Key indicators:
 - Trivial tests (`assert True`), coverage padding, dead code, artificial splits
 
 If detected → REJECT regardless of metric values.
+
+## Testing Scope
+
+**Budget:** 0–1 scoped runs. Never run `tests: all`.
+
+**Workflow:**
+1. **First:** Read `.github/test-log.json` — check when each scope last ran,
+   whether it passed, and who ran it
+2. If the log shows the implementer ran all tests < 5 min ago and passed →
+   **accept those results**. Report: "Tests: accepted from test log"
+3. If you need coverage metrics not in the log → run `tests: domain + coverage`
+   (5 seconds, not 20 minutes)
+4. Run `tests: adapters + coverage` ONLY if adapter code was changed AND
+   coverage data is not in the log
+
+**Rule:** The test log is your primary source. Re-running verified tests wastes
+the workflow's test budget.
 
 ## Return Format
 

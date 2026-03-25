@@ -1,30 +1,43 @@
 # Copilot Agent Team Framework
 
-> A ready-to-use folder structure for VS Code + GitHub Copilot agent workflows.
-> Drop the `.github/` folder into any Python project to get an **autonomous**,
-> multi-agent TDD workflow with quality gates and traceability.
+**v1.17.0** · [Changelog](CHANGELOG.md) · [Troubleshooting](.github/TROUBLESHOOTING.md) · [Interactive Map](agent-framework-map.v2.html)
 
-## What This Is
+> Drop `.github/` into any Python project to get an **autonomous**, multi-agent
+> TDD workflow with quality gates, traceability, and deterministic enforcement hooks.
 
-A **generic, battle-tested** framework for organising AI agents in VS Code
-GitHub Copilot. It uses the **Coordinator-Worker pattern** — one coordinator
-agent autonomously orchestrates 10 specialised workers as subagents, running
-the full TDD pipeline without manual intervention.
+## Why Use This
+
+You describe a task. The framework runs the full pipeline — planning, failing
+tests, implementation, refactoring, code review, documentation — autonomously.
+Critics review every output; hooks enforce quality gates with real code, not
+suggestions. You stay in control through mandatory escalation points.
+
+- **11 specialised agents** (1 coordinator + 10 workers) with isolated contexts
+- **Test-Driven Development** enforced as separate Red → Green → Refactor phases
+- **Deterministic hooks** run pytest, scan for secrets, block destructive commands
+- **Maker-Checker pattern** — every agent's output is reviewed by a critic
+- **Escalation, not surprise** — the coordinator asks you when it needs domain input
+
+## Prerequisites
+
+- VS Code with GitHub Copilot extension (agent mode enabled)
+- Python 3.10+ with `pytest` and `hypothesis` (for property-based tests)
+- Optional: `radon` (complexity), `ruff` (linting), `mutmut` (mutation testing)
 
 ## Quick Setup
 
-1. **Place** the `github-copilot/` directory in your project root
+1. **Place** the `_agent-framework/` directory in your project root
    (or clone it as a subdirectory).
 2. **Run the deploy script** to install AF files into `.github/` and `.vscode/`:
    ```powershell
    # Windows — preview first, then deploy
-   .\github-copilot\deploy.ps1 -DryRun
-   .\github-copilot\deploy.ps1
+   .\_agent-framework\deploy.ps1 -DryRun
+   .\_agent-framework\deploy.ps1
    ```
    ```bash
    # macOS / Linux
-   ./github-copilot/deploy.sh --dry-run
-   ./github-copilot/deploy.sh
+   ./_agent-framework/deploy.sh --dry-run
+   ./_agent-framework/deploy.sh
    ```
    The script copies only AF-owned files (see `.github/.af-manifest`).
    Existing non-AF files (`workflows/`, `CODEOWNERS`, etc.) are never touched.
@@ -42,13 +55,13 @@ they won't be overwritten unless you use `-Force` / `--force`.
 
 Use `-Diff` / `--diff` to compare source vs deployed before updating:
 ```powershell
-.\github-copilot\deploy.ps1 -Diff
+.\_agent-framework\deploy.ps1 -Diff
 ```
 
 <details>
 <summary>Manual setup (if you prefer not to use the deploy script)</summary>
 
-1. **Copy AF-owned directories** from `github-copilot/.github/` into your
+1. **Copy AF-owned directories** from `_agent-framework/.github/` into your
    project's `.github/`. AF owns: `agents/`, `hooks/`, `instructions/`,
    `prompts/`, `skills/`, `templates/`, `logs/`, `retros/`, plus
    `MANIFEST.md`, `GOVERNANCE.md`, `TROUBLESHOOTING.md`, and
@@ -58,6 +71,17 @@ Use `-Diff` / `--diff` to compare source vs deployed before updating:
 3. **Run `/onboard-project`** and follow prompts.
 
 </details>
+
+## Your First Week
+
+> Don't try to use the full pipeline from day one. Start small.
+
+| Week | What to Do |
+|---|---|
+| **1** | Use `@coordinator` for small tasks — try `/quick-fix` or `/trivial-fix` |
+| **2** | Run a feature with `/tdd-feature`. Watch the subagent calls in the chat |
+| **3** | Customise `copilot-instructions.md` and `architecture.instructions.md` for your project |
+| **4** | Review workflow logs in `.github/logs/` and retro snippets in `retros/auto/` |
 
 ## How It Works
 
@@ -112,7 +136,8 @@ The coordinator picks the right workflow for the task:
 | Code review | Review Only | code-critic | `/review-code` |
 | Planning | Plan Only | planner | — |
 
-### Model Prioritization
+<details>
+<summary><strong>Model Prioritization</strong> (click to expand)</summary>
 
 Every worker has a **prioritized model list** sized to its task complexity.
 VS Code tries each model in order until one is available.
@@ -143,6 +168,8 @@ subscription and model availability. Check the
 [supported models list](https://docs.github.com/en/copilot/reference/ai-models/supported-models)
 for current availability and cost multipliers.
 
+</details>
+
 ## When You're Involved
 
 The coordinator runs autonomously but **escalates** to you for:
@@ -155,7 +182,8 @@ The coordinator runs autonomously but **escalates** to you for:
 
 Everything else is fully autonomous.
 
-## File Map
+<details>
+<summary><strong>File Map</strong> (click to expand)</summary>
 
 ```
 deploy.ps1                                 # AF deploy script (Windows)
@@ -242,7 +270,10 @@ CHANGELOG.md                               # Release history (Keep a Changelog f
     └── README.md
 ```
 
-## Tool Configuration
+</details>
+
+<details>
+<summary><strong>Tool Configuration</strong> (click to expand)</summary>
 
 Agents list their permitted tools individually in their `tools:` YAML
 frontmatter using the `namespace/tool` format:
@@ -263,6 +294,8 @@ Each agent has a minimal, explicitly scoped tool list. Read-only agents
 VS Code also supports **named tool sets** defined in `.vscode/tool-sets.jsonc`.
 The project defines shared sets (`reader`, `dev`, `python-analysis`, etc.)
 that can be referenced by name instead of listing tools individually.
+
+</details>
 
 ## Agent Hooks (Deterministic Enforcement)
 
@@ -340,15 +373,6 @@ from your description.
 Standalone utilities run independently — the coordinator doesn't invoke
 them. Use them for framework maintenance and discovery.
 
-## Adopting Incrementally
-
-> **Key lesson:** Don't try to use the full pipeline from day one. Start small.
-
-**Week 1:** Use `@coordinator` for small tasks. See the Quick Fix workflow.
-**Week 2:** Try a feature with the full TDD workflow. Watch the subagent calls.
-**Week 3:** Customise worker instructions for your project's patterns.
-**Week 4:** Review workflow logs in `.github/logs/` for process improvement.
-
 ## Using Workers Standalone (Optional)
 
 Workers are hidden from the agents dropdown by default (`user-invocable: false`).
@@ -376,12 +400,6 @@ to the worker's YAML frontmatter.
 8. **Model Optimisation** — Cheaper models for analysis, capable for editing
 9. **Traceability** — Provenance markers + workflow logs + git conventions
 
-## Prerequisites
-
-- VS Code with GitHub Copilot extension
-- Python 3.10+ with `pytest`, `hypothesis` (for property-based tests)
-- Optional: `radon` (complexity), `ruff` (linting), `mutmut` (mutation testing)
-
 ## Lessons Baked In
 
 This framework was refined through real usage. Key lessons:
@@ -394,3 +412,7 @@ This framework was refined through real usage. Key lessons:
 - **Build incrementally.** Use the coordinator for one task, fix friction, expand.
 - **Domain expertise is the human's irreplaceable contribution.** Agents
   investigate and implement; the human confirms domain semantics.
+
+---
+
+**Resources:** [CHANGELOG](CHANGELOG.md) · [TROUBLESHOOTING](.github/TROUBLESHOOTING.md) · [MANIFEST](.github/MANIFEST.md) · [Interactive Map](agent-framework-map.v2.html)

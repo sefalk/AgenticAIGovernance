@@ -142,6 +142,101 @@ def test_compute_result_filters_nulls():
 - **Visible data.** Inline test data or use explicit fixtures. Avoid
   "Mystery Guest" anti-pattern (hidden external data files).
 
+## Agent Test Execution
+
+<!-- copilot:modified | implementer | 2026-03-18 | added pre-defined tasks via run_task -->
+
+Agents execute tests via **pre-defined VS Code Tasks** (`run_task`) for common
+scenarios, falling back to `run_in_terminal` only for dynamic cases.
+
+### Pre-Defined Tasks (preferred)
+
+Use `run_task` with the task label. Arguments are fixed — no dynamic params.
+
+| Task Label | Args | Primary Users |
+|---|---|---|
+| `tests: all` | `-Scope all` | refactorer, implementer (final) |
+| `tests: domain` | `-Scope domain` | implementer, test-writer, test-critic |
+| `tests: adapters` | `-Scope adapters` | implementer, test-writer |
+| `tests: properties` | `-Scope properties` | test-writer, test-critic |
+| `tests: contracts` | `-Scope contracts` | implementer |
+| `tests: all + coverage` | `-Scope all -Coverage` | code-critic, implementer |
+| `tests: domain + coverage` | `-Scope domain -Coverage` | code-critic, implementer |
+| `tests: adapters + coverage` | `-Scope adapters -Coverage` | code-critic, implementer |
+| `tests: domain + fail-fast` | `-Scope domain -FailFast` | test-writer (Red phase) |
+| `tests: all + fail-fast` | `-Scope all -FailFast` | refactorer, implementer |
+| `tests: all + coverage + save` | `-Scope all -Coverage -OutputFile` | code-critic |
+| `tests: adapters + fail-fast` | `-Scope adapters -FailFast` | implementer |
+
+### Fallback: `run_in_terminal` (dynamic cases only)
+
+Use `run_in_terminal` with the canonical script when `-File` or `-Filter`
+are needed (values change per task):
+
+```
+.github/scripts/run-tests.ps1 -Scope {scope} [-Filter {pattern}] [-File {path}] [-Coverage] [-FailFast]
+```
+
+### Phase-Specific Test Strategy
+
+| Phase | Agent | Preferred Task | Fallback (when -Filter/-File needed) |
+|---|---|---|---|
+| Red (verify failing) | test-writer | `tests: domain + fail-fast` | `run_in_terminal` with `-Filter` |
+| Green (make pass) | implementer | `tests: domain` | — |
+| Green (full suite) | implementer | `tests: all` | — |
+| Refactor (no regression) | refactorer | `tests: all` | — |
+| Code review (metrics) | code-critic | `tests: all + coverage` | — |
+| Code review (save report) | code-critic | `tests: all + coverage + save` | — |
+| Re-Red (specific test) | test-writer | — | `run_in_terminal` with `-File` + `-Filter` |
+
+### Expected Runtimes
+
+| Scope | Tests | Typical Runtime | Cost |
+|---|---|---|---|
+| domain | ~600 | ~5s | LOW — run freely |
+| properties | ~40 | <1s | LOW — run freely |
+| contracts | ~20 | ~2s | LOW — run freely |
+| adapters | ~300 | ~15–20 min | HIGH — run sparingly |
+| all | ~1100 | ~20 min | HIGH — once per workflow |
+
+### Test Budget per Workflow
+
+**Cardinal Rule:** A full-suite run (`tests: all`) happens **at most ONCE**
+per workflow. All other test execution must be scoped.
+
+| Agent | Budget | Scope | When to Skip |
+|---|---|---|---|
+| test-writer | 1–3 targeted runs | `-Filter` or `-File` on new tests, domain scope, fail-fast | Never runs all. Never adapters unless writing adapter tests. |
+| implementer | unlimited domain, 1 adapters (if changed), 0× all | domain during dev, adapters only if adapter code changed | Stop hook runs all via canonical script and writes test log — do not pre-run all. |
+| refactorer | unlimited domain, 0 adapters, 0 all | domain after each step | Stop hook runs full suite — do NOT pre-run all yourself. |
+| code-critic | 0–1 scoped runs | domain+coverage or adapters+coverage | Accept implementer results if test log shows < 5 min old. Never re-run what test log shows as current. |
+| test-critic | 0 runs | N/A — review only, do not execute | Always skip. Read test log for context. |
+
+### Test Log (`.github/test-log.json`)
+
+The test runner automatically maintains a persistent test log at
+`.github/test-log.json`. Each scoped run updates ONLY that scope's entry —
+other scope data is preserved.
+
+**Before running tests**, read the test log:
+- Compare `last_run` timestamp with the last code change time
+- If the scope passed recently and no relevant code changed → **skip the run**
+- Report: "Tests: accepted from test log (domain: 619/619 passed, 5s ago)"
+
+**The test log is the source of truth** for cross-agent test visibility.
+
+### Rules
+
+1. **Prefer `run_task`** — pre-defined tasks are safer and avoid terminal confirmation.
+2. **Never call pytest directly** — always use the canonical test runner script.
+3. **Never create temp output files** — the runner streams to stdout.
+4. **Use the narrowest scope** — `domain` first, `all` only for the single final verification per workflow.
+5. **Use `-Filter` via `run_in_terminal`** — only when re-running specific tests.
+6. **Use fail-fast tasks for Red phase** — stop at first failure to confirm the right test fails.
+7. **Task labels are a stable API** — do not rename without updating all agent definitions.
+8. **Check test log before running** — read `.github/test-log.json` first. If the scope passed recently and no code changed since, skip the run and cite the log.
+9. **Respect the test budget** — see "Test Budget per Workflow" above. Exceeding budget wastes 20+ minutes.
+
 ## Test Doubles (Stubs, Mocks, Fakes, Spies)
 
 Use test doubles to isolate the unit under test from its dependencies.
@@ -220,20 +315,22 @@ These are the **canonical thresholds** — source of truth for all agents.
 
 ## Running Tests
 
+All test execution uses the canonical test runner script.
+Agents must use `run_task` or `run_in_terminal` with `run-tests.ps1` / `run-tests.sh`.
+See "Agent Test Execution" above for the full task table and rules.
+
 ```bash
-# All tests
-pytest tests/ -v --tb=short
+# Via VS Code tasks (agents use run_task with these labels):
+#   tests: domain               # Fast domain tests (~5s)
+#   tests: all                  # Full suite (~20 min)
+#   tests: domain + coverage    # Domain with coverage report
 
-# Domain tests only (fast)
-pytest tests/domain/ -v
+# Via terminal (for -Filter or -File):
+.github/scripts/run-tests.ps1 -Scope domain -Filter "test_name"
+.github/scripts/run-tests.ps1 -File tests/domain/test_helper.py
+.github/scripts/run-tests.ps1 -Scope all -Coverage
 
-# With coverage
-pytest tests/ --cov=<package> --cov-report=term-missing --cov-branch
-
-# Property-based with stats
-pytest tests/properties/ -v --hypothesis-show-statistics
-
-# Mutation testing on a specific module
+# Mutation testing (manual only, not via task):
 mutmut run --paths-to-mutate=<module> --tests-dir=tests/domain/
 ```
 

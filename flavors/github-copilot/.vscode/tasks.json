@@ -1,0 +1,163 @@
+// VS Code Tasks for Agent Workflows.
+// These tasks wrap the canonical test runner script (.github/scripts/run-tests.ps1)
+// and provide common git/lint operations that agents invoke via execute/runTask.
+//
+// IMPORTANT: Task labels are a stable API. Do not rename without updating
+// all agent definitions and testing.instructions.md.
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "tests: all",
+      "type": "shell",
+      "command": ".github/scripts/run-tests.ps1",
+      "args": ["-Scope", "all"],
+      "group": "test",
+      "detail": "Run all tests (refactorer regression, implementer final)"
+    },
+    {
+      "label": "tests: domain",
+      "type": "shell",
+      "command": ".github/scripts/run-tests.ps1",
+      "args": ["-Scope", "domain"],
+      "group": "test",
+      "detail": "Run domain tests only — fast, no Spark"
+    },
+    {
+      "label": "tests: adapters",
+      "type": "shell",
+      "command": ".github/scripts/run-tests.ps1",
+      "args": ["-Scope", "adapters"],
+      "group": "test",
+      "detail": "Run adapter tests — requires Spark"
+    },
+    {
+      "label": "tests: properties",
+      "type": "shell",
+      "command": ".github/scripts/run-tests.ps1",
+      "args": ["-Scope", "properties"],
+      "group": "test",
+      "detail": "Run property-based tests (hypothesis)"
+    },
+    {
+      "label": "tests: contracts",
+      "type": "shell",
+      "command": ".github/scripts/run-tests.ps1",
+      "args": ["-Scope", "contracts"],
+      "group": "test",
+      "detail": "Run port-adapter contract tests"
+    },
+    {
+      "label": "tests: all + coverage",
+      "type": "shell",
+      "command": ".github/scripts/run-tests.ps1",
+      "args": ["-Scope", "all", "-Coverage"],
+      "group": "test",
+      "detail": "Full suite with coverage — code-critic gate metrics"
+    },
+    {
+      "label": "tests: domain + coverage",
+      "type": "shell",
+      "command": ".github/scripts/run-tests.ps1",
+      "args": ["-Scope", "domain", "-Coverage"],
+      "group": "test",
+      "detail": "Domain tests with coverage — Domain ≥ 90% gate"
+    },
+    {
+      "label": "tests: adapters + coverage",
+      "type": "shell",
+      "command": ".github/scripts/run-tests.ps1",
+      "args": ["-Scope", "adapters", "-Coverage"],
+      "group": "test",
+      "detail": "Adapter tests with coverage — Adapters ≥ 60% gate"
+    },
+    {
+      "label": "tests: domain + fail-fast",
+      "type": "shell",
+      "command": ".github/scripts/run-tests.ps1",
+      "args": ["-Scope", "domain", "-FailFast"],
+      "group": "test",
+      "detail": "Domain tests, stop on first failure — Red phase verification"
+    },
+    {
+      "label": "tests: all + fail-fast",
+      "type": "shell",
+      "command": ".github/scripts/run-tests.ps1",
+      "args": ["-Scope", "all", "-FailFast"],
+      "group": "test",
+      "detail": "Full suite, stop on first failure — quick smoke check"
+    },
+    {
+      "label": "tests: all + coverage + save",
+      "type": "shell",
+      "command": ".github/scripts/run-tests.ps1",
+      "args": ["-Scope", "all", "-Coverage", "-OutputFile"],
+      "group": "test",
+      "detail": "Full coverage report saved to .github/test-output.txt"
+    },
+    {
+      "label": "tests: adapters + fail-fast",
+      "type": "shell",
+      "command": ".github/scripts/run-tests.ps1",
+      "args": ["-Scope", "adapters", "-FailFast"],
+      "group": "test",
+      "detail": "Adapter tests, stop on first failure — slow scope early exit"
+    },
+    {
+      "label": "git: current branch",
+      "type": "shell",
+      "command": "git",
+      "args": ["branch", "--show-current"],
+      "detail": "Show current branch name"
+    },
+    {
+      "label": "git: status",
+      "type": "shell",
+      "command": "git",
+      "args": ["status", "--short"],
+      "detail": "Show git status (short format)"
+    },
+    {
+      "label": "git: diff stat",
+      "type": "shell",
+      "command": "git",
+      "args": ["diff", "--stat"],
+      "detail": "Show changed files summary"
+    },
+    {
+      "label": "git: branch list",
+      "type": "shell",
+      "command": "git",
+      "args": ["branch", "--list"],
+      "detail": "List local branches"
+    },
+    {
+      "label": "git: log oneline",
+      "type": "shell",
+      "command": "git",
+      "args": ["log", "--oneline", "-20"],
+      "detail": "Show last 20 commits (one line each)"
+    },
+    {
+      "label": "lint: ruff check",
+      "type": "shell",
+      "command": "ruff",
+      "args": ["check", "."],
+      "detail": "Run ruff linter on all Python files"
+    },
+    {
+      "label": "lint: ruff format check",
+      "type": "shell",
+      "command": "ruff",
+      "args": ["format", "--check", "."],
+      "detail": "Check ruff formatting (no changes)"
+    },
+    {
+      "label": "lint: ruff format",
+      "type": "shell",
+      "command": "ruff",
+      "args": ["format", "."],
+      "detail": "Apply ruff formatting"
+    }
+  ]
+}

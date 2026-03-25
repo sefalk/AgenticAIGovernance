@@ -26,7 +26,7 @@
     manual recovery.
 
 .PARAMETER TargetDir
-    Project root directory. Defaults to parent of the github-copilot directory.
+    Project root directory. Defaults to parent of the _agent-framework directory.
 
 .PARAMETER DryRun
     Show what would be copied without making changes.

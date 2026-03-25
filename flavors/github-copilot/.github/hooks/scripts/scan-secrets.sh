@@ -49,5 +49,16 @@ if [ -n "$findings" ]; then
     exit 1
 fi
 
+# --- Provenance marker check (SOFT advisory -- Idea 37a) ---
+case "$file_path" in
+    *.py)
+        first_lines=$(head -n 5 "$file_path" 2>/dev/null || true)
+        if [ -n "$first_lines" ] && ! echo "$first_lines" | grep -qE 'copilot:(generated|modified)'; then
+            echo "{\"gate\": \"provenance-check\", \"status\": \"WARN\", \"file\": \"$file_path\", \"detail\": \"No copilot:generated or copilot:modified marker found in first 5 lines. If this file was created or substantially modified by an agent, add a provenance marker. See instructions/provenance.instructions.md.\"}"
+            exit 0
+        fi
+        ;;
+esac
+
 echo '{}'
 exit 0

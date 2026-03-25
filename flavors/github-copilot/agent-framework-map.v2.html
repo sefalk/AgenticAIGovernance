@@ -1,0 +1,1167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Framework -- Interactive Architecture Map</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #c9d1d9; --text-muted: #8b949e; --text-bright: #f0f6fc;
+    --accent: #58a6ff; --green: #3fb950; --orange: #d29922;
+    --red: #f85149; --purple: #bc8cff; --pink: #f778ba;
+    --teal: #39d2c0; --yellow: #e3b341;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); overflow-x: hidden; }
+  h1 { color: var(--text-bright); font-size: 1.5rem; font-weight: 600; }
+  h2 { color: var(--text-bright); font-size: 1.15rem; font-weight: 600; margin-bottom: .5rem; }
+  h3 { color: var(--accent); font-size: .95rem; font-weight: 600; margin-bottom: .35rem; }
+  code { background: rgba(110,118,129,.2); padding: .1rem .35rem; border-radius: 4px; font-size: .8rem; }
+
+  /* ---- Layout ---- */
+  .app { display: flex; flex-direction: column; height: 100vh; }
+  .topbar { background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: .5rem 1rem; display: flex; align-items: center; gap: .8rem; flex-shrink: 0; flex-wrap: wrap; }
+  .topbar .subtitle { color: var(--text-muted); font-size: .82rem; }
+  .main { display: flex; flex: 1; overflow: hidden; }
+  .canvas { flex: 1; overflow: auto; padding: 1.2rem; }
+  .sidebar { width: 370px; background: var(--surface);
+    border-left: 1px solid var(--border); overflow-y: auto; padding: 1rem;
+    transition: width .25s ease, padding .25s ease, opacity .2s; flex-shrink: 0; position: relative; }
+  .sidebar.collapsed { width: 0; padding: 0; overflow: hidden; opacity: 0; }
+  .sidebar-toggle { position: absolute; top: .5rem; right: .5rem; background: var(--border);
+    border: none; color: var(--text-muted); width: 26px; height: 26px; border-radius: 5px;
+    cursor: pointer; font-size: .85rem; display: flex; align-items: center; justify-content: center;
+    z-index: 20; }
+  .sidebar-toggle:hover { background: var(--accent); color: var(--bg); }
+  .sidebar-open { position: fixed; right: 8px; top: 55px; background: var(--surface);
+    border: 1px solid var(--border); color: var(--text-muted); width: 32px; height: 32px;
+    border-radius: 6px; cursor: pointer; font-size: 1rem; display: none; align-items: center;
+    justify-content: center; z-index: 30; }
+  .sidebar-open:hover { background: var(--accent); color: var(--bg); }
+  .sidebar.collapsed ~ .sidebar-open { display: flex; }
+
+  /* ---- Tabs ---- */
+  .tabs { display: flex; gap: 2px; flex-wrap: wrap; }
+  .tab { padding: .3rem .65rem; border-radius: 6px; font-size: .78rem;
+    cursor: pointer; border: 1px solid var(--border); background: transparent;
+    color: var(--text-muted); transition: all .15s; user-select: none; }
+  .tab:hover { background: var(--border); color: var(--text); }
+  .tab.active { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
+
+  /* ---- Views ---- */
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* ---- Overview: Section zones ---- */
+  .zone { border: 1px solid var(--border); border-radius: 12px; padding: .8rem;
+    margin-bottom: .8rem; position: relative; }
+  .zone-label { position: absolute; top: -.55rem; left: 1rem; background: var(--bg);
+    padding: 0 .5rem; font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+  .zone-grid { display: flex; flex-wrap: wrap; gap: .6rem; justify-content: center; padding-top: .3rem; }
+
+  /* ---- Nodes ---- */
+  .node { border-radius: 10px; padding: .6rem .8rem; cursor: pointer;
+    transition: transform .15s, box-shadow .15s;
+    border: 1.5px solid var(--border); min-width: 120px; text-align: center;
+    font-size: .8rem; position: relative; }
+  .node:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.45); }
+  .node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .node.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(88,166,255,.35); }
+  .node .icon { font-size: 1.2rem; margin-bottom: .15rem; }
+  .node .label { font-weight: 600; }
+  .node .sublabel { font-size: .68rem; color: var(--text-muted); margin-top: .1rem; }
+
+  /* Node type colors */
+  .node.agent { background: linear-gradient(135deg, #1a2332, #1c2a3a); border-color: rgba(88,166,255,.45); }
+  .node.agent .label { color: var(--accent); }
+  .node.skill { background: linear-gradient(135deg, #1a2b1e, #1c3322); border-color: rgba(63,185,80,.4); }
+  .node.skill .label { color: var(--green); }
+  .node.instruction { background: linear-gradient(135deg, #2a1f2e, #32233a); border-color: rgba(188,140,255,.4); }
+  .node.instruction .label { color: var(--purple); }
+  .node.hook { background: linear-gradient(135deg, #2a221a, #332a1c); border-color: rgba(210,153,34,.45); }
+  .node.hook .label { color: var(--orange); }
+  .node.prompt { background: linear-gradient(135deg, #2a1a2a, #331c33); border-color: rgba(247,120,186,.4); }
+  .node.prompt .label { color: var(--pink); }
+  .node.template { background: linear-gradient(135deg, #1a2a2a, #1c3333); border-color: rgba(57,210,192,.4); }
+  .node.template .label { color: var(--teal); }
+  .node.governance { background: linear-gradient(135deg, #2a2a1a, #33331c); border-color: rgba(227,179,65,.4); }
+  .node.governance .label { color: var(--yellow); }
+  .node.human { background: linear-gradient(135deg, #2a1a1a, #331c1c); border-color: rgba(248,81,73,.4); }
+  .node.human .label { color: var(--red); }
+  .node.coordinator { border-width: 2.5px; border-color: var(--accent); min-width: 155px; }
+
+  /* ---- Arrows (SVG overlay) ---- */
+  .arrow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 0; }
+  .arrow-canvas line, .arrow-canvas path { fill: none; }
+  /* Node z above arrows */
+  .zone-grid .node { z-index: 2; position: relative; }
+
+  /* ---- Connector badges on overview nodes ---- */
+  .conn-badge { position: absolute; bottom: -8px; width: 18px; height: 18px;
+    border-radius: 50%; font-size: .6rem; display: flex; align-items: center;
+    justify-content: center; font-weight: 700; border: 1.5px solid var(--bg); }
+  .conn-badge.hook-count { right: -6px; background: var(--orange); color: var(--bg); }
+  .conn-badge.skill-count { left: -6px; background: var(--green); color: var(--bg); }
+
+  /* ---- Workflow Swimlane ---- */
+  .swimlane { background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: .9rem; margin-bottom: .8rem; }
+  .swimlane-title { font-size: .88rem; font-weight: 600; color: var(--text-bright); margin-bottom: .5rem;
+    display: flex; align-items: center; gap: .5rem; }
+  .flow-row { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; padding: .25rem 0; }
+  .flow-step { padding: .28rem .55rem; border-radius: 6px; font-size: .73rem;
+    font-weight: 500; border: 1px solid; cursor: pointer; transition: all .15s; white-space: nowrap; }
+  .flow-step:hover { transform: scale(1.06); }
+  .flow-step:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .flow-step.agent-step { background: rgba(88,166,255,.12); border-color: rgba(88,166,255,.3); color: var(--accent); }
+  .flow-step.hook-step { background: rgba(210,153,34,.12); border-color: rgba(210,153,34,.3); color: var(--orange); }
+  .flow-step.human-step { background: rgba(248,81,73,.12); border-color: rgba(248,81,73,.3); color: var(--red); }
+  .flow-arrow { color: var(--text-muted); font-size: .85rem; }
+  .flow-label { font-size: .68rem; color: var(--text-muted); margin-left: .2rem; }
+
+  /* ---- Detail panel ---- */
+  .detail-card { background: var(--bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: .75rem; margin-bottom: .6rem; }
+  .detail-card .field { font-size: .75rem; color: var(--text-muted); margin-bottom: .2rem; }
+  .detail-card .value { font-size: .8rem; color: var(--text); }
+  .badge { display: inline-block; padding: .12rem .4rem; border-radius: 4px;
+    font-size: .68rem; font-weight: 600; margin: .08rem .12rem .08rem 0; }
+  .badge.hard { background: rgba(248,81,73,.15); color: var(--red); border: 1px solid rgba(248,81,73,.3); }
+  .badge.soft { background: rgba(210,153,34,.15); color: var(--orange); border: 1px solid rgba(210,153,34,.3); }
+  .badge.advisory { background: rgba(88,166,255,.15); color: var(--accent); border: 1px solid rgba(88,166,255,.3); }
+  .tag { display: inline-block; padding: .1rem .35rem; border-radius: 4px;
+    font-size: .68rem; margin: .08rem .12rem .08rem 0; background: rgba(88,166,255,.1);
+    color: var(--accent); border: 1px solid rgba(88,166,255,.2); cursor: pointer; }
+  .tag:hover { background: rgba(88,166,255,.2); }
+  .tag.green { background: rgba(63,185,80,.1); color: var(--green); border-color: rgba(63,185,80,.2); }
+  .tag.green:hover { background: rgba(63,185,80,.2); }
+  .tag.orange { background: rgba(210,153,34,.1); color: var(--orange); border-color: rgba(210,153,34,.2); }
+  .tag.pink { background: rgba(247,120,186,.1); color: var(--pink); border-color: rgba(247,120,186,.2); }
+
+  /* ---- Legend ---- */
+  .legend { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .8rem;
+    padding: .5rem .7rem; background: var(--surface); border-radius: 8px; border: 1px solid var(--border); }
+  .legend-item { display: flex; align-items: center; gap: .3rem; font-size: .72rem; color: var(--text-muted); }
+  .legend-dot { width: 9px; height: 9px; border-radius: 3px; }
+  .legend-line { width: 20px; height: 0; border-top: 2px solid; }
+  .legend-line.dashed { border-top-style: dashed; }
+
+  /* ---- Misc ---- */
+  .empty-state { text-align: center; padding: 2.5rem; color: var(--text-muted); }
+  ul.compact { padding-left: 1rem; font-size: .8rem; }
+  ul.compact li { margin-bottom: .15rem; }
+
+  /* Hook matrix */
+  .hook-matrix { width: 100%; border-collapse: collapse; font-size: .76rem; }
+  .hook-matrix th, .hook-matrix td { padding: .32rem .45rem; border: 1px solid var(--border); text-align: left; }
+  .hook-matrix th { background: var(--surface); color: var(--text-bright); font-weight: 600; }
+  .hook-matrix td { color: var(--text); }
+  .hook-matrix tr:hover td { background: rgba(88,166,255,.06); }
+  .hook-matrix tr { cursor: pointer; }
+
+  /* ---- Relationship lines in overview ---- */
+  .rel-section { margin-top: .6rem; padding: .6rem .8rem; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px; }
+  .rel-row { display: flex; align-items: center; gap: .4rem; padding: .2rem 0; font-size: .75rem;
+    color: var(--text-muted); flex-wrap: wrap; }
+  .rel-arrow { font-weight: 600; }
+  .rel-row .tag { font-size: .65rem; }
+
+  /* ---- Grid cards ---- */
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: .7rem; }
+  .card-grid.wide { grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: .7rem; cursor: pointer; transition: border-color .15s, transform .15s; }
+  .card:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .card .card-icon { font-size: 1.4rem; text-align: center; margin-bottom: .2rem; }
+  .card .card-title { font-weight: 600; text-align: center; margin-bottom: .15rem; font-size: .82rem; }
+  .card .card-sub { text-align: center; font-size: .72rem; color: var(--text-muted); }
+  .card .card-desc { font-size: .73rem; color: var(--text); margin-top: .35rem; }
+  .card .card-tags { margin-top: .3rem; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Top bar -->
+  <div class="topbar">
+    <h1>&#x1f3d7;&#xfe0f; Agent Framework</h1>
+    <span class="subtitle">Interactive Architecture Map</span>
+    <div style="flex:1"></div>
+    <div class="tabs" id="viewTabs">
+      <div class="tab active" data-view="overview" tabindex="0">Overview</div>
+      <div class="tab" data-view="workflows" tabindex="0">Workflows</div>
+      <div class="tab" data-view="agents" tabindex="0">Agents</div>
+      <div class="tab" data-view="hooks" tabindex="0">Hooks</div>
+      <div class="tab" data-view="skills" tabindex="0">Skills</div>
+      <div class="tab" data-view="instructions" tabindex="0">Instructions</div>
+      <div class="tab" data-view="prompts" tabindex="0">Prompts</div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="canvas" id="canvas">
+
+      <!-- ============ OVERVIEW ============ -->
+      <div class="view active" id="view-overview">
+        <div class="legend">
+          <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div> Human</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--accent)"></div> Agents</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div> Skills</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--purple)"></div> Instructions</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div> Hooks</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--pink)"></div> Prompts</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--teal)"></div> Templates</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--yellow)"></div> Governance</div>
+          <div class="legend-item"><div class="legend-line" style="border-color:var(--accent)"></div> invokes</div>
+          <div class="legend-item"><div class="legend-line dashed" style="border-color:var(--orange)"></div> enforces</div>
+          <div class="legend-item"><div class="legend-line dashed" style="border-color:var(--green)"></div> consumes</div>
+        </div>
+
+        <!-- Human + Governance + Entry -->
+        <div class="zone" style="border-color: rgba(248,81,73,.25);">
+          <div class="zone-label" style="color:var(--red);">Entry &amp; Governance</div>
+          <div class="zone-grid">
+            <div class="node human" tabindex="0" data-detail="human" data-id="human">
+              <div class="icon">&#x1f464;</div>
+              <div class="label">Human</div>
+              <div class="sublabel">Task &middot; Escalation &middot; Approval</div>
+            </div>
+            <div class="node governance" tabindex="0" data-detail="governance" data-id="manifest">
+              <div class="icon">&#x1f4dc;</div>
+              <div class="label">MANIFEST.md</div>
+              <div class="sublabel">13 sections &middot; governing rules</div>
+            </div>
+            <div class="node governance" tabindex="0" data-detail="governance-gov" data-id="governance-doc">
+              <div class="icon">&#x2696;&#xfe0f;</div>
+              <div class="label">GOVERNANCE.md</div>
+              <div class="sublabel">L1 Principles &middot; L2 Rules</div>
+            </div>
+            <div class="node prompt" tabindex="0" data-detail="prompts-overview" data-id="prompts">
+              <div class="icon">&#x1f4ac;</div>
+              <div class="label">14 Prompts</div>
+              <div class="sublabel">Slash command entry points</div>
+            </div>
+            <div class="node template" tabindex="0" data-detail="tmpl" data-id="tmpl-plan">
+              <div class="icon">&#x1f4d1;</div>
+              <div class="label">Templates</div>
+              <div class="sublabel">PLAN &middot; WIP &middot; INVESTIGATION</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Coordinator -->
+        <div class="zone" style="border-color: rgba(88,166,255,.35);">
+          <div class="zone-label" style="color:var(--accent);">Orchestration</div>
+          <div class="zone-grid">
+            <div class="node agent coordinator" tabindex="0" data-detail="agent-coordinator" data-id="coordinator">
+              <div class="icon">&#x1f3af;</div>
+              <div class="label">Coordinator</div>
+              <div class="sublabel">Orchestrates all workflows &middot; delegates to 10 workers</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Maker agents -->
+        <div class="zone" style="border-color: rgba(88,166,255,.25);">
+          <div class="zone-label" style="color:var(--accent);">Maker Agents (produce artifacts)</div>
+          <div class="zone-grid">
+            <div class="node agent" tabindex="0" data-detail="agent-planner" data-id="planner">
+              <div class="icon">&#x1f4cb;</div>
+              <div class="label">Planner</div>
+              <div class="sublabel">Read-only &middot; Planning</div>
+              <div class="conn-badge skill-count" title="3 skills">3</div>
+            </div>
+            <div class="node agent" tabindex="0" data-detail="agent-test-writer" data-id="test-writer">
+              <div class="icon">&#x1f9ea;</div>
+              <div class="label">Test-Writer</div>
+              <div class="sublabel">&#x1f534; Red phase</div>
+              <div class="conn-badge skill-count" title="4 skills">4</div>
+              <div class="conn-badge hook-count" title="2 hooks">2</div>
+            </div>
+            <div class="node agent" tabindex="0" data-detail="agent-implementer" data-id="implementer">
+              <div class="icon">&#x2699;&#xfe0f;</div>
+              <div class="label">Implementer</div>
+              <div class="sublabel">&#x1f7e2; Green phase</div>
+              <div class="conn-badge skill-count" title="7 skills">7</div>
+              <div class="conn-badge hook-count" title="1 hook">1</div>
+            </div>
+            <div class="node agent" tabindex="0" data-detail="agent-refactorer" data-id="refactorer">
+              <div class="icon">&#x267b;&#xfe0f;</div>
+              <div class="label">Refactorer</div>
+              <div class="sublabel">&#x267b;&#xfe0f; Refactor phase</div>
+              <div class="conn-badge skill-count" title="5 skills">5</div>
+              <div class="conn-badge hook-count" title="2 hooks">2</div>
+            </div>
+            <div class="node agent" tabindex="0" data-detail="agent-documenter" data-id="documenter">
+              <div class="icon">&#x1f4dd;</div>
+              <div class="label">Documenter</div>
+              <div class="sublabel">Workflow logs</div>
+              <div class="conn-badge skill-count" title="1 skill">1</div>
+              <div class="conn-badge hook-count" title="1 hook">1</div>
+            </div>
+            <div class="node agent" tabindex="0" data-detail="agent-researcher" data-id="researcher">
+              <div class="icon">&#x1f52c;</div>
+              <div class="label">Researcher</div>
+              <div class="sublabel">External docs</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Critic agents -->
+        <div class="zone" style="border-color: rgba(88,166,255,.2);">
+          <div class="zone-label" style="color:var(--accent);">Checker Agents (review &amp; verify)</div>
+          <div class="zone-grid">
+            <div class="node agent" tabindex="0" data-detail="agent-test-critic" data-id="test-critic">
+              <div class="icon">&#x1f50d;</div>
+              <div class="label">Test-Critic</div>
+              <div class="sublabel">Read-only &middot; Reviews test-writer</div>
+              <div class="conn-badge skill-count" title="3 skills">3</div>
+            </div>
+            <div class="node agent" tabindex="0" data-detail="agent-code-critic" data-id="code-critic">
+              <div class="icon">&#x1f50e;</div>
+              <div class="label">Code-Critic</div>
+              <div class="sublabel">Read-only &middot; Reviews implementer + refactorer</div>
+              <div class="conn-badge skill-count" title="6 skills">6</div>
+            </div>
+            <div class="node agent" tabindex="0" data-detail="agent-arbiter" data-id="arbiter">
+              <div class="icon">&#x2696;&#xfe0f;</div>
+              <div class="label">Arbiter</div>
+              <div class="sublabel">Dispute resolution</div>
+              <div class="conn-badge skill-count" title="3 skills">3</div>
+            </div>
+            <div class="node agent" tabindex="0" data-detail="agent-compliance" data-id="compliance-checker">
+              <div class="icon">&#x2705;</div>
+              <div class="label">Compliance</div>
+              <div class="sublabel">Pre-flight &amp; post-flight</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hooks -->
+        <div class="zone" style="border-color: rgba(210,153,34,.3);">
+          <div class="zone-label" style="color:var(--orange);">Hooks (deterministic enforcement)</div>
+          <div class="zone-grid">
+            <div class="node hook" tabindex="0" data-detail="hook-session" data-id="hook-session">
+              <div class="icon">&#x1f680;</div>
+              <div class="label">Session Context</div>
+              <div class="sublabel">SessionStart &middot; Global</div>
+            </div>
+            <div class="node hook" tabindex="0" data-detail="hook-block" data-id="hook-block">
+              <div class="icon">&#x1f6e1;&#xfe0f;</div>
+              <div class="label">Safety Gate</div>
+              <div class="sublabel">PreToolUse &middot; Global</div>
+            </div>
+            <div class="node hook" tabindex="0" data-detail="hook-secrets" data-id="hook-secrets">
+              <div class="icon">&#x1f510;</div>
+              <div class="label">Secret Scan</div>
+              <div class="sublabel">PostToolUse &middot; Global</div>
+            </div>
+            <div class="node hook" tabindex="0" data-detail="hook-tests" data-id="hook-tests">
+              <div class="icon">&#x1f9ea;</div>
+              <div class="label">Test Gate</div>
+              <div class="sublabel">Stop &middot; Global (advisory)</div>
+            </div>
+            <div class="node hook" tabindex="0" data-detail="hook-tw-stop" data-id="hook-tw-stop">
+              <div class="icon">&#x1f534;</div>
+              <div class="label">Red Phase Gate</div>
+              <div class="sublabel">test-writer Stop</div>
+            </div>
+            <div class="node hook" tabindex="0" data-detail="hook-tw-pre" data-id="hook-tw-pre">
+              <div class="icon">&#x1f6a7;</div>
+              <div class="label">TDD Isolation</div>
+              <div class="sublabel">test-writer PreToolUse</div>
+            </div>
+            <div class="node hook" tabindex="0" data-detail="hook-impl-stop" data-id="hook-impl-stop">
+              <div class="icon">&#x1f7e2;</div>
+              <div class="label">Green Phase Gate</div>
+              <div class="sublabel">implementer Stop</div>
+            </div>
+            <div class="node hook" tabindex="0" data-detail="hook-ref-stop" data-id="hook-ref-stop">
+              <div class="icon">&#x267b;&#xfe0f;</div>
+              <div class="label">Refactor Gate</div>
+              <div class="sublabel">refactorer Stop</div>
+            </div>
+            <div class="node hook" tabindex="0" data-detail="hook-ref-pre" data-id="hook-ref-pre">
+              <div class="icon">&#x1f6ab;</div>
+              <div class="label">No New Files</div>
+              <div class="sublabel">refactorer PreToolUse</div>
+            </div>
+            <div class="node hook" tabindex="0" data-detail="hook-doc-stop" data-id="hook-doc-stop">
+              <div class="icon">&#x1f4c4;</div>
+              <div class="label">Artifact Gate</div>
+              <div class="sublabel">documenter Stop</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Instructions -->
+        <div class="zone" style="border-color: rgba(188,140,255,.25);">
+          <div class="zone-label" style="color:var(--purple);">Instructions (auto-injected by file pattern)</div>
+          <div class="zone-grid">
+            <div class="node instruction" tabindex="0" data-detail="instr-copilot" data-id="instr-copilot">
+              <div class="icon">&#x1f4cc;</div>
+              <div class="label">copilot-instructions</div>
+              <div class="sublabel">Always active &middot; root config</div>
+            </div>
+            <div class="node instruction" tabindex="0" data-detail="instr-architecture" data-id="instr-arch">
+              <div class="icon">&#x1f3db;&#xfe0f;</div>
+              <div class="label">Architecture</div>
+              <div class="sublabel">applyTo: mpusage/**</div>
+            </div>
+            <div class="node instruction" tabindex="0" data-detail="instr-testing" data-id="instr-testing">
+              <div class="icon">&#x1f9ea;</div>
+              <div class="label">Testing</div>
+              <div class="sublabel">applyTo: tests/**</div>
+            </div>
+            <div class="node instruction" tabindex="0" data-detail="instr-git-workflow" data-id="instr-git">
+              <div class="icon">&#x1f33f;</div>
+              <div class="label">Git Workflow</div>
+              <div class="sublabel">applyTo: **</div>
+            </div>
+            <div class="node instruction" tabindex="0" data-detail="instr-provenance" data-id="instr-prov">
+              <div class="icon">&#x1f3f7;&#xfe0f;</div>
+              <div class="label">Provenance</div>
+              <div class="sublabel">applyTo: **</div>
+            </div>
+            <div class="node instruction" tabindex="0" data-detail="instr-quality-gates" data-id="instr-qg">
+              <div class="icon">&#x1f4ca;</div>
+              <div class="label">Quality Gates</div>
+              <div class="sublabel">applyTo: **</div>
+            </div>
+            <div class="node instruction" tabindex="0" data-detail="instr-copilot-authoring" data-id="instr-auth">
+              <div class="icon">&#x270d;&#xfe0f;</div>
+              <div class="label">Copilot Authoring</div>
+              <div class="sublabel">applyTo: *.agent.md, *.instructions.md</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Skills -->
+        <div class="zone" style="border-color: rgba(63,185,80,.25);">
+          <div class="zone-label" style="color:var(--green);">Skills (opt-in domain knowledge)</div>
+          <div class="zone-grid">
+            <div class="node skill" tabindex="0" data-detail="skills-overview" data-id="skills-all" style="min-width:260px;">
+              <div class="icon">&#x1f4da;</div>
+              <div class="label">16 Active + 22 Available</div>
+              <div class="sublabel">Click for details &middot; See Skills tab for full list</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Relationship summary -->
+        <div class="rel-section">
+          <h3 style="margin-bottom:.4rem;">Key Relationships</h3>
+          <div class="rel-row">
+            <span class="tag">Human</span> <span class="rel-arrow" style="color:var(--accent);">&#x2192;</span>
+            <span class="tag">Coordinator</span> <span style="color:var(--text-muted);">task / prompt</span>
+            <span class="rel-arrow" style="color:var(--red);">&#x2190;</span>
+            <span class="tag">Coordinator</span> <span style="color:var(--text-muted);">escalation / result</span>
+          </div>
+          <div class="rel-row">
+            <span class="tag">Coordinator</span> <span class="rel-arrow" style="color:var(--accent);">&#x2192;</span>
+            <span style="color:var(--text-muted);">invokes all 10 worker agents as subagents</span>
+          </div>
+          <div class="rel-row">
+            <span class="tag">test-writer</span> <span class="rel-arrow" style="color:var(--accent);">&#x21c4;</span> <span class="tag">test-critic</span>
+            <span style="color:var(--text-muted);">&nbsp;|&nbsp;</span>
+            <span class="tag">implementer</span> <span class="rel-arrow" style="color:var(--accent);">&#x21c4;</span> <span class="tag">code-critic</span>
+            <span style="color:var(--text-muted);">&nbsp;|&nbsp;</span>
+            <span class="tag">refactorer</span> <span class="rel-arrow" style="color:var(--accent);">&#x21c4;</span> <span class="tag">code-critic</span>
+            <span style="color:var(--text-muted);">maker&#x2194;checker pairs</span>
+          </div>
+          <div class="rel-row">
+            <span class="tag orange">Hooks</span> <span class="rel-arrow" style="color:var(--orange);">&#x2192;</span>
+            <span style="color:var(--text-muted);">enforce agent constraints (block production edits, require failing tests, etc.)</span>
+          </div>
+          <div class="rel-row">
+            <span class="tag green">Skills</span> <span class="rel-arrow" style="color:var(--green);">&#x2192;</span>
+            <span style="color:var(--text-muted);">provide domain knowledge read at task time by designated agents</span>
+          </div>
+          <div class="rel-row">
+            <span style="color:var(--purple);">Instructions</span> <span class="rel-arrow" style="color:var(--purple);">&#x2192;</span>
+            <span style="color:var(--text-muted);">auto-injected into context when <code>applyTo</code> pattern matches the active file</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ WORKFLOWS ============ -->
+      <div class="view" id="view-workflows">
+        <h2 style="margin-bottom:.8rem;">Workflow Pipelines</h2>
+
+        <div class="swimlane">
+          <div class="swimlane-title">&#x1f504; Full TDD Workflow <span class="flow-label">(new features, major refactoring)</span></div>
+          <div class="flow-row">
+            <div class="flow-step hook-step" tabindex="0" data-detail="hook-session">SessionStart</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-researcher">researcher</div>
+            <span class="flow-label">(optional)</span>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-compliance">compliance &#x2713;</div>
+            <span class="flow-label">pre-flight</span>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-planner">planner</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step human-step" tabindex="0" data-detail="human">&#x1f464; approve plan</div>
+            <span class="flow-label">(&ge;4 subtasks)</span>
+          </div>
+          <div class="flow-row" style="padding-left:1.5rem;">
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-test-writer">test-writer</div>
+            <span class="flow-label">&#x1f534; Red</span>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step hook-step" tabindex="0" data-detail="hook-tw-stop">Red Gate &#x2713;</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-test-critic">test-critic</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-implementer">implementer</div>
+            <span class="flow-label">&#x1f7e2; Green</span>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step hook-step" tabindex="0" data-detail="hook-impl-stop">Green Gate &#x2713;</div>
+          </div>
+          <div class="flow-row" style="padding-left:1.5rem;">
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-refactorer">refactorer</div>
+            <span class="flow-label">&#x267b;&#xfe0f; Refactor</span>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step hook-step" tabindex="0" data-detail="hook-ref-stop">Refactor Gate &#x2713;</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-code-critic">code-critic</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-documenter">documenter</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step hook-step" tabindex="0" data-detail="hook-doc-stop">Artifact Gate &#x2713;</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-compliance">compliance &#x2713;</div>
+            <span class="flow-label">post-flight</span>
+          </div>
+        </div>
+
+        <div class="swimlane">
+          <div class="swimlane-title">&#x26a1; Quick Fix <span class="flow-label">(investigation-documented, &le; 5 files)</span></div>
+          <div class="flow-row">
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-compliance">compliance &#x2713;</div>
+            <span class="flow-label">pre</span>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-planner">planner</div>
+            <span class="flow-label">investigation</span>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-implementer">implementer</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step hook-step" tabindex="0" data-detail="hook-impl-stop">Green Gate &#x2713;</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-code-critic">code-critic</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-documenter">documenter</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-compliance">compliance &#x2713;</div>
+            <span class="flow-label">post</span>
+          </div>
+        </div>
+
+        <div class="swimlane">
+          <div class="swimlane-title">&#x1f527; Trivial Fix <span class="flow-label">(mechanical, &le; 2 files)</span></div>
+          <div class="flow-row">
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-compliance">compliance &#x2713;</div>
+            <span class="flow-label">pre</span>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-implementer">implementer</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-code-critic">code-critic</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-documenter">documenter</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-compliance">compliance &#x2713;</div>
+            <span class="flow-label">post</span>
+          </div>
+        </div>
+
+        <div class="swimlane">
+          <div class="swimlane-title">&#x1f441;&#xfe0f; Review Only <span class="flow-label">(code analysis, no changes)</span></div>
+          <div class="flow-row">
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-code-critic">code-critic</div>
+          </div>
+        </div>
+
+        <div class="swimlane">
+          <div class="swimlane-title">&#x1f4cb; Plan Only <span class="flow-label">(analysis, decomposition)</span></div>
+          <div class="flow-row">
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-planner">planner</div>
+          </div>
+        </div>
+
+        <h2 style="margin-top:1.2rem; margin-bottom:.6rem;">Retry &amp; Escalation</h2>
+        <div class="swimlane">
+          <div class="swimlane-title">&#x1f501; Maker-Checker Loop</div>
+          <div class="flow-row">
+            <div class="flow-step agent-step">maker</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step">critic</div>
+            <span class="flow-arrow">&rarr;</span>
+            <span style="font-size:.75rem; color:var(--text-muted);">REJECTED?</span>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step">retry 1</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step">critic</div>
+            <span class="flow-arrow">&rarr;</span>
+            <span style="font-size:.75rem; color:var(--text-muted);">REJECTED?</span>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step">retry 2</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step">critic</div>
+            <span class="flow-arrow">&rarr;</span>
+            <span style="font-size:.75rem; color:var(--text-muted);">REJECTED?</span>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step agent-step" tabindex="0" data-detail="agent-arbiter">arbiter</div>
+            <span style="font-size:.72rem; color:var(--text-muted);">or</span>
+            <div class="flow-step human-step" tabindex="0" data-detail="human">&#x1f464; escalate</div>
+          </div>
+        </div>
+
+        <h2 style="margin-top:1.2rem; margin-bottom:.6rem;">Workflow States</h2>
+        <div class="swimlane">
+          <div class="flow-row">
+            <div class="flow-step" style="background:rgba(188,140,255,.12); border-color:rgba(188,140,255,.3); color:var(--purple);">PLANNING</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step" style="background:rgba(248,81,73,.12); border-color:rgba(248,81,73,.3); color:var(--red);">RED</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step" style="background:rgba(248,81,73,.08); border-color:rgba(248,81,73,.2); color:var(--red);">RED_REVIEW</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step" style="background:rgba(63,185,80,.12); border-color:rgba(63,185,80,.3); color:var(--green);">GREEN</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step" style="background:rgba(57,210,192,.12); border-color:rgba(57,210,192,.3); color:var(--teal);">REFACTOR</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step" style="background:rgba(88,166,255,.12); border-color:rgba(88,166,255,.3); color:var(--accent);">CODE_REVIEW</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step" style="background:rgba(210,153,34,.12); border-color:rgba(210,153,34,.3); color:var(--orange);">DOCUMENTING</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step" style="background:rgba(63,185,80,.18); border-color:rgba(63,185,80,.45); color:var(--green);">COMPLETED</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ AGENTS ============ -->
+      <div class="view" id="view-agents">
+        <h2 style="margin-bottom:.8rem;">Agent Roster (11 agents)</h2>
+        <div class="card-grid" id="agentGrid"></div>
+      </div>
+
+      <!-- ============ HOOKS ============ -->
+      <div class="view" id="view-hooks">
+        <h2 style="margin-bottom:.4rem;">Hook System</h2>
+        <p style="font-size:.8rem; color:var(--text-muted); margin-bottom:.8rem;">
+          Hooks execute shell scripts at lifecycle points. Unlike instructions that <em>guide</em>, hooks <em>enforce</em> deterministically.
+        </p>
+
+        <h3>Global Hooks (agent-hooks.json)</h3>
+        <table class="hook-matrix" style="margin-bottom:1rem;">
+          <tr><th>Event</th><th>Script</th><th>Purpose</th><th>Action</th></tr>
+          <tr data-detail="hook-session"><td>SessionStart</td><td>session-context</td><td>Inject git branch, commit, Python version</td><td>additionalContext</td></tr>
+          <tr data-detail="hook-block"><td>PreToolUse</td><td>block-dangerous</td><td>Prompt for destructive commands</td><td>ask / deny</td></tr>
+          <tr data-detail="hook-secrets"><td>PostToolUse</td><td>scan-secrets</td><td>Scan for hardcoded secrets</td><td>block if found</td></tr>
+          <tr data-detail="hook-tests"><td>Stop</td><td>stop-tests</td><td>Artifact existence check (retired from testing)</td><td>warn (advisory)</td></tr>
+        </table>
+
+        <h3>Agent-Scoped Hooks (in .agent.md frontmatter)</h3>
+        <table class="hook-matrix">
+          <tr><th>Agent</th><th>Event</th><th>Script</th><th>Gate</th><th>What It Enforces</th></tr>
+          <tr data-detail="hook-tw-pre"><td>test-writer</td><td>PreToolUse</td><td>test-writer-pretooluse</td><td><span class="badge hard">HARD</span></td><td>Blocks editing production code (TDD isolation)</td></tr>
+          <tr data-detail="hook-tw-stop"><td>test-writer</td><td>Stop</td><td>test-writer-stop</td><td><span class="badge hard">HARD</span></td><td>Tests must FAIL (Red gate) + provenance</td></tr>
+          <tr data-detail="hook-impl-stop"><td>implementer</td><td>Stop</td><td>implementer-stop</td><td><span class="badge hard">HARD</span></td><td>All tests must PASS (Green gate)</td></tr>
+          <tr data-detail="hook-ref-pre"><td>refactorer</td><td>PreToolUse</td><td>refactorer-pretooluse</td><td><span class="badge hard">HARD</span></td><td>Blocks creating new files</td></tr>
+          <tr data-detail="hook-ref-stop"><td>refactorer</td><td>Stop</td><td>refactorer-stop</td><td><span class="badge hard">HARD</span></td><td>Tests green + no new .py files</td></tr>
+          <tr data-detail="hook-doc-stop"><td>documenter</td><td>Stop</td><td>documenter-stop</td><td><span class="badge hard">HARD</span></td><td>Workflow log + retro snippet exist</td></tr>
+        </table>
+      </div>
+
+      <!-- ============ SKILLS ============ -->
+      <div class="view" id="view-skills">
+        <h2 style="margin-bottom:.4rem;">Skill Library</h2>
+        <p style="font-size:.8rem; color:var(--text-muted); margin-bottom:.8rem;">
+          Skills provide domain-specific guidance. Each is a SKILL.md file consumed by designated agents.
+          Click a skill to see details.
+        </p>
+        <div class="card-grid wide" id="skillGrid"></div>
+      </div>
+
+      <!-- ============ INSTRUCTIONS ============ -->
+      <div class="view" id="view-instructions">
+        <h2 style="margin-bottom:.4rem;">Instruction Files</h2>
+        <p style="font-size:.8rem; color:var(--text-muted); margin-bottom:.8rem;">
+          Instructions are auto-injected into agent context based on <code>applyTo</code> glob patterns.
+          Unlike skills (opt-in), instructions are always active for matching files.
+        </p>
+        <div class="card-grid wide" id="instrGrid"></div>
+      </div>
+
+      <!-- ============ PROMPTS ============ -->
+      <div class="view" id="view-prompts">
+        <h2 style="margin-bottom:.4rem;">Prompt Files (Slash Commands)</h2>
+        <p style="font-size:.8rem; color:var(--text-muted); margin-bottom:.8rem;">
+          Prompt files define reusable slash commands. They inject structured instructions when invoked via <code>/name</code>.
+        </p>
+        <div class="card-grid wide" id="promptGrid"></div>
+      </div>
+
+    </div><!-- /canvas -->
+
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+      <button class="sidebar-toggle" id="sidebarClose" title="Close panel">&times;</button>
+      <div id="detailPanel">
+        <div class="empty-state">
+          <p style="font-size:.88rem;">&#x1f448; Click any component</p>
+          <p style="font-size:.76rem; margin-top:.25rem;">to see details and relationships</p>
+        </div>
+      </div>
+    </div>
+    <button class="sidebar-open" id="sidebarOpen" title="Open detail panel">&#x25c0;</button>
+  </div>
+</div>
+
+<script>
+// ===== DATA =====
+const AGENTS = {
+  coordinator: {
+    name: 'Coordinator', icon: '\u{1f3af}', role: 'Autonomous TDD workflow orchestrator',
+    phase: 'Orchestration', capabilities: 'Read + execute + agent invocation',
+    tools: ['agent', 'search/*', 'read/*', 'todo', 'runTests', 'runInTerminal'],
+    skills: [], hooks: [],
+    notes: 'Primary entry point. Receives tasks from user, selects workflow, delegates to specialists. Cardinal Rules: (1) never creates files directly, (2) always checks branch before delegating writes.',
+    makerChecker: null
+  },
+  planner: {
+    name: 'Planner', icon: '\u{1f4cb}', role: 'Decompose tasks, define acceptance criteria',
+    phase: 'Planning', capabilities: 'Read-only analysis',
+    tools: ['search/*', 'read/*', 'todo'],
+    skills: ['task-decomposition', 'risk-management', 'design-patterns'], hooks: [],
+    notes: 'Creates plan files using templates/PLAN.md. Assigns complexity tier. For Quick Fix: produces investigation doc using templates/INVESTIGATION.md.',
+    makerChecker: null
+  },
+  'test-writer': {
+    name: 'Test-Writer', icon: '\u{1f9ea}', role: 'Write failing tests (Red phase)',
+    phase: 'TDD Red', capabilities: 'Create/edit test files only',
+    tools: ['search/*', 'read/*', 'editFiles', 'createFile', 'runTests', 'runInTerminal'],
+    skills: ['unit-testing', 'property-testing', 'error-handling', 'human-escalation'],
+    hooks: ['test-writer-pretooluse (blocks production edits)', 'test-writer-stop (Red gate + provenance)'],
+    notes: 'Blocked from editing production code by PreToolUse hook. Tests must FAIL (not pass) for Red phase to succeed.',
+    makerChecker: 'test-critic'
+  },
+  'test-critic': {
+    name: 'Test-Critic', icon: '\u{1f50d}', role: 'Review test quality and meaningfulness',
+    phase: 'Review', capabilities: 'Read-only review',
+    tools: ['search/*', 'read/*'],
+    skills: ['unit-testing', 'code-review', 'property-testing'], hooks: [],
+    notes: 'Returns verdict: APPROVED, REJECTED, or ESCALATE. Checks for trivial tests, coverage padding, anti-gaming.',
+    makerChecker: null
+  },
+  implementer: {
+    name: 'Implementer', icon: '\u{2699}\u{fe0f}', role: 'Make tests pass (Green phase)',
+    phase: 'TDD Green', capabilities: 'Full edit + execution',
+    tools: ['search/*', 'read/*', 'editFiles', 'createFile', 'runTests', 'runInTerminal', 'pylance*'],
+    skills: ['hexagonal-architecture', 'pydantic', 'error-handling', 'design-patterns', 'static-analysis', 'dependency-management', 'human-escalation'],
+    hooks: ['implementer-stop (Green gate: all tests must pass)'],
+    notes: 'Writes minimal code to make tests pass. Must meet coverage thresholds per module type.',
+    makerChecker: 'code-critic'
+  },
+  refactorer: {
+    name: 'Refactorer', icon: '\u{267b}\u{fe0f}', role: 'Clean up without changing behaviour',
+    phase: 'TDD Refactor', capabilities: 'Edit existing files + test',
+    tools: ['search/*', 'read/*', 'editFiles', 'runTests', 'runInTerminal', 'pylance*'],
+    skills: ['refactoring', 'design-patterns', 'hexagonal-architecture', 'pydantic', 'human-escalation'],
+    hooks: ['refactorer-pretooluse (blocks new file creation)', 'refactorer-stop (tests green + no new files)'],
+    notes: 'Cannot create new files (enforced by hook). All tests must remain green after each change.',
+    makerChecker: 'code-critic'
+  },
+  'code-critic': {
+    name: 'Code-Critic', icon: '\u{1f50e}', role: 'Architecture + metrics review',
+    phase: 'Review', capabilities: 'Read-only + terminal for metrics',
+    tools: ['search/*', 'read/*', 'runInTerminal'],
+    skills: ['code-review', 'static-analysis', 'metrics', 'secure-coding', 'hexagonal-architecture', 'dependency-management'],
+    hooks: [],
+    notes: 'Reviews architecture boundaries, coverage, complexity, security. Returns verdict with metrics: line_coverage, branch_coverage, complexity_max.',
+    makerChecker: null
+  },
+  arbiter: {
+    name: 'Arbiter', icon: '\u{2696}\u{fe0f}', role: 'Resolve maker-critic disagreements',
+    phase: 'Dispute Resolution', capabilities: 'Read-only advisory',
+    tools: ['search/*', 'read/*'],
+    skills: ['human-escalation', 'design-patterns', 'hexagonal-architecture'], hooks: [],
+    notes: 'Invoked after 3rd rejection. Returns: RESOLVED, COMPROMISE, or ESCALATE. Decision is binding unless human appeals.',
+    makerChecker: null
+  },
+  documenter: {
+    name: 'Documenter', icon: '\u{1f4dd}', role: 'Write workflow logs, update docs',
+    phase: 'Documentation', capabilities: 'Limited write (logs, docs)',
+    tools: ['search/*', 'read/*', 'editFiles', 'createFile'],
+    skills: ['documentation'],
+    hooks: ['documenter-stop (workflow log + retro snippet must exist)'],
+    notes: 'Creates YAML workflow log in .github/logs/ and retro snippet in retros/auto/. Updates plan file status to COMPLETED.',
+    makerChecker: null
+  },
+  researcher: {
+    name: 'Researcher', icon: '\u{1f52c}', role: 'Fetch & synthesize external docs',
+    phase: 'Research (pre-flight)', capabilities: 'Read-only + web fetch',
+    tools: ['search/*', 'read/*', 'fetchWebpage'],
+    skills: [], hooks: [],
+    notes: 'Optional step at workflow start. Used for third-party APIs, libraries, external standards. Every claim must have a source URL.',
+    makerChecker: null
+  },
+  'compliance-checker': {
+    name: 'Compliance Checker', icon: '\u{2705}', role: 'Verify workflow process gates',
+    phase: 'Compliance (bookends)', capabilities: 'Read-only + can invoke documenter',
+    tools: ['search/*', 'read/*', 'agent (documenter only)'],
+    skills: [], hooks: [],
+    notes: 'Mandatory bookend: pre-flight (branch check, plan dir) and post-flight (plan status, workflow log, retro snippet, provenance markers).',
+    makerChecker: null
+  }
+};
+
+const SKILLS = [
+  { name: 'code-review', desc: 'Structured code review. Diff analysis, blast radius, anti-pattern detection, review artifact templates.', agents: ['test-critic', 'code-critic'] },
+  { name: 'dependency-management', desc: 'Dependency selection, version pinning, lockfiles, vulnerability scanning, and license compliance.', agents: ['implementer', 'code-critic'] },
+  { name: 'design-patterns', desc: 'Creational, structural, behavioural, DDD, architecture patterns. When to use, when NOT to use.', agents: ['planner', 'implementer', 'refactorer', 'arbiter'] },
+  { name: 'documentation', desc: 'Documentation standards -- code comments, docstrings, READMEs, ADRs, changelogs.', agents: ['documenter'] },
+  { name: 'error-handling', desc: 'Error hierarchies, retry strategies, resilience patterns, and structured error responses.', agents: ['test-writer', 'implementer'] },
+  { name: 'hexagonal-architecture', desc: 'Ports & adapters to isolate core business logic. Domain isolation, dependency inversion, testability by design.', agents: ['implementer', 'refactorer', 'code-critic', 'arbiter'] },
+  { name: 'human-escalation', desc: 'Protocol for agents to gracefully halt and transfer context to a human when blocked or ambiguous.', agents: ['test-writer', 'implementer', 'refactorer', 'arbiter'] },
+  { name: 'metrics', desc: 'Collect and report code quality metrics -- coverage, complexity, mutation score, lint violations.', agents: ['code-critic'] },
+  { name: 'property-testing', desc: 'Write property-based tests with hypothesis. Invariant templates, strategy patterns, best practices.', agents: ['test-writer', 'test-critic'] },
+  { name: 'pydantic', desc: 'Pydantic for Python domain models, config, validation -- BaseModel, field validators, serialization, settings.', agents: ['implementer', 'refactorer'] },
+  { name: 'refactoring', desc: 'Disciplined code restructuring without behaviour change. Code smells, refactoring catalog, safe workflow.', agents: ['refactorer'] },
+  { name: 'risk-management', desc: 'Identify, assess, mitigate project risks -- risk registers, scoring matrices, response strategies.', agents: ['planner'] },
+  { name: 'secure-coding', desc: 'Prevent vulnerabilities -- input validation, injection prevention, authentication, authorization, crypto.', agents: ['code-critic'] },
+  { name: 'static-analysis', desc: 'Run and interpret static analysis tools -- Ruff, mypy, Bandit, Radon. Configuration and thresholds.', agents: ['implementer', 'code-critic'] },
+  { name: 'task-decomposition', desc: 'Break complex objectives into manageable units -- WBS, INVEST criteria, vertical slicing.', agents: ['planner'] },
+  { name: 'unit-testing', desc: 'Verify correctness in isolation. AAA pattern, test doubles, edge cases, coverage quality gates.', agents: ['test-writer', 'test-critic'] }
+];
+
+const INSTRUCTIONS = [
+  { name: 'copilot-instructions', file: 'copilot-instructions.md', applyTo: '** (always active)', desc: 'Root project config. Project overview, tech stack, coding standards, repo structure, pre-delivery checklist, skill index. Auto-injected into every agent.' },
+  { name: 'architecture', file: 'architecture.instructions.md', applyTo: 'mpusage/**/*.py', desc: 'Layer classification (Domain Core, Ports, Adapters, Orchestrators), dependency rules, module-to-layer mapping.' },
+  { name: 'testing', file: 'testing.instructions.md', applyTo: 'tests/**/*.py, **/conftest.py', desc: 'TDD workflow conventions, test naming, directory structure, fixtures, quality gates for test files.' },
+  { name: 'git-workflow', file: 'git-workflow.instructions.md', applyTo: '**', desc: 'Branch lifecycle (agent/{id}), atomic commit strategy, autonomy boundary table, planning document workflow.' },
+  { name: 'provenance', file: 'provenance.instructions.md', applyTo: '**', desc: '3-layer provenance model (in-code markers, git commits, workflow logs). Marker format and lifecycle rules.' },
+  { name: 'quality-gates', file: 'quality-gates.instructions.md', applyTo: '**', desc: 'Gate taxonomy (HARD/SOFT/ADVISORY), complexity tiers (Trivial/Standard/Deep), per-agent exit gates, Gate Summary format.' },
+  { name: 'copilot-authoring', file: 'copilot-authoring.instructions.md', applyTo: '**/*.agent.md, *.instructions.md, *.prompt.md', desc: 'Gotchas, YAML frontmatter conventions, link rules, and pre-save checklist for authoring AF files.' }
+];
+
+const PROMPTS = [
+  { name: 'tdd-feature', desc: 'Full TDD workflow for new features', workflow: 'Full TDD', category: 'Workflow' },
+  { name: 'quick-fix', desc: 'Investigation-documented fix', workflow: 'Quick Fix', category: 'Workflow' },
+  { name: 'trivial-fix', desc: 'Mechanical change, \u{2264} 2 files', workflow: 'Trivial Fix', category: 'Workflow' },
+  { name: 'review-code', desc: 'Code review without changes', workflow: 'Review Only', category: 'Workflow' },
+  { name: 'resume', desc: 'Resume interrupted workflow from WIP.md', workflow: 'Any (resume)', category: 'Workflow' },
+  { name: 'simulate', desc: 'Dry-run workflow without file changes', workflow: 'Any (simulation)', category: 'Workflow' },
+  { name: 'smoke-test', desc: 'Verify AF installation and hooks work', workflow: 'Diagnostic', category: 'Diagnostic' },
+  { name: 'validate-framework', desc: 'Full AF integrity check (7 steps)', workflow: 'Diagnostic', category: 'Diagnostic' },
+  { name: 'audit-config', desc: 'Audit agent permissions and tools', workflow: 'Diagnostic', category: 'Diagnostic' },
+  { name: 'onboard-project', desc: 'Configure AF for a new project', workflow: 'Setup', category: 'Setup' },
+  { name: 'find-skill', desc: 'Search available skills for a topic', workflow: 'Discovery', category: 'Utility' },
+  { name: 'draft-pr-description', desc: 'Generate PR description from branch changes', workflow: 'Utility', category: 'Utility' },
+  { name: 'retro-summary', desc: 'Summarize recent retro snippets', workflow: 'Utility', category: 'Utility' },
+  { name: 'workflow-summary', desc: 'Summarize a completed workflow log', workflow: 'Utility', category: 'Utility' }
+];
+
+const HOOKS_DETAIL = {
+  'hook-session': { name: 'Session Context', event: 'SessionStart', scope: 'Global', script: 'session-context.ps1/.sh',
+    desc: 'Injects git branch, last commit hash, and Python version into every agent session as additionalContext. Agents start aware of their environment.',
+    enforcement: 'Informational (injects context, does not block)' },
+  'hook-block': { name: 'Safety Gate (block-dangerous)', event: 'PreToolUse', scope: 'Global', script: 'block-dangerous.ps1/.sh',
+    desc: 'Intercepts terminal commands and prompts for confirmation on destructive patterns: rm -rf, DROP TABLE, --force, git push, git reset --hard, etc.',
+    enforcement: 'HARD -- prompts user to confirm (permissionDecision: ask)' },
+  'hook-secrets': { name: 'Secret Scan', event: 'PostToolUse', scope: 'Global', script: 'scan-secrets.ps1/.sh',
+    desc: 'Scans edited files for hardcoded secrets, API keys, tokens using gitleaks (if available) or regex fallback patterns.',
+    enforcement: 'HARD -- blocks if secrets found' },
+  'hook-tests': { name: 'Test Gate (stop-tests)', event: 'Stop', scope: 'Global', script: 'stop-tests.ps1/.sh',
+    desc: 'Retired from test enforcement (moved to agent-scoped hooks). Now checks for workflow artifact existence (advisory).',
+    enforcement: 'ADVISORY -- warns but does not block' },
+  'hook-tw-stop': { name: 'Red Phase Gate', event: 'SubagentStop', scope: 'test-writer', script: 'test-writer-stop.ps1/.sh',
+    desc: 'Gate 1: Runs pytest -- tests must FAIL (exit code 1). If all pass (exit code 0), blocks with "Red phase violation". Gate 2: Checks copilot:generated provenance marker in first 5 lines of new test files.',
+    enforcement: 'HARD -- blocks if tests pass OR provenance missing' },
+  'hook-tw-pre': { name: 'TDD Phase Isolation', event: 'SubagentPreToolUse', scope: 'test-writer', script: 'test-writer-pretooluse.ps1/.sh',
+    desc: 'Blocks the test-writer from editing any file under the source package (e.g., mpusage/). Only test files and conftest.py are allowed. Prevents the test-writer from "cheating" by implementing the feature itself.',
+    enforcement: 'HARD -- blocks file edit tool calls targeting production code' },
+  'hook-impl-stop': { name: 'Green Phase Gate', event: 'SubagentStop', scope: 'implementer', script: 'implementer-stop.ps1/.sh',
+    desc: 'Runs pytest -- all tests must PASS (exit code 0 or 5). If any test fails, blocks the implementer from completing.',
+    enforcement: 'HARD -- blocks if tests fail' },
+  'hook-ref-stop': { name: 'Refactor Phase Gate', event: 'SubagentStop', scope: 'refactorer', script: 'refactorer-stop.ps1/.sh',
+    desc: 'Gate 1: All tests must pass. Gate 2: No new .py files under mpusage/ or tests/ (git status --porcelain check). Refactoring = modify only.',
+    enforcement: 'HARD -- blocks if tests fail OR new files created' },
+  'hook-ref-pre': { name: 'No New Files Gate', event: 'SubagentPreToolUse', scope: 'refactorer', script: 'refactorer-pretooluse.ps1/.sh',
+    desc: 'Blocks the refactorer from using createFile or createDirectory tools. Refactoring must only modify existing files.',
+    enforcement: 'HARD -- blocks file/directory creation tool calls' },
+  'hook-doc-stop': { name: 'Documentation Artifact Gate', event: 'SubagentStop', scope: 'documenter', script: 'documenter-stop.ps1/.sh',
+    desc: 'Derives workflow-id from branch name (agent/{id}). Checks: (1) YAML workflow log exists in .github/logs/{id}.yaml, (2) retro snippet exists in retros/auto/{id}.md.',
+    enforcement: 'HARD -- blocks if artifacts missing' }
+};
+
+// ===== DETAIL RENDERER =====
+
+function showDetail(key) {
+  const panel = document.getElementById('detailPanel');
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar.classList.contains('collapsed')) {
+    sidebar.classList.remove('collapsed');
+  }
+
+  // Highlight selected
+  document.querySelectorAll('.node, .card').forEach(n => n.classList.remove('selected'));
+  const sel = document.querySelector(`[data-detail="${key}"]`);
+  if (sel) sel.classList.add('selected');
+
+  // Human
+  if (key === 'human') {
+    panel.innerHTML = `
+      <h2>\u{1f464} Human</h2>
+      <div class="detail-card"><div class="field">Role</div><div class="value">Task originator, approver, and escalation target.</div></div>
+      <div class="detail-card"><div class="field">Interactions</div><div class="value">
+        <ul class="compact">
+          <li>Gives tasks to the <strong>Coordinator</strong> (via chat or slash commands)</li>
+          <li>Approves plans with &ge;4 subtasks or high-risk items</li>
+          <li>Receives escalations after 3rd maker-critic rejection</li>
+          <li>Controls remote git operations (push, merge, branch deletion)</li>
+          <li>Overrides complexity tier at plan approval</li>
+          <li>Confirms destructive commands via Safety Gate hook</li>
+        </ul>
+      </div></div>`;
+    return;
+  }
+
+  // Agent details
+  if (key.startsWith('agent-')) {
+    const id = key.replace('agent-', '');
+    const a = AGENTS[id]; if (!a) return;
+    panel.innerHTML = `
+      <h2>${a.icon} ${a.name}</h2>
+      <div class="detail-card"><div class="field">Role</div><div class="value">${a.role}</div></div>
+      <div class="detail-card"><div class="field">Phase</div><div class="value">${a.phase}</div></div>
+      <div class="detail-card"><div class="field">Capabilities</div><div class="value">${a.capabilities}</div></div>
+      <div class="detail-card"><div class="field">Tools</div><div class="value">${a.tools.map(t => `<span class="tag">${t}</span>`).join('')}</div></div>
+      ${a.skills.length ? `<div class="detail-card"><div class="field">Skills (${a.skills.length})</div><div class="value">${a.skills.map(s => `<span class="tag green" onclick="showDetail('skill-${s}')">${s}</span>`).join('')}</div></div>` : ''}
+      ${a.hooks.length ? `<div class="detail-card"><div class="field">Hooks (${a.hooks.length})</div><div class="value"><ul class="compact">${a.hooks.map(h => `<li>${h}</li>`).join('')}</ul></div></div>` : ''}
+      ${a.makerChecker ? `<div class="detail-card"><div class="field">Reviewed by</div><div class="value"><span class="tag" onclick="showDetail('agent-${a.makerChecker}')">${a.makerChecker}</span> (maker-checker pair)</div></div>` : ''}
+      <div class="detail-card"><div class="field">Notes</div><div class="value">${a.notes}</div></div>
+    `;
+    return;
+  }
+
+  // Hook details
+  if (key.startsWith('hook-')) {
+    const h = HOOKS_DETAIL[key]; if (!h) return;
+    panel.innerHTML = `
+      <h2>${h.name}</h2>
+      <div class="detail-card"><div class="field">Event</div><div class="value"><span class="badge hard">${h.event}</span></div></div>
+      <div class="detail-card"><div class="field">Scope</div><div class="value">${h.scope}</div></div>
+      <div class="detail-card"><div class="field">Script</div><div class="value" style="font-family:monospace;font-size:.76rem;">${h.script}</div></div>
+      <div class="detail-card"><div class="field">Description</div><div class="value">${h.desc}</div></div>
+      <div class="detail-card"><div class="field">Enforcement</div><div class="value">${h.enforcement}</div></div>
+    `;
+    return;
+  }
+
+  // Skill details
+  if (key.startsWith('skill-')) {
+    const slug = key.replace('skill-', '');
+    const s = SKILLS.find(x => x.name === slug); if (!s) return;
+    panel.innerHTML = `
+      <h2>\u{1f4d7} ${s.name}</h2>
+      <div class="detail-card"><div class="field">Description</div><div class="value">${s.desc}</div></div>
+      <div class="detail-card"><div class="field">Consumed by</div><div class="value">${s.agents.map(a => `<span class="tag" onclick="showDetail('agent-${a}')">${a}</span>`).join('')}</div></div>
+      <div class="detail-card"><div class="field">File</div><div class="value" style="font-family:monospace;font-size:.76rem;">skills/${s.name}/SKILL.md</div></div>
+    `;
+    return;
+  }
+
+  // Instruction details
+  if (key.startsWith('instr-')) {
+    const slug = key.replace('instr-', '');
+    const i = INSTRUCTIONS.find(x => x.name === slug || x.name.replace(/-/g,'').startsWith(slug.replace(/-/g,'')));
+    if (!i) return;
+    panel.innerHTML = `
+      <h2>\u{1f4dc} ${i.name}</h2>
+      <div class="detail-card"><div class="field">File</div><div class="value" style="font-family:monospace;font-size:.76rem;">${i.file}</div></div>
+      <div class="detail-card"><div class="field">applyTo</div><div class="value"><code>${i.applyTo}</code></div></div>
+      <div class="detail-card"><div class="field">Description</div><div class="value">${i.desc}</div></div>
+    `;
+    return;
+  }
+
+  // Prompt detail
+  if (key.startsWith('prompt-')) {
+    const slug = key.replace('prompt-', '');
+    const p = PROMPTS.find(x => x.name === slug); if (!p) return;
+    panel.innerHTML = `
+      <h2>\u{1f4ac} /${p.name}</h2>
+      <div class="detail-card"><div class="field">Description</div><div class="value">${p.desc}</div></div>
+      <div class="detail-card"><div class="field">Workflow</div><div class="value"><span class="tag pink">${p.workflow}</span></div></div>
+      <div class="detail-card"><div class="field">Category</div><div class="value">${p.category}</div></div>
+      <div class="detail-card"><div class="field">File</div><div class="value" style="font-family:monospace;font-size:.76rem;">prompts/${p.name}.prompt.md</div></div>
+    `;
+    return;
+  }
+
+  // Static details
+  const STATIC = {
+    'governance': `
+      <h2>\u{1f4dc} MANIFEST.md</h2>
+      <div class="detail-card"><div class="field">Sections</div><div class="value">
+        <ul class="compact">
+          <li>\u{00a7}1 Autonomous Orchestration</li><li>\u{00a7}2 Test-Driven Development</li>
+          <li>\u{00a7}3 Architecture & Separation</li><li>\u{00a7}4 Maker-Checker Pattern</li>
+          <li>\u{00a7}5 Quality Gates & Metric Thresholds</li><li>\u{00a7}6 Human-in-the-Loop Escalation</li>
+          <li>\u{00a7}7 Traceability & Provenance</li><li>\u{00a7}8 Agent Hooks</li>
+          <li>\u{00a7}9 Model Prioritization</li><li>\u{00a7}10 Custom Tool Sets</li>
+          <li>\u{00a7}11 Pre-Delivery Checklist</li><li>\u{00a7}12 Governing Rules (27 domain rules)</li>
+          <li>\u{00a7}13 Inter-Agent Contracts</li>
+        </ul></div></div>
+      <div class="detail-card"><div class="field">Role</div><div class="value">Single source of truth for all agent behaviour. All agents must follow these rules. Operationalizes GOVERNANCE.md principles.</div></div>`,
+
+    'governance-gov': `
+      <h2>\u{2696}\u{fe0f} GOVERNANCE.md</h2>
+      <div class="detail-card"><div class="field">Structure</div><div class="value">
+        <ul class="compact">
+          <li><strong>L1:</strong> Core Principles (7 principles)</li>
+          <li><strong>L2:</strong> Domain Rules (R-SD-01 to R-SD-27)</li>
+          <li><strong>L3:</strong> Operational Rules (MANIFEST)</li>
+        </ul></div></div>
+      <div class="detail-card"><div class="field">Role</div><div class="value">Meta-level governance. Defines WHY the rules exist. MANIFEST.md operationalizes into HOW.</div></div>`,
+
+    'tmpl': `
+      <h2>\u{1f4d1} Templates</h2>
+      <div class="detail-card"><div class="field">PLAN.md</div><div class="value">Full planning document template. Used by planner for Standard+ tasks. Contains scope, subtasks, risks, metrics.</div></div>
+      <div class="detail-card"><div class="field">INVESTIGATION.md</div><div class="value">Lightweight investigation template. Used by planner for Quick Fix workflows. Documents root cause, fix rationale, alternatives.</div></div>
+      <div class="detail-card"><div class="field">WIP.md</div><div class="value">Recovery checkpoint. Written by coordinator on interruption. Contains last completed phase, state, and context for resume.</div></div>`,
+
+    'prompts-overview': `
+      <h2>\u{1f4ac} Prompt Files</h2>
+      <div class="detail-card"><div class="field">Count</div><div class="value">14 prompt files (.prompt.md)</div></div>
+      <div class="detail-card"><div class="field">Purpose</div><div class="value">Define reusable slash commands that inject structured instructions. Users invoke with /<em>name</em>.</div></div>
+      <div class="detail-card"><div class="field">Categories</div><div class="value">
+        <ul class="compact">
+          <li><strong>Workflow:</strong> tdd-feature, quick-fix, trivial-fix, review-code, resume, simulate</li>
+          <li><strong>Diagnostic:</strong> smoke-test, validate-framework, audit-config</li>
+          <li><strong>Setup:</strong> onboard-project</li>
+          <li><strong>Utility:</strong> find-skill, draft-pr-description, retro-summary, workflow-summary</li>
+        </ul></div></div>`,
+
+    'skills-overview': `
+      <h2>\u{1f4da} Skill Library</h2>
+      <div class="detail-card"><div class="field">Active</div><div class="value">16 skills assigned to agents</div></div>
+      <div class="detail-card"><div class="field">Available</div><div class="value">22 additional skills in _available/ (not yet assigned)</div></div>
+      <div class="detail-card"><div class="field">Mechanism</div><div class="value">Each skill is a SKILL.md read by agents at task time. Agents are listed in the Agent Skill Matrix (INDEX.md).</div></div>
+      <div class="detail-card"><div class="field">Activation</div><div class="value">Move from skills/_available/{name}/ to skills/{name}/, add to agent's Skills section, update INDEX.md.</div></div>`
+  };
+
+  if (STATIC[key]) { panel.innerHTML = STATIC[key]; }
+}
+
+// ===== VIEW SWITCHING =====
+
+document.querySelectorAll('.tab').forEach(tab => {
+  function activate() {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById('view-' + tab.dataset.view).classList.add('active');
+  }
+  tab.addEventListener('click', activate);
+  tab.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } });
+});
+
+// ===== CLICK HANDLERS =====
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-detail]');
+  if (el) showDetail(el.dataset.detail);
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    const el = e.target.closest('[data-detail]');
+    if (el) { e.preventDefault(); showDetail(el.dataset.detail); }
+  }
+});
+
+// ===== SIDEBAR TOGGLE =====
+
+document.getElementById('sidebarClose').addEventListener('click', () => {
+  document.getElementById('sidebar').classList.add('collapsed');
+});
+document.getElementById('sidebarOpen').addEventListener('click', () => {
+  document.getElementById('sidebar').classList.remove('collapsed');
+});
+
+// ===== POPULATE GRIDS =====
+
+// Agent grid
+const agentGrid = document.getElementById('agentGrid');
+Object.entries(AGENTS).forEach(([id, a]) => {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.tabIndex = 0;
+  card.dataset.detail = 'agent-' + id;
+  card.innerHTML = `
+    <div class="card-icon">${a.icon}</div>
+    <div class="card-title" style="color:var(--accent);">${a.name}</div>
+    <div class="card-sub">${a.phase}</div>
+    <div class="card-desc">${a.role}</div>
+    ${a.skills.length ? `<div class="card-tags">${a.skills.slice(0,3).map(s => `<span class="tag green" style="font-size:.63rem;">${s}</span>`).join('')}${a.skills.length > 3 ? `<span class="tag green" style="font-size:.63rem;">+${a.skills.length-3}</span>` : ''}</div>` : ''}
+    ${a.hooks.length ? `<div style="margin-top:.2rem;"><span class="tag orange" style="font-size:.63rem;">${a.hooks.length} hook${a.hooks.length>1?'s':''}</span></div>` : ''}
+  `;
+  agentGrid.appendChild(card);
+});
+
+// Skill grid
+const skillGrid = document.getElementById('skillGrid');
+SKILLS.forEach(s => {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.tabIndex = 0;
+  card.dataset.detail = 'skill-' + s.name;
+  card.innerHTML = `
+    <div style="font-weight:600;color:var(--green);margin-bottom:.15rem;">\u{1f4d7} ${s.name}</div>
+    <div class="card-desc">${s.desc}</div>
+    <div class="card-tags">${s.agents.map(a => `<span class="tag" style="font-size:.63rem;">${a}</span>`).join('')}</div>
+  `;
+  skillGrid.appendChild(card);
+});
+
+// Instruction grid
+const instrGrid = document.getElementById('instrGrid');
+INSTRUCTIONS.forEach(i => {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.tabIndex = 0;
+  card.dataset.detail = 'instr-' + i.name;
+  card.innerHTML = `
+    <div style="font-weight:600;color:var(--purple);margin-bottom:.15rem;">\u{1f4dc} ${i.name}</div>
+    <div style="font-size:.7rem;color:var(--text-muted);font-family:monospace;margin-bottom:.25rem;">applyTo: ${i.applyTo}</div>
+    <div class="card-desc">${i.desc}</div>
+  `;
+  instrGrid.appendChild(card);
+});
+
+// Prompt grid
+const promptGrid = document.getElementById('promptGrid');
+PROMPTS.forEach(p => {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.tabIndex = 0;
+  card.dataset.detail = 'prompt-' + p.name;
+  card.innerHTML = `
+    <div style="font-weight:600;color:var(--pink);margin-bottom:.15rem;">\u{1f4ac} /${p.name}</div>
+    <div class="card-desc">${p.desc}</div>
+    <div class="card-tags">
+      <span class="tag pink" style="font-size:.63rem;">${p.workflow}</span>
+      <span class="tag" style="font-size:.63rem;">${p.category}</span>
+    </div>
+  `;
+  promptGrid.appendChild(card);
+});
+</script>
+</body>
+</html>

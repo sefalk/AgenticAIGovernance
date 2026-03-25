@@ -17,6 +17,7 @@ tools:
   - read/problems
   - todo
   - execute/runTests
+  - execute/runTask
   - execute/testFailure
   - pylance-mcp-server/pylanceFileSyntaxErrors
   - pylance-mcp-server/pylanceImports
@@ -83,6 +84,20 @@ Consult these skills when relevant to the task:
 | Mocks internals, asserts private vars | Implementation coupling |
 | Uses `random` without `seed()` | Flaky |
 | `@pytest.mark.skip` without `reason=` | Hidden work |
+
+## Testing Scope
+
+**Budget:** Zero test runs. You are a reviewer, not an executor.
+
+**Workflow:**
+1. Read `.github/test-log.json` — understand which tests passed, when, and
+   their runtime
+2. Read the test source code to evaluate quality
+3. Use `execute/testFailure` to analyze failure modes if needed
+4. **Never** run tests yourself — the test-writer already confirmed failure,
+   the implementer confirmed passing
+
+**Rule:** Your verdict is based on code review, not execution.
 
 ## Return Format
 

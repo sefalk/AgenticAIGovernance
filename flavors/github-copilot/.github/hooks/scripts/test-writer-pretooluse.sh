@@ -4,13 +4,21 @@
 # TDD PHASE ISOLATION (HARD — blocks test-writer from editing production code)
 #
 # The Red phase must only create/edit test files. If the test-writer modifies
-# production code under mpusage/, the tests may pass immediately and the
+# production code under SRC_DIR/, the tests may pass immediately and the
 # Green phase becomes a no-op — violating the most fundamental TDD invariant.
 #
 # Fires only when the test-writer agent is active.
 # Requires chat.useCustomAgentHooks = true in .vscode/settings.json.
 
 set -uo pipefail
+
+# Load project config
+SRC_DIR="src"
+_conf=".github/af-env.conf"
+if [ -f "$_conf" ]; then
+    _val=$(grep -E '^SRC_DIR=' "$_conf" | head -1 | cut -d= -f2-)
+    [ -n "$_val" ] && SRC_DIR="$_val"
+fi
 
 PYTHON=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo "")
 
@@ -45,10 +53,10 @@ fi
 
 # Resolve and check against production source directory
 resolved=$(realpath -m "$file_path" 2>/dev/null || echo "$file_path")
-prod_root=$(realpath -m "mpusage" 2>/dev/null || echo "mpusage")
+prod_root=$(realpath -m "${SRC_DIR}" 2>/dev/null || echo "${SRC_DIR}")
 
 if [[ "$resolved" == "$prod_root"* ]]; then
-    echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "TDD phase isolation: test-writer cannot modify production code under mpusage/. Only test files should be created or edited during the Red phase."}}'
+    echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "TDD phase isolation: test-writer cannot modify production code under '"${SRC_DIR}"'/. Only test files should be created or edited during the Red phase."}}'
     exit 0
 fi
 

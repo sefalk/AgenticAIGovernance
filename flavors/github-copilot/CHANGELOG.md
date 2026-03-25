@@ -16,6 +16,166 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.17.0] -- 2026-03-24
+
+### Changed
+
+- **README restructured for team distribution** — Two-tier layout: quick-start
+  for newcomers (Why Use This → Prerequisites → Quick Setup → Your First Week)
+  and collapsible deep-dive sections (File Map, Model Prioritization, Tool
+  Configuration). Value proposition section added. Prerequisites moved before
+  Quick Setup. "Adopting Incrementally" promoted to "Your First Week" with
+  table format. Links bar with version badge, Changelog, and Troubleshooting.
+- **Scope-aware test execution** — Agents now follow per-agent test budgets
+  (implementer: 0× all-scope, test-writer: Red-phase only, refactorer: 1× all).
+  Persistent `.github/test-log.json` tracks cumulative test results across
+  sessions. Stop hooks invoke the canonical test runner script instead of raw
+  pytest. Git-based change detection replaced hardcoded time limits for
+  freshness checks.
+- **Pure bash hook scripts** — Removed python3 dependency from all `.sh` hook
+  scripts (`run-tests.sh`, `session-context.sh`, `implementer-stop.sh`,
+  `refactorer-stop.sh`). Reimplemented JSON merging and date formatting with
+  sed, tr, date, and printf.
+
+### Fixed
+
+- **Stop hooks now use canonical test runner** — `implementer-stop` and
+  `refactorer-stop` hooks invoke `run-tests.ps1/.sh` instead of raw pytest,
+  ensuring test-log.json is always populated (P0).
+- **Implementer test budget contradiction** — Resolved conflict between
+  "1× all" budget and "Do NOT run all" instruction; standardised on 0× all
+  (P1).
+- **git diff missing HEAD** — Added `HEAD` to all `git diff` commands in hook
+  scripts to correctly detect staged and committed changes (P2).
+- **Stale pytest commands in testing instructions** — Replaced raw pytest
+  invocations with canonical runner references (P3).
+- **Error summary chrome stripping** — Stop hooks now strip pytest `===` banner
+  lines from error summaries injected into agent context (R1).
+- **Known-schema comment** — Expanded documentation of sed JSON parsing safety
+  assumptions in `run-tests.sh` (R3).
+
+---
+
+## [1.16.0] -- 2026-03-16
+
+### Added
+
+- **Idea 46 -- Task-Based Test Execution System** -- Back-ported from live
+  project work. Agents now use pre-defined VS Code Tasks (`execute/runTask`)
+  instead of calling pytest directly.
+
+  - **Canonical test runner** -- `run-tests.ps1/.sh` wraps pytest with scope
+    selection, coverage, fail-fast, output file, and PySpark stderr suppression.
+  - **VS Code tasks** -- 12 test tasks, 5 git tasks, 3 lint tasks defined in
+    `.vscode/tasks.json`. Agents invoke via `execute/runTask`.
+  - **VS Code settings** -- `.vscode/settings.json` enables hook system
+    (`chat.useCustomAgentHooks: true`) and pytest integration.
+  - **Tool sets** -- `.vscode/tool-sets.jsonc` defines reusable tool groups
+    (`reader`, `dev`, `python-analysis`, `python-environment`, `notebooks`).
+  - **Agent tool grants** -- `execute/runTask` added to coordinator,
+    implementer, refactorer, code-critic, test-critic, test-writer, documenter,
+    planner. Implementer also gets `execute/createAndRunTask`.
+  - **Testing instruction** -- New "Agent Test Execution" section with task
+    table, phase-specific strategy, and 7 rules.
+
+  **Files created (5):** `.vscode/settings.json`, `tasks.json`,
+  `tool-sets.jsonc`, `scripts/run-tests.ps1`, `.sh`
+  **Files modified (10):** 8 agent `.agent.md` files, `testing.instructions.md`,
+  `.af-manifest`
+
+- **Idea 41 -- Coordinator Delegation Enforcement Hooks** -- Three-layer
+  safeguard preventing the coordinator from directly modifying files.
+
+  **Background:** During live project work, the coordinator bypassed all
+  workflows and directly edited 4 files. Investigation revealed the "never
+  modify files" Cardinal Rule was enforced only by prose instruction -- no
+  programmatic guard existed.
+
+  - **Layer 1: PreToolUse hook (HARD deny)** -- `coordinator-pretooluse.ps1/.sh`
+    blocks `editFiles`, `createFile`, `createDirectory` tool calls. Allows
+    `runInTerminal` and all read/search tools. Deny message redirects to the
+    correct subagent and workflow.
+  - **Layer 2: PostToolUse hook (detective advisory)** --
+    `coordinator-posttooluse.ps1/.sh` fires after terminal commands. Runs
+    `git status --porcelain -- mpusage/ tests/` to detect indirect file writes
+    via terminal escape hatch (`Set-Content`, `echo >`, `sed -i`). Injects
+    warning via `additionalContext`.
+  - **Layer 3: Prose (existing)** -- Cardinal Rule #1 reinforced by Layer 1
+    deny messages.
+
+  Scripts follow the established agent-scoped hook pattern from Idea 39
+  (test-writer PreToolUse, refactorer PreToolUse). Coordinator is the 5th
+  agent with scoped hooks.
+
+  **Files created (4):** `coordinator-pretooluse.ps1`, `.sh`,
+  `coordinator-posttooluse.ps1`, `.sh`
+  **Files modified (1):** `coordinator.agent.md` (hooks frontmatter)
+
+- **Idea 43 -- Remaining Hook Iteration 3 (37a + 39-H3)** -- Completed the
+  two remaining low-priority hook tasks.
+
+  - **37a: Provenance marker check in scan-secrets** -- Extended
+    `scan-secrets.ps1/.sh` with a SOFT advisory that checks `.py` files for
+    `copilot:generated|modified` markers in the first 5 lines. Emits JSON
+    warning; does not block.
+  - **39-H3: Researcher PreToolUse credential-URL scan** -- Created
+    `researcher-pretooluse.ps1/.sh`. Scans `web/fetch` URLs for basic auth,
+    token query params, credential fragments. WARN advisory only — allows
+    fetch, shows sanitized URL. Researcher is now the 6th agent with scoped
+    hooks.
+
+  **Files created (2):** `researcher-pretooluse.ps1`, `.sh`
+  **Files modified (4):** `scan-secrets.ps1`, `.sh`, `researcher.agent.md`,
+  `.af-manifest`
+
+### Changed
+
+- **Open task re-evaluation** -- Reviewed all remaining open items from
+  Ideas 14, 37, 39.
+  - Dropped **37b** (branch advisory in SessionStart) -- superseded by 3
+    existing layers of branch awareness.
+  - Corrected **39-H8** (planner Stop hook) -- the Stop hook itself
+    remains infeasible (conversational output, not hookable), but the
+    original drop reasoning was wrong. Investigation revealed a latent
+    plan persistence gap, resolved by Idea 42.
+  - Retained **39-P4** (PreCompact checkpoint) at MEDIUM priority.
+  - Retained **37a** (provenance in scan-secrets) and **39-H3** (researcher
+    URL scan) at LOW priority.
+
+### Fixed
+
+- **Idea 42 -- Plan File Persistence Gap** -- Coordinator Step 1 instructed
+  "persist as {type}-{date}-{slug}.md" but neither the coordinator (no
+  `edit/*` tools, PreToolUse hook denies) nor the planner (read-only) could
+  actually write the file. Latent contradiction since Idea 35, masked until
+  Idea 41 added programmatic enforcement.
+  - Coordinator Step 1 now delegates plan file creation to the **documenter**.
+  - Quick Fix investigation doc creation also delegated to documenter.
+  - Documenter gained Responsibility #1 "Persist plan files when delegated";
+    existing responsibilities renumbered #2--#6.
+  - **Files modified (2):** `coordinator.agent.md`, `documenter.agent.md`
+
+- **Idea 44 -- Coordinator PreToolUse False-Positive Fix** -- The `file`
+  pattern in the coordinator hook matched read-only tools (`read_file`,
+  `readFile`, `fileSearch`) causing false-positive denials. Added a
+  read-only tool allowlist (`read|search|find|list|get|problems`) that
+  exits early before the `file` catch-all. 14/14 tool scenarios pass.
+  - **Files modified (2):** `coordinator-pretooluse.ps1`, `.sh`
+
+- **Idea 45 -- Hook-Agent Alignment Audit** -- Cross-referenced all 11 agent
+  tool definitions against hook enforcement, workflow semantics, and quality
+  gates.
+  - Removed `edit/createFile` + `edit/createDirectory` from refactorer tools
+    (hook already blocks them — model was wasting turns).
+  - Standardized researcher hook YAML format to match all other agents.
+  - Added provenance marker check to `implementer-stop` as a HARD gate
+    (quality-gates.instructions.md said HARD but only SOFT WARN existed).
+  - HARD gate hook coverage improved from 56% (9/16) to 69% (11/16).
+  - **Files modified (4):** `refactorer.agent.md`, `researcher.agent.md`,
+    `implementer-stop.ps1`, `.sh`
+
+---
+
 ## [1.15.0] -- 2026-03-11
 
 ### Changed

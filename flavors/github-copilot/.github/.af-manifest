@@ -14,8 +14,18 @@
 # Agents
 agents/
 
+# Project configuration
+af-env.conf                                              [customizable]
+
 # Hooks
 hooks/
+hooks/scripts/researcher-pretooluse.ps1
+hooks/scripts/researcher-pretooluse.sh
+
+# Scripts (canonical test runner)
+scripts/
+scripts/run-tests.ps1                                   [customizable]
+scripts/run-tests.sh                                     [customizable]
 
 # Instructions
 instructions/
@@ -50,3 +60,5 @@ instructions/architecture.instructions.md                [customizable]
 
 # VS Code files (deployed to .vscode/ instead of .github/)
 toolsets.jsonc                                           [optional, vscode]
+tasks.json                                               [customizable, vscode]
+settings.json                                            [customizable, vscode]

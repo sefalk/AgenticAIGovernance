@@ -17,6 +17,7 @@ tools:
   - read/problems
   - todo
   - execute/runTests
+  - execute/runTask
   - execute/testFailure
   - edit/editFiles
   - edit/createFile
@@ -114,6 +115,21 @@ Return format when blocked:
 ```
 
 Consult the **human-escalation** skill for the full halt protocol.
+
+## Testing Scope
+
+**Budget:** 1–3 targeted runs in domain scope only.
+
+**Workflow:**
+1. Write tests → run with `-Filter {test_name}` or `-File {test_file}` via
+   `run_in_terminal`, using fail-fast
+2. Verify tests FAIL (Red phase) for the right reason
+3. **Never** run `tests: all` or `tests: adapters` (unless writing adapter tests)
+4. After confirming failure, check `.github/test-log.json` — if domain tests
+   were green before your changes, note this in your return
+
+**Rule:** Use `run_task` for `tests: domain + fail-fast`. Use `run_in_terminal`
+only when `-Filter` or `-File` is needed.
 
 ## Return Format
 

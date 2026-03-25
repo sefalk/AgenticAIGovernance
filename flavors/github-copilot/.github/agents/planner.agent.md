@@ -16,8 +16,9 @@ tools:
   - read/readFile
   - read/problems
   - todo
+  - execute/runTask
+  - execute/runTests
   - execute/testFailure
-  - execute/runInTerminal
 ---
 
 # Planner Agent (Worker)

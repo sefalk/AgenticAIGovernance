@@ -880,9 +880,9 @@ Each layer catches failures the previous layer missed:
 
 ### Remaining from Original Analysis
 
-The 2 minor hook extensions identified in the initial discussion remain deferred:
-- **Provenance marker check** in scan-secrets — ⬜ TODO (trivial, low priority)
-- **Branch advisory** in session-context — ⬜ TODO (pure advisory)
+The 2 minor hook extensions identified in the initial discussion:
+- **Provenance marker check** in scan-secrets — ✅ DONE (Idea 37a, 2026-03-17)
+- **Branch advisory** in session-context — Dropped (37b, superseded by 3 layers of branch awareness)
 
 ## 38) ✅ DONE — Autonomous Local Git Execution (2026-03-10)
 
@@ -1071,10 +1071,11 @@ field is present in both AF source and project copies.
 
 ```
 Iteration 2:  ✅ DONE (see below)
-Iteration 3:  P4 (PreCompact checkpoint) → verify across 2+ workflows
-              H3 (researcher:PreToolUse credential-URL scan)
+Iteration 3:  ✅ H3 DONE (researcher:PreToolUse credential-URL scan — 2026-03-17)
+              P4 (PreCompact checkpoint) → verify across 2+ workflows
 Future:       P2a (SubagentStart) → only after P4 proves stable
-              H8 (planner:Stop plan quality gate) — evaluate
+              H8 (planner:Stop plan quality gate) — infeasible, but underlying
+                  gap resolved by Idea 42
 ```
 
 ### What Was Implemented (Iteration 2 — P1a, H1–H5, P1c)
@@ -1199,3 +1200,334 @@ Comprehensive overhaul of `deploy.ps1` and `deploy.sh` based on peer review
 - **Idea 38**: Autonomous git unaffected — hooks enforce phase gates only.
 - **Idea 39**: Agent-scoped hooks unaffected — deployed via manifest directory
   traversal like all other agent files.
+
+---
+
+## 41) ✅ DONE — Coordinator Delegation Enforcement Hooks (2026-03-16)
+
+During live project work, the coordinator directly modified 4 files (2 source
+files) without following any workflow — no planner, no test-writer, no TDD
+cycle. Investigation revealed a multi-layered enforcement gap:
+
+- **Tool list**: `tools:` frontmatter omitted `edit/*` but included
+  `execute/runInTerminal` (terminal escape hatch for file writes).
+- **Global hooks**: `block-dangerous.ps1` only blocks git/disk ops, not file edits.
+- **Agent-scoped hooks**: Coordinator had **zero** scoped hooks (unlike
+  test-writer, refactorer which already had PreToolUse enforcement).
+- **Prose instructions**: Cardinal Rule #1 ("never create/modify files") was
+  the only constraint — a SOFT gate an LLM can ignore under context pressure.
+
+The existing hook infrastructure (test-writer `PreToolUse`, refactorer
+`PreToolUse`) provided the exact pattern needed but had never been applied
+to the coordinator.
+
+### Solution: Three-Layer Coordinator Safeguard
+
+| Layer | Type | Hook | What It Does |
+|---|---|---|---|
+| **1. PreToolUse** | HARD (deny) | `coordinator-pretooluse` | Blocks `editFiles`, `createFile`, `createDirectory` tool calls. Allows `runInTerminal`, `createTerminal`, and all read/search tools. Deny message redirects to correct subagent. |
+| **2. PostToolUse** | Detective (advisory) | `coordinator-posttooluse` | Fires only after terminal commands. Runs `git status --porcelain -- mpusage/ tests/` (scoped, fast). If source files modified, injects `additionalContext` warning about delegation violation. Suggests `git checkout -- <file>` to revert. |
+| **3. Prose** | SOFT (existing) | Cardinal Rule #1 | Already present in coordinator.agent.md. Reinforced by the deny message from Layer 1. |
+
+### Why Three Layers
+
+- **PreToolUse** prevents the most common failure mode (coordinator uses edit
+  tools directly). This is the highest-ROI gate.
+- **PostToolUse on terminal** catches the escape hatch (writing files via
+  `Set-Content`, `echo >`, `sed -i`, python one-liners). Stateless — just
+  checks `git status` on two directories. Fast and efficient.
+- **Prose** serves as the "soft start reminder" — the coordinator reads its
+  Cardinal Rules at session start, and the deny message reinforces if it forgets.
+
+### Design Decisions
+
+1. **PreToolUse blocks ALL file-modifying tools**, not just mpusage/ — the
+   coordinator should not edit ANY file, anywhere. Unlike test-writer (which
+   blocks only production code), coordinator has a blanket prohibition.
+2. **PostToolUse scoped to `mpusage/` and `tests/` only** — checking the
+   entire repo would false-positive on AF files, docs, etc. Source directories
+   are the critical assets.
+3. **PostToolUse uses `additionalContext`** (not `deny`) — the action already
+   happened, denial is impossible. Warning via context injection is the right
+   detective response.
+4. **`createTerminal` explicitly allowed** in PreToolUse — it's not a file
+   operation, just terminal session creation.
+
+### What Was Done
+
+- Created `hooks/scripts/coordinator-pretooluse.ps1` + `.sh`
+- Created `hooks/scripts/coordinator-posttooluse.ps1` + `.sh`
+- Updated `agents/coordinator.agent.md` — added `hooks:` section with
+  `PreToolUse` and `PostToolUse` entries
+- Deployed via `deploy.ps1` — 4 scripts created, coordinator.agent.md updated
+- Verified: PreToolUse correctly denies `editFiles`, `createFile`; allows
+  `runInTerminal`. PostToolUse correctly returns `{}` on clean working tree.
+
+**Files created (4):** `coordinator-pretooluse.ps1`, `coordinator-pretooluse.sh`,
+`coordinator-posttooluse.ps1`, `coordinator-posttooluse.sh`
+**Files modified (1):** `coordinator.agent.md`
+
+### Relationship to Other Ideas
+
+- **Idea 37**: Closes the coordinator delegation gap identified in the
+  process gates discussion. Hooks are the correct enforcement layer for
+  tool-level constraints (confirmed by both planner and code-critic peers).
+- **Idea 38**: Autonomous git execution unaffected — `runInTerminal` remains
+  permitted for git commands.
+- **Idea 39**: Extends the agent-scoped hook pattern to the 5th agent
+  (coordinator joins test-writer, refactorer, implementer, documenter).
+
+---
+
+## Open Tasks — Re-Evaluation (2026-03-17)
+
+Comprehensive review of all remaining open items with priority assessment.
+
+### Active TODO
+
+| Priority | ID | Item | Rationale |
+|---|---|---|---|
+| **MEDIUM** | 39-P4 | `coordinator:PreCompact` checkpoint hook | Context compaction is a real risk. Coordinator has Context Budget Awareness (Idea 15) but no programmatic safety net. PreCompact could auto-checkpoint to WIP.md before compaction erases workflow state. Defer until 2+ full workflows completed. |
+| ~~LOW~~ | ~~37a~~ | ~~Provenance marker check in `scan-secrets` PostToolUse~~ | ✅ **DONE** (2026-03-17) — SOFT advisory added to `scan-secrets.ps1/.sh`. Checks first 5 lines of `.py` files for `copilot:generated|modified` marker. |
+| ~~LOW~~ | ~~39-H3~~ | ~~`researcher:PreToolUse` credential-URL scan~~ | ✅ **DONE** (2026-03-17) — Created `researcher-pretooluse.ps1/.sh`. Scans fetch URLs for basic auth, token query params, credential fragments. WARN advisory (allows fetch, logs sanitized URL). |
+
+### Dropped
+
+| ID | Item | Reason |
+|---|---|---|
+| **37b** | Branch advisory in `session-context` SessionStart | **Superseded** — coordinator Cardinal Rule #2 (branch before writing), Step 0 convention discovery, and compliance-checker pre-flight (Step 0b) all cover branch awareness. Adding a SessionStart advisory is triple-redundant. |
+
+### Corrected (from previous drop)
+
+| ID | Item | Correction |
+|---|---|---|
+| **39-H8** | `planner:Stop` plan quality gate | **Original drop reasoning was wrong.** The justification stated "coordinator writes the file" — but the coordinator has no `edit/*` tools and the PreToolUse hook (Idea 41) now hard-blocks edit attempts. The planner also has no write tools. **The real gap was: who persists the plan file?** This was a latent design contradiction — Step 1 said "persist as..." but neither the planner nor the coordinator had write access. **Resolved by Idea 42: documenter now persists the plan file.** The planner Stop hook itself remains infeasible (conversational output, not file artifact) — that assessment was correct. |
+
+### Deferred (unchanged)
+
+| ID | Item | Precondition |
+|---|---|---|
+| **14** | Custom Workflow Definitions | Existing workflows exercised 3+ times |
+
+### Acknowledged Gaps (no AF action possible)
+
+| ID | Item | Status |
+|---|---|---|
+| **G-08** | Credential scoping (R-SD-21/22) | Infrastructure limitation — VS Code does not support per-agent credential scoping. Documented in MANIFEST §7. |
+
+---
+
+## 42) ✅ DONE — Plan File Persistence Gap (2026-03-17)
+
+Discovered via Idea 41 (coordinator hooks): the coordinator's Step 1 instructed
+"persist as {type}-{date}-{slug}.md" but the coordinator has:
+- No `edit/*` tools in its `tools:` frontmatter
+- A PreToolUse hook (Idea 41) that hard-denies all edit/create tool calls
+
+The planner is also read-only (no `edit/*` tools). Result: **no agent in the
+Step 1 chain could actually write the plan file**. This was a latent
+contradiction that existed since Idea 35 (plan naming) but was masked because
+the coordinator's tool restrictions were not enforced programmatically until
+Idea 41.
+
+### Solution
+
+Delegate plan file creation to the **documenter** agent. The documenter already:
+- Has `edit/createFile` and `edit/createDirectory` tools
+- Is responsible for finalising the plan file (Responsibility #2, formerly #1)
+- Writes workflow artifacts (YAML logs, retro snippets)
+
+Adding plan file creation as Responsibility #1 is a natural extension.
+
+### What Was Done
+
+- Updated `coordinator.agent.md` Step 1: after receiving planner output,
+  invoke the documenter to persist the plan file (instead of writing directly)
+- Updated `documenter.agent.md`: added Responsibility #1 "Persist plan files
+  when delegated", renumbered existing responsibilities (#1→#2 through #5→#6)
+- Corrected 39-H8 assessment in Ideas.md Open Tasks section
+
+**Files modified (2):** `coordinator.agent.md`, `documenter.agent.md`
+
+---
+
+## 43) ✅ DONE — Remaining Hook Iteration 3 (37a + 39-H3) (2026-03-17)
+
+Implemented the two remaining low-priority hook tasks from the open tasks list.
+
+### 37a: Provenance Marker Check in scan-secrets (SOFT advisory)
+
+Extended `scan-secrets.ps1` and `.sh` to check Python files for provenance markers after the secret scan passes. If a `.py` file lacks `copilot:generated` or `copilot:modified` in its first 5 lines, emits a WARN advisory (JSON with `gate: provenance-check`). Does NOT block (exit 0).
+
+This is a secondary, earlier-stage check. The documenter post-flight remains the HARD gate for provenance compliance.
+
+### 39-H3: Researcher PreToolUse Credential-URL Scan (WARN advisory)
+
+Created `researcher-pretooluse.ps1` and `.sh` — agent-scoped PreToolUse hooks for the researcher agent. Scans URLs passed to `web/fetch` for embedded credentials:
+
+| Pattern | Example |
+|---|---|
+| Basic auth | `https://user:pass@host.com` |
+| Token query param | `?token=abc123`, `?api_key=secret` |
+| Authorization query param | `?Authorization=Bearer xyz` |
+| Credential fragment | `#access_token=xyz` |
+
+When credentials detected: emits `permissionDecision: allow` with WARNING message and sanitized URL (credentials replaced with `***`). Does not block — researcher must sanitize output per existing Critical Constraints.
+
+Researcher is now the 6th agent with scoped hooks (joining test-writer, refactorer, implementer, documenter, coordinator).
+
+### What Was Done
+
+- Modified `scan-secrets.ps1` and `.sh` — appended provenance check after secret scan
+- Created `researcher-pretooluse.ps1` and `.sh` — credential-URL scan
+- Updated `researcher.agent.md` frontmatter — added `hooks: PreToolUse` entries
+- Updated `.af-manifest` — registered 2 new hook scripts
+
+**Files created (2):** `researcher-pretooluse.ps1`, `.sh`
+**Files modified (4):** `scan-secrets.ps1`, `.sh`, `researcher.agent.md`, `.af-manifest`
+
+---
+
+## 44) ✅ DONE — Coordinator PreToolUse False-Positive Fix (2026-03-17)
+
+Bug discovered during live coordinator usage: the `coordinator-pretooluse` hook
+(Idea 41) used `file` as a catch-all pattern to match file-modifying tools
+(`editFiles`, `createFile`). But this also matched read-only tools like
+`read_file`, `readFile`, `fileSearch` — causing false-positive denials for
+the coordinator's legitimate read operations.
+
+The coordinator was forced to work around the bug by using `grep_search` and
+`semantic_search` instead of `read_file`, or delegating file reads to subagents.
+
+### Root Cause
+
+The filter logic:
+```
+$toolName -notmatch 'edit|create|write|file'
+```
+
+The `file` pattern matches any tool name containing "file" — including `readFile`,
+`fileSearch`, `read_file`. The terminal allowlist (`terminal|Terminal`) prevented
+`createTerminal` from being blocked, but no read-tool allowlist existed.
+
+### Fix
+
+Added an early-exit allowlist before the file-modification pattern:
+
+```powershell
+# Allow read-only and search tools unconditionally
+if ($toolName -match 'read|search|find|list|get|problems') {
+    Write-Output '{}'
+    exit 0
+}
+```
+
+Now `readFile` matches `read` and exits early (allow), while `editFiles`
+only matches `edit` and proceeds to the deny block.
+
+### Test Matrix (14/14 PASS)
+
+| Tool | Expected | Got |
+|---|---|---|
+| `read_file` | allow | allow |
+| `readFile` | allow | allow |
+| `fileSearch` | allow | allow |
+| `search/fileSearch` | allow | allow |
+| `listDirectory` | allow | allow |
+| `getErrors` | allow | allow |
+| `semantic_search` | allow | allow |
+| `grep_search` | allow | allow |
+| `runInTerminal` | allow | allow |
+| `createTerminal` | allow | allow |
+| `runSubagent` | allow | allow |
+| `editFiles` | deny | deny |
+| `createFile` | deny | deny |
+| `replace_string_in_file` | deny | deny |
+
+**Files modified (2):** `coordinator-pretooluse.ps1`, `.sh` (both AF source and deployed copies)
+
+---
+
+## 45) ✅ DONE — Hook-Agent Alignment Audit (2026-03-17)
+
+Cross-referenced all 11 agent tool definitions against hook enforcement rules,
+workflow semantics, and quality gate specifications. Found 4 discrepancies and
+3 actionable improvements.
+
+### Findings
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| F1 | MEDIUM | Refactorer has `edit/createFile` + `edit/createDirectory` in tools but PreToolUse hook HARD-denies them → model wastes turns trying | Removed from tools list; PreToolUse hook kept as defense-in-depth |
+| F2 | LOW | Code-critic and planner have `execute/runInTerminal` despite "read-only" description | Accepted — they need it for `pytest`, `ruff`, `git log`. Global `block-dangerous` is sufficient |
+| F3 | INFO | Researcher hooks used flat list YAML format, all other agents use nested format | Standardized to nested `PreToolUse:` format |
+| F4 | MEDIUM | Quality gates say implementer provenance markers are HARD, but `scan-secrets` only emits SOFT WARN | Added provenance check to `implementer-stop` as HARD gate |
+
+### Coverage Metrics
+
+- HARD quality gates with hook enforcement: **11 of 16** (69%, up from 9/16 = 56%)
+- HARD quality gates prose-only: **5 of 16** (31%)
+- Remaining prose-only HARD gates: syntax checks (3 agents), coverage threshold, compliance-checker branch guard
+
+### What Was Done
+
+1. **Removed `edit/createFile` + `edit/createDirectory`** from `refactorer.agent.md` tools list
+2. **Standardized researcher hook YAML** in `researcher.agent.md` to nested format
+3. **Added provenance marker check** to `implementer-stop.ps1` and `.sh`:
+   - After tests pass, queries `git diff` for added/modified `.py` files
+   - Reads first 5 lines, blocks if `copilot:generated|modified` marker missing
+   - HARD gate (decision: block) — aligns with quality-gates.instructions.md
+
+**Files modified (4):** `refactorer.agent.md`, `researcher.agent.md`, `implementer-stop.ps1`, `.sh`
+
+---
+
+## 46) ✅ DONE — Task-Based Test Execution System (2026-03-18)
+
+Back-ported the task-based test execution system that evolved during live
+project work. Agents now use pre-defined VS Code Tasks (`execute/runTask`)
+instead of calling pytest directly, ensuring consistent test execution.
+
+### Motivation
+
+During the first real project workflow, the testing instruction's "use pytest"
+guidance caused inconsistencies: agents used different pytest flags, missed
+coverage args, or triggered terminal auto-approve prompts. A canonical test
+runner script + VS Code Tasks solved this in the project copy. This back-port
+brings it to the AF source.
+
+### Components
+
+| Component | Files | Purpose |
+|---|---|---|
+| **Test runner scripts** | `scripts/run-tests.ps1`, `.sh` | Canonical pytest wrapper with scope, coverage, fail-fast, output file support |
+| **VS Code tasks** | `.vscode/tasks.json` | 12 test tasks + 5 git tasks + 3 lint tasks — agents invoke via `runTask` |
+| **VS Code settings** | `.vscode/settings.json` | `chat.useCustomAgentHooks: true` enables hook system; pytest config |
+| **Tool sets** | `.vscode/tool-sets.jsonc` | Reusable tool group definitions for future agent simplification |
+| **Agent tool grants** | 8 agents + 1 enhanced | `execute/runTask` added to 8 agents; implementer also gets `createAndRunTask` |
+| **Testing instruction** | `testing.instructions.md` | New "Agent Test Execution" section — task table, phase strategy, rules |
+| **Manifest** | `.af-manifest` | Scripts and .vscode entries registered with annotations |
+
+### Agent Tool Changes
+
+| Agent | Added |
+|---|---|
+| coordinator | `execute/runTask` |
+| implementer | `execute/runTask`, `execute/createAndRunTask` |
+| refactorer | `execute/runTask` |
+| code-critic | `execute/runTask` |
+| test-critic | `execute/runTask` |
+| documenter | `execute/runTask` |
+| planner | `execute/runTask` |
+| test-writer | `execute/runTask` |
+
+### Customization Points
+
+- `run-tests.ps1/.sh`: `$covPackage` / `COV_PACKAGE` variable (default: `src`)
+- `tasks.json`: lint targets default to `.` (project changes to specific dirs)
+- `settings.json`: project adds own Jupyter/auto-approve settings
+
+**Files created (5):** `.vscode/settings.json`, `.vscode/tasks.json`,
+`.vscode/tool-sets.jsonc`, `scripts/run-tests.ps1`, `scripts/run-tests.sh`
+**Files modified (10):** 8 agent `.agent.md` files, `testing.instructions.md`,
+`.af-manifest`

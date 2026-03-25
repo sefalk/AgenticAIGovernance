@@ -14,6 +14,7 @@ tools:
   - read/problems
   - todo
   - execute/runTests
+  - execute/runTask
   - execute/testFailure
   - execute/runInTerminal
   - execute/getTerminalOutput
@@ -28,6 +29,15 @@ agents:
   - documenter
   - researcher
   - compliance-checker
+hooks:
+  PreToolUse:
+    - type: command
+      command: 'bash .github/hooks/scripts/coordinator-pretooluse.sh'
+      windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\coordinator-pretooluse.ps1'
+  PostToolUse:
+    - type: command
+      command: 'bash .github/hooks/scripts/coordinator-posttooluse.sh'
+      windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\coordinator-posttooluse.ps1'
 ---
 
 # Coordinator Agent
@@ -262,8 +272,10 @@ coordinator-specific **phase checkpoints**.
 
 **Trivial Fix:** Single commit `[agent:coordinator] trivial fix: {description}`.
 
-**Quick Fix:** Investigation commit + implementation commit:
-1. `[agent:planner] investigation doc`
+**Quick Fix:** After planner returns investigation output, delegate file
+creation to the **documenter** (same pattern as Step 1 plan persistence).
+Then commit:
+1. `git add {investigation_file}` then `git commit -m "[agent:planner] investigation doc"`
 2. `[agent:implementer] fix: {description}`
 
 **After final commit:** Narrate to the human:
@@ -295,10 +307,15 @@ Use the **planner** agent as a subagent to decompose the user's request:
 > Follow the structure in `.github/templates/PLAN.md`.
 > Include acceptance criteria, file list, and test requirements: {user_request}"
 
-**After receiving the plan:** Persist as `{type}-{YYYY-MM-DD}-{slug}.md` (using today's date)
-in the plan directory (Step 0). Type = `feat`/`fix`/`refactor`/`adr`/`review`.
+**After receiving the plan:** Delegate file creation to the **documenter** agent:
+
+> "Persist the following plan as `{type}-{YYYY-MM-DD}-{slug}.md` in the plan
+> directory (`{plan_dir}`). Create the directory if needed. Content:
+>
+> {planner_output}"
+
+where: Type = `feat`/`fix`/`refactor`/`adr`/`review`.
 Slug = branch name slug (e.g., `agent/fix-alignment-nulls` → `fix-alignment-nulls`).
-Create the directory if needed.
 
 Commit: `git add {plan_file}` then `git commit -m "[agent:planner] implementation plan"`.
 

@@ -15,6 +15,11 @@ tools:
   - read/problems
   - todo
   - web/fetch
+hooks:
+  PreToolUse:
+    - type: command
+      command: 'bash .github/hooks/scripts/researcher-pretooluse.sh'
+      windows: 'powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/researcher-pretooluse.ps1'
 ---
 
 # Researcher Agent
