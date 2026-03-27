@@ -102,6 +102,80 @@ sops --decrypt config.enc.yaml | app --config -
 - `.env.example` (committed) with placeholder values.
 - Local vault or Doppler/1Password CLI for team sync.
 
+### Databricks Secret Scopes
+
+Databricks has a built-in secrets service accessed via `dbutils.secrets`.
+
+**Creating and managing scopes (CLI):**
+```bash
+# Create a scope (backed by Databricks or Azure Key Vault)
+databricks secrets create-scope my-scope
+
+# Store a secret
+databricks secrets put-secret my-scope api-key --string-value "..."
+
+# List scopes
+databricks secrets list-scopes
+
+# List secrets in a scope (values are redacted)
+databricks secrets list-secrets my-scope
+```
+
+**Accessing secrets in notebooks/jobs:**
+```python
+# Read a secret value (returns string)
+token = dbutils.secrets.get(scope="my-scope", key="api-key")
+
+# List available keys (not values)
+dbutils.secrets.list("my-scope")
+```
+
+**Accessing secrets via Python SDK:**
+```python
+from databricks.sdk import WorkspaceClient
+
+w = WorkspaceClient()
+for scope in w.secrets.list_scopes():
+    print(scope.name)
+```
+
+**Key rules for Databricks secrets:**
+- Secret values are **redacted** in notebook output (`[REDACTED]`)
+- ACLs control which users/groups can READ or MANAGE each scope
+- Azure-backed scopes delegate to Azure Key Vault
+- Databricks-backed scopes store secrets internally
+- Secret scopes are workspace-scoped, not catalog-scoped
+
+**ACL management:**
+```bash
+# Grant READ access to a group
+databricks secrets put-acl my-scope data-engineers READ
+
+# Grant MANAGE access
+databricks secrets put-acl my-scope admins MANAGE
+```
+
+### Databricks `.databrickscfg` Profiles
+
+The `~/.databrickscfg` file stores workspace connection profiles.
+**This is NOT a secret store** — it's auth configuration:
+
+```ini
+[DEFAULT]
+host = https://adb-xxx.azuredatabricks.net
+auth_type = databricks-cli
+
+[PROD]
+host = https://adb-yyy.azuredatabricks.net
+token = dapi...
+```
+
+**Security rules:**
+- Never commit `.databrickscfg` to git
+- Prefer `auth_type = databricks-cli` over plaintext tokens
+- Use Azure AD / OAuth for production (no long-lived tokens)
+- Rotate `dapi` tokens every 90 days
+
 ## Quality Gates
 
 | Gate | Default Threshold | Notes |

@@ -42,7 +42,7 @@
 | **compliance-checker** | *(no skills — process checkpoint agent)* |
 | **coordinator** | *(no skills — orchestrates agents)* |
 
-## Available for Activation (22 skills in `skills/_available/`)
+## Available for Activation (34 skills in `skills/_available/`)
 
 Skills in the library — not assigned to any agent. To activate one, move
 it from `skills/_available/{name}/` to `skills/{name}/`, add it to the
@@ -52,12 +52,16 @@ Use `/onboard-project` to evaluate which available skills match your tech
 stack, or `/find-skill <topic>` to search.
 
 ci-cd, configuration-management, containerization, context-curation,
-contract-testing, data-modeling, data-pipeline-design, data-quality,
+contract-testing, databricks-agent-bricks, databricks-apps,
+databricks-bundles, databricks-connect, databricks-dbsql,
+databricks-jobs, databricks-mlflow-eval, databricks-model-serving,
+databricks-sdp, databricks-synthetic-data, databricks-unity-catalog,
+data-modeling, data-pipeline-design, data-quality,
 experiment-tracking, exploratory-data-analysis, feature-engineering,
 idempotent-operations, integration-testing, ml-pipeline-design,
 model-evaluation, model-selection, multi-agent-coordination,
-performance-testing, secrets-management, security-testing, threat-modeling,
-version-control
+performance-testing, python-dev, secrets-management, security-testing,
+threat-modeling, version-control
 
 Each contains a `SKILL.md` in `skills/_available/{name}/SKILL.md`.
 `/validate-framework` only deeply scans active skills (step 7).

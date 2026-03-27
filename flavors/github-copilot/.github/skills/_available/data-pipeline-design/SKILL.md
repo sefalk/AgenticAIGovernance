@@ -124,10 +124,113 @@ Speed Layer:  Source --> Stream Processing --> Serving Layer (real-time view)
 | **No staging layer** | Raw source data is immediately transformed. Can't debug or replay. | Always land raw data first, then transform. |
 | **Manual scheduling** | "I run the pipeline every Monday morning." | Use an orchestrator with scheduling, retries, and alerting. |
 
+## Databricks & Spark Patterns
+
+### Medallion Architecture (Bronze / Silver / Gold)
+
+The medallion architecture organises data processing into three layers
+of increasing quality and business value:
+
+| Layer | Purpose | Write Pattern | Typical Format |
+|-------|---------|---------------|----------------|
+| **Bronze** | Raw data, append-only, preserves lineage | Streaming table / Auto Loader | Delta (minimal schema) |
+| **Silver** | Cleaned, validated, deduplicated | Streaming table or merge | Delta (typed columns) |
+| **Gold** | Business-ready aggregations, star schema | Materialized view or merge | Delta (denormalised) |
+
+**Typical flow:**
+```
+Source → Auto Loader → Bronze (streaming table)
+Bronze → filter/clean/validate → Silver (streaming table)
+Silver → aggregate/denormalise → Gold (materialized view)
+```
+
+**Naming convention:**
+- Flat: `bronze_orders.sql`, `silver_orders.sql`, `gold_revenue.sql`
+- Subdirectories: `bronze/orders.sql`, `silver/cleaned.sql`, `gold/summary.sql`
+
+### Delta Lake Write Patterns
+
+| Pattern | Use Case | PySpark Example |
+|---------|----------|-----------------|
+| **Append** | New data only, no updates | `df.write.mode("append").saveAsTable(t)` |
+| **Overwrite** | Full refresh | `df.write.mode("overwrite").saveAsTable(t)` |
+| **Merge (upsert)** | Incremental with updates | `DeltaTable.forName(spark, t).merge(...)` |
+| **Partition overwrite** | Replace a time window | `df.write.mode("overwrite").option("replaceWhere", "date = '2026-03-27'").saveAsTable(t)` |
+
+### Merge (Upsert) Pattern
+
+```python
+from delta.tables import DeltaTable
+
+target = DeltaTable.forName(spark, "catalog.schema.target_table")
+
+target.alias("t").merge(
+    source_df.alias("s"),
+    "t.id = s.id"
+).whenMatchedUpdateAll(
+).whenNotMatchedInsertAll(
+).execute()
+```
+
+### Spark Structured Streaming
+
+```python
+# Read from streaming source
+stream_df = (
+    spark.readStream
+    .format("cloudFiles")           # Auto Loader
+    .option("cloudFiles.format", "json")
+    .option("cloudFiles.schemaLocation", schema_path)
+    .load(input_path)
+)
+
+# Write as streaming table
+(
+    stream_df.writeStream
+    .format("delta")
+    .outputMode("append")
+    .option("checkpointLocation", checkpoint_path)
+    .trigger(availableNow=True)     # Process all available, then stop
+    .toTable("catalog.schema.bronze_events")
+)
+```
+
+### Spark Declarative Pipelines (SDP / DLT)
+
+For managed pipeline orchestration, use Databricks SDP (formerly DLT):
+
+```python
+from pyspark import pipelines as dp
+
+@dp.table(comment="Raw events from source")
+def bronze_events():
+    return spark.readStream.format("cloudFiles").load(path)
+
+@dp.table(comment="Cleaned events")
+def silver_events():
+    return dp.read_stream("bronze_events").filter("status IS NOT NULL")
+
+@dp.materialized_view(comment="Daily aggregations")
+def gold_daily_summary():
+    return dp.read("silver_events").groupBy("date").agg(count("*"))
+```
+
+### Performance Patterns
+
+| Technique | When | How |
+|-----------|------|-----|
+| **Liquid Clustering** | Replace Z-ordering, adaptive | `CLUSTER BY (col1, col2)` on table |
+| **Partition pruning** | Date-based queries | Partition by date, filter early |
+| **Broadcast joins** | Small table + large table | `broadcast(small_df)` |
+| **Caching** | Reused intermediate results | `df.cache()` (use sparingly) |
+| **Predicate pushdown** | Read less from source | Filter as early as possible |
+
 ## References
 
 - Maxime Beauchemin, *The Rise of the Data Engineer* (2017) -- foundational essay.
 - Martin Kleppmann, *Designing Data-Intensive Applications* (2017), Ch. 10-11 -- batch and stream processing.
+- Databricks Medallion Architecture: https://www.databricks.com/glossary/medallion-architecture
+- Delta Lake Documentation: https://docs.delta.io/
 - Apache Airflow: https://airflow.apache.org/
 - Dagster: https://dagster.io/
 - dbt: https://www.getdbt.com/
