@@ -79,6 +79,23 @@ Scan all `.md` files in `.github/` for cross-references:
 
 ## Step 7: Skill Directory Structure
 
+**Automated check (preferred):** Run the validation script:
+
+```bash
+python .github/scripts/validate-skills.py
+```
+
+Add `--deep-available` to also deeply validate `_available/` skills.
+Add `--ci` for GitHub Actions annotation output.
+
+The script checks:
+- Every skill directory has a `SKILL.md` with valid YAML frontmatter
+- `name` matches directory name, is lowercase-hyphenated, ≤64 chars
+- `description` is non-empty, ≤1024 chars, no XML tags
+- `INDEX.md` lists all active and available skills (no orphans/phantoms)
+
+**Manual fallback** (if script unavailable):
+
 **Active skills** (`.github/skills/`, excluding `_available/`):
 For each directory, perform a full check:
 
