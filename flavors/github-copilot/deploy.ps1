@@ -609,6 +609,28 @@ if (-not $DryRun) {
 }
 Write-Host "  WRITE   .github/.af-version" -ForegroundColor Cyan
 
+# ── Stale activation check ─────────────────────────────────────────────────
+# Warn when a project has activated a skill (skills/{name}/) but the
+# _available/{name}/SKILL.md copy is newer. This happens when AAIG updates
+# a skill and deploy syncs _available/ but can't know about activated copies.
+$staleSkills = @()
+$targetAvailable = Join-Path $TargetGitHub 'skills\_available'
+$targetSkills    = Join-Path $TargetGitHub 'skills'
+if ((Test-Path $targetAvailable) -and (Test-Path $targetSkills)) {
+    foreach ($activeDir in (Get-ChildItem $targetSkills -Directory)) {
+        if ($activeDir.Name -eq '_available' -or $activeDir.Name.StartsWith('.')) { continue }
+        $availCopy = Join-Path $targetAvailable "$($activeDir.Name)\SKILL.md"
+        $activeCopy = Join-Path $activeDir.FullName 'SKILL.md'
+        if ((Test-Path $availCopy) -and (Test-Path $activeCopy)) {
+            $availHash  = (Get-FileHash $availCopy).Hash
+            $activeHash = (Get-FileHash $activeCopy).Hash
+            if ($availHash -ne $activeHash) {
+                $staleSkills += $activeDir.Name
+            }
+        }
+    }
+}
+
 # Summary
 Write-Host ""
 Write-Host "=== Summary ===" -ForegroundColor Cyan
@@ -629,6 +651,13 @@ if ($script:Stats.Conflict -gt 0) {
 if ($DryRun) {
     Write-Host ""
     Write-Host '  [DRY RUN -- no files were changed. Remove -DryRun to apply.]' -ForegroundColor Yellow
+}
+if ($staleSkills.Count -gt 0) {
+    Write-Host ""
+    Write-Host "  Stale activations ($($staleSkills.Count)): _available/ has newer SKILL.md" -ForegroundColor Yellow
+    foreach ($s in $staleSkills | Sort-Object) {
+        Write-Host "    - skills/$s/  (re-copy from skills/_available/$s/ to update)" -ForegroundColor Yellow
+    }
 }
 
 # Backup cleanup

@@ -35,6 +35,7 @@ prompts/
 
 # Skills
 skills/
+skills/INDEX.md                                          [customizable]
 
 # Templates
 templates/

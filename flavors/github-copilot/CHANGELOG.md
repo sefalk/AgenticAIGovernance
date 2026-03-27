@@ -36,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Delta Lake patterns, and Spark Streaming guidance.
 - **secrets-management skill enhanced** — Added Databricks secret scopes
   and dbutils.secrets patterns.
+
+### Fixed
+
+- **deploy.ps1 skill INDEX.md protection** — Marked `skills/INDEX.md` as
+  `[customizable]` in `.af-manifest`. Previously, deploy would overwrite
+  project-specific skill activations with the AAIG template index.
+- **deploy.ps1 stale activation warning** — Post-deploy check now warns
+  when activated skills have a newer version in `_available/`.
 - **validate-framework.prompt.md** — Step 7 now references the automated
   validation script as the preferred check method.
 
