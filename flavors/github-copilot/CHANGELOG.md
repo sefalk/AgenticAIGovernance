@@ -16,6 +16,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.18.0] -- 2026-03-27
+
+### Added
+
+- **12 new skills from ai-dev-kit** — databricks-agent-bricks, databricks-apps,
+  databricks-bundles, databricks-connect, databricks-dbsql, databricks-jobs,
+  databricks-mlflow-eval, databricks-model-serving, databricks-sdp,
+  databricks-synthetic-data, databricks-unity-catalog, python-dev.
+  Available skills library expanded from 22 to 34.
+- **validate-skills.py** — Automated skill validation script. Checks YAML
+  frontmatter (name, description, argument-hint), directory-name consistency,
+  and INDEX.md cross-references. Supports `--deep-available`, `--root`, `--ci`.
+  Integrated into validate-framework.prompt.md step 7.
+
+### Changed
+
+- **data-pipeline-design skill enhanced** — Added medallion architecture,
+  Delta Lake patterns, and Spark Streaming guidance.
+- **secrets-management skill enhanced** — Added Databricks secret scopes
+  and dbutils.secrets patterns.
+- **validate-framework.prompt.md** — Step 7 now references the automated
+  validation script as the preferred check method.
+
 ## [1.17.0] -- 2026-03-24
 
 ### Changed
