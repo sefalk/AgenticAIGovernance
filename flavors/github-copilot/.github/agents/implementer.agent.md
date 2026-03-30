@@ -72,6 +72,20 @@ Consult these skills when relevant to the task:
 - Consult the **hexagonal-architecture** skill for detailed layer rules.
   Follow auto-applied **architecture** and **provenance** instructions.
 
+## Dependency Tracking
+
+When your implementation adds a **new package import** (any `import` or
+`from … import` that references a package not already in the project's
+dependency spec):
+
+1. Read `af-env.conf` to find `DEP_FILE` (runtime) and `DEP_DEV_FILE`
+   (dev/test).
+2. **Runtime dependency** → add to `DEP_FILE` with exact pin (`==`).
+3. **Dev/test dependency** → add to `DEP_DEV_FILE` with compatible pin (`~=`).
+4. If neither variable is set, report `BLOCKED` — escalate to coordinator.
+
+Consult the **dependency-management** skill for pinning strategy.
+
 ## Quality Checkpoints
 
 After completing each subtask:

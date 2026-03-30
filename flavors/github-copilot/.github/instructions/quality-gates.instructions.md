@@ -95,6 +95,7 @@ reference the metric thresholds from MANIFEST § 5.
 | Zero syntax/import errors | HARD | Run syntax checker | Standard+ |
 | Line coverage ≥ threshold | HARD | Run coverage tool, compare to MANIFEST § 5 thresholds: Domain ≥ 90%, Ports ≥ 80%, Adapters ≥ 60%, Utilities ≥ 85% | Standard+ |
 | No secrets in changed files | HARD | Grep for credential patterns, API keys | Standard+ |
+| New deps declared in spec file | HARD | If a new package was `import`ed, verify it appears in the project dep file (`af-env.conf` → `DEP_FILE` / `DEP_DEV_FILE`) | Standard+ |
 | Provenance markers on new/modified files | HARD | Verify markers present | Standard+ |
 | Skills read declaration | SOFT | `Skills Read:` line in Gate Summary (critic flags if missing) | Standard+ |
 | Architecture boundaries respected | SOFT | code-critic reviews | Standard+ |

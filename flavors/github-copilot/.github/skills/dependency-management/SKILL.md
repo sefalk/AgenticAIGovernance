@@ -17,6 +17,20 @@ dependencies.
 - Setting up lockfiles and version pinning
 - Reviewing dependency changes in code review
 
+## Agent Workflow Integration
+
+When an agent adds a new package import, the dependency spec must be
+updated **in the same commit** as the code change. The implementer has a
+HARD quality gate for this (`New deps declared in spec file`).
+
+### How it works
+
+1. `af-env.conf` declares `DEP_FILE` (runtime) and `DEP_DEV_FILE` (dev).
+2. The implementer reads these before committing.
+3. New runtime imports → add to `DEP_FILE` with exact pin (`==`).
+4. New dev/test imports → add to `DEP_DEV_FILE` with compatible pin (`~=`).
+5. The code-critic verifies the gate during review.
+
 ## Principles
 
 - **Minimise dependencies** — every dependency is a liability (security
