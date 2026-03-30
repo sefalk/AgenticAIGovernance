@@ -18,9 +18,8 @@ tools:
   - todo
   - execute/runTests
   - execute/runTask
+  - execute/createAndRunTask
   - execute/testFailure
-  - execute/runInTerminal
-  - execute/getTerminalOutput
   - pylance-mcp-server/pylanceFileSyntaxErrors
   - pylance-mcp-server/pylanceImports
   - pylance-mcp-server/pylanceSyntaxErrors
@@ -67,7 +66,7 @@ occurred since those results were produced:
 1. **Accept the prior results** for the "Tests pass" checkbox — do not
    re-run the full test suite.
 2. **Run targeted smoke tests** only if you have specific concerns about
-   a code path (e.g., `pytest tests/adapters/test_specific_file.py -x`).
+   a code path — use `runTests` with specific `files` and/or `testNames`.
 3. **Record in your Auto-Check Results** that you accepted prior results:
    `Tests: accepted from {agent} ({N}/{M} passed, {cov}% line coverage)`.
 
@@ -106,8 +105,8 @@ project-specific commands, thresholds, and tool configuration.
 
 - [ ] **No secrets in code** — no hardcoded passwords, API keys, or tokens
 - [ ] **No vulnerable dependencies** — if new dependencies were added, run
-  `pip-audit` (or `pip-audit -r requirements.txt`) in the terminal to check
-  for known CVEs. Flag any critical/high findings as BLOCKING.
+  `pip-audit` (or `pip-audit -r requirements.txt`) via `createAndRunTask` to
+  check for known CVEs. Flag any critical/high findings as BLOCKING.
 - [ ] **Lockfile present** — if new dependencies were added, verify they are
   declared in a lockfile or deterministic dependency spec (R-SD-10)
 - [ ] **Input validation** at system boundaries

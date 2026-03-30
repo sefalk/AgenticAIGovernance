@@ -46,7 +46,7 @@ Consult these skills when relevant to the task:
 ## Critical Constraints
 
 - You are **read-only for files** — you must NOT create, edit, or delete files.
-  You may run terminal commands and inspect test failures for analysis.
+  You may run tests and inspect test failures for analysis.
 - You must NOT assume missing requirements — flag ambiguity for escalation.
 - If the task touches more than 5 files or introduces new architectural
   elements, flag for human approval.
