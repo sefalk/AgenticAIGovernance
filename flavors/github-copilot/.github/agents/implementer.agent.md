@@ -82,7 +82,7 @@ dependency spec):
    (dev/test).
 2. **Runtime dependency** → add to `DEP_FILE` with exact pin (`==`).
 3. **Dev/test dependency** → add to `DEP_DEV_FILE` with compatible pin (`~=`).
-4. Run `deps: install dev` or `deps: install runtime` task to install.
+4. Run `pip: install dev` or `pip: install runtime` task to install.
 5. If neither variable is set, report `BLOCKED` — escalate to coordinator.
 
 **Flow:** update dep file → install via task → import in code.

@@ -181,18 +181,18 @@
       "detail": "Check dependencies for known CVEs — code-critic security gate"
     },
     {
-      "label": "deps: install dev",
+      "label": "pip: install dev",
       "type": "shell",
-      "command": ".venv/Scripts/pip.exe",
-      "args": ["install", "-r", "requirements-dev.txt"],
-      "detail": "Install dev dependencies from requirements-dev.txt"
+      "command": ".github/scripts/run-deps.ps1",
+      "args": ["-Scope", "dev"],
+      "detail": "Install dev/test Python packages (reads DEP_DEV_FILE from af-env.conf)"
     },
     {
-      "label": "deps: install runtime",
+      "label": "pip: install runtime",
       "type": "shell",
-      "command": ".venv/Scripts/pip.exe",
-      "args": ["install", "-e", "."],
-      "detail": "Install runtime package in editable mode (reads setup.py / pyproject.toml)"
+      "command": ".github/scripts/run-deps.ps1",
+      "args": ["-Scope", "runtime"],
+      "detail": "Install runtime Python packages (reads DEP_FILE from af-env.conf)"
     }
   ]
 }
