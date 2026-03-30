@@ -15,6 +15,7 @@ tools:
   - todo
   - execute/runTests
   - execute/runTask
+  - execute/createAndRunTask
   - execute/testFailure
   - execute/runInTerminal
   - execute/getTerminalOutput
@@ -66,12 +67,16 @@ These apply **always** — during workflows, conversations, and ad-hoc requests.
      *known* branch. Never let file creation happen without knowing where
      you are.
 
-3. **Prefer tasks over terminal.** Use `run_task` for any operation that
-   has a predefined task (tests, metrics, pip installs, git queries, lint).
-   Use the terminal only for git commands (`add`, `commit`, `status`,
-   `diff`) and ad-hoc investigation that no task covers. Never run raw
-   `pip install` — use the `pip: install dev` or `pip: install runtime`
-   tasks instead.
+3. **Prefer tasks over terminal.** Fallback chain:
+   `run_task` → `createAndRunTask` (run the script directly) → terminal.
+   Use `run_task` for any operation that has a predefined task (tests,
+   metrics, pip installs, git queries, lint). If `run_task` cannot find
+   a task, use `createAndRunTask` to run the underlying script
+   (e.g., `.github/scripts/run-deps.ps1 -Scope dev`). Reserve terminal
+   for git commands (`add`, `commit`, `status`, `diff`) and ad-hoc
+   investigation only. Never run raw `pip install` — use the
+   `pip: install dev` / `pip: install runtime` tasks or run
+   `.github/scripts/run-deps.ps1` via `createAndRunTask`.
 
 ## Worker Agents
 
