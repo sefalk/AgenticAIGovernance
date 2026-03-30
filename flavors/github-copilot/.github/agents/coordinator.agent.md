@@ -66,6 +66,13 @@ These apply **always** — during workflows, conversations, and ad-hoc requests.
      *known* branch. Never let file creation happen without knowing where
      you are.
 
+3. **Prefer tasks over terminal.** Use `run_task` for any operation that
+   has a predefined task (tests, metrics, pip installs, git queries, lint).
+   Use the terminal only for git commands (`add`, `commit`, `status`,
+   `diff`) and ad-hoc investigation that no task covers. Never run raw
+   `pip install` — use the `pip: install dev` or `pip: install runtime`
+   tasks instead.
+
 ## Worker Agents
 
 | Agent | Role | Capabilities |
