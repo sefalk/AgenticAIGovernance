@@ -18,9 +18,9 @@ tools:
   - todo
   - execute/runTests
   - execute/runTask
+  - execute/createAndRunTask
   - execute/testFailure
   - edit/editFiles
-  - execute/getTerminalOutput
   - pylance-mcp-server/pylanceFileSyntaxErrors
   - pylance-mcp-server/pylanceImports
   - pylance-mcp-server/pylanceSyntaxErrors
@@ -118,8 +118,9 @@ Consult the **human-escalation** skill for the full halt protocol.
 3. **Do NOT run `tests: all`** — the stop hook runs the full suite automatically
    when you finish. Running it yourself wastes ~20 minutes.
 
-**Rule:** Use `run_task` for `tests: domain`. Accept the stop hook as your
-full-suite validation.
+**Rule:** Use `run_task` for `tests: domain`. Use `runTests` for file-scoped
+runs. Use `createAndRunTask` for one-off tasks. Accept the stop hook as your
+full-suite validation. You do NOT have terminal access.
 
 ## Return Format
 

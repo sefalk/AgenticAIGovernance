@@ -22,8 +22,6 @@ tools:
   - edit/editFiles
   - edit/createFile
   - edit/createDirectory
-  - execute/runInTerminal
-  - execute/getTerminalOutput
   - pylance-mcp-server/pylanceFileSyntaxErrors
   - pylance-mcp-server/pylanceImports
   - pylance-mcp-server/pylanceSyntaxErrors
@@ -121,15 +119,16 @@ Consult the **human-escalation** skill for the full halt protocol.
 **Budget:** 1–3 targeted runs in domain scope only.
 
 **Workflow:**
-1. Write tests → run with `-Filter {test_name}` or `-File {test_file}` via
-   `run_in_terminal`, using fail-fast
+1. Write tests → run with `run_task` (`tests: domain + fail-fast`) or
+   `run_tests` with specific file/test name args
 2. Verify tests FAIL (Red phase) for the right reason
 3. **Never** run `tests: all` or `tests: adapters` (unless writing adapter tests)
 4. After confirming failure, check `.github/test-log.json` — if domain tests
    were green before your changes, note this in your return
 
-**Rule:** Use `run_task` for `tests: domain + fail-fast`. Use `run_in_terminal`
-only when `-Filter` or `-File` is needed.
+**Rule:** Use `run_task` for broad scope runs. Use `run_tests` when targeting
+specific files or test names. **NEVER** use `run_in_terminal` — you do not
+have terminal access.
 
 ## Return Format
 

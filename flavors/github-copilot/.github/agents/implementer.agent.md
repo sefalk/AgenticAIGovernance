@@ -18,12 +18,11 @@ tools:
   - todo
   - execute/runTests
   - execute/runTask
+  - execute/createAndRunTask
   - execute/testFailure
   - edit/editFiles
   - edit/createFile
   - edit/createDirectory
-  - execute/runInTerminal
-  - execute/getTerminalOutput
   - pylance-mcp-server/pylanceFileSyntaxErrors
   - pylance-mcp-server/pylanceImports
   - pylance-mcp-server/pylanceRunCodeSnippet
@@ -121,8 +120,10 @@ changed). One `all` run at the very end only.
 4. Before running any scope, check `.github/test-log.json` — skip if scope
    passed recently and no relevant code changed since
 
-**Rule:** Never call pytest directly. Use `run_task` for pre-defined scenarios,
-`run_in_terminal` with the canonical script only for `-Filter` / `-File`.
+**Rule:** Never call pytest directly. Use `run_task` for pre-defined scenarios.
+Use `runTests` with `files` or `testNames` args for file- or test-scoped runs.
+Use `createAndRunTask` for one-off tasks not covered by pre-defined tasks.
+You do NOT have terminal access — use Pylance MCP for syntax/import checks.
 
 ## Return Format
 

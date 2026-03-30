@@ -168,26 +168,26 @@ Use `run_task` with the task label. Arguments are fixed — no dynamic params.
 | `tests: all + coverage + save` | `-Scope all -Coverage -OutputFile` | code-critic |
 | `tests: adapters + fail-fast` | `-Scope adapters -FailFast` | implementer |
 
-### Fallback: `run_in_terminal` (dynamic cases only)
+### Fallback: `runTests` or `createAndRunTask` (dynamic cases only)
 
-Use `run_in_terminal` with the canonical script when `-File` or `-Filter`
-are needed (values change per task):
+For file- or test-scoped runs, use `runTests` with `files` and/or `testNames`
+arguments. For one-off tasks not covered by pre-defined tasks (e.g., syntax
+checks, custom lint), use `createAndRunTask`.
 
-```
-.github/scripts/run-tests.ps1 -Scope {scope} [-Filter {pattern}] [-File {path}] [-Coverage] [-FailFast]
-```
+Only `code-critic` and `coordinator` have `run_in_terminal` — other agents
+must use `run_task`, `runTests`, or `createAndRunTask`.
 
 ### Phase-Specific Test Strategy
 
 | Phase | Agent | Preferred Task | Fallback (when -Filter/-File needed) |
 |---|---|---|---|
-| Red (verify failing) | test-writer | `tests: domain + fail-fast` | `run_in_terminal` with `-Filter` |
-| Green (make pass) | implementer | `tests: domain` | — |
+| Red (verify failing) | test-writer | `tests: domain + fail-fast` | `runTests` with `files`/`testNames` |
+| Green (make pass) | implementer | `tests: domain` | `runTests` with `files` |
 | Green (full suite) | implementer | `tests: all` | — |
-| Refactor (no regression) | refactorer | `tests: all` | — |
+| Refactor (no regression) | refactorer | `tests: domain` | `runTests` with `files` |
 | Code review (metrics) | code-critic | `tests: all + coverage` | — |
 | Code review (save report) | code-critic | `tests: all + coverage + save` | — |
-| Re-Red (specific test) | test-writer | — | `run_in_terminal` with `-File` + `-Filter` |
+| Re-Red (specific test) | test-writer | — | `runTests` with `files` + `testNames` |
 
 ### Expected Runtimes
 
@@ -231,7 +231,7 @@ other scope data is preserved.
 2. **Never call pytest directly** — always use the canonical test runner script.
 3. **Never create temp output files** — the runner streams to stdout.
 4. **Use the narrowest scope** — `domain` first, `all` only for the single final verification per workflow.
-5. **Use `-Filter` via `run_in_terminal`** — only when re-running specific tests.
+5. **Use `runTests` for specific files/tests** — `run_in_terminal` is reserved for coordinator and code-critic only.
 6. **Use fail-fast tasks for Red phase** — stop at first failure to confirm the right test fails.
 7. **Task labels are a stable API** — do not rename without updating all agent definitions.
 8. **Check test log before running** — read `.github/test-log.json` first. If the scope passed recently and no code changed since, skip the run and cite the log.
