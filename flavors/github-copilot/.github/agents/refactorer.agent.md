@@ -119,8 +119,9 @@ Consult the **human-escalation** skill for the full halt protocol.
    when you finish. Running it yourself wastes ~20 minutes.
 
 **Rule:** Use `run_task` for `tests: domain`. Use `runTests` for file-scoped
-runs. Use `createAndRunTask` for one-off tasks. Accept the stop hook as your
-full-suite validation. You do NOT have terminal access.
+runs. `createAndRunTask` is **last resort** — only when no pre-defined task or
+`runTests` covers the need. Accept the stop hook as your full-suite validation.
+You do NOT have terminal access.
 
 ## Return Format
 

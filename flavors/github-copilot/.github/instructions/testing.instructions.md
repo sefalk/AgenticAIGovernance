@@ -236,6 +236,10 @@ other scope data is preserved.
 7. **Task labels are a stable API** — do not rename without updating all agent definitions.
 8. **Check test log before running** — read `.github/test-log.json` first. If the scope passed recently and no code changed since, skip the run and cite the log.
 9. **Respect the test budget** — see "Test Budget per Workflow" above. Exceeding budget wastes 20+ minutes.
+10. **`createAndRunTask` is last resort** — before creating a task, check if a
+    pre-defined task already covers it (`run_task`), or if `runTests` handles
+    the case (file-scoped runs, coverage). Only use `createAndRunTask` when
+    no existing task or tool fits.
 
 ## Test Doubles (Stubs, Mocks, Fakes, Spies)
 

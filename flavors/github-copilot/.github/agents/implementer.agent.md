@@ -122,8 +122,9 @@ changed). One `all` run at the very end only.
 
 **Rule:** Never call pytest directly. Use `run_task` for pre-defined scenarios.
 Use `runTests` with `files` or `testNames` args for file- or test-scoped runs.
-Use `createAndRunTask` for one-off tasks not covered by pre-defined tasks.
-You do NOT have terminal access — use Pylance MCP for syntax/import checks.
+`createAndRunTask` is **last resort** — only when no pre-defined task or
+`runTests` covers the need. You do NOT have terminal access — use Pylance MCP
+for syntax/import checks.
 
 ## Return Format
 
