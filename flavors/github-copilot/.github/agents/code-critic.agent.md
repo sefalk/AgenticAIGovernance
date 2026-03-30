@@ -105,8 +105,8 @@ project-specific commands, thresholds, and tool configuration.
 
 - [ ] **No secrets in code** — no hardcoded passwords, API keys, or tokens
 - [ ] **No vulnerable dependencies** — if new dependencies were added, run
-  `pip-audit` (or `pip-audit -r requirements.txt`) via `createAndRunTask` to
-  check for known CVEs. Flag any critical/high findings as BLOCKING.
+  task `metrics: pip-audit` to check for known CVEs. Flag any critical/high
+  findings as BLOCKING.
 - [ ] **Lockfile present** — if new dependencies were added, verify they are
   declared in a lockfile or deterministic dependency spec (R-SD-10)
 - [ ] **Input validation** at system boundaries

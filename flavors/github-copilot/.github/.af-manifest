@@ -26,6 +26,7 @@ hooks/scripts/researcher-pretooluse.sh
 scripts/
 scripts/run-tests.ps1                                   [customizable]
 scripts/run-tests.sh                                     [customizable]
+scripts/run-metrics.ps1
 
 # Instructions
 instructions/

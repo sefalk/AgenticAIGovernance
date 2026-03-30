@@ -158,6 +158,27 @@
       "command": "ruff",
       "args": ["format", "."],
       "detail": "Apply ruff formatting"
+    },
+    {
+      "label": "metrics: complexity",
+      "type": "shell",
+      "command": ".github/scripts/run-metrics.ps1",
+      "args": ["-Metric", "complexity"],
+      "detail": "Cyclomatic complexity via radon — code-critic gate"
+    },
+    {
+      "label": "metrics: test-to-code ratio",
+      "type": "shell",
+      "command": ".github/scripts/run-metrics.ps1",
+      "args": ["-Metric", "ratio"],
+      "detail": "Test-to-code line ratio — code-critic advisory"
+    },
+    {
+      "label": "metrics: pip-audit",
+      "type": "shell",
+      "command": ".github/scripts/run-metrics.ps1",
+      "args": ["-Metric", "audit"],
+      "detail": "Check dependencies for known CVEs — code-critic security gate"
     }
   ]
 }

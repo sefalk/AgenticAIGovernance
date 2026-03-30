@@ -9,6 +9,22 @@ disable-model-invocation: true
 
 Instructions for collecting, interpreting, and reporting code quality metrics.
 
+## Pre-Defined Tasks
+
+Use `run_task` for these static metrics. No dynamic arguments needed.
+
+| Task Label | Metric | Tool |
+|---|---|---|
+| `tests: domain + coverage` | Line + branch coverage (domain) | `run_task` |
+| `tests: all + coverage` | Line + branch coverage (all) | `run_task` |
+| `metrics: complexity` | Cyclomatic complexity (radon) | `run_task` |
+| `metrics: test-to-code ratio` | Test-to-code line ratio | `run_task` |
+| `metrics: pip-audit` | Dependency CVE audit | `run_task` |
+| `lint: ruff check` | Lint violations | `run_task` |
+
+For per-module coverage, use `runTests(mode="coverage", coverageFiles=[...])`.
+For mutation testing (dynamic module), use `createAndRunTask`.
+
 ## When to Use
 
 - Validating quality gate thresholds after implementation
