@@ -179,6 +179,20 @@
       "command": ".github/scripts/run-metrics.ps1",
       "args": ["-Metric", "audit"],
       "detail": "Check dependencies for known CVEs — code-critic security gate"
+    },
+    {
+      "label": "deps: install dev",
+      "type": "shell",
+      "command": ".venv/Scripts/pip.exe",
+      "args": ["install", "-r", "requirements-dev.txt"],
+      "detail": "Install dev dependencies from requirements-dev.txt"
+    },
+    {
+      "label": "deps: install runtime",
+      "type": "shell",
+      "command": ".venv/Scripts/pip.exe",
+      "args": ["install", "-e", "."],
+      "detail": "Install runtime package in editable mode (reads setup.py / pyproject.toml)"
     }
   ]
 }
