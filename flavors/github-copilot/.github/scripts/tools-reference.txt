@@ -1,0 +1,62 @@
+# VS Code Built-in Tool Identifiers (Baseline)
+# copilot:generated | implementer | 2026-03-31
+#
+# Source: https://code.visualstudio.com/docs/copilot/reference/copilot-vscode-features#_chat-tools
+# Last verified: 2026-03-31
+#
+# Format: one tool identifier per line. Lines starting with # are comments.
+# Group headers use ## prefix for readability.
+#
+# Usage: audit-tools.ps1 reads this file to validate agent tool assignments.
+# Update this file when VS Code adds or removes built-in tools.
+
+## Agent orchestration
+agent
+agent/runSubagent
+
+## Search
+search/codebase
+search/fileSearch
+search/listDirectory
+search/textSearch
+search/changes
+search/usages
+
+## Read
+read/readFile
+read/problems
+read/getNotebookSummary
+read/readNotebookCellOutput
+read/terminalLastCommand
+read/terminalSelection
+
+## Edit
+edit/editFiles
+edit/createFile
+edit/createDirectory
+edit/editNotebook
+
+## Execute
+execute/runTests
+execute/runTask
+execute/createAndRunTask
+execute/testFailure
+execute/runInTerminal
+execute/getTerminalOutput
+execute/runNotebookCell
+
+## VS Code
+vscode/askQuestions
+vscode/extensions
+vscode/getProjectSetupInfo
+vscode/installExtension
+vscode/runCommand
+vscode/VSCodeAPI
+
+## Web
+web/fetch
+
+## Other
+todo
+newWorkspace
+selection

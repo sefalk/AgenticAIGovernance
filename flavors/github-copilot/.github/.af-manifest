@@ -28,6 +28,8 @@ scripts/run-tests.ps1                                   [customizable]
 scripts/run-tests.sh                                     [customizable]
 scripts/run-deps.ps1
 scripts/run-metrics.ps1
+scripts/audit-tools.ps1
+scripts/tools-reference.txt
 
 # Instructions
 instructions/

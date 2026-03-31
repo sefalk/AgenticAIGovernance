@@ -193,6 +193,20 @@
       "command": ".github/scripts/run-deps.ps1",
       "args": ["-Scope", "runtime"],
       "detail": "Install runtime Python packages (reads DEP_FILE from af-env.conf)"
+    },
+    {
+      "label": "audit: tools",
+      "type": "shell",
+      "command": ".github/scripts/audit-tools.ps1",
+      "args": [],
+      "detail": "Validate agent tool assignments against reference baseline and TOOLS.md"
+    },
+    {
+      "label": "audit: tools verbose",
+      "type": "shell",
+      "command": ".github/scripts/audit-tools.ps1",
+      "args": ["-Verbose"],
+      "detail": "Detailed agent tool audit with per-agent breakdown"
     }
   ]
 }
