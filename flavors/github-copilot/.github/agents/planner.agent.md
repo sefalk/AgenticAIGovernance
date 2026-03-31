@@ -21,6 +21,8 @@ tools:
   - execute/testFailure
   - read/getNotebookSummary
   - read/readNotebookCellOutput
+  - vscode/askQuestions
+  - vscode.mermaid-chat-features/renderMermaidDiagram
 ---
 
 # Planner Agent (Worker)

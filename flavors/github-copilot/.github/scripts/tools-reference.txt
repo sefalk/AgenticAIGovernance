@@ -1,5 +1,6 @@
-# VS Code Built-in Tool Identifiers (Baseline)
+# VS Code Tool Identifiers (Baseline)
 # copilot:generated | implementer | 2026-03-31
+# copilot:modified  | implementer | 2026-03-31 | added extension tools section
 #
 # Source: https://code.visualstudio.com/docs/copilot/reference/copilot-vscode-features#_chat-tools
 # Last verified: 2026-03-31
@@ -8,7 +9,12 @@
 # Group headers use ## prefix for readability.
 #
 # Usage: audit-tools.ps1 reads this file to validate agent tool assignments.
-# Update this file when VS Code adds or removes built-in tools.
+# Update this file when VS Code adds/removes tools or extensions are adopted.
+#
+# Naming conventions:
+#   Built-in:   {category}/{tool}             e.g. read/readFile
+#   Extension:  {publisher.ext}/{tool}        e.g. ms-toolsai.jupyter/configureNotebook
+#   MCP:        {server-name}/{tool}          e.g. pylance-mcp-server/pylanceImports
 
 ## Agent orchestration
 agent
@@ -48,6 +54,21 @@ execute/runNotebookCell
 ## VS Code
 vscode/askQuestions
 vscode/extensions
+
+## Extension tools (publisher.extension/tool format)
+## Jupyter (ms-toolsai.jupyter)
+ms-toolsai.jupyter/configureNotebook
+ms-toolsai.jupyter/listNotebookPackages
+ms-toolsai.jupyter/installNotebookPackages
+
+## Python (ms-python.python)
+ms-python.python/configurePythonEnvironment
+ms-python.python/getPythonEnvironmentInfo
+ms-python.python/getPythonExecutableCommand
+ms-python.python/installPythonPackage
+
+## Mermaid (vscode.mermaid-chat-features)
+vscode.mermaid-chat-features/renderMermaidDiagram
 vscode/getProjectSetupInfo
 vscode/installExtension
 vscode/runCommand

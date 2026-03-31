@@ -39,6 +39,9 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 | `read/getNotebookSummary` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — |
 | `read/readNotebookCellOutput` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
 | `execute/runNotebookCell` | X | — | — | — | — | ✅ | ✅ | ✅ | — | — | — | — |
+| `ms-toolsai.jupyter/configureNotebook` | X | — | — | ✅ | — | ✅ | ✅ | ✅ | — | — | — | — |
+| `ms-toolsai.jupyter/listNotebookPackages` | R | — | — | — | — | — | — | ✅ | — | — | — | — |
+| `ms-python.python/configurePythonEnvironment` | X | — | — | ✅ | — | ✅ | ✅ | ✅ | — | — | — | — |
 | **Pylance MCP** | | | | | | | | | | | | |
 | `pylance-mcp-server/pylanceFileSyntaxErrors` | R | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
 | `pylance-mcp-server/pylanceImports` | R | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
@@ -51,6 +54,9 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 | **Agent orchestration** | | | | | | | | | | | | |
 | `agent` (invoke subagents) | X | ✅ | — | — | — | — | — | — | — | — | — | — |
 | `todo` | R/W | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| **VS Code UI** | | | | | | | | | | | | |
+| `vscode/askQuestions` | X | ✅ | ✅ | — | — | — | — | — | — | — | — | — |
+| `vscode.mermaid-chat-features/renderMermaidDiagram` | W | — | ✅ | — | — | — | — | — | ✅ | — | — | — |
 
 ## Excluded Tools — Rationale
 
@@ -68,21 +74,17 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 | Tool (internal) | Why Excluded | Risk if Included |
 |---|---|---|
 | `create_new_jupyter_notebook` | New notebooks are architectural decisions (entry points). Human decides. | Unreviewed entry points, scope creep |
-| `notebook_install_packages` | Installs inside kernel, bypasses `requirements-dev.txt` and dep-tracking workflow. | Untracked dependencies, venv/kernel drift |
-| `notebook_list_packages` | Kernel packages should match venv. Use `pip: install` tasks. | Encourages kernel-level management |
+| `ms-toolsai.jupyter/installNotebookPackages` | Installs inside kernel, bypasses `requirements-dev.txt` and dep-tracking workflow. | Untracked dependencies, venv/kernel drift |
 | `configure_non_python_notebook` | Project is Python-only. No use case. | Confusion, wasted tokens |
-| `configure_notebook` | Not a documented built-in tool. May be auto-available when notebook tools are present. | If needed, add to implementer/refactorer |
-| `configure_python_notebook` | Same as above. | Same as above |
-| `restart_notebook_kernel` | Same as above. | If needed, add to implementer/refactorer |
+| `configure_python_notebook` | Superseded by `ms-python.python/configurePythonEnvironment`. | Redundant |
+| `restart_notebook_kernel` | No assignable frontmatter key found. Appears to be auto-injected by the Jupyter extension at runtime. | If a key is discovered, add to implementer/refactorer |
 
 ### Other built-in tools — considered but not assigned
 
 | Tool (docs key) | Why Not Assigned | Potential Future Use |
 |---|---|---|
-| `vscode/askQuestions` | Subagents don't interact with users directly; coordinator handles communication. | Could enable planner to ask clarifying questions |
 | `vscode/getProjectSetupInfo` | Project scaffolding — not relevant to maintenance workflows. | New-project setup workflows |
 | `vscode/VSCodeAPI` | VS Code extension development reference — not relevant. | Extension development projects |
-| `renderMermaidDiagram` | Diagram rendering — nice-to-have for documenter. | Architecture documentation |
 
 ## Tool Assignment Principles
 

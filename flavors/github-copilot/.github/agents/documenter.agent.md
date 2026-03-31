@@ -22,6 +22,7 @@ tools:
   - execute/runTask
   - edit/editNotebook
   - read/getNotebookSummary
+  - vscode.mermaid-chat-features/renderMermaidDiagram
 hooks:
   SubagentStop:
     - type: command

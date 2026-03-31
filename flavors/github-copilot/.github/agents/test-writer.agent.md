@@ -28,6 +28,8 @@ tools:
   - pylance-mcp-server/pylanceRunCodeSnippet
   - read/getNotebookSummary
   - read/readNotebookCellOutput
+  - ms-toolsai.jupyter/configureNotebook
+  - ms-python.python/configurePythonEnvironment
 hooks:
   SubagentStop:
     - type: command

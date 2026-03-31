@@ -36,7 +36,7 @@ $referenceTools = Get-Content $refFile |
 
 Write-Output "=== Agent Tool Audit ==="
 Write-Output ""
-Write-Output "Reference baseline: $($referenceTools.Count) built-in tools"
+Write-Output "Reference baseline: $($referenceTools.Count) registered tools"
 
 # ── Step 2: Parse agent frontmatter ──────────────────────────────────────
 
@@ -91,7 +91,7 @@ foreach ($file in $agentFiles) {
 }
 
 Write-Output "Agents scanned: $($agentTools.Count)"
-Write-Output "Unique built-in tools in use: $($allAgentTools.Count)"
+Write-Output "Unique registered tools in use: $($allAgentTools.Count)"
 Write-Output "MCP tools in use: $($mcpTools.Count)"
 Write-Output ""
 
@@ -192,7 +192,7 @@ if ($Verbose) {
         $mcp = $tools | Where-Object { $_ -match '^(pylance-mcp-server|mcp-)' }
         $unknownCount = ($builtIn | Where-Object { $_ -notin $referenceTools }).Count
 
-        Write-Output "   $agent ($($tools.Count) tools: $($builtIn.Count) built-in, $($mcp.Count) MCP)"
+        Write-Output "   $agent ($($tools.Count) tools: $($builtIn.Count) registered, $($mcp.Count) MCP)"
         if ($unknownCount -gt 0) {
             Write-Output "     WARNING: $unknownCount unknown tool(s)"
         }
@@ -205,7 +205,7 @@ if ($Verbose) {
 Write-Output "=== Summary ==="
 if ($issues -eq 0) {
     Write-Output "  OK All agent tools valid and documented"
-    Write-Output "  Built-in: $($allAgentTools.Count) unique tools across $($agentTools.Count) agents"
+    Write-Output "  Registered: $($allAgentTools.Count) unique tools across $($agentTools.Count) agents"
     Write-Output "  MCP: $($mcpTools.Count) unique tools"
     exit 0
 } else {

@@ -30,6 +30,8 @@ tools:
   - read/getNotebookSummary
   - read/readNotebookCellOutput
   - execute/runNotebookCell
+  - ms-toolsai.jupyter/configureNotebook
+  - ms-python.python/configurePythonEnvironment
 hooks:
   SubagentStop:
     - type: command

@@ -27,6 +27,9 @@ tools:
   - read/getNotebookSummary
   - read/readNotebookCellOutput
   - execute/runNotebookCell
+  - ms-toolsai.jupyter/configureNotebook
+  - ms-toolsai.jupyter/listNotebookPackages
+  - ms-python.python/configurePythonEnvironment
 ---
 
 # Code Critic Agent (Worker)

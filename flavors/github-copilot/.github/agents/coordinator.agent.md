@@ -21,6 +21,7 @@ tools:
   - execute/getTerminalOutput
   - read/getNotebookSummary
   - read/readNotebookCellOutput
+  - vscode/askQuestions
 agents:
   - planner
   - test-writer
