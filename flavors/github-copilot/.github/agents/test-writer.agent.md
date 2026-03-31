@@ -26,8 +26,8 @@ tools:
   - pylance-mcp-server/pylanceImports
   - pylance-mcp-server/pylanceSyntaxErrors
   - pylance-mcp-server/pylanceRunCodeSnippet
-  - notebook/getNotebookSummary
-  - notebook/readNotebookCellOutput
+  - read/getNotebookSummary
+  - read/readNotebookCellOutput
 hooks:
   SubagentStop:
     - type: command

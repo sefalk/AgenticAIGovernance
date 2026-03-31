@@ -26,13 +26,10 @@ tools:
   - pylance-mcp-server/pylanceSyntaxErrors
   - pylance-mcp-server/pylanceInvokeRefactoring
   - pylance-mcp-server/pylanceRunCodeSnippet
-  - notebook/editNotebookFile
-  - notebook/getNotebookSummary
-  - notebook/readNotebookCellOutput
-  - notebook/runNotebookCell
-  - notebook/configureNotebook
-  - notebook/configurePythonNotebook
-  - notebook/restartNotebookKernel
+  - edit/editNotebook
+  - read/getNotebookSummary
+  - read/readNotebookCellOutput
+  - execute/runNotebookCell
 hooks:
   SubagentStop:
     - type: command

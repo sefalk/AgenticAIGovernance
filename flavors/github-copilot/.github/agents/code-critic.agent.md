@@ -24,11 +24,9 @@ tools:
   - pylance-mcp-server/pylanceImports
   - pylance-mcp-server/pylanceSyntaxErrors
   - pylance-mcp-server/pylanceWorkspaceUserFiles
-  - notebook/getNotebookSummary
-  - notebook/readNotebookCellOutput
-  - notebook/runNotebookCell
-  - notebook/configureNotebook
-  - notebook/configurePythonNotebook
+  - read/getNotebookSummary
+  - read/readNotebookCellOutput
+  - execute/runNotebookCell
 ---
 
 # Code Critic Agent (Worker)

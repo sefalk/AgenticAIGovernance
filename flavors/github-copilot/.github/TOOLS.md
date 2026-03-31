@@ -4,6 +4,9 @@
 > the agent team. Agents consult this to understand their capabilities and
 > know which agent to delegate to. Humans use it to identify gaps when new
 > tools become available.
+>
+> Tool identifiers match the official VS Code built-in tools reference:
+> https://code.visualstudio.com/docs/copilot/reference/copilot-vscode-features#_chat-tools
 
 ## Tool-Agent Matrix
 
@@ -32,13 +35,10 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 | `execute/runInTerminal` | X | ✅ | — | — | — | — | — | — | — | — | — | — |
 | `execute/getTerminalOutput` | X | ✅ | — | — | — | — | — | — | — | — | — | — |
 | **Notebook** | | | | | | | | | | | | |
-| `notebook/editNotebookFile` | W | — | — | — | — | ✅ | ✅ | — | ✅ | — | — | — |
-| `notebook/getNotebookSummary` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — |
-| `notebook/readNotebookCellOutput` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
-| `notebook/runNotebookCell` | X | — | — | — | — | ✅ | ✅ | ✅ | — | — | — | — |
-| `notebook/configureNotebook` | X | — | — | — | — | ✅ | ✅ | ✅ | — | — | — | — |
-| `notebook/configurePythonNotebook` | X | — | — | — | — | ✅ | ✅ | ✅ | — | — | — | — |
-| `notebook/restartNotebookKernel` | X | — | — | — | — | ✅ | ✅ | — | — | — | — | — |
+| `edit/editNotebook` | W | — | — | — | — | ✅ | ✅ | — | ✅ | — | — | — |
+| `read/getNotebookSummary` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — |
+| `read/readNotebookCellOutput` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
+| `execute/runNotebookCell` | X | — | — | — | — | ✅ | ✅ | ✅ | — | — | — | — |
 | **Pylance MCP** | | | | | | | | | | | | |
 | `pylance-mcp-server/pylanceFileSyntaxErrors` | R | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
 | `pylance-mcp-server/pylanceImports` | R | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
@@ -54,13 +54,35 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 
 ## Excluded Tools — Rationale
 
-| Tool | Why Excluded | Risk if Included |
+| Tool (docs key) | Why Excluded | Risk if Included |
 |---|---|---|
-| `notebook/createNewJupyterNotebook` | New notebooks are architectural decisions (entry points). Human decides. | Unreviewed entry points, scope creep |
-| `notebook/notebookInstallPackages` | Installs inside kernel, bypasses `requirements-dev.txt` and dep-tracking workflow. | Untracked dependencies, venv/kernel drift |
-| `notebook/notebookListPackages` | Kernel packages should match venv. Use `pip: install` tasks. | Encourages kernel-level management |
-| `notebook/configureNonPythonNotebook` | Project is Python-only. No use case. | Confusion, wasted tokens |
-| `execute/runInTerminal` (for workers) | Workers use `runTests` / `runTask` / `createAndRunTask`. Only coordinator has terminal. | Ad-hoc commands bypass quality gates |
+| `newWorkspace` | Not relevant to development workflows. | Scope creep |
+| `vscode/installExtension` | Extension management is a human decision. | Unreviewed extensions, supply-chain risk |
+| `vscode/runCommand` | Too broad — can invoke any VS Code command. | Bypasses tool restrictions |
+| `execute/runInTerminal` (workers) | Workers use `runTests` / `runTask` / `createAndRunTask`. Only coordinator has terminal. | Ad-hoc commands bypass quality gates |
+| `read/terminalLastCommand` | Only useful with terminal access (coordinator only). Not assigned to avoid encouraging terminal reliance. | — |
+| `read/terminalSelection` | Same as above. | — |
+
+### Notebook-specific exclusions
+
+| Tool (internal) | Why Excluded | Risk if Included |
+|---|---|---|
+| `create_new_jupyter_notebook` | New notebooks are architectural decisions (entry points). Human decides. | Unreviewed entry points, scope creep |
+| `notebook_install_packages` | Installs inside kernel, bypasses `requirements-dev.txt` and dep-tracking workflow. | Untracked dependencies, venv/kernel drift |
+| `notebook_list_packages` | Kernel packages should match venv. Use `pip: install` tasks. | Encourages kernel-level management |
+| `configure_non_python_notebook` | Project is Python-only. No use case. | Confusion, wasted tokens |
+| `configure_notebook` | Not a documented built-in tool. May be auto-available when notebook tools are present. | If needed, add to implementer/refactorer |
+| `configure_python_notebook` | Same as above. | Same as above |
+| `restart_notebook_kernel` | Same as above. | If needed, add to implementer/refactorer |
+
+### Other built-in tools — considered but not assigned
+
+| Tool (docs key) | Why Not Assigned | Potential Future Use |
+|---|---|---|
+| `vscode/askQuestions` | Subagents don't interact with users directly; coordinator handles communication. | Could enable planner to ask clarifying questions |
+| `vscode/getProjectSetupInfo` | Project scaffolding — not relevant to maintenance workflows. | New-project setup workflows |
+| `vscode/VSCodeAPI` | VS Code extension development reference — not relevant. | Extension development projects |
+| `renderMermaidDiagram` | Diagram rendering — nice-to-have for documenter. | Architecture documentation |
 
 ## Tool Assignment Principles
 
@@ -68,7 +90,7 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 2. **Tasks over terminal** — predefined tasks (`run_task`) before ad-hoc terminal
 3. **Read before write** — critics and planners get read-only subsets
 4. **Dep-tracking integrity** — no tool that installs packages outside the spec file workflow
-5. **Kernel = venv** — kernel management happens via venv tools; `restartNotebookKernel` is the only kernel-specific tool (for reload after code changes)
+5. **Kernel = venv** — kernel management happens via venv tools; notebook cell execution is sufficient
 
 ## How to Use This Document
 

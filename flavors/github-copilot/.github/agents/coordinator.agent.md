@@ -19,8 +19,8 @@ tools:
   - execute/testFailure
   - execute/runInTerminal
   - execute/getTerminalOutput
-  - notebook/getNotebookSummary
-  - notebook/readNotebookCellOutput
+  - read/getNotebookSummary
+  - read/readNotebookCellOutput
 agents:
   - planner
   - test-writer

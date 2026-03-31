@@ -20,8 +20,8 @@ tools:
   - edit/createFile
   - edit/createDirectory
   - execute/runTask
-  - notebook/editNotebookFile
-  - notebook/getNotebookSummary
+  - edit/editNotebook
+  - read/getNotebookSummary
 hooks:
   SubagentStop:
     - type: command

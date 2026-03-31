@@ -21,8 +21,8 @@ tools:
   - execute/testFailure
   - pylance-mcp-server/pylanceFileSyntaxErrors
   - pylance-mcp-server/pylanceImports
-  - notebook/getNotebookSummary
-  - notebook/readNotebookCellOutput
+  - read/getNotebookSummary
+  - read/readNotebookCellOutput
 ---
 
 # Test Critic Agent (Worker)

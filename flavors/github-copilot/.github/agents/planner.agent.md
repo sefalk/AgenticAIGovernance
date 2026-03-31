@@ -19,8 +19,8 @@ tools:
   - execute/runTask
   - execute/runTests
   - execute/testFailure
-  - notebook/getNotebookSummary
-  - notebook/readNotebookCellOutput
+  - read/getNotebookSummary
+  - read/readNotebookCellOutput
 ---
 
 # Planner Agent (Worker)
