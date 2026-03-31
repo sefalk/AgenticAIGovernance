@@ -660,6 +660,22 @@ if ($staleSkills.Count -gt 0) {
     }
 }
 
+# ── Version-stale detection ────────────────────────────────────────────────
+# Warn when files were updated/created but VERSION hasn't changed since last
+# deploy. This catches the common mistake of forgetting to bump VERSION.
+$filesChanged = $script:Stats.Created + $script:Stats.Updated
+if ($filesChanged -gt 0 -and $DeployedInfo) {
+    $deployedVerLine = ($DeployedInfo -split "`n") | Where-Object { $_ -match '^version:\s*(.+)' } | Select-Object -First 1
+    if ($deployedVerLine -match '^version:\s*(.+)') {
+        $previousVer = $Matches[1].Trim()
+        if ($previousVer -eq $AFVersion) {
+            Write-Host ""
+            Write-Host "  WARNING: VERSION is still $AFVersion but $filesChanged file(s) changed." -ForegroundColor Red
+            Write-Host "  Did you forget to bump VERSION and update CHANGELOG.md?" -ForegroundColor Red
+        }
+    }
+}
+
 # Backup cleanup
 if ($script:BackupDir -and (Test-Path $script:BackupDir)) {
     if ($script:Stats.Conflict -eq 0) {

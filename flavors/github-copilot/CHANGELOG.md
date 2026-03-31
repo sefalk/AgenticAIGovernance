@@ -16,6 +16,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.18.1] -- 2026-03-31
+
+### Added
+
+- **Tool audit system** — `audit-tools.ps1` script validates agent tool
+  assignments against `tools-reference.txt` baseline and `TOOLS.md` matrix.
+  Reports unknown, undocumented, and orphaned tools. Tasks: `audit: tools`,
+  `audit: tools verbose`.
+- **Extension tools assigned to agents** — `ms-toolsai.jupyter/configureNotebook`
+  (implementer, refactorer, code-critic, test-writer),
+  `ms-python.python/configurePythonEnvironment` (same 4),
+  `vscode/askQuestions` (coordinator, planner),
+  `vscode.mermaid-chat-features/renderMermaidDiagram` (planner, documenter),
+  `ms-toolsai.jupyter/listNotebookPackages` (code-critic).
+- **tools-reference.txt** expanded from 30 built-in to 43 registered tools
+  (built-in + extension).
+
+### Changed
+
+- **TOOLS.md** — added extension tools and VS Code UI sections to matrix;
+  updated exclusion tables with correct frontmatter keys.
+- **audit-tools.ps1** — renamed "built-in" to "registered" to reflect
+  built-in + extension coverage; fixed Unicode characters for PS 5.1.
+
+### Fixed
+
+- **deploy.ps1** — added version-stale detection: warns when deploying
+  updated files without a VERSION bump (prevents silent version drift).
+
 ## [1.18.0] -- 2026-03-27
 
 ### Added
