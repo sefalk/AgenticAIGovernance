@@ -51,6 +51,7 @@ retros/                                                  [optional]
 # Root-level AF files
 MANIFEST.md
 GOVERNANCE.md
+TOOLS.md
 TROUBLESHOOTING.md
 copilot-instructions.md                                  [customizable]
 

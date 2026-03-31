@@ -27,6 +27,13 @@ tools:
   - pylance-mcp-server/pylanceImports
   - pylance-mcp-server/pylanceRunCodeSnippet
   - pylance-mcp-server/pylanceSyntaxErrors
+  - notebook/editNotebookFile
+  - notebook/getNotebookSummary
+  - notebook/readNotebookCellOutput
+  - notebook/runNotebookCell
+  - notebook/configureNotebook
+  - notebook/configurePythonNotebook
+  - notebook/restartNotebookKernel
 hooks:
   SubagentStop:
     - type: command
