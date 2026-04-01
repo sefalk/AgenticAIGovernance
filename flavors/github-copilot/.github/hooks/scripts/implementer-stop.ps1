@@ -11,6 +11,7 @@
 # Requires chat.useCustomAgentHooks = true in .vscode/settings.json.
 
 $ErrorActionPreference = 'SilentlyContinue'
+. "$PSScriptRoot/hook-utils.ps1"
 
 # Load project config
 $SRC_DIR = 'src'
@@ -22,6 +23,7 @@ if (Test-Path $confPath) {
 
 # Read stdin (hook input JSON -- required by protocol)
 $null = [Console]::In.ReadToEnd()
+Write-HookTrace -Hook 'implementer-stop' -Event 'invoked'
 
 # Check if stop hook is already active (prevent infinite loop)
 # The input JSON contains stop_hook_active but we read it as raw;
@@ -96,6 +98,7 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
 
     if ($missingMarkers.Count -gt 0) {
         $fileList = $missingMarkers -join ', '
+        Write-HookTrace -Hook 'implementer-stop' -Event 'block' -Detail "provenance: $fileList"
         $output = @{
             hookSpecificOutput = @{
                 hookEventName = "Stop"
@@ -115,6 +118,7 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
     exit 0
 } else {
     # Tests fail -- block the implementer from completing
+    Write-HookTrace -Hook 'implementer-stop' -Event 'block' -Detail 'tests failing'
     $summary = ($result | Where-Object { $_ -notmatch '^===' } | Select-Object -Last 3 | Out-String).Trim()
     $output = @{
         hookSpecificOutput = @{

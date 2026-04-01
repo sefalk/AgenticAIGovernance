@@ -12,9 +12,11 @@
 # Requires chat.useCustomAgentHooks = true in .vscode/settings.json.
 
 $ErrorActionPreference = 'SilentlyContinue'
+. "$PSScriptRoot/hook-utils.ps1"
 
 # Read stdin (hook input JSON -- required by protocol)
 $null = [Console]::In.ReadToEnd()
+Write-HookTrace -Hook 'test-writer-stop' -Event 'invoked'
 
 $pytest = Get-Command pytest -ErrorAction SilentlyContinue
 if (-not $pytest) {
@@ -42,6 +44,7 @@ $exitCode = $LASTEXITCODE
 # Exit code 1 = some tests fail → Red phase satisfied
 # Exit code 5 = no tests collected → skip (nothing to verify)
 if ($exitCode -eq 0) {
+    Write-HookTrace -Hook 'test-writer-stop' -Event 'block' -Detail 'Red phase violation: all tests pass'
     $output = @{
         hookSpecificOutput = @{
             hookEventName = "Stop"
@@ -82,6 +85,7 @@ foreach ($f in $newTestFiles) {
 }
 
 if ($missingMarkers.Count -gt 0) {
+    Write-HookTrace -Hook 'test-writer-stop' -Event 'block' -Detail "provenance: $($missingMarkers -join ', ')"
     $list = $missingMarkers -join ', '
     $output = @{
         hookSpecificOutput = @{

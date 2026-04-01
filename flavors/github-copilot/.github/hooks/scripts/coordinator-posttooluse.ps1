@@ -15,6 +15,7 @@
 # Requires chat.useCustomAgentHooks = true in .vscode/settings.json.
 
 $ErrorActionPreference = 'SilentlyContinue'
+. "$PSScriptRoot/hook-utils.ps1"
 
 # Load project config
 $SRC_DIR = 'src'
@@ -59,6 +60,7 @@ if ($changedFiles.Count -eq 0) {
 }
 
 $fileList = $changedFiles -join ', '
+Write-HookTrace -Hook 'coordinator-posttooluse' -Event 'warn' -Tool $toolName -Detail "$($changedFiles.Count) files changed"
 $warning = "DELEGATION VIOLATION DETECTED: $($changedFiles.Count) source file(s) have " +
     "uncommitted changes: $fileList. " +
     "If you modified these via terminal, this violates Cardinal Rule 1. " +

@@ -12,6 +12,7 @@
 # Requires chat.useCustomAgentHooks = true in .vscode/settings.json.
 
 $ErrorActionPreference = 'SilentlyContinue'
+. "$PSScriptRoot/hook-utils.ps1"
 
 # Read and parse stdin
 $raw = [Console]::In.ReadToEnd()
@@ -30,7 +31,7 @@ if ($toolName -match 'read|search|find|list|get|problems') {
 }
 
 # Only inspect file-modifying tools
-if ($toolName -notmatch 'edit|create|write|file') {
+if ($toolName -notmatch 'editFile|createFile|createDir|editNotebook|writeFile') {
     Write-Output '{}'
     exit 0
 }
@@ -42,6 +43,7 @@ if ($toolName -match 'terminal|Terminal') {
 }
 
 # Block: coordinator must not edit or create files directly
+Write-HookTrace -Hook 'coordinator-pretooluse' -Event 'deny' -Tool $toolName
 $reason = "Coordinator delegation violation: The coordinator must not modify files directly. " +
     "Select the appropriate workflow and delegate to the correct subagent: " +
     "test-writer (Red phase, test files), implementer (Green phase, production code), " +

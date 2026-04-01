@@ -10,6 +10,7 @@
 # Requires chat.useCustomAgentHooks = true in .vscode/settings.json.
 
 $ErrorActionPreference = 'SilentlyContinue'
+. "$PSScriptRoot/hook-utils.ps1"
 
 # Load project config
 $SRC_DIR = 'src'
@@ -28,9 +29,9 @@ try {
     exit 0
 }
 
-# Only inspect file-modifying tools
+# Only inspect file-modifying tools (not read/search tools that contain 'File')
 $toolName = $inputData.tool_name
-if ($toolName -notmatch 'edit|create|write|file') {
+if ($toolName -notmatch 'editFile|createFile|createDir|editNotebook') {
     Write-Output '{}'
     exit 0
 }
@@ -52,6 +53,7 @@ try {
     $prodRoot = [System.IO.Path]::GetFullPath($SRC_DIR)
 
     if ($resolved.StartsWith($prodRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Write-HookTrace -Hook 'test-writer-pretooluse' -Event 'deny' -Tool $toolName -Detail $filePath
         @{
             hookSpecificOutput = @{
                 hookEventName      = 'PreToolUse'

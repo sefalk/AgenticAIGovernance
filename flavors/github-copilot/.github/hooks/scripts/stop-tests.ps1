@@ -8,6 +8,7 @@
 # See Idea 39 for rationale.
 
 $ErrorActionPreference = 'SilentlyContinue'
+. "$PSScriptRoot/hook-utils.ps1"
 # ---------- Gate 2: Workflow Artifact Compliance (advisory) ----------
 
 # Detect the current branch to derive workflow-id

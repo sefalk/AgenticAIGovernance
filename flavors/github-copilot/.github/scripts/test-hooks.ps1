@@ -379,6 +379,61 @@ foreach ($hook in $hooks) {
 
 Write-Output ""
 
+# ── 8. Trace telemetry verification ──────────────────────────────────────
+
+Write-Output "## Trace telemetry (hook-utils.ps1)"
+
+# The hooks that made deny/ask/block/warn decisions should have written
+# trace entries to .github/logs/hook-trace.jsonl. Verify the file exists
+# and contains expected hook names.
+
+$tracePath = Join-Path (Get-Location) '.github/logs/hook-trace.jsonl'
+if (Test-Path $tracePath) {
+    $traceLines = Get-Content $tracePath
+    $traceHooks = $traceLines | ForEach-Object {
+        try { ($_ | ConvertFrom-Json).hook } catch {}
+    } | Sort-Object -Unique
+
+    $expectedHooks = @(
+        'block-dangerous',
+        'coordinator-pretooluse',
+        'test-writer-pretooluse',
+        'refactorer-pretooluse',
+        'scan-secrets'
+    )
+
+    foreach ($h in $expectedHooks) {
+        if ($h -in $traceHooks) {
+            $script:passed++
+            if ($Verbose) { Write-Output "  PASS  trace: $h wrote to hook-trace.jsonl" }
+        } else {
+            $script:failed++
+            $script:errors += "FAIL  trace: $h missing from hook-trace.jsonl"
+        }
+    }
+
+    # Verify trace entries are valid JSON
+    $invalidCount = 0
+    foreach ($line in $traceLines) {
+        try { $null = $line | ConvertFrom-Json } catch { $invalidCount++ }
+    }
+    if ($invalidCount -eq 0) {
+        $script:passed++
+        if ($Verbose) { Write-Output "  PASS  trace: all $($traceLines.Count) entries are valid JSON" }
+    } else {
+        $script:failed++
+        $script:errors += "FAIL  trace: $invalidCount invalid JSON lines in hook-trace.jsonl"
+    }
+
+    # Clean up trace file after test (it's a test artifact)
+    Remove-Item $tracePath -Force -ErrorAction SilentlyContinue
+} else {
+    $script:failed++
+    $script:errors += "FAIL  trace: hook-trace.jsonl was not created -- hooks may not be writing traces"
+}
+
+Write-Output ""
+
 # ── Summary ──────────────────────────────────────────────────────────────
 
 Write-Output "=== Summary ==="

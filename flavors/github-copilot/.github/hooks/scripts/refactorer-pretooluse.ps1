@@ -10,6 +10,7 @@
 # Requires chat.useCustomAgentHooks = true in .vscode/settings.json.
 
 $ErrorActionPreference = 'SilentlyContinue'
+. "$PSScriptRoot/hook-utils.ps1"
 
 # Read and parse stdin
 $raw = [Console]::In.ReadToEnd()
@@ -29,6 +30,7 @@ if ($toolName -notmatch 'create|Create') {
 
 # Block createFile and createDirectory (but allow createTerminal etc.)
 if ($toolName -match 'file|File|directory|Directory') {
+    Write-HookTrace -Hook 'refactorer-pretooluse' -Event 'deny' -Tool $toolName
     @{
         hookSpecificOutput = @{
             hookEventName      = 'PreToolUse'

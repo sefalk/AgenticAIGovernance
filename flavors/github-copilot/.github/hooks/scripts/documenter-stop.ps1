@@ -10,9 +10,11 @@
 # Requires chat.useCustomAgentHooks = true in .vscode/settings.json.
 
 $ErrorActionPreference = 'SilentlyContinue'
+. "$PSScriptRoot/hook-utils.ps1"
 
 # Read stdin (hook input JSON -- required by protocol)
 $null = [Console]::In.ReadToEnd()
+Write-HookTrace -Hook 'documenter-stop' -Event 'invoked'
 
 # Derive workflow-id from current branch
 $branch = & git branch --show-current 2>$null
@@ -47,6 +49,7 @@ if (-not (Test-Path $retroPath1) -and -not (Test-Path $retroPath2)) {
 # ---------- Verdict ----------
 
 if ($missing.Count -gt 0) {
+    Write-HookTrace -Hook 'documenter-stop' -Event 'block' -Detail ($missing -join '; ')
     $list = $missing -join '; '
     $output = @{
         hookSpecificOutput = @{

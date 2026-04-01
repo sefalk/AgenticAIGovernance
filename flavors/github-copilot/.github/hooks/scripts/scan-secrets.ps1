@@ -5,6 +5,7 @@
 # Blocking -- exits with code 1 when secrets are detected (HARD gate).
 
 $ErrorActionPreference = 'SilentlyContinue'
+. "$PSScriptRoot/hook-utils.ps1"
 
 # Read and parse stdin
 $raw = [Console]::In.ReadToEnd()
@@ -17,7 +18,7 @@ try {
 
 # Only inspect file-editor tool calls
 $toolName = $inputData.tool_name
-if ($toolName -notmatch 'edit|create|write|file') {
+if ($toolName -notmatch 'editFile|createFile|editNotebook|writeFile') {
     Write-Output '{}'
     exit 0
 }
@@ -42,6 +43,7 @@ $gitleaks = Get-Command gitleaks -ErrorAction SilentlyContinue
 if ($gitleaks) {
     $result = & gitleaks detect --no-git --source $filePath --no-color 2>&1
     if ($LASTEXITCODE -ne 0) {
+        Write-HookTrace -Hook 'scan-secrets' -Event 'block' -Tool $toolName -Detail "gitleaks: $filePath"
         $output = @{
             gate = "secret-scan"
             status = "FAIL"
@@ -78,6 +80,7 @@ foreach ($p in $secretPatterns) {
 }
 
 if ($findings.Count -gt 0) {
+    Write-HookTrace -Hook 'scan-secrets' -Event 'block' -Tool $toolName -Detail "regex: $($findings -join ', ') in $filePath"
     $output = @{
         gate = "secret-scan"
         status = "FAIL"

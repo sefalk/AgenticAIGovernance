@@ -16,6 +16,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.18.3] -- 2026-04-01
+
+### Added
+
+- **hook-utils.ps1** -- shared trace logging utility for all hooks. Writes
+  JSONL entries to `.github/logs/hook-trace.jsonl` with timestamp, hook name,
+  event type, tool name, and detail. Proves hooks fire during real agent runs.
+- **Trace calls in all 13 hooks** -- dot-source `hook-utils.ps1` and log at
+  decision points (deny/ask/block/warn) plus `invoked` events for stop hooks
+  and session-context.
+- **Trace verification in test-hooks.ps1** -- 6 new test cases confirm trace
+  entries are written and valid JSON. Total: 54 tests.
+
+### Fixed
+
+- **test-writer-pretooluse.ps1** -- tool-name pattern `edit|create|write|file`
+  falsely matched `readFile`, blocking the test-writer from reading production
+  code. Tightened to `editFile|createFile|createDir|editNotebook`.
+- **coordinator-pretooluse.ps1, scan-secrets.ps1** -- same pattern tightened
+  for consistency (not exploitable due to earlier guards, but fragile).
+
 ## [1.18.2] -- 2026-04-01
 
 ### Added
