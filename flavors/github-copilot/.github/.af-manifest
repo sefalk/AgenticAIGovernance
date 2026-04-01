@@ -30,6 +30,7 @@ scripts/run-deps.ps1
 scripts/run-metrics.ps1
 scripts/audit-tools.ps1
 scripts/tools-reference.txt
+scripts/test-hooks.ps1
 
 # Instructions
 instructions/

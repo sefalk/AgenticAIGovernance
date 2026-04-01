@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.18.2] -- 2026-04-01
+
+### Added
+
+- **test-hooks.ps1** -- integration test suite for all 13 Copilot agent hooks.
+  Exercises PreToolUse (block-dangerous, coordinator, test-writer, refactorer,
+  researcher), PostToolUse (scan-secrets), and edge cases (empty/malformed JSON).
+  48 test cases. Task: `test: hooks`.
+
 ## [1.18.1] -- 2026-03-31
 
 ### Added

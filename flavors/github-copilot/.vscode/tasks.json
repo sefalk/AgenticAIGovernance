@@ -207,6 +207,13 @@
       "command": ".github/scripts/audit-tools.ps1",
       "args": ["-Verbose"],
       "detail": "Detailed agent tool audit with per-agent breakdown"
+    },
+    {
+      "label": "test: hooks",
+      "type": "shell",
+      "command": ".github/scripts/test-hooks.ps1",
+      "args": ["-Verbose"],
+      "detail": "Run integration tests for all Copilot agent hooks"
     }
   ]
 }
