@@ -16,6 +16,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.18.4] -- 2026-04-01
+
+### Removed
+
+- **hook-utils.ps1** -- deleted. Custom trace logging replaced by VS Code's
+  native `GitHub Copilot Chat Hooks.log` (zero runtime overhead).
+- **Write-HookTrace calls in all 13 hooks** -- removed dot-source and all
+  trace invocations. Scripts are now self-contained again.
+- **Section 8 (trace telemetry) in test-hooks.ps1** -- 6 trace test cases
+  removed. Total: 53 tests (down from 59).
+
+### Added
+
+- **test-hooks-integration.ps1** -- parses VS Code's native hook log to
+  verify hooks actually fire. Supports `-All` (all sessions) and `-Verbose`
+  (per-invocation detail). Detects orphaned scripts and confirms global
+  hook non-firing.
+- **Pytest terminal guard in coordinator-pretooluse.ps1** -- denies
+  `run_in_terminal` when command matches `\bpytest\b|\bpy\.test\b`.
+  Returns hint to use `execute/runTests` tool or predefined tasks.
+
+### Fixed
+
+- **refactorer-stop.ps1** -- fixed corrupted line containing literal `\n`
+  embedded in source.
+
 ## [1.18.3] -- 2026-04-01
 
 ### Added

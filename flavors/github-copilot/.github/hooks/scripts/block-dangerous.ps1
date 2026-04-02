@@ -6,7 +6,6 @@
 # Safe commands pass through without interference.
 
 $ErrorActionPreference = 'SilentlyContinue'
-. "$PSScriptRoot/hook-utils.ps1"
 
 # Read and parse stdin
 $raw = [Console]::In.ReadToEnd()
@@ -54,7 +53,6 @@ $patterns = @(
 
 foreach ($p in $patterns) {
     if ($command -match $p) {
-        Write-HookTrace -Hook 'block-dangerous' -Event 'ask' -Tool $toolName -Detail "pattern: $p"
         @{
             hookSpecificOutput = @{
                 hookEventName            = 'PreToolUse'

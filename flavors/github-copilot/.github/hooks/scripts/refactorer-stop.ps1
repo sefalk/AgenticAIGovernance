@@ -12,7 +12,6 @@
 # Requires chat.useCustomAgentHooks = true in .vscode/settings.json.
 
 $ErrorActionPreference = 'SilentlyContinue'
-. "$PSScriptRoot/hook-utils.ps1"
 
 # Load project config
 $SRC_DIR = 'src'
@@ -24,7 +23,6 @@ if (Test-Path $confPath) {
 
 # Read stdin (hook input JSON -- required by protocol)
 $null = [Console]::In.ReadToEnd()
-Write-HookTrace -Hook 'refactorer-stop' -Event 'invoked'
 
 # ---------- Gate 1: All tests must pass ----------
 
@@ -74,7 +72,6 @@ if ($fromLog) {
 }
 
 if ($exitCode -ne 0 -and $exitCode -ne 5) {
-    Write-HookTrace -Hook 'refactorer-stop' -Event 'block' -Detail 'tests failing after refactoring'
     $summary = ($result | Where-Object { $_ -notmatch '^===' } | Select-Object -Last 3 | Out-String).Trim()
     $output = @{
         hookSpecificOutput = @{
@@ -105,7 +102,7 @@ $statusTests = & git status --porcelain "tests/" 2>$null |
     Where-Object { $_ -match '\.py$' }
 if ($statusTests) { $newFiles += $statusTests }
 
-if ($newFiles.Count -gt 0) {\n    Write-HookTrace -Hook 'refactorer-stop' -Event 'block' -Detail \"new files: $($newFiles -join ', ')\"
+if ($newFiles.Count -gt 0) {
     $list = $newFiles -join ', '
     $output = @{
         hookSpecificOutput = @{

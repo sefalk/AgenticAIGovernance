@@ -7,7 +7,6 @@
 # last commit, and Python version -- no manual prompting needed.
 
 $ErrorActionPreference = 'SilentlyContinue'
-. "$PSScriptRoot/hook-utils.ps1"
 
 # Consume stdin (required even if we don't use the input)
 try { [Console]::In.ReadToEnd() | Out-Null } catch {}
@@ -55,7 +54,6 @@ if ($testLogPath -and (Test-Path $testLogPath -ErrorAction SilentlyContinue)) {
 }
 
 # Build context string
-Write-HookTrace -Hook 'session-context' -Event 'invoked' -Detail $branch
 $context = "Project: $project | Branch: $branch | Last commit: $commit | $pyVer$testLogSummary"
 
 # Return JSON

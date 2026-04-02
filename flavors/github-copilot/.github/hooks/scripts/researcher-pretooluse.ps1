@@ -11,7 +11,6 @@
 # Requires chat.useCustomAgentHooks = true in .vscode/settings.json.
 
 $ErrorActionPreference = 'SilentlyContinue'
-. "$PSScriptRoot/hook-utils.ps1"
 
 # Read and parse stdin
 $raw = [Console]::In.ReadToEnd()
@@ -56,7 +55,6 @@ foreach ($p in $credPatterns) {
 
 if ($findings.Count -gt 0) {
     # WARN only -- do not deny the fetch
-    Write-HookTrace -Hook 'researcher-pretooluse' -Event 'warn' -Tool $toolName -Detail ($findings -join ', ')
     $sanitized = $url -replace '://([^/@]+):([^/@]+)@', '://***:***@'
     $sanitized = $sanitized -replace '([?&])(token|access_token|api_key|apikey|auth|key|secret|password)=[^&]*', '$1$2=***'
 
