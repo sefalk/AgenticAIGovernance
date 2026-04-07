@@ -16,6 +16,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.18.6] -- 2026-04-07
+
+### Removed
+
+- **Hardcoded model definitions** — removed `model:` fields from all 10 worker
+  agents (implementer, test-writer, refactorer, planner, code-critic, researcher,
+  test-critic, arbiter, documenter, compliance-checker). Previously these listed
+  tiered prioritized models (Tier 1-3) that required manual updates on company
+  model releases.
+
+### Changed
+
+- **Model selection:** All agents now use the user's selected model in Copilot Chat.
+  This eliminates maintenance burden and ensures zero downtime on model availability
+  changes.
+- **README:** Updated "Model Prioritization" section to explain new behavior and
+  legacy reference.
+
+### Rationale
+
+- Company model updates happen frequently; hardcoding in 11 files created
+  drift risk and maintenance overhead.
+- User-driven model selection is simpler, more flexible (e.g., A/B testing,
+  cost optimization), and future-proof.
+- VS Code's fallback behavior handles unavailable models automatically.
+
 ## [1.18.5] -- 2026-04-07
 
 ### Changed

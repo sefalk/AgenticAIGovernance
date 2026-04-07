@@ -137,36 +137,22 @@ The coordinator picks the right workflow for the task:
 | Planning | Plan Only | planner | — |
 
 <details>
-<summary><strong>Model Prioritization</strong> (click to expand)</summary>
+<summary><strong>Model Selection (v1.18.6+)</strong> (click to expand)</summary>
 
-Every worker has a **prioritized model list** sized to its task complexity.
-VS Code tries each model in order until one is available.
+As of v1.18.6, agents no longer have hardcoded model lists. Instead:
 
-| Tier | Agents | Model Priority | Rationale |
-|---|---|---|---|
-| **1 — Full Power** | implementer, test-writer, refactorer | Opus 4.6 → Sonnet 4.6 → GPT-5.4 | Complex creative code generation (3x premium) |
-| **2 — Strong** | planner, code-critic, researcher | Sonnet 4.6 → GPT-5.4 → GPT-4.1 | Deep analysis at standard cost (1x) |
-| **3 — Efficient** | test-critic, arbiter, documenter, compliance-checker | Sonnet 4 → GPT-4.1 → Haiku 4.5 | Checklist review / template output (0.33x fallback) |
-| **— (user)** | coordinator | *(no `model:` field)* | Uses whatever model the user selects |
+- **All agents** use the model **selected by the user** in Copilot Chat
+- **Fallback:** If no model is explicitly selected, VS Code uses its default
+- **No maintenance burden:** Model updates require zero agent edits — they're
+  configured by the user or automatically by VS Code availability
 
-```yaml
-# Tier 1 — makers get the most capable model first
-model:
-  - Claude Opus 4.6 (copilot)
-  - Claude Sonnet 4.6 (copilot)
-  - GPT-5.4 (copilot)
+**Legacy reference (pre-v1.18.6):** Prior versions had tiered model lists
+(Tier 1: Opus/Sonnet/GPT-5; Tier 2: Sonnet/GPT-5/GPT-4; Tier 3: Sonnet/GPT-4/Haiku).
+This design was replaced for simplicity and maintainability.
 
-# Tier 3 — lightweight tasks end with a cheap fallback
-model:
-  - Claude Sonnet 4 (copilot)
-  - GPT-4.1 (copilot)
-  - Claude Haiku 4.5 (copilot)
-```
-
-Customise the model lists in each worker's `.agent.md` file to match your
-subscription and model availability. Check the
-[supported models list](https://docs.github.com/en/copilot/reference/ai-models/supported-models)
-for current availability and cost multipliers.
+**Rationale:** Company model updates happen frequently. Hardcoding models
+in 11 agent files created maintenance overhead. Dynamic model selection via
+user preference is simpler and future-proof.
 
 </details>
 

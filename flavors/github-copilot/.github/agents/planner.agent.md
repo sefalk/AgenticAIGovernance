@@ -2,10 +2,6 @@
 name: planner
 description: 'Plan and decompose tasks. Analyse the codebase, define subtasks with acceptance criteria. Read-only — does NOT modify files.'
 user-invocable: false
-model:
-  - Claude Sonnet 4.6 (copilot)
-  - GPT-5.4 (copilot)
-  - GPT-4.1 (copilot)
 tools:
   - search/codebase
   - search/textSearch

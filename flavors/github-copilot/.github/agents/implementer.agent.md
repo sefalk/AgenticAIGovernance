@@ -2,10 +2,6 @@
 name: implementer
 description: 'Implement code changes following plans, architecture rules, and TDD. Full editing and execution tools.'
 user-invocable: false
-model:
-  - Claude Opus 4.6 (copilot)
-  - Claude Sonnet 4.6 (copilot)
-  - GPT-5.4 (copilot)
 tools:
   - search/codebase
   - search/textSearch

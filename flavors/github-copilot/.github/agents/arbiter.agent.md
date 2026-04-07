@@ -2,10 +2,6 @@
 name: arbiter
 description: 'Resolve maker-critic disagreements on design decisions. Read-only advisory role — does NOT modify files or run tests. Produces a binding recommendation or escalates to human.'
 user-invocable: false
-model:
-  - Claude Sonnet 4 (copilot)
-  - GPT-4.1 (copilot)
-  - Claude Haiku 4.5 (copilot)
 tools:
   - search/codebase
   - search/textSearch

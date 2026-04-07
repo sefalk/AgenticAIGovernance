@@ -2,10 +2,6 @@
 name: test-critic
 description: 'Review test quality, meaningful assertions, and domain invariant coverage. Read-only — does NOT modify files. Produces APPROVED, REJECTED, or ESCALATE verdicts.'
 user-invocable: false
-model:
-  - Claude Sonnet 4 (copilot)
-  - GPT-4.1 (copilot)
-  - Claude Haiku 4.5 (copilot)
 tools:
   - search/codebase
   - search/textSearch

@@ -2,10 +2,6 @@
 name: researcher
 description: 'Fetch and synthesize external documentation — third-party APIs, versioned library docs, or external standards not available in the codebase or skills library.'
 user-invocable: true
-model:
-  - Claude Sonnet 4.6 (copilot)
-  - GPT-5.4 (copilot)
-  - GPT-4.1 (copilot)
 tools:
   - search/codebase
   - search/textSearch

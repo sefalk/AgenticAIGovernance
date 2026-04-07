@@ -2,10 +2,6 @@
 name: test-writer
 description: 'Write failing tests that express requirements (Red phase of TDD). Creates test files but does NOT write production code.'
 user-invocable: false
-model:
-  - Claude Opus 4.6 (copilot)
-  - Claude Sonnet 4.6 (copilot)
-  - GPT-5.4 (copilot)
 tools:
   - search/codebase
   - search/textSearch

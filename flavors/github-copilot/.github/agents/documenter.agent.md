@@ -2,10 +2,6 @@
 name: documenter
 description: 'Write handoff logs, workflow summaries, and update the architecture map. Lightweight end-of-workflow agent with limited write tools.'
 user-invocable: false
-model:
-  - Claude Sonnet 4 (copilot)
-  - GPT-4.1 (copilot)
-  - Claude Haiku 4.5 (copilot)
 tools:
   - search/codebase
   - search/textSearch

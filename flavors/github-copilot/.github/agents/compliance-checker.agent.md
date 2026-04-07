@@ -2,10 +2,6 @@
 name: compliance-checker
 description: 'Workflow compliance watchdog. Invoked as mandatory bookend (pre-flight and post-flight) by the coordinator to verify process gates that drift under context pressure.'
 user-invocable: false
-model:
-  - Claude Sonnet 4 (copilot)
-  - GPT-4.1 (copilot)
-  - Claude Haiku 4.5 (copilot)
 tools:
   - search/codebase
   - search/textSearch
