@@ -34,14 +34,28 @@ agents:
   - researcher
   - compliance-checker
 hooks:
+  SessionStart:
+    - type: command
+      command: 'bash .github/hooks/scripts/session-context.sh'
+      windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\session-context.ps1'
   PreToolUse:
     - type: command
       command: 'bash .github/hooks/scripts/coordinator-pretooluse.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\coordinator-pretooluse.ps1'
+    - type: command
+      command: 'bash .github/hooks/scripts/block-dangerous.sh'
+      windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\block-dangerous.ps1'
   PostToolUse:
     - type: command
       command: 'bash .github/hooks/scripts/coordinator-posttooluse.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\coordinator-posttooluse.ps1'
+    - type: command
+      command: 'bash .github/hooks/scripts/scan-secrets.sh'
+      windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\scan-secrets.ps1'
+  Stop:
+    - type: command
+      command: 'bash .github/hooks/scripts/stop-tests.sh'
+      windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\stop-tests.ps1'
 ---
 
 # Coordinator Agent

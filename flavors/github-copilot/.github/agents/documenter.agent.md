@@ -24,6 +24,10 @@ tools:
   - read/getNotebookSummary
   - vscode.mermaid-chat-features/renderMermaidDiagram
 hooks:
+  PostToolUse:
+    - type: command
+      command: 'bash .github/hooks/scripts/scan-secrets.sh'
+      windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\scan-secrets.ps1'
   SubagentStop:
     - type: command
       command: 'bash .github/hooks/scripts/documenter-stop.sh'

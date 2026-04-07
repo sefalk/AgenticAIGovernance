@@ -1,6 +1,11 @@
 # Agent Hooks
 
-> **Status:** Preview feature (VS Code 1.106+)
+> **Status:** Transitioning to per-agent frontmatter hooks (v1.18.4+)
+>
+> **Global `.json` hooks:** Currently orphaned — VS Code agent hooks are a
+> preview feature and JSON loading is not yet fully implemented. We recommend
+> defining hooks in agent frontmatter instead (per-agent `.agent.md` files).
+> The `.json` files are maintained as legacy fallbacks for future use.
 >
 > Hooks execute deterministic shell commands at lifecycle points during agent
 > sessions. Unlike instructions that _guide_ behaviour, hooks _enforce_ it
@@ -32,6 +37,19 @@ Each hook:
 | `Stop` | Agent session ends | Enforce test runs, generate reports |
 
 ## Configuration Format
+
+**Recommended:** Define hooks in agent frontmatter (`.agent.md` files) for
+per-agent enforcement. Example:
+
+```yaml
+hooks:
+  PreToolUse:
+    - type: command
+      command: 'bash .github/hooks/scripts/my-hook.sh'
+      windows: 'powershell -ExecutionPolicy Bypass -File .github\hooks\scripts\my-hook.ps1'
+```
+
+**Legacy:** JSON format (not currently auto-loaded by VS Code):
 
 ```json
 {
