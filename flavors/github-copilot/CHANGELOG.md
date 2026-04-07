@@ -16,6 +16,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.18.5] -- 2026-04-07
+
+### Changed
+
+- **Hook configuration transition** — wire formerly orphaned hooks (block-dangerous,
+  scan-secrets, session-context, stop-tests) into agent frontmatter instead of
+  relying on `.json` files. Coordinator now enforces 4 lifecycle events (SessionStart,
+  PreToolUse, PostToolUse, Stop). File-writing agents (implementer, test-writer,
+  refactorer, documenter) now scan for secrets post-tool.
+- **hooks/README.md** — document per-agent hooks as primary method, clarify JSON
+  hooks are legacy fallbacks for future VS Code feature stabilization.
+
+### Notes
+
+- `agent-hooks.json` remains in place and is auto-generated if needed; it will
+  not break if VS Code enables JSON loading in the future.
+- All 4 orphaned hook scripts are now active via agent frontmatter.
+
 ## [1.18.4] -- 2026-04-01
 
 ### Removed
