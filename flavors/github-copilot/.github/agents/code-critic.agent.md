@@ -58,6 +58,8 @@ Consult these skills when relevant to the task:
 - [ ] **Imports resolved** — no unresolved imports
 - [ ] **No new problems** — problems panel clean
 - [ ] **Tests pass** — all tests green
+- [ ] **Ignore statements justified** — reject `# type: ignore` / `# pyright: ignore`
+   without explicit rule code + reason comment
 
 #### Test Execution Optimization
 

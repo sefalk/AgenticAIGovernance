@@ -16,6 +16,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.18.7] -- 2026-06-27
+
+### Added
+
+- **`check-python-quality.py` — `# noqa` hygiene:** Checker now enforces that
+  every `# noqa` suppression includes an explicit rule code (`# noqa: E501`) and
+  a justification comment of at least 8 characters. Mirrors existing
+  `# type: ignore` and `# pyright: ignore` hygiene.
+- **Atomic ignore commit enforcement (4 stop hooks):** `implementer-stop.ps1/sh`
+  and `refactorer-stop.ps1/sh` now inspect the staged diff and block when:
+  - More than one new ignore statement appears in the same commit.
+  - A new ignore statement is bundled with other code changes.
+  Agents receive a clear `block` decision with the required commit message
+  format: `[agent:name] justify ignore: file:line RULE -- reason`.
+- **Git Workflow Rule 6:** Added Commit Rule 6 to `git-workflow.instructions.md`
+  formalising the standalone-commit requirement for every `# type: ignore`,
+  `# pyright: ignore`, or `# noqa` added to production code.
+
+---
+
 ## [1.18.6] -- 2026-04-07
 
 ### Removed

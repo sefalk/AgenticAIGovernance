@@ -104,6 +104,13 @@ executes commits at defined checkpoints after reviewer gates clear.
 5. **WIP checkpoints** -- if a phase is interrupted, commit a `WIP.md`
    with message: `[agent:coordinator] WIP checkpoint -- {phase}`.
    WIP.md lives in the plan directory (e.g., `docs/plans/WIP.md`).
+6. **Ignore statements are standalone commits** — each new `# type: ignore`,
+   `# pyright: ignore`, or `# noqa` added to production code must be its own
+   isolated atomic commit. It must not be bundled with code changes or with
+   other ignore additions. Commit message format:
+   `[agent:{agent-name}] justify ignore: {file}:{line} {rule} -- {reason}`.
+   The reason must explain *why* the suppression is warranted and why it cannot
+   be avoided. The implementer/refactorer stop-hook enforces this mechanically.
 
 ## Planning Document
 

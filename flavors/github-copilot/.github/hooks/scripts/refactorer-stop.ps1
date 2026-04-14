@@ -115,9 +115,100 @@ if ($newFiles.Count -gt 0) {
     exit 0
 }
 
+# ---------- Gate 3: Python quality on changed source files ----------
+
+$changedSrcPy = @()
+try {
+    $changedSrcPy = git diff --name-only --cached --diff-filter=AM -- "$SRC_DIR/" 2>$null |
+        Where-Object { $_ -match '\.py$' }
+    if (-not $changedSrcPy) {
+        $changedSrcPy = git diff --name-only HEAD --diff-filter=AM -- "$SRC_DIR/" 2>$null |
+            Where-Object { $_ -match '\.py$' }
+    }
+} catch {}
+
+if ($changedSrcPy.Count -gt 0) {
+    $qualityScript = Join-Path (Get-Location) '.github/scripts/check-python-quality.py'
+    if (-not (Test-Path $qualityScript)) {
+        $output = @{
+            hookSpecificOutput = @{
+                hookEventName = "Stop"
+                decision = "block"
+                reason = "Refactor phase violation: python quality script missing (.github/scripts/check-python-quality.py)."
+            }
+        } | ConvertTo-Json -Compress -Depth 3
+        Write-Output $output
+        exit 0
+    }
+
+    $pythonExe = Join-Path (Get-Location) '.venv/Scripts/python.exe'
+    if (-not (Test-Path $pythonExe)) {
+        $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+        if ($pythonCmd) {
+            $pythonExe = $pythonCmd.Source
+        } else {
+            $output = @{
+                hookSpecificOutput = @{
+                    hookEventName = "Stop"
+                    decision = "block"
+                    reason = "Refactor phase violation: no Python executable found to run quality gate checks."
+                }
+            } | ConvertTo-Json -Compress -Depth 3
+            Write-Output $output
+            exit 0
+        }
+    }
+
+    $qualityResult = & $pythonExe $qualityScript --files @($changedSrcPy) 2>&1
+    $qualityExit = $LASTEXITCODE
+    if ($qualityExit -ne 0) {
+        $summary = ($qualityResult | Select-Object -First 10 | Out-String).Trim()
+        $output = @{
+            hookSpecificOutput = @{
+                hookEventName = "Stop"
+                decision = "block"
+                reason = "Refactor phase violation: python quality gate failed (type hints/docstrings/ignore hygiene). Summary: $summary"
+            }
+        } | ConvertTo-Json -Compress -Depth 3
+        Write-Output $output
+        exit 0
+    }
+}
+
+# ---------- Gate 4: Atomic ignore commit check ----------
+$diffLines = @()
+try {
+    $diffLines = git diff --cached -- '*.py' 2>$null
+    if (-not $diffLines) { $diffLines = git diff HEAD -- '*.py' 2>$null }
+} catch {}
+$ignorePattern = '#\s*(type:\s*ignore|pyright:\s*ignore|noqa)'
+$newIgnoreLines = @($diffLines | Where-Object { $_ -match '^\+[^+]' -and $_ -match $ignorePattern })
+$otherAddedLines = @($diffLines | Where-Object { $_ -match '^\+[^+]' -and $_ -notmatch $ignorePattern -and $_ -match '\S' })
+if ($newIgnoreLines.Count -gt 1) {
+    $output = @{
+        hookSpecificOutput = @{
+            hookEventName = "Stop"
+            decision = "block"
+            reason = "Refactor phase violation: $($newIgnoreLines.Count) new ignore statements in one commit. Each must be its own standalone atomic commit. Format: '[agent:name] justify ignore: file:line RULE -- reason'"
+        }
+    } | ConvertTo-Json -Compress -Depth 3
+    Write-Output $output
+    exit 0
+} elseif ($newIgnoreLines.Count -eq 1 -and $otherAddedLines.Count -gt 0) {
+    $output = @{
+        hookSpecificOutput = @{
+            hookEventName = "Stop"
+            decision = "block"
+            reason = "Refactor phase violation: new ignore statement mixed with $($otherAddedLines.Count) other code changes. Commit code changes first, then add the ignore in its own standalone commit. Format: '[agent:name] justify ignore: file:line RULE -- reason'"
+        }
+    } | ConvertTo-Json -Compress -Depth 3
+    Write-Output $output
+    exit 0
+}
+
 # All gates passed
 $output = @{
-    systemMessage = "refactorer:Stop -- all gates PASS: tests $(if ($fromLog) {'accepted from log'} else {'green'}), no new files created"
+    systemMessage = "refactorer:Stop -- all gates PASS: tests $(if ($fromLog) {'accepted from log'} else {'green'}), no new files created, python quality verified"
 } | ConvertTo-Json -Compress
 Write-Output $output
 exit 0

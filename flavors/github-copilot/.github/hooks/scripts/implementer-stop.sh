@@ -92,12 +92,64 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
         exit 0
     fi
 
+    # Python quality hard gate for changed source files
+    changed_src_py=""
+    if [ -n "$changed_py" ]; then
+        while IFS= read -r f; do
+            if [[ "$f" == "$SRC_DIR/"* || "$f" == "$SRC_DIR\\"* ]]; then
+                changed_src_py+="$f "$'\n'
+            fi
+        done <<< "$changed_py"
+    fi
+
+    if [ -n "$changed_src_py" ]; then
+        quality_script=".github/scripts/check-python-quality.py"
+        if [ ! -f "$quality_script" ]; then
+            echo '{"hookSpecificOutput": {"hookEventName": "Stop", "decision": "block", "reason": "Python quality gate: .github/scripts/check-python-quality.py not found. Cannot verify type hints/docstrings/ignore hygiene."}}'
+            exit 0
+        fi
+
+        python_exe=""
+        if [ -x ".venv/Scripts/python.exe" ]; then
+            python_exe=".venv/Scripts/python.exe"
+        elif command -v python &>/dev/null; then
+            python_exe="python"
+        fi
+
+        if [ -z "$python_exe" ]; then
+            echo '{"hookSpecificOutput": {"hookEventName": "Stop", "decision": "block", "reason": "Python quality gate: no Python executable found to run check-python-quality.py"}}'
+            exit 0
+        fi
+
+        quality_output=$(echo "$changed_src_py" | xargs "$python_exe" "$quality_script" --files 2>&1)
+        quality_exit=$?
+        if [ "$quality_exit" -ne 0 ]; then
+            summary=$(echo "$quality_output" | head -10 | tr '\n' ' ' | sed 's/"/\\"/g')
+            echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Python quality gate failed (type hints/docstrings/ignore hygiene). Summary: ${summary}\"}}"
+            exit 0
+        fi
+    fi
+
+    # Atomic ignore commit check
+    diff_output=$(git diff --cached -- '*.py' 2>/dev/null)
+    [ -z "$diff_output" ] && diff_output=$(git diff HEAD -- '*.py' 2>/dev/null)
+    new_ignores=$(echo "$diff_output" | grep -cE '^\+[^+].*#[[:space:]]*(type:[[:space:]]*ignore|pyright:[[:space:]]*ignore|noqa)' || true)
+    other_additions=$(echo "$diff_output" | grep -E '^\+[^+]' | grep -cvE '#[[:space:]]*(type:[[:space:]]*ignore|pyright:[[:space:]]*ignore|noqa)' | grep -cE '[^[:space:]]' || true)
+    if [ "$new_ignores" -gt 1 ]; then
+        echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Atomic ignore commit violation: ${new_ignores} new ignore statements in one commit. Each must be its own standalone atomic commit. Format: [agent:name] justify ignore: file:line RULE -- reason\"}}"
+        exit 0
+    fi
+    if [ "$new_ignores" -eq 1 ] && [ "$other_additions" -gt 0 ]; then
+        echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Atomic ignore commit violation: new ignore statement mixed with ${other_additions} other code changes. Commit code changes first, then add the ignore in its own standalone commit. Format: [agent:name] justify ignore: file:line RULE -- reason\"}}"
+        exit 0
+    fi
+
     if [[ "$from_log" == true ]]; then
         pass_detail="tests accepted from log"
     else
         pass_detail="all tests pass"
     fi
-    echo "{\"systemMessage\": \"implementer:Stop \u2014 Green gate PASS: ${pass_detail}, provenance markers verified\"}"
+    echo "{\"systemMessage\": \"implementer:Stop \u2014 Green gate PASS: ${pass_detail}, provenance + python quality verified\"}"
     exit 0
 else
     summary=$(echo "$output" | grep -v '^===' | tail -3 | tr '\n' ' ' | sed 's/"/\\"/g')

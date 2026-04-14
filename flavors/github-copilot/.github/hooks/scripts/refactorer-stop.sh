@@ -92,11 +92,60 @@ if [ -n "$new_files" ]; then
     exit 0
 fi
 
+# ---------- Gate 3: Python quality on changed source files ----------
+
+changed_src_py=$(git diff --name-only --cached --diff-filter=AM -- "${SRC_DIR}/" 2>/dev/null | grep -E '\.py$' || true)
+if [ -z "$changed_src_py" ]; then
+    changed_src_py=$(git diff --name-only HEAD --diff-filter=AM -- "${SRC_DIR}/" 2>/dev/null | grep -E '\.py$' || true)
+fi
+
+if [ -n "$changed_src_py" ]; then
+    quality_script=".github/scripts/check-python-quality.py"
+    if [ ! -f "$quality_script" ]; then
+        echo '{"hookSpecificOutput": {"hookEventName": "Stop", "decision": "block", "reason": "Refactor phase violation: python quality script missing (.github/scripts/check-python-quality.py)."}}'
+        exit 0
+    fi
+
+    python_exe=""
+    if [ -x ".venv/Scripts/python.exe" ]; then
+        python_exe=".venv/Scripts/python.exe"
+    elif command -v python &>/dev/null; then
+        python_exe="python"
+    fi
+
+    if [ -z "$python_exe" ]; then
+        echo '{"hookSpecificOutput": {"hookEventName": "Stop", "decision": "block", "reason": "Refactor phase violation: no Python executable found to run quality gate checks."}}'
+        exit 0
+    fi
+
+    quality_output=$(echo "$changed_src_py" | xargs "$python_exe" "$quality_script" --files 2>&1)
+    quality_exit=$?
+    if [ "$quality_exit" -ne 0 ]; then
+        summary=$(echo "$quality_output" | head -10 | tr '\n' ' ' | sed 's/"/\\"/g')
+        echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Refactor phase violation: python quality gate failed (type hints/docstrings/ignore hygiene). Summary: ${summary}\"}}"
+        exit 0
+    fi
+fi
+
+# Gate 4: Atomic ignore commit check
+diff_output=$(git diff --cached -- '*.py' 2>/dev/null)
+[ -z "$diff_output" ] && diff_output=$(git diff HEAD -- '*.py' 2>/dev/null)
+new_ignores=$(echo "$diff_output" | grep -cE '^\+[^+].*#[[:space:]]*(type:[[:space:]]*ignore|pyright:[[:space:]]*ignore|noqa)' || true)
+other_additions=$(echo "$diff_output" | grep -E '^\+[^+]' | grep -cvE '#[[:space:]]*(type:[[:space:]]*ignore|pyright:[[:space:]]*ignore|noqa)' | grep -cE '[^[:space:]]' || true)
+if [ "$new_ignores" -gt 1 ]; then
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Refactor phase violation: ${new_ignores} new ignore statements in one commit. Each must be its own standalone atomic commit. Format: [agent:name] justify ignore: file:line RULE -- reason\"}}"
+    exit 0
+fi
+if [ "$new_ignores" -eq 1 ] && [ "$other_additions" -gt 0 ]; then
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Refactor phase violation: new ignore statement mixed with ${other_additions} other code changes. Commit code changes first, then add the ignore in its own standalone commit. Format: [agent:name] justify ignore: file:line RULE -- reason\"}}"
+    exit 0
+fi
+
 # All gates passed
 if [[ "$from_log" == true ]]; then
     pass_detail="tests accepted from log"
 else
     pass_detail="tests green"
 fi
-echo "{\"systemMessage\": \"refactorer:Stop \u2014 all gates PASS: ${pass_detail}, no new files created\"}"
+echo "{\"systemMessage\": \"refactorer:Stop \u2014 all gates PASS: ${pass_detail}, no new files created, python quality verified\"}"
 exit 0

@@ -104,6 +104,12 @@ After completing each subtask:
 3. **No unused imports** — verify with Pylance
 4. **No new problems** — check problems panel
 5. **Imports clean** — no unresolved imports
+6. **Type hints complete** — all changed public functions have arg + return annotations
+7. **Docstrings complete** — changed public functions include meaningful docstrings
+8. **Ignore hygiene** — `# type: ignore[...]` / `# pyright: ignore` only with explicit rule and reason
+
+The SubagentStop hard gate enforces Python quality on changed source files via
+`.github/scripts/check-python-quality.py`.
 
 ## When to Flag Issues
 

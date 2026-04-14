@@ -93,6 +93,9 @@ reference the metric thresholds from MANIFEST § 5.
 |---|---|---|---|
 | All tests pass | HARD | Run test suite, verify zero failures | Standard+ |
 | Zero syntax/import errors | HARD | Run syntax checker | Standard+ |
+| Python type hints complete (changed source files) | HARD | Verify all public functions have full argument+return annotations in changed `SRC_DIR/**/*.py` files | Standard+ |
+| Python docstrings present and structured (changed source files) | HARD | Verify changed public functions include non-trivial docstrings with parameters/returns sections when applicable | Standard+ |
+| Ignore statements justified | HARD | Reject `# type: ignore` / `# pyright: ignore` without explicit rule code and justification comment | Standard+ |
 | Line coverage ≥ threshold | HARD | Run coverage tool, compare to MANIFEST § 5 thresholds: Domain ≥ 90%, Ports ≥ 80%, Adapters ≥ 60%, Utilities ≥ 85% | Standard+ |
 | No secrets in changed files | HARD | Grep for credential patterns, API keys | Standard+ |
 | New deps declared in spec file | HARD | If a new package was `import`ed, verify it appears in the project dep file (`af-env.conf` → `DEP_FILE` / `DEP_DEV_FILE`) | Standard+ |
@@ -107,6 +110,9 @@ reference the metric thresholds from MANIFEST § 5.
 |---|---|---|---|
 | All tests still pass after each step | HARD | Run test suite after each refactoring | Standard+ |
 | Zero syntax/import errors | HARD | Run syntax checker | Standard+ |
+| Python type hints remain complete (changed source files) | HARD | Verify all changed public functions in `SRC_DIR/**/*.py` retain full annotations | Standard+ |
+| Python docstrings remain complete (changed source files) | HARD | Verify changed public functions retain structured docstrings | Standard+ |
+| Ignore statements justified | HARD | Reject `# type: ignore` / `# pyright: ignore` without explicit rule code and justification comment | Standard+ |
 | No new files created (refactoring only) | HARD | Self-check: only existing files modified | Standard+ |
 | Skills read declaration | SOFT | `Skills Read:` line in Gate Summary (critic flags if missing) | Standard+ |
 | Complexity reduced or unchanged | ADVISORY | Run complexity tool, compare before/after | Standard+ |

@@ -63,6 +63,12 @@ Consult these skills when relevant to the task:
 **All existing tests MUST pass after every refactoring step.** If any test
 breaks, undo the change immediately.
 
+**No Python quality regression is allowed.** For changed source files, public
+functions must keep full type annotations and meaningful docstrings.
+
+**Ignore statements are exceptional only.** `# type: ignore[...]` and
+`# pyright: ignore` require explicit rule code and a justification comment.
+
 **Maximum 3 undo-and-retry attempts per refactoring step.** If after 3 attempts
 tests still break, abandon that refactoring, report FAILED, and return your
 results so the coordinator can proceed with un-refactored code.
@@ -128,6 +134,9 @@ Consult the **human-escalation** skill for the full halt protocol.
 runs. `createAndRunTask` is **last resort** — only when no pre-defined task or
 `runTests` covers the need. Accept the stop hook as your full-suite validation.
 You do NOT have terminal access.
+
+The SubagentStop hard gate also enforces Python quality on changed source files
+via `.github/scripts/check-python-quality.py`.
 
 ## Return Format
 
