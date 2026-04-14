@@ -273,6 +273,29 @@ that the current task is **related to that branch's purpose** before reusing it:
 This check prevents cross-contamination of unrelated changes on feature
 branches. It applies to **all workflows** (Full TDD, Quick Fix, Trivial Fix).
 
+### Step 0d: Worktree Bootstrap
+
+Immediately after branch creation (or Step 0c verification), create the
+worktree for this workflow. **Skip only for Trivial Fix workflows** (single
+file, no parallel work expected).
+
+```bash
+# Read WORKTREE_DIR from af-env.conf (default: ../wt)
+git worktree add "$WORKTREE_DIR/$WORKFLOW_ID" -b "agent/$WORKFLOW_ID" dev
+```
+
+1. **Read config:** Get `WORKTREE_DIR` from `.github/af-env.conf` (default: `../wt`).
+2. **Check for stale worktrees:** Run `git worktree list --porcelain`.
+   If prunable entries exist: run `git worktree prune` and report to human.
+3. **Create:** `git worktree add {WORKTREE_DIR}/{workflow-id} -b agent/{workflow-id} dev`
+4. **Verify:** Confirm the directory exists and `.github/` is accessible within it.
+5. **Record:** Add `worktree: {absolute_path}` to the plan metadata
+   (or note it in the WIP checkpoint for Trivial/Quick Fix).
+6. **Narrate:** `"Worktree created at {path} on branch agent/{id}. Proceeding inside worktree."`
+
+All subsequent subagent calls (test-writer, implementer, refactorer) include
+the worktree path in the context block — see Subagent Context Injection.
+
 ### Git Workflow
 
 The coordinator **executes** local git operations at defined checkpoints.
@@ -284,8 +307,12 @@ coordinator-specific **phase checkpoints**.
 
 **Full TDD Workflow:**
 
-1. **Before Step 1:** Create feature branch (`git checkout -b agent/{workflow-id}`)
-   or verify current branch relevance (Step 0c)
+1. **Before Step 1:** Create feature branch and worktree:
+   ```
+   git checkout -b agent/{workflow-id}    # (if worktrees not used: old path)
+   git worktree add {WT_DIR}/{workflow-id} -b agent/{workflow-id} dev
+   ```
+   Or verify current branch relevance (Step 0c). See Step 0d for full worktree bootstrap.
 2. **After Step 1:** Commit the plan: `git add {plan_file}` then
    `git commit -m "[agent:planner] implementation plan: {slug — what is planned}"`
 3. **After Step 3 (test-critic APPROVED):** Commit tests:
@@ -317,6 +344,7 @@ When invoking any subagent, prepend this **context block** to the prompt:
 > "Context: Complexity tier = {tier}. Target layers: {layers}.
 > Quality thresholds: coverage ≥ {line_cov}% line, ≥ {branch_cov}% branch;
 > complexity ≤ {cc_limit}.
+> Worktree: {absolute_worktree_path}. Branch: agent/{workflow-id}.
 > Retro lessons (if any): {retro_lessons_or_none}.
 > Before starting, read your relevant skills (listed in your Skills section)
 > by calling read_file on each SKILL.md that applies to this task."
@@ -524,6 +552,21 @@ and provenance markers exist. It is **read-only** — detects gaps only.
 
 This is a **mandatory bookend**. The Stop hook provides a third safety net
 at session end.
+
+### Step 8: Worktree Cleanup
+
+After the human confirms the branch has been merged to dev, the coordinator
+removes the worktree. **Skip if no worktree was created (Trivial Fix).**
+
+1. **Confirm merge:** Ask or wait for human confirmation:
+   `"Please confirm branch agent/{id} has been merged to dev."`
+2. **Check clean:** Run `git status --porcelain` in the worktree directory.
+   If dirty: halt and escalate — do NOT force-remove.
+3. **Remove:** `git worktree remove {WORKTREE_DIR}/{workflow-id}`
+4. **Prune:** `git worktree prune`
+5. **Verify:** `git worktree list` must not show the removed path.
+6. **Narrate:** `"Worktree {path} removed. Branch agent/{id} cleanup complete."`
+7. **Log:** Record cleanup timestamp and final commit hash in the workflow log.
 
 ### Verdict Parsing Protocol
 

@@ -107,6 +107,7 @@ skills when their task falls within the skill's scope.
 | **static-analysis** | `skills/static-analysis/` | implementer, code-critic |
 | **task-decomposition** | `skills/task-decomposition/` | planner |
 | **unit-testing** | `skills/unit-testing/` | test-writer, test-critic |
+| **git-worktrees** | `skills/git-worktrees/` | coordinator |
 
 ## Pre-Delivery Checklist (Mandatory)
 

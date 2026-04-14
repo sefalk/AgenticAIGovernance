@@ -19,6 +19,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.18.7] -- 2026-06-27
 ---
 
+## [1.18.9] -- 2026-04-14
+
+### Added
+
+- **Git Worktrees — Phase 1: Spec & Skill.** Enables parallel agent task
+  execution. Each `agent/{id}` task runs in an isolated `../wt/{id}` worktree
+  backed by the shared `.git`. Human’s main checkout stays on `dev` and is
+  never disturbed.
+
+  **`git-workflow.instructions.md`**
+  - Expanded Autonomy Boundary table: `git worktree add/remove/prune/list`
+    are now coordinator-permitted local operations.
+  - New section **Worktree Lifecycle:** path convention (`../wt/{id}`),
+    Create / Work / Merge / Cleanup lifecycle, context proof requirements,
+    stale worktree audit, and full recovery table (locked, dirty, diverged,
+    stale, path collision).
+  - New section **Worktree and VS Code:** how to open worktrees as workspace
+    folders, `.gitignore` recommendations.
+
+  **`coordinator.agent.md`**
+  - New **Step 0d: Worktree Bootstrap** — creates the worktree before Red
+    phase; reads `WORKTREE_DIR` from `af-env.conf`; checks for stale trees;
+    records worktree path in plan metadata.
+  - New **Step 8: Worktree Cleanup** — after human confirms merge; verifies
+    clean status; removes + prunes; narrates result.
+  - Subagent context injection now includes `Worktree: {path}` and
+    `Branch: agent/{id}` so all agents know their execution context.
+  - Phase Checkpoint #1 updated to show `git worktree add` as the canonical
+    branch creation path.
+
+  **`af-env.conf`** (template defaults)
+  - `WORKTREE_DIR=../wt` — sibling path to avoid repo pollution.
+  - `WORKTREE_BRANCH_PREFIX=agent` — consistent with existing branch convention.
+
+  **`skills/git-worktrees/SKILL.md`** (new)
+  - 7-section practical guide: concepts, key commands, lifecycle,
+    troubleshooting (7 common problems + resolutions), verification
+    patterns, configuration reference, `.gitignore` recommendations,
+    limitations and edge cases (OneDrive, submodules, file watchers).
+
+  **`skills/INDEX.md`** — entry #17; agent matrix entry for coordinator.
+  **`copilot-instructions.md`** — skills table entry added.
+  **`.af-manifest`** — `skills/git-worktrees/SKILL.md` registered.
+
+  **Not yet implemented (Phases 2–4):** Hard-gate hooks for worktree
+  creation preconditions and context proof; `setup-worktree` and
+  `cleanup-worktree` scripts; integration tests. See
+  `ideas/feature-git-worktrees.md` for the full roadmap.
+
+---
+
 ## [1.18.8] -- 2026-04-14
 
 ### Fixed

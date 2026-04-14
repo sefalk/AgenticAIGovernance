@@ -34,6 +34,10 @@ explicit human approval.
 | `git branch -d / -D` | **Human** | Irreversible deletion |
 | `git reset --hard` | **Human** | Destructive state rewrite |
 | `git rebase` | **Human** | History rewrite risk |
+| `git worktree add ../wt/{id} -b agent/{id}` | Coordinator | Local, fully reversible |
+| `git worktree remove ../wt/{id}` | Coordinator | Local cleanup after human merge |
+| `git worktree prune` | Coordinator | Read-write, but only prunes stale entries |
+| `git worktree list` | Coordinator | Read-only |
 
 The `block-dangerous` hook enforces this boundary as a safety net
 independent of coordinator instructions. No worker agent (test-writer,
@@ -62,6 +66,113 @@ agent/{workflow-id}
 
 After merge, the human deletes the feature branch. Agents do not delete
 branches.
+
+## Worktree Lifecycle
+
+Every branch-based task runs in its own **git worktree** — an isolated
+working directory backed by the same repository. This enables 3–5 tasks
+to execute in parallel without branch-switching overhead or interference
+with the developer's main checkout.
+
+### Path Convention
+
+Worktrees live **outside** the repository to avoid repo pollution:
+
+```
+{repo-root}/../wt/{workflow-id}/
+```
+
+Example: if the repo is at `~/projects/myapp`, worktrees are at
+`~/projects/wt/feat-auth/`, `~/projects/wt/fix-db-pool/`, etc.
+
+The path root is configured via `WORKTREE_DIR` in `.github/af-env.conf`
+(default: `../wt`). Project `.gitignore` should include `../wt/`.
+
+### Create (Coordinator — Step 0d)
+
+Before the Red phase, the coordinator creates the worktree:
+
+```bash
+# Read WORKTREE_DIR from af-env.conf (default: ../wt)
+git worktree add "$WORKTREE_DIR/$WORKFLOW_ID" -b "agent/$WORKFLOW_ID" dev
+```
+
+Preconditions (verified by `coordinator-pretooluse` hard gate):
+1. Branch name matches `^agent/[a-z0-9-]+$`.
+2. Target path does not already exist.
+3. Base branch (`dev`) exists and is reachable.
+4. Main repo `.git` is healthy (`git status` exits 0).
+
+After creation:
+- Verify `.github/` hooks are present in the worktree (inherited via the
+  shared `.git`).
+- Record worktree path in the plan metadata (`worktree: ../wt/{id}`).
+- Run venv bootstrap if needed (see `scripts/setup-worktree.ps1/.sh`).
+
+### Work (Agents run inside the worktree)
+
+All subagents (test-writer, implementer, refactorer) execute **within the
+worktree directory**. The coordinator passes the absolute worktree path
+in the subagent context block:
+
+```
+Worktree: {absolute_path_to_worktree}
+Branch:   agent/{workflow-id}
+```
+
+Context proof gates (enforced by `block-dangerous` and stop hooks):
+- `git branch --show-current` must return `agent/{id}`.
+- `git rev-parse --git-common-dir` must point to the shared `.git`.
+- PWD must be inside the worktree directory.
+
+Violation → immediate halt + escalate to human with context dump.
+
+### Merge (Human)
+
+The human merges from the main checkout — not from the worktree:
+
+```bash
+# In main checkout (on dev):
+git merge --no-ff agent/{workflow-id}
+```
+
+**Agents do not merge, rebase, or push.** The coordinator narrates:
+`"Branch agent/{id} ready for merge. Run: git merge --no-ff agent/{id}"`
+
+### Cleanup (Coordinator — Step 8)
+
+After the human confirms merge:
+
+1. Verify worktree is clean: `git status --porcelain` in worktree must be empty.
+2. Remove: `git worktree remove "$WORKTREE_DIR/$WORKFLOW_ID"`
+3. Prune dangling references: `git worktree prune`
+4. Verify removal: `git worktree list` must not contain the path.
+5. Record cleanup in the workflow log.
+
+If the worktree is dirty (uncommitted changes): **halt, escalate to human.**
+Do not force-remove. Human can either commit, stash, or manually clean.
+
+If `git worktree remove` fails with "is locked": suggest
+`git worktree unlock ../wt/{id}` then retry.
+
+### Stale Worktree Audit
+
+At the start of each new workflow (Step 0), the coordinator:
+
+1. Runs `git worktree list --porcelain`.
+2. Checks for entries with `prunable` or missing HEAD.
+3. If any found: warns the human and runs `git worktree prune` to clean them.
+4. Lists remaining active worktrees so the human can see parallel workload.
+
+### Recovery Procedures
+
+| Problem | Diagnosis | Resolution |
+|---------|-----------|------------|
+| Worktree locked | `git worktree list` shows `locked` | `git worktree unlock ../wt/{id}` then `git worktree remove` |
+| Worktree dirty after task | Uncommitted changes found | Human: commit, stash, or `git checkout -- .` then coordinator removes |
+| Stale entry (dir missing) | `git worktree list` shows prunable | `git worktree prune` |
+| Branch diverged | Long-lived worktree; base updated | Human merge `dev` into `agent/{id}` in the worktree, then continue |
+| Path collision | Worktree already exists | Investigate: is an old task still running? Check with human before force-delete |
 
 ### Branch Relevance
 
@@ -175,6 +286,27 @@ The `WIP.md` file is a recovery checkpoint, not a plan. It always uses
 the literal name `WIP.md` and lives in the same directory as plan files
 (e.g., `docs/plans/WIP.md`). It is deleted when the workflow completes
 successfully. See `templates/WIP.md` for the template.
+
+## Worktree and VS Code
+
+Each worktree is a valid VS Code workspace root. To open a worktree in VS Code:
+
+```bash
+code ../wt/{workflow-id}
+```
+
+Or add it as a workspace folder (`File > Add Folder to Workspace`). Hooks
+from `.github/` work because they reference the shared `.git` directory —
+no hook duplication needed.
+
+Recommended `.gitignore` additions:
+
+```gitignore
+# Git worktree directories (outside repo root)
+../wt/
+/worktrees/
+/.worktrees/
+```
 
 ## Human Commit Format
 

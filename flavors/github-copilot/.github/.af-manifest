@@ -41,6 +41,7 @@ prompts/
 # Skills
 skills/
 skills/INDEX.md                                          [customizable]
+skills/git-worktrees/SKILL.md
 
 # Templates
 templates/

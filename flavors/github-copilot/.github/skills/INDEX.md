@@ -25,12 +25,14 @@
 | 14 | `static-analysis` | Run and interpret static analysis tools — Ruff, mypy, Bandit, Radon. Covers configuration, complexity thresholds, editor integration, and failure handling. | implementer, code-critic |
 | 15 | `task-decomposition` | Break complex objectives into manageable, estimable, and assignable units of work using WBS, INVEST criteria, and vertical slicing. | planner |
 | 16 | `unit-testing` | Verify correctness of individual units of code in isolation. AAA pattern, test doubles, language-specific guidance, edge cases, and coverage quality gates. | test-writer, test-critic |
+| 17 | `git-worktrees` | Create, manage, and remove git worktrees for parallel agent task execution. Lifecycle commands, context verification, troubleshooting, and recovery procedures. | coordinator |
 
 ## Agent Skill Matrix
 
 | Agent | Skills |
 |-------|--------|
 | **planner** | task-decomposition, risk-management, design-patterns |
+| **coordinator** | git-worktrees |
 | **test-writer** | unit-testing, property-testing, error-handling, human-escalation |
 | **test-critic** | unit-testing, code-review, property-testing |
 | **implementer** | hexagonal-architecture, pydantic, error-handling, design-patterns, static-analysis, dependency-management, human-escalation |

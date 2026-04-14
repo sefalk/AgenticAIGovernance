@@ -9,6 +9,33 @@
 
 ---
 
+## 🆕 **Git Worktrees for Parallel Agent Execution** (2026-04-14)
+
+**Status:** ⬜ TODO  
+**Scope:** `git workflow` + `coordinator` orchestration  
+**Effort:** MEDIUM  
+**Impact:** HIGH (enables 3-5× parallel task execution)
+
+**Problem:** Current workflow forces sequential task execution. One branch/checkout at a time. Coordinator blocks while waiting for agents. Human developer cannot work locally without interference.
+
+**Proposed solution:** Implement Git worktrees to isolate each `agent/{task-id}` in its own working directory.
+- Planner creates `wt/{task-id}` worktree on `agent/{task-id}` branch.
+- Agents work independently; multiple tasks run in parallel.
+- No branch-switching or stash chaos.
+- Hard gates prevent context contamination (wrong branch in wrong tree).
+- Automatic cleanup after merge.
+
+**Deliverables:**
+1. Git workflow spec extension (lifecycle, bootstrap, cleanup).
+2. 4 hard-gate hooks (creation preconditions, context proof, cleanup validation).
+3. 2 bootstrap/cleanup scripts.
+4. Troubleshooting skill.
+5. Integration tests (3+ parallel worktrees).
+
+**See:** `ideas/feature-git-worktrees.md` — detailed feature plan with gate matrix.
+
+---
+
 ## 1) ✅ DONE — AF should not reference AAIG (2026-03-09)
 
 AF should not reference to AAIG. The content must be integrated into AF fully. Can AF integrate any additional information into agents/skills/hooks. Note that core principles should be considered.
