@@ -206,9 +206,31 @@ if ($newIgnoreLines.Count -gt 1) {
     exit 0
 }
 
+# ---------- Gate 5: Python linting on changed source files ----------
+if ($changedSrcPy.Count -gt 0) {
+    $lintScript = Join-Path (Get-Location) '.github/scripts/check-python-linting.py'
+    if ((Test-Path $lintScript) -and $pythonExe) {
+        $lintResult = & $pythonExe $lintScript --files @($changedSrcPy) 2>&1
+        $lintExit = $LASTEXITCODE
+        if ($lintExit -eq 2) {
+            $lintSummary = ($lintResult | Select-Object -First 15 | Out-String).Trim()
+            $output = @{
+                hookSpecificOutput = @{
+                    hookEventName = "Stop"
+                    decision = "block"
+                    reason = "Refactor phase violation: linting gate failed. Fix with: ruff check --fix <files>. Violations: $lintSummary"
+                }
+            } | ConvertTo-Json -Compress -Depth 3
+            Write-Output $output
+            exit 0
+        }
+        # exit 1 = ruff not installed: skip with advisory (not a block)
+    }
+}
+
 # All gates passed
 $output = @{
-    systemMessage = "refactorer:Stop -- all gates PASS: tests $(if ($fromLog) {'accepted from log'} else {'green'}), no new files created, python quality verified"
+    systemMessage = "refactorer:Stop -- all gates PASS: tests $(if ($fromLog) {'accepted from log'} else {'green'}), no new files created, python quality verified, linting clean"
 } | ConvertTo-Json -Compress
 Write-Output $output
 exit 0

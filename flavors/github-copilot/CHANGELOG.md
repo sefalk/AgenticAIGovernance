@@ -19,6 +19,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.18.7] -- 2026-06-27
 ---
 
+## [1.18.13] -- 2026-04-14
+
+### Added
+
+- **Linting Hard Gate — `scripts/check-python-linting.py`.**
+  Dependency-light ruff wrapper that enforces linting quality on changed
+  source files during the Refactor phase.
+  Reads `LINTING_STRICTNESS` from `af-env.conf`:
+  - `minimal` → F8 (unused imports + undefined names)
+  - `standard` → E,F,I (+ pycodestyle errors + isort)
+  - `strict` → E,F,I,B,UP,SIM,C90 (+ bugbear, pyupgrade, simplify, complexity)
+  Exit 0 = pass, 1 = ruff not installed (BLOCKED — advisory skip, not deny), 2 = fail.
+
+- **`refactorer-stop.ps1/.sh` — Gate 5 (Linting).**
+  Calls `check-python-linting.py` on all changed `SRC_DIR/**/*.py` files.
+  HARD gate: if exit 2, blocks with `ruff check --fix` remediation hint.
+  BLOCKED state (ruff missing) is advisory — does not deny the commit.
+
+- **`af-env.conf` template — two new configurable keys:**
+  - `LINTING_STRICTNESS=standard` — controls ruff rule set
+  - `PYLANCE_TYPE_CHECKING=strict` — documents Pylance strictness for agents
+
+- **`.vscode/settings.json` — `python.analysis.typeCheckingMode: "strict"` default.**
+  Anchors Pylance strict type checking in the workspace settings.
+  Projects can override per `[customizable]` convention.
+
+- **`quality-gates.instructions.md` — Refactorer linting HARD gate.**
+  Explicitly documents the new gate: `check-python-linting.py` on changed
+  source files; BLOCKED (not FAIL) if ruff is absent.
+
+---
+
 ## [1.18.12] -- 2026-04-14
 
 ### Added

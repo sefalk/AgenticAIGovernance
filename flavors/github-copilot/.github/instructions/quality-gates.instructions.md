@@ -114,6 +114,7 @@ reference the metric thresholds from MANIFEST § 5.
 | Python docstrings remain complete (changed source files) | HARD | Verify changed public functions retain structured docstrings | Standard+ |
 | Ignore statements justified | HARD | Reject `# type: ignore` / `# pyright: ignore` without explicit rule code and justification comment | Standard+ |
 | No new files created (refactoring only) | HARD | Self-check: only existing files modified | Standard+ |
+| Linting clean (changed source files) | HARD | Run `check-python-linting.py` on changed `SRC_DIR/**/*.py` files; rule set determined by `LINTING_STRICTNESS` in `af-env.conf` (`minimal`/`standard`/`strict`). Gate is BLOCKED (not fail) if `ruff` is not installed. | Standard+ |
 | Skills read declaration | SOFT | `Skills Read:` line in Gate Summary (critic flags if missing) | Standard+ |
 | Complexity reduced or unchanged | ADVISORY | Run complexity tool, compare before/after | Standard+ |
 
