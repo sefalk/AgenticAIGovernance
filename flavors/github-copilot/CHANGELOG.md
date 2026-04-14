@@ -17,6 +17,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [1.18.7] -- 2026-06-27
+---
+
+## [1.18.8] -- 2026-04-14
+
+### Fixed
+
+- **Root cause: generic commit messages from test-writer and implementer.**
+  The Phase-to-Commit Mapping table and Phase Checkpoints in
+  `coordinator.agent.md` showed commit messages as **literal complete strings**
+  (`"[agent:test-writer] failing tests"`) rather than templates requiring a
+  colon-separated description. The coordinator followed the spec correctly —
+  the spec was wrong.
+
+### Changed
+
+- **`git-workflow.instructions.md` — Phase-to-Commit Mapping:** All 5 phase
+  messages now show mandatory `{description}` suffixes after a colon separator:
+  `[agent:test-writer] failing tests: {module/suite — what scenarios are covered}`.
+- **`git-workflow.instructions.md` — Commit Rule 4:** Tightened to require
+  `[agent:name] {phase}: {description}` format. States that generic phase-only
+  labels are rejected by the hook.
+- **`coordinator.agent.md` — Phase Checkpoints:** All 7 phase commit message
+  examples updated to show required `{description}` suffix.
+
+### Added
+
+- **Hard gate — `coordinator-pretooluse.ps1` and `.sh`:** `run_in_terminal`
+  calls containing `git commit -m "..."` are now intercepted. The hook rejects
+  commit messages that match `[agent:name] phase` with no `: {description}` of
+  ≥ 10 chars. Exempt patterns: `WIP checkpoint`, `task cancelled`,
+  `justify ignore` (already validated by their own gates). On rejection the
+  coordinator receives a `deny` decision with the required format and a
+  concrete example.
+- **`coordinator-pretooluse.sh`:** The bash hook previously had no terminal
+  interception at all (pytest block existed only in the PS1 version). This
+  release adds full terminal handling parity: pytest block + commit message
+  validation.
+
 
 ### Added
 

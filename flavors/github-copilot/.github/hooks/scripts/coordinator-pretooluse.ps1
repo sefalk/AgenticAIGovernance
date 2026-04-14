@@ -1,6 +1,7 @@
 # copilot:generated | implementer | 2026-03-16
 # copilot:modified  | implementer | 2026-03-17 | fixed false-positive deny on read-only tools
 # copilot:modified  | implementer | 2026-04-02 | deny pytest via terminal, hint execute/runTests
+# copilot:modified  | implementer | 2026-04-14 | validate git commit message quality, reject generic phase-only messages
 # Agent-scoped PreToolUse hook for the coordinator agent.
 #
 # DELEGATION ENFORCEMENT (HARD -- blocks coordinator from editing/creating files)
@@ -51,7 +52,29 @@ if ($toolName -match 'terminal') {
         } | ConvertTo-Json -Depth 3 -Compress
         exit 0
     }
-    # Non-pytest terminal commands are allowed (git, investigation, etc.)
+    # Validate git commit message quality -- reject generic phase-only messages
+    # Required format: [agent:name] phase: {description >= 10 chars}
+    if ($command -match 'git\s+commit') {
+        $commitMsg = $null
+        if ($command -match '-m\s+"([^"]+)"') { $commitMsg = $Matches[1] }
+        elseif ($command -match "-m\s+'([^']+)'") { $commitMsg = $Matches[1] }
+        if ($null -ne $commitMsg) {
+            $m = $commitMsg.Trim()
+            $exempt = $m -match '^\[agent:[^\]]+\]\s+(WIP checkpoint|task cancelled|justify ignore)'
+            $adequate = $m -match '^\[agent:[^\]]+\]\s+[^:]+:\s+.{10,}'
+            if (-not $exempt -and -not $adequate) {
+                @{
+                    hookSpecificOutput = @{
+                        hookEventName      = 'PreToolUse'
+                        permissionDecision = 'deny'
+                        permissionDecisionReason = "Commit message too generic. Required format: '[agent:name] phase: {description >= 10 chars}'. E.g.: '[agent:test-writer] failing tests: ColumnMeta validation -- null CRC and negative threshold edge cases'. See git-workflow.instructions.md Commit Rule 4."
+                    }
+                } | ConvertTo-Json -Depth 3 -Compress
+                exit 0
+            }
+        }
+    }
+    # Terminal commands allowed (git, investigation, etc.)
     Write-Output '{}'
     exit 0
 }

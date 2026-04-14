@@ -287,17 +287,17 @@ coordinator-specific **phase checkpoints**.
 1. **Before Step 1:** Create feature branch (`git checkout -b agent/{workflow-id}`)
    or verify current branch relevance (Step 0c)
 2. **After Step 1:** Commit the plan: `git add {plan_file}` then
-   `git commit -m "[agent:planner] implementation plan"`
+   `git commit -m "[agent:planner] implementation plan: {slug — what is planned}"`
 3. **After Step 3 (test-critic APPROVED):** Commit tests:
-   `git add {test_files}` then `git commit -m "[agent:test-writer] failing tests"`
+   `git add {test_files}` then `git commit -m "[agent:test-writer] failing tests: {module/suite — what scenarios are covered}"`
 4. **After Step 4 (code-critic APPROVED in Step 6):** Commit implementation:
-   `git add {source_files}` then `git commit -m "[agent:implementer] make tests pass"`
+   `git add {source_files}` then `git commit -m "[agent:implementer] make tests pass: {what was implemented, key changes}"`
 5. **After Step 5 (if changes made):** Commit refactoring:
-   `git add {refactored_files}` then `git commit -m "[agent:refactorer] cleanup"`
+   `git add {refactored_files}` then `git commit -m "[agent:refactorer] cleanup: {what was refactored and why}"`
 6. **After Step 7:** Commit docs:
-   `git add {log_files}` then `git commit -m "[agent:documenter] workflow log"`
+   `git add {log_files}` then `git commit -m "[agent:documenter] workflow log: {workflow-id}"`
 7. **After Step 7b (if remediation occurred):** Commit remediated artifacts:
-   `git add {remediated_files}` then `git commit -m "[agent:compliance-checker] remediated artifacts"`
+   `git add {remediated_files}` then `git commit -m "[agent:compliance-checker] remediated artifacts: {what was remediated}"`
 
 **Trivial Fix:** Single commit `[agent:coordinator] trivial fix: {description}`.
 
@@ -346,7 +346,7 @@ Use the **planner** agent as a subagent to decompose the user's request:
 where: Type = `feat`/`fix`/`refactor`/`adr`/`review`.
 Slug = branch name slug (e.g., `agent/fix-alignment-nulls` → `fix-alignment-nulls`).
 
-Commit: `git add {plan_file}` then `git commit -m "[agent:planner] implementation plan"`.
+Commit: `git add {plan_file}` then `git commit -m "[agent:planner] implementation plan: {slug — what is planned}"`.
 
 **Decision gate:** Count the subtasks in the plan. If **any** of these are true,
 present the plan to the human for approval BEFORE proceeding:

@@ -87,11 +87,11 @@ executes commits at defined checkpoints after reviewer gates clear.
 
 | Phase | Agent | Commit Message | What Is Committed |
 |---|---|---|---|
-| Plan | planner | `[agent:planner] implementation plan` | Plan file in `docs/plans/` |
-| Red | test-writer | `[agent:test-writer] failing tests` | New test files, `conftest.py` updates |
-| Green | implementer | `[agent:implementer] make tests pass` | Production code changes |
-| Refactor | refactorer | `[agent:refactorer] cleanup` | Structural improvements (tests still green) |
-| Document | documenter | `[agent:documenter] workflow log` | Updated plan file, workflow log YAML |
+| Plan | planner | `[agent:planner] implementation plan: {slug — what is planned}` | Plan file in `docs/plans/` |
+| Red | test-writer | `[agent:test-writer] failing tests: {module/suite — what scenarios are covered}` | New test files, `conftest.py` updates |
+| Green | implementer | `[agent:implementer] make tests pass: {what was implemented, key changes}` | Production code changes |
+| Refactor | refactorer | `[agent:refactorer] cleanup: {what was refactored and why}` | Structural improvements (tests still green) |
+| Document | documenter | `[agent:documenter] workflow log: {workflow-id}` | Updated plan file, workflow log YAML |
 
 ### Commit Rules
 
@@ -100,7 +100,10 @@ executes commits at defined checkpoints after reviewer gates clear.
    must fail for the right reason).
 3. **No partial commits** — each commit is self-contained and leaves the
    codebase in a consistent state.
-4. **Commit messages** follow the format: `[agent:{agent-name}] {description}`.
+4. **Commit messages** follow the format: `[agent:{agent-name}] {phase}: {description}`.
+   The `{description}` after the colon must be specific (≥ 10 chars). Generic
+   phase-only labels such as `failing tests` or `make tests pass` with no
+   colon-separated description are rejected by the `coordinator-pretooluse` hook.
 5. **WIP checkpoints** -- if a phase is interrupted, commit a `WIP.md`
    with message: `[agent:coordinator] WIP checkpoint -- {phase}`.
    WIP.md lives in the plan directory (e.g., `docs/plans/WIP.md`).
