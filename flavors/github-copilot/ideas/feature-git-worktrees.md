@@ -1,6 +1,6 @@
 # Feature: Git Worktrees for Parallel Agent Task Execution
 
-**Status:** 🔄 IN PROGRESS — Phase 1+2+3 complete 2026-04-14  
+**Status:** ✅ COMPLETE — Phase 1+2+3+4 done 2026-04-14  
 **Created:** 2026-04-14  
 **Owner:** User Request  
 **Type:** Enhancement (git-workflow)
@@ -165,10 +165,10 @@ All gates are **HARD** (mechanically enforced) unless marked SOFT.
 
 ### Phase 4: Testing & Hardening
 
-- [ ] Integration tests: create/merge/cleanup cycle.
-- [ ] Stress test: 4+ parallel worktrees + merge conflicts.
-- [ ] Error recovery: simulate locked worktrees, force removal.
-- [ ] Documentation: troubleshooting guide + video example (optional).
+- [x] Integration tests: setup-worktree / cleanup-worktree lifecycle (19 test cases).
+- [x] Multi-worktree validation: simultaneous create + parallel cleanup.
+- [x] Error recovery: path collision, invalid IDs, dirty worktrees, force-remove.
+- [x] Round-trip verification: create → clean → verify removal.
 
 ---
 

@@ -71,23 +71,26 @@ if (-not $isRegistered) {
     exit 1
 }
 
-# --- Check worktree is clean ---
-$status = git -C $wtPath status --porcelain 2>$null
-if ($status) {
-    Write-Host ""
-    Write-Host "ERROR: Worktree is dirty. Uncommitted changes found:" -ForegroundColor Red
-    Write-Host $status
-    Write-Host ""
-    Write-Host "  Options:"
-    Write-Host "    Commit   : cd `"$wtPath`" ; git add <files> ; git commit -m `"...`""
-    Write-Host "    Discard  : cd `"$wtPath`" ; git checkout -- ."
-    Write-Host "    Stash    : cd `"$wtPath`" ; git stash"
-    Write-Host ""
-    Write-Host "  After cleaning: re-run cleanup-worktree.ps1 -WorkflowId $WorkflowId"
-    exit 2
+# --- Check worktree is clean (unless -Force) ---
+if (-not $Force) {
+    $status = git -C $wtPath status --porcelain 2>$null
+    if ($status) {
+        Write-Host ""
+        Write-Host "ERROR: Worktree is dirty. Uncommitted changes found:" -ForegroundColor Red
+        Write-Host $status
+        Write-Host ""
+        Write-Host "  Options:"
+        Write-Host "    Commit   : cd `"$wtPath`" ; git add <files> ; git commit -m `"...`""
+        Write-Host "    Discard  : cd `"$wtPath`" ; git checkout -- ."
+        Write-Host "    Stash    : cd `"$wtPath`" ; git stash"
+        Write-Host ""
+        Write-Host "  After cleaning: re-run cleanup-worktree.ps1 -WorkflowId $WorkflowId"
+        exit 2
+    }
+    Write-Host "  Status: clean"
+} else {
+    Write-Host "  Status: -Force -- skipping dirty check"
 }
-
-Write-Host "  Status: clean"
 
 # --- Remove worktree ---
 Write-Host "  Removing worktree..."

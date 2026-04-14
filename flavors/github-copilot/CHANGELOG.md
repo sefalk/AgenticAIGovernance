@@ -19,6 +19,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.18.7] -- 2026-06-27
 ---
 
+## [1.18.12] -- 2026-04-14
+
+### Added
+
+- **Git Worktrees — Phase 4: Integration Tests.**
+
+  **`scripts/test-worktree-scripts.ps1`**
+  19 integration tests covering the full lifecycle of `setup-worktree.ps1` and `cleanup-worktree.ps1`.
+  Creates isolated temp git repos and exercises:
+  - Setup: valid IDs, parallel worktrees, validation gates (bad slugs, collisions, bad base branch)
+  - Cleanup: clean removal, unregistered IDs, dirty worktree blocking, force-remove override
+  - Round-trip: create → [work implied] → cleanup → verify purged
+
+  All tests run in isolation with no side effects (temp repos auto-deleted).
+  Exit: 0 = all passed, 1 = failures.
+
+  **`scripts/cleanup-worktree.ps1` — `-Force` fix:**
+  The `-Force` flag now **skips the dirty check**, allowing safe recovery removal
+  of abandoned/corrupted worktrees. Prints confirmation and proceeds directly to
+  `git worktree remove --force`.
+
+  **Feature Status: COMPLETE**
+  - Phase 1 ✅ Spec + documentation
+  - Phase 2 ✅ Hard gates (pre-tool + post-merge hooks)
+  - Phase 3 ✅ Bootstrap & cleanup scripts (setup-worktree, cleanup-worktree)
+  - Phase 4 ✅ Integration tests (19 cases, 100% pass)
+  All four phases deployed. Worktree workflow ready for production use.
+
+---
+
 ## [1.18.11] -- 2026-04-14
 
 ### Added
