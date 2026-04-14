@@ -154,7 +154,8 @@ if [ -n "$changed_src_py" ]; then
             echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Refactor phase violation: linting gate failed. Fix with: ruff check --fix <files>. Violations: ${lint_summary}\"}}"
             exit 0
         elif [ "$lint_exit" -eq 1 ]; then
-            lint_status="BLOCKED (ruff not installed)"
+            echo '{"hookSpecificOutput": {"hookEventName": "Stop", "decision": "block", "reason": "Refactor phase blocked: linting gate unavailable because ruff is not installed. Install dev dependencies or run: pip install ruff"}}'
+            exit 0
         else
             lint_status="clean"
         fi

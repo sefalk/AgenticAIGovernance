@@ -226,7 +226,15 @@ if ($changedSrcPy.Count -gt 0) {
             Write-Output $output
             exit 0
         } elseif ($lintExit -eq 1) {
-            $lintStatus = 'BLOCKED (ruff not installed)'
+            $output = @{
+                hookSpecificOutput = @{
+                    hookEventName = "Stop"
+                    decision = "block"
+                    reason = "Refactor phase blocked: linting gate unavailable because ruff is not installed. Install dev dependencies or run: pip install ruff"
+                }
+            } | ConvertTo-Json -Compress -Depth 3
+            Write-Output $output
+            exit 0
         } else {
             $lintStatus = 'clean'
         }

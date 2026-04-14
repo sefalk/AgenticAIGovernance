@@ -22,7 +22,8 @@ suggestions. You stay in control through mandatory escalation points.
 
 - VS Code with GitHub Copilot extension (agent mode enabled)
 - Python 3.10+ with `pytest` and `hypothesis` (for property-based tests)
-- Optional: `radon` (complexity), `ruff` (linting), `mutmut` (mutation testing)
+- `ruff` (required for refactorer linting hard gate)
+- Optional: `radon` (complexity), `mutmut` (mutation testing)
 
 ## Quick Setup
 

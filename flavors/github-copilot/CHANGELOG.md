@@ -19,6 +19,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.18.7] -- 2026-04-14
 ---
 
+## [1.18.16] -- 2026-04-14
+
+### Fixed
+
+- **HARD gate consistency for linting:** `refactorer-stop.ps1/.sh` now blocks
+  handoff when linting cannot run (`ruff` missing), instead of reporting PASS
+  with a `BLOCKED` lint status. This aligns behavior with the Quality Gate
+  model for BLOCKED hard gates.
+
+- **Dependency guidance sanitization:**
+  - `README.md` now marks `ruff` as required (not optional) because the
+    refactorer linting gate is hard-enforced.
+  - `.github/af-env.conf` comments now state that missing `ruff` blocks
+    refactorer handoff.
+
+### Verification
+
+- Hook integration suite: **53/53 PASS**
+- Skills validation: **51/51 PASS**
+- Tool audit: all registered tools valid; no duplicate tool definitions detected.
+
+---
+
 ## [1.18.15] -- 2026-04-14
 
 ### Fixed
