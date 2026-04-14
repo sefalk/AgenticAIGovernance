@@ -1,6 +1,6 @@
 # Feature: Git Worktrees for Parallel Agent Task Execution
 
-**Status:** 🔄 IN PROGRESS — Phase 1 (Spec) complete 2026-04-14  
+**Status:** 🔄 IN PROGRESS — Phase 1+2+3 complete 2026-04-14  
 **Created:** 2026-04-14  
 **Owner:** User Request  
 **Type:** Enhancement (git-workflow)
@@ -147,49 +147,21 @@ All gates are **HARD** (mechanically enforced) unless marked SOFT.
 
 ### Phase 1: Spec & Documentation (2-3 files)
 
-- [ ] Extend `git-workflow.instructions.md` with new sections:
-  - Worktree lifecycle (create → work → merge → remove).
-  - Path conventions (`../wt/{task-id}`).
-  - Bootstrap steps (venv, hooks, context verification).
-  - Error recovery (stale worktrees, unlock, cleanup).
-  
-- [ ] Update `coordinator.agent.md`:
-  - Add Step 0d: Worktree Bootstrap (between planning and Red).
-  - Add Step 8: Worktree Cleanup (after merge confirmation).
-  - Subagent context injection: include worktree-id metadata.
-
-- [ ] Create `skills/git-workflow-worktrees/SKILL.md`:
-  - Troubleshooting guide (locked worktrees, merge conflicts).
-  - Recovery procedures (stale worktree recovery, re-sync).
-  - Performance considerations (large repos, network shares).
+- [x] Extend `git-workflow.instructions.md` with new sections
+- [x] Update `coordinator.agent.md` (Step 0d, Step 8, context injection)
+- [x] Create `skills/git-worktrees/SKILL.md`
 
 ### Phase 2: Hard Gates (4 hooks)
 
-- [ ] `coordinator-pretooluse.ps1/.sh`: Verify worktree creation preconditions.
-  - Branch name, path collision, dev health.
-  - Error: deny with remediation.
-
-- [ ] All agent `*-pretooluse.ps1/.sh`: Verify branch + worktree context before file edits.
-  - Check: `git branch --show-current` and PWD consistency.
-  - Error: deny; escalate context dump.
-
-- [ ] All agent `*-stop.ps1/.sh`: Context check before commit.
-  - Verify agent/* branch is active.
-  - Error: block commit, suggest context check.
-
-- [ ] `coordinator-postmerge.ps1/.sh` (new): Cleanup gate after merge.
-  - Verify worktree clean and removable.
-  - Error: halt; suggest manual cleanup.
+- [x] `coordinator-pretooluse.ps1/.sh`: Worktree creation preconditions (branch name, path collision, repo health)
+- [x] `test-writer-pretooluse.ps1/.sh`: Branch context proof (agent/* required)
+- [x] `refactorer-pretooluse.ps1/.sh`: Branch context proof (agent/* required)
+- [x] `coordinator-postmerge.ps1/.sh` (new): Worktree audit at session end
 
 ### Phase 3: Tool Integration (2 new scripts)
 
-- [ ] `scripts/setup-worktree.sh|ps1`: Bootstrap script.
-  - Clone venv? Setup hooks? Set `.python-version`?
-  - Link to main repo's dev dependencies.
-
-- [ ] `scripts/cleanup-worktree.sh|ps1`: Safe cleanup script.
-  - Pre-checks (clean status, no uncommitted changes).
-  - Worktree removal + prune + sanity check.
+- [x] `scripts/setup-worktree.ps1/.sh`: Bootstrap script (validate, create, venv, verify)
+- [x] `scripts/cleanup-worktree.ps1/.sh`: Safe cleanup (clean check, remove, prune, verify)
 
 ### Phase 4: Testing & Hardening
 

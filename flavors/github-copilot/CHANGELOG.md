@@ -19,6 +19,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.18.7] -- 2026-06-27
 ---
 
+## [1.18.11] -- 2026-04-14
+
+### Added
+
+- **Git Worktrees — Phase 3: Bootstrap & Cleanup Scripts.**
+
+  **`scripts/setup-worktree.ps1/.sh`**
+  Human-runnable script to bootstrap a new agent worktree.
+  Reads `WORKTREE_DIR` / `WORKTREE_BRANCH_PREFIX` from `af-env.conf`.
+  Steps: validates workflow ID slug, stale worktree audit + prune,
+  path collision guard, base branch health check, `git worktree add`,
+  venv bootstrap (symlink/junction to main `.venv`, or fresh install
+  via `run-deps` if no shared venv), hooks accessibility check.
+  Prints exact path + `code "<path>"` open command on success.
+
+  **`scripts/cleanup-worktree.ps1/.sh`**
+  Safe coordinator/human-runnable script to remove a worktree after merge.
+  Steps: verifies worktree is registered in `git worktree list`,
+  checks `git status --porcelain` (empty = clean), removal via
+  `git worktree remove` (with optional `--force`), prune, verification.
+  On dirty worktree: halts with actionable options (commit/discard/stash).
+  On locked worktree: prints `git worktree unlock` command.
+
+  **`.af-manifest`** — all 4 scripts registered.
+
+  **Not yet implemented (Phase 4):** Integration tests.
+
+---
+
 ## [1.18.10] -- 2026-04-14
 
 ### Added

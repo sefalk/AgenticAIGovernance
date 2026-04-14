@@ -33,6 +33,11 @@ scripts/run-metrics.ps1
 scripts/audit-tools.ps1
 scripts/tools-reference.txt
 scripts/test-hooks.ps1
+scripts/check-python-quality.py
+scripts/setup-worktree.ps1
+scripts/setup-worktree.sh
+scripts/cleanup-worktree.ps1
+scripts/cleanup-worktree.sh
 
 # Instructions
 instructions/
