@@ -207,7 +207,9 @@ if ($newIgnoreLines.Count -gt 1) {
 }
 
 # ---------- Gate 5: Python linting on changed source files ----------
+$lintStatus = 'no src changes'
 if ($changedSrcPy.Count -gt 0) {
+    $lintStatus = 'skipped (script/python not available)'
     $lintScript = Join-Path (Get-Location) '.github/scripts/check-python-linting.py'
     if ((Test-Path $lintScript) -and $pythonExe) {
         $lintResult = & $pythonExe $lintScript --files @($changedSrcPy) 2>&1
@@ -223,14 +225,17 @@ if ($changedSrcPy.Count -gt 0) {
             } | ConvertTo-Json -Compress -Depth 3
             Write-Output $output
             exit 0
+        } elseif ($lintExit -eq 1) {
+            $lintStatus = 'BLOCKED (ruff not installed)'
+        } else {
+            $lintStatus = 'clean'
         }
-        # exit 1 = ruff not installed: skip with advisory (not a block)
     }
 }
 
 # All gates passed
 $output = @{
-    systemMessage = "refactorer:Stop -- all gates PASS: tests $(if ($fromLog) {'accepted from log'} else {'green'}), no new files created, python quality verified, linting clean"
+    systemMessage = "refactorer:Stop -- all gates PASS: tests $(if ($fromLog) {'accepted from log'} else {'green'}), no new files created, python quality verified, linting: $lintStatus"
 } | ConvertTo-Json -Compress
 Write-Output $output
 exit 0

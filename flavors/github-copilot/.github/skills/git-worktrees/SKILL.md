@@ -1,5 +1,9 @@
-# Skill: Git Worktrees
-# copilot:generated | implementer | 2026-04-14
+---
+name: git-worktrees
+description: Bootstrap, manage, and clean up git worktrees for parallel agent task execution. Lifecycle commands, coordinator step 0d/8, troubleshooting locked/stale worktrees, and VS Code integration.
+argument-hint: '[workflow-id] [base-branch]'
+---
+<!-- copilot:generated | implementer | 2026-04-14 -->
 
 **Domain:** Git workflow / Parallel task execution  
 **Primary consumers:** coordinator, researcher  

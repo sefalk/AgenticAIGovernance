@@ -16,7 +16,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.18.7] -- 2026-06-27
+## [1.18.7] -- 2026-04-14
+---
+
+## [1.18.15] -- 2026-04-14
+
+### Fixed
+
+- **Hook test regressions (3 cases):** `test-hooks.ps1` still asserted `Allow` for
+  test-writer/refactorer file operations on `main`. Since v1.18.10 the branch-context
+  gate correctly denies those — tests updated to `Assert-Deny` with accurate descriptions.
+  Suite now passes 53/53 (was 50/53).
+
+- **`git-worktrees` SKILL.md missing YAML frontmatter:** Skills validator reported
+  `invalid or missing YAML frontmatter`. Added `name`, `description`, and
+  `argument-hint` frontmatter block. Skills validation now passes 51/51.
+
+- **Refactorer pass message inaccuracy:** Stop hooks claimed `linting clean` even when
+  ruff was not installed (BLOCKED) or the gate was skipped. Both `refactorer-stop.ps1`
+  and `refactorer-stop.sh` now track a `$lintStatus` / `lint_status` variable
+  (`clean` | `BLOCKED (ruff not installed)` | `skipped (script/python not available)`
+  | `no src changes`) and emit it in the `systemMessage`.
+
+- **CHANGELOG wrong date:** Entry `[1.18.7]` had date `2026-06-27` (future). Corrected
+  to `2026-04-14`.
+
 ---
 
 ## [1.18.14] -- 2026-04-14

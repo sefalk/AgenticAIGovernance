@@ -142,17 +142,22 @@ if [ "$new_ignores" -eq 1 ] && [ "$other_additions" -gt 0 ]; then
 fi
 
 # ---------- Gate 5: Python linting on changed source files ----------
-if [ -n "$changed_src_py" ] && [ -n "$python_exe" ]; then
+lint_status="no src changes"
+if [ -n "$changed_src_py" ]; then
+    lint_status="skipped (script/python not available)"
     lint_script=".github/scripts/check-python-linting.py"
-    if [ -f "$lint_script" ]; then
+    if [ -f "$lint_script" ] && [ -n "$python_exe" ]; then
         lint_output=$(echo "$changed_src_py" | xargs "$python_exe" "$lint_script" --files 2>&1)
         lint_exit=$?
         if [ "$lint_exit" -eq 2 ]; then
             lint_summary=$(echo "$lint_output" | head -15 | tr '\n' ' ' | sed 's/"/\\"/g')
             echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Refactor phase violation: linting gate failed. Fix with: ruff check --fix <files>. Violations: ${lint_summary}\"}}"
             exit 0
+        elif [ "$lint_exit" -eq 1 ]; then
+            lint_status="BLOCKED (ruff not installed)"
+        else
+            lint_status="clean"
         fi
-        # exit 1 = ruff not installed: skip with advisory (not a block)
     fi
 fi
 
@@ -162,5 +167,5 @@ if [[ "$from_log" == true ]]; then
 else
     pass_detail="tests green"
 fi
-echo "{\"systemMessage\": \"refactorer:Stop \u2014 all gates PASS: ${pass_detail}, no new files created, python quality verified, linting clean\"}"
+echo "{\"systemMessage\": \"refactorer:Stop \u2014 all gates PASS: ${pass_detail}, no new files created, python quality verified, linting: ${lint_status}\"}"
 exit 0

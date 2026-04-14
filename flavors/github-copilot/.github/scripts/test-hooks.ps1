@@ -281,13 +281,15 @@ $prodCreate = @{ tool_name = "createFile"; tool_input = @{ filePath = (Join-Path
 Assert-Deny "test-writer cannot create production file" `
     "test-writer-pretooluse.ps1" $prodCreate
 
-# Should ALLOW test file edits
+# DENY test file edits/creates on non-agent branch (branch-context gate, v1.18.10+)
+# test-writer must run inside a worktree checked out to agent/* — running on
+# 'main' is a hard block regardless of whether the target file is a test file.
 $testJson = @{ tool_name = "editFiles"; tool_input = @{ filePath = (Join-Path (Get-Location) "tests/test_example.py") } } | ConvertTo-Json -Compress
-Assert-Allow "test-writer can edit test files" `
+Assert-Deny "test-writer denied on non-agent branch (test file edit)" `
     "test-writer-pretooluse.ps1" $testJson
 
 $testCreate = @{ tool_name = "createFile"; tool_input = @{ filePath = (Join-Path (Get-Location) "tests/test_new.py") } } | ConvertTo-Json -Compress
-Assert-Allow "test-writer can create test files" `
+Assert-Deny "test-writer denied on non-agent branch (test file create)" `
     "test-writer-pretooluse.ps1" $testCreate
 
 # Should ALLOW read tools
@@ -310,8 +312,8 @@ Assert-Deny "refactorer cannot createDirectory" `
     "refactorer-pretooluse.ps1" `
     '{"tool_name":"createDirectory","tool_input":{"path":"src/new_dir/"}}'
 
-# Should ALLOW edits to existing files
-Assert-Allow "refactorer can editFiles" `
+# DENY file edits on non-agent branch (branch-context gate, v1.18.10+)
+Assert-Deny "refactorer denied on non-agent branch (file edit)" `
     "refactorer-pretooluse.ps1" `
     '{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}'
 
