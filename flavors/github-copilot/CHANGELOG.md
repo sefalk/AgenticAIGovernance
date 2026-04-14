@@ -19,6 +19,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.18.7] -- 2026-06-27
 ---
 
+## [1.18.10] -- 2026-04-14
+
+### Added
+
+- **Git Worktrees — Phase 2: Hard-Gate Hooks.**
+
+  **`coordinator-pretooluse.ps1/.sh` — Worktree Creation Gate (HARD)**
+  When the coordinator runs `git worktree add`, the hook validates:
+  - Branch name matches `^agent/[a-z0-9-]+$` — rejects invalid slugs.
+  - Worktree path does not already exist — prevents collision with running tasks.
+  - Main repository is healthy (`git status` exit 0) — halts on corrupt repo state.
+  On any violation: `deny` decision with a specific remediation message.
+
+  **`test-writer-pretooluse.ps1/.sh` — Branch Context Proof (HARD)**
+  Before any file edit/create, verifies `git branch --show-current` returns
+  `agent/*`. Blocks if running on `main`, `dev`, or any non-agent branch.
+  Error includes worktree setup reminder (Step 0d).
+
+  **`refactorer-pretooluse.ps1/.sh` — Branch Context Proof (HARD)**
+  Same check as test-writer. Applied before both the no-new-files gate
+  and any file edit, so context is verified regardless of tool type.
+
+  **`coordinator-postmerge.ps1/.sh` (new) — Worktree Audit at Session End**
+  Fires on coordinator Stop event. Lists all active `agent/*` worktrees
+  with their paths and branch names. Warns about prunable stale entries.
+  Added to coordinator.agent.md Stop hooks.
+
+  **`.af-manifest`** — `coordinator-postmerge.ps1/.sh` registered.
+
+  **Not yet implemented (Phases 3–4):** `setup-worktree` and
+  `cleanup-worktree` scripts; integration tests.
+
+---
+
 ## [1.18.9] -- 2026-04-14
 
 ### Added

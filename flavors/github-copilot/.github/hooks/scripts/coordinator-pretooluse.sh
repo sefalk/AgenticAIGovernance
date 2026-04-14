@@ -2,6 +2,7 @@
 # copilot:generated | implementer | 2026-03-16
 # copilot:modified  | implementer | 2026-03-17 | fixed false-positive deny on read-only tools
 # copilot:modified  | implementer | 2026-04-14 | add terminal interception: pytest block + commit message quality gate
+# copilot:modified  | implementer | 2026-04-14 | add git worktree add precondition gate (bash parity)
 # Agent-scoped PreToolUse hook for the coordinator agent.
 #
 # DELEGATION ENFORCEMENT (HARD -- blocks coordinator from editing/creating files)
@@ -49,8 +50,28 @@ except Exception:
         if echo "$COMMAND" | grep -qE '\bpytest\b|\bpy\.test\b'; then
             printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Do not run tests via terminal. Use the execute/runTests tool (structured output, VS Code test integration) or the predefined task '\''tests: domain'\'' / '\''tests: all'\'' via execute/runTask."}}'
             exit 0
-        fi
-        # Validate git commit message quality -- reject generic phase-only messages
+        fi        # Validate git worktree add preconditions
+        if echo "$COMMAND" | grep -qE 'git[[:space:]]+worktree[[:space:]]+add'; then
+            WT_DIR=$(grep '^WORKTREE_DIR=' .github/af-env.conf 2>/dev/null | cut -d= -f2 | xargs)
+            : "${WT_DIR:=../wt}"
+            # Extract branch name after -b flag
+            BRANCH=$(echo "$COMMAND" | grep -oP '(?<=-b )\S+' || true)
+            if [ -n "$BRANCH" ] && ! echo "$BRANCH" | grep -qE '^agent/[a-z0-9][a-z0-9-]*$'; then
+                printf '%s\n' "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Worktree branch name '${BRANCH}' is invalid. Must match '^agent/[a-z0-9-]+' (e.g. agent/feat-auth, agent/fix-db-pool). See git-workflow.instructions.md Worktree Lifecycle.\"}}"
+                exit 0
+            fi
+            # Extract worktree path (first arg after 'add')
+            WT_PATH=$(echo "$COMMAND" | grep -oP '(?<=worktree add )\S+' || true)
+            if [ -n "$WT_PATH" ] && [ -e "$WT_PATH" ]; then
+                printf '%s\n' "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Worktree path '${WT_PATH}' already exists. An existing task may still be running. Run 'git worktree list' to check before creating a new worktree here.\"}}"
+                exit 0
+            fi
+            # Check repo health
+            if ! git status --porcelain >/dev/null 2>&1; then
+                printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Main repository is not healthy (\'git status\' failed). Fix repository state before creating a worktree."}}'
+                exit 0
+            fi
+        fi        # Validate git commit message quality -- reject generic phase-only messages
         # Required format: [agent:name] phase: {description >= 10 chars}
         if echo "$COMMAND" | grep -qE 'git[[:space:]]+commit'; then
             MSG=$(echo "$COMMAND" | python3 << 'PYEOF'

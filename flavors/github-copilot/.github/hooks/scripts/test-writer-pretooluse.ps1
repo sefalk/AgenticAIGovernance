@@ -1,6 +1,9 @@
+# copilot:generated | implementer | 2026-03-16
+# copilot:modified  | implementer | 2026-04-14 | add branch context proof gate
 # Agent-scoped PreToolUse hook for the test-writer agent.
 #
 # TDD PHASE ISOLATION (HARD -- blocks test-writer from editing production code)
+# BRANCH CONTEXT PROOF (HARD -- blocks file edits if not on agent/* branch)
 #
 # The Red phase must only create/edit test files. If the test-writer modifies
 # production code under SRC_DIR/, the tests may pass immediately and the
@@ -32,6 +35,19 @@ try {
 $toolName = $inputData.tool_name
 if ($toolName -notmatch 'editFile|createFile|createDir|editNotebook') {
     Write-Output '{}'
+    exit 0
+}
+
+# Branch context proof -- block file edits if not on an agent/* branch
+$currentBranch = git branch --show-current 2>$null
+if ($currentBranch -and $currentBranch -notmatch '^agent/') {
+    @{
+        hookSpecificOutput = @{
+            hookEventName      = 'PreToolUse'
+            permissionDecision = 'deny'
+            permissionDecisionReason = "Branch context violation: test-writer is running on branch '$currentBranch', not on an agent/* branch. Ensure the coordinator created a worktree for this task (Step 0d). Expected branch: agent/{workflow-id}."
+        }
+    } | ConvertTo-Json -Depth 3 -Compress
     exit 0
 }
 

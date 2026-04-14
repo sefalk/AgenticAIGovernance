@@ -1,6 +1,9 @@
+# copilot:generated | implementer | 2026-03-XX
+# copilot:modified  | implementer | 2026-04-14 | add branch context proof gate
 # Agent-scoped PreToolUse hook for the refactorer agent.
 #
 # NO NEW FILES GATE (HARD -- blocks refactorer from creating files/directories)
+# BRANCH CONTEXT PROOF (HARD -- blocks file edits if not on agent/* branch)
 #
 # Refactoring must only modify existing files. This preventative hook fires
 # before createFile/createDirectory calls. Defence-in-depth with the
@@ -18,6 +21,22 @@ try {
 } catch {
     Write-Output '{}'
     exit 0
+}
+
+# Branch context proof -- block file edits if not on agent/* branch
+$toolName = $inputData.tool_name
+if ($toolName -match 'editFile|createFile|createDir|editNotebook') {
+    $currentBranch = git branch --show-current 2>$null
+    if ($currentBranch -and $currentBranch -notmatch '^agent/') {
+        @{
+            hookSpecificOutput = @{
+                hookEventName      = 'PreToolUse'
+                permissionDecision = 'deny'
+                permissionDecisionReason = "Branch context violation: refactorer is running on branch '$currentBranch', not on an agent/* branch. Ensure the coordinator created a worktree for this task (Step 0d). Expected branch: agent/{workflow-id}."
+            }
+        } | ConvertTo-Json -Depth 3 -Compress
+        exit 0
+    }
 }
 
 # Only inspect file/directory creation tools

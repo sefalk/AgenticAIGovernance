@@ -21,6 +21,8 @@ af-env.conf                                              [customizable]
 hooks/
 hooks/scripts/researcher-pretooluse.ps1
 hooks/scripts/researcher-pretooluse.sh
+hooks/scripts/coordinator-postmerge.ps1
+hooks/scripts/coordinator-postmerge.sh
 
 # Scripts (canonical test runner)
 scripts/

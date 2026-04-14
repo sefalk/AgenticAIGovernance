@@ -2,6 +2,7 @@
 # copilot:modified  | implementer | 2026-03-17 | fixed false-positive deny on read-only tools
 # copilot:modified  | implementer | 2026-04-02 | deny pytest via terminal, hint execute/runTests
 # copilot:modified  | implementer | 2026-04-14 | validate git commit message quality, reject generic phase-only messages
+# copilot:modified  | implementer | 2026-04-14 | add git worktree add precondition gate
 # Agent-scoped PreToolUse hook for the coordinator agent.
 #
 # DELEGATION ENFORCEMENT (HARD -- blocks coordinator from editing/creating files)
@@ -51,6 +52,59 @@ if ($toolName -match 'terminal') {
             }
         } | ConvertTo-Json -Depth 3 -Compress
         exit 0
+    }
+    # Validate git worktree add preconditions
+    if ($command -match 'git\s+worktree\s+add') {
+        $WT_DIR = '../wt'
+        $confPath = Join-Path (Get-Location) '.github/af-env.conf'
+        if (Test-Path $confPath) {
+            $m = Select-String -Path $confPath -Pattern '^WORKTREE_DIR=(.+)$'
+            if ($m) { $WT_DIR = $m.Matches[0].Groups[1].Value.Trim() }
+        }
+        # Extract branch name: git worktree add <path> -b <branch> ...
+        $branchMatch = $null
+        if ($command -match '-b\s+(\S+)') { $branchMatch = $Matches[1] }
+        elseif ($command -match 'worktree\s+add\s+\S+\s+(\S+)') { $branchMatch = $Matches[1] }
+        if ($branchMatch -and $branchMatch -notmatch '^agent/[a-z0-9][a-z0-9-]*$') {
+            @{
+                hookSpecificOutput = @{
+                    hookEventName      = 'PreToolUse'
+                    permissionDecision = 'deny'
+                    permissionDecisionReason = "Worktree branch name '$branchMatch' is invalid. Must match '^agent/[a-z0-9-]+' (e.g. agent/feat-auth, agent/fix-db-pool). See git-workflow.instructions.md Worktree Lifecycle."
+                }
+            } | ConvertTo-Json -Depth 3 -Compress
+            exit 0
+        }
+        # Extract worktree path and check for collision
+        $pathMatch = $null
+        if ($command -match 'worktree\s+add\s+(\S+)') { $pathMatch = $Matches[1] }
+        if ($pathMatch) {
+            try {
+                $resolvedWt = [System.IO.Path]::GetFullPath($pathMatch)
+                if (Test-Path $resolvedWt) {
+                    @{
+                        hookSpecificOutput = @{
+                            hookEventName      = 'PreToolUse'
+                            permissionDecision = 'deny'
+                            permissionDecisionReason = "Worktree path '$pathMatch' already exists. An existing task may still be running. Run 'git worktree list' to check. Investigate before creating a new worktree at this path."
+                        }
+                    } | ConvertTo-Json -Depth 3 -Compress
+                    exit 0
+                }
+            } catch {}
+        }
+        # Check repo health
+        $gitStatus = git status --porcelain 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            @{
+                hookSpecificOutput = @{
+                    hookEventName      = 'PreToolUse'
+                    permissionDecision = 'deny'
+                    permissionDecisionReason = "Main repository is not healthy ('git status' failed). Fix repository state before creating a worktree."
+                }
+            } | ConvertTo-Json -Depth 3 -Compress
+            exit 0
+        }
     }
     # Validate git commit message quality -- reject generic phase-only messages
     # Required format: [agent:name] phase: {description >= 10 chars}

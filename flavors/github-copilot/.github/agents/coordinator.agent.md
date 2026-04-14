@@ -56,6 +56,9 @@ hooks:
     - type: command
       command: 'bash .github/hooks/scripts/stop-tests.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\stop-tests.ps1'
+    - type: command
+      command: 'bash .github/hooks/scripts/coordinator-postmerge.sh'
+      windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\coordinator-postmerge.ps1'
 ---
 
 # Coordinator Agent
