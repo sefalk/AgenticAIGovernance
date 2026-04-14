@@ -24,6 +24,8 @@ suggestions. You stay in control through mandatory escalation points.
 - Python 3.10+ with `pytest` and `hypothesis` (for property-based tests)
 - `ruff` (required for refactorer linting hard gate)
 - Optional: `radon` (complexity), `mutmut` (mutation testing)
+- Coordinator auto-bootstrap for missing `.venv` is configurable via
+  `.github/af-env.conf` (`PY_ENV_BOOTSTRAP=ask|always|off`)
 
 ## Quick Setup
 

@@ -3,6 +3,7 @@
 # copilot:modified  | implementer | 2026-04-02 | deny pytest via terminal, hint execute/runTests
 # copilot:modified  | implementer | 2026-04-14 | validate git commit message quality, reject generic phase-only messages
 # copilot:modified  | implementer | 2026-04-14 | add git worktree add precondition gate
+# copilot:modified  | implementer | 2026-04-14 | add python environment bootstrap interception (ask/always/off)
 # Agent-scoped PreToolUse hook for the coordinator agent.
 #
 # DELEGATION ENFORCEMENT (HARD -- blocks coordinator from editing/creating files)
@@ -36,14 +37,68 @@ if ($toolName -match 'read|search|find|list|get|problems') {
     exit 0
 }
 
-# Intercept terminal pytest — coordinator must use execute/runTests or tasks
+# Intercept terminal commands: bootstrap env (configurable), block terminal pytest,
+# and enforce git command quality gates.
 if ($toolName -match 'terminal') {
     $command = $inputData.tool_input.command
     # Fallback: tool_input may arrive as a JSON string
     if (-not $command -and $inputData.tool_input -is [string]) {
         try { $ti = $inputData.tool_input | ConvertFrom-Json; $command = $ti.command } catch {}
     }
-    if ($command -match '\bpytest\b|\bpy\.test\b') {
+
+    # Config: PROJECT_LANGUAGE and PY_ENV_BOOTSTRAP from af-env.conf
+    $projectLanguage = 'python'
+    $bootstrapMode = 'ask'
+    $confPath = Join-Path (Get-Location) '.github/af-env.conf'
+    if (Test-Path $confPath) {
+        $m = Select-String -Path $confPath -Pattern '^PROJECT_LANGUAGE=(.+)$'
+        if ($m) { $projectLanguage = $m.Matches[0].Groups[1].Value.Trim().ToLower() }
+        $m = Select-String -Path $confPath -Pattern '^PY_ENV_BOOTSTRAP=(.+)$'
+        if ($m) { $bootstrapMode = $m.Matches[0].Groups[1].Value.Trim().ToLower() }
+    }
+
+    $isPyTerminalCommand = $command -match '(\.github/scripts/(run-tests|run-deps|run-metrics)\.ps1)|(\.venv/Scripts/python\.exe)|(^|\s)(python|pip|ruff|mypy)(\s|$)'
+    $isPytestViaTerminal = $command -match '\bpytest\b|\bpy\.test\b'
+    $venvPython = Join-Path (Get-Location) '.venv/Scripts/python.exe'
+
+    # Bootstrap only for non-pytest Python commands; pytest via terminal is denied below anyway.
+    if ($projectLanguage -eq 'python' -and -not $isPytestViaTerminal -and $isPyTerminalCommand -and -not (Test-Path $venvPython)) {
+        if ($bootstrapMode -eq 'always') {
+            $bootstrapScript = Join-Path (Get-Location) '.github/scripts/bootstrap-python-env.ps1'
+            if (-not (Test-Path $bootstrapScript)) {
+                @{
+                    hookSpecificOutput = @{
+                        hookEventName      = 'PreToolUse'
+                        permissionDecision = 'deny'
+                        permissionDecisionReason = "Python environment missing and bootstrap script not found at '.github/scripts/bootstrap-python-env.ps1'."
+                    }
+                } | ConvertTo-Json -Depth 3 -Compress
+                exit 0
+            }
+            & $bootstrapScript 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $venvPython)) {
+                @{
+                    hookSpecificOutput = @{
+                        hookEventName      = 'PreToolUse'
+                        permissionDecision = 'deny'
+                        permissionDecisionReason = "Python environment bootstrap failed. Run '.github/scripts/bootstrap-python-env.ps1' manually and retry."
+                    }
+                } | ConvertTo-Json -Depth 3 -Compress
+                exit 0
+            }
+        } elseif ($bootstrapMode -eq 'ask') {
+            @{
+                hookSpecificOutput = @{
+                    hookEventName      = 'PreToolUse'
+                    permissionDecision = 'ask'
+                    permissionDecisionReason = "Python environment (.venv) is missing. Allow running '.github/scripts/bootstrap-python-env.ps1' now to prepare venv + dependencies?"
+                }
+            } | ConvertTo-Json -Depth 3 -Compress
+            exit 0
+        }
+    }
+
+    if ($isPytestViaTerminal) {
         @{
             hookSpecificOutput = @{
                 hookEventName      = 'PreToolUse'

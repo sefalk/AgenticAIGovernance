@@ -19,6 +19,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.18.7] -- 2026-04-14
 ---
 
+## [1.18.17] -- 2026-04-14
+
+### Added
+
+- **Python environment bootstrap scripts**
+  - `.github/scripts/bootstrap-python-env.ps1`
+  - `.github/scripts/bootstrap-python-env.sh`
+  Creates `.venv` when missing, upgrades pip/setuptools/wheel, and installs
+  runtime + dev dependencies from `af-env.conf`.
+
+- **Coordinator pretooluse bootstrap interception** (configurable)
+  - New config keys in `.github/af-env.conf`:
+    - `PROJECT_LANGUAGE=python`
+    - `PY_ENV_BOOTSTRAP=ask|always|off` (default: `ask`)
+  - In Python projects, when `.venv` is missing and coordinator runs
+    Python-related terminal commands, the hook now:
+    - `ask`: requests human approval to run bootstrap
+    - `always`: auto-runs bootstrap script before continuing
+    - `off`: disables interception
+
+### Changed
+
+- `README.md` prerequisites now document bootstrap behavior.
+- `.github/.af-manifest` now includes bootstrap scripts.
+
+---
+
 ## [1.18.16] -- 2026-04-14
 
 ### Fixed
