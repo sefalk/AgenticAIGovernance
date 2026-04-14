@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.18.7] -- 2026-06-27
 ---
 
+## [1.18.14] -- 2026-04-14
+
+### Changed
+
+- **Default linting strictness is now strict.**
+  `LINTING_STRICTNESS` in `af-env.conf` now defaults to `strict` instead of
+  `standard`, so refactorer lint hard-gates use the full rule set by default.
+
+---
+
 ## [1.18.13] -- 2026-04-14
 
 ### Added
