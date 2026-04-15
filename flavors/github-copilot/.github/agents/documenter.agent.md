@@ -72,6 +72,7 @@ started: "<ISO 8601>"
 completed: "<ISO 8601>"
 status: "COMPLETED"  # COMPLETED | FAILED | ESCALATED
 git_branch: "agent/<workflow-id>"
+af_version: "<version from .github/.af-version, e.g. 1.18.22>"
 
 steps:
   - step: 1

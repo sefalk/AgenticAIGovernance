@@ -19,6 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.18.7] -- 2026-04-14
 ---
 
+## [1.18.23] -- 2026-04-15
+
+### Added
+
+- **Coordinator AF version awareness at Step 0.**
+  - Coordinator reads `.github/.af-version` at the start of every workflow
+    and logs the active framework version (`AF vX.Y.Z`) in its opening narration.
+  - Includes a "context hygiene" notice: if a deploy happened since the
+    conversation started, agents advise the human to start a new conversation
+    so all agents pick up the latest instructions from disk.
+  - `PLAN.md` template gains an `AF Version:` metadata field, making the
+    deployed version traceable per workflow artifact.
+  - Documenter YAML log schema gains an `af_version:` field.
+
+---
+
 ## [1.18.22] -- 2026-04-15
 
 ### Added

@@ -227,6 +227,15 @@ it in WIP.md on checkpoints.
 
 Before starting any workflow:
 
+**Framework version check:** Read `.github/.af-version` and extract the
+`version:` line. Log it as `AF vX.Y.Z` in your opening narration.
+If the file is absent, note "AF version unknown" and continue.
+
+> **Context hygiene:** If the deployed version differs from what you expected
+> (e.g., a deploy happened since this conversation started), **start a new
+> conversation** to ensure all agents pick up the latest instructions from disk.
+> Instructions are loaded once per conversation; they do not refresh mid-session.
+
 **Convention discovery:** Find where plans live: use `docs/plans/` if it
 exists, else adopt any existing `docs/` subdirectory with prior plans, else
 create `docs/plans/`.

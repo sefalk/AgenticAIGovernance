@@ -8,6 +8,7 @@
 **Workflow:** <!-- Feature Development | Bug Fix | Refactoring -->
 **Branch:** `agent/<!-- workflow-id -->`
 **Status:** <!-- DRAFT | APPROVED | IN_PROGRESS | COMPLETED -->
+**AF Version:** <!-- read from .github/.af-version at Step 0 -->
 
 ## Context
 
