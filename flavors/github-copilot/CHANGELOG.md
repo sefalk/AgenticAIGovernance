@@ -19,6 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.18.7] -- 2026-04-14
 ---
 
+## [1.18.20] -- 2026-04-15
+
+### Added
+
+- **Jupyter notebook output stripping anchored in AF (`NOTEBOOKS_ENABLED`).**
+  - New `NOTEBOOKS_ENABLED=false` key in `af-env.conf` template. Set to `true`
+    for Python projects using Jupyter notebooks.
+  - `bootstrap-python-env.ps1` / `.sh` now run `nbstripout --install` when
+    `NOTEBOOKS_ENABLED=true`, registering the git clean filter automatically on
+    every clone/environment setup. This prevents notebook outputs from dirtying
+    git status after cells are run.
+  - Warns if `.gitattributes` is missing the `filter=nbstripout` entry.
+  - New reference template: `.github/templates/gitattributes-notebooks.txt`.
+
+---
+
 ## [1.18.19] -- 2026-04-15
 
 ### Added

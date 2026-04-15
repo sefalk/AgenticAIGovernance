@@ -124,5 +124,35 @@ try {
     Pop-Location
 }
 
+# 4) Register nbstripout git filter if NOTEBOOKS_ENABLED=true
+$notebooksEnabled = $false
+if (Test-Path $confPath) {
+    if (Select-String -Path $confPath -Pattern '^NOTEBOOKS_ENABLED=true$' -Quiet) {
+        $notebooksEnabled = $true
+    }
+}
+
+if ($notebooksEnabled) {
+    Write-Output 'Registering nbstripout git filter (NOTEBOOKS_ENABLED=true) ...'
+    Push-Location $workspaceRoot
+    try {
+        & $venvPython -m nbstripout --install
+        if ($LASTEXITCODE -eq 0) {
+            Write-Output 'nbstripout git filter registered.'
+        } else {
+            Write-Output 'WARN: nbstripout --install failed. Ensure nbstripout is in requirements-dev.txt.'
+        }
+    } finally {
+        Pop-Location
+    }
+
+    $gaPath = Join-Path $workspaceRoot '.gitattributes'
+    if (-not (Test-Path $gaPath) -or -not (Select-String -Path $gaPath -Pattern 'filter=nbstripout' -Quiet)) {
+        Write-Output 'WARN: .gitattributes is missing or has no nbstripout filter entry.'
+        Write-Output '  Add to .gitattributes: *.ipynb filter=nbstripout'
+        Write-Output '  Reference: .github/templates/gitattributes-notebooks.txt'
+    }
+}
+
 Write-Output 'Environment ready.'
 exit 0

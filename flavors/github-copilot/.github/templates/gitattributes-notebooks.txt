@@ -1,0 +1,27 @@
+# Jupyter / Zeppelin notebook git filter
+# ----------------------------------------
+# Add these lines to your project's .gitattributes file to prevent notebook
+# outputs and execution counts from being committed to git.
+#
+# The nbstripout clean filter is registered automatically by the bootstrap
+# script when NOTEBOOKS_ENABLED=true in .github/af-env.conf.
+#
+# Prerequisites (add to requirements-dev.txt):
+#   nbstripout~=0.8
+#
+# Initial setup (first clone / new environment):
+#   .github/scripts/bootstrap-python-env.ps1   (Windows)
+#   .github/scripts/bootstrap-python-env.sh    (macOS/Linux)
+#
+# Manual registration (if bootstrap is not used):
+#   .venv/Scripts/python -m nbstripout --install   (Windows)
+#   .venv/bin/python    -m nbstripout --install    (macOS/Linux)
+#
+# Reference: https://github.com/kynan/nbstripout
+
+# Strip outputs + execution counts on add/commit
+*.ipynb filter=nbstripout
+*.zpln filter=nbstripout
+
+# Use nbstripout-aware diff display (shows source only, not output noise)
+*.ipynb diff=ipynb

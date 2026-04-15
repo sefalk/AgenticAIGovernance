@@ -106,5 +106,28 @@ for dep in "${dep_targets[@]:-}"; do
     fi
 done
 
+# 4) Register nbstripout git filter if NOTEBOOKS_ENABLED=true
+NOTEBOOKS_ENABLED=false
+if [[ -f "$CONF_PATH" ]] && grep -qE '^NOTEBOOKS_ENABLED=true$' "$CONF_PATH"; then
+    NOTEBOOKS_ENABLED=true
+fi
+
+if [[ "$NOTEBOOKS_ENABLED" == true ]]; then
+    echo "Registering nbstripout git filter (NOTEBOOKS_ENABLED=true) ..."
+    cd "$WORKSPACE_ROOT"
+    if "$VENV_PY" -m nbstripout --install; then
+        echo "nbstripout git filter registered."
+    else
+        echo "WARN: nbstripout --install failed. Ensure nbstripout is in requirements-dev.txt."
+    fi
+
+    GA_PATH="$WORKSPACE_ROOT/.gitattributes"
+    if [[ ! -f "$GA_PATH" ]] || ! grep -q 'filter=nbstripout' "$GA_PATH"; then
+        echo "WARN: .gitattributes is missing or has no nbstripout filter entry."
+        echo "  Add to .gitattributes: *.ipynb filter=nbstripout"
+        echo "  Reference: .github/templates/gitattributes-notebooks.txt"
+    fi
+fi
+
 echo "Environment ready."
 exit 0
