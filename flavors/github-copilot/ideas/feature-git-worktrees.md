@@ -299,12 +299,111 @@ WORKTREE_BRANCH_PREFIX=agent
 1. **Rebase policy:** Should agents rebase feature branches daily? Or merge-only? (Recommended: merge-only to avoid history rewrite friction.)
 2. **Stale worktree audit:** Auto-delete worktrees older than N days? Or only manual + warnings?
 3. **Performance baseline:** What's the overhead of 3-5 parallel worktrees on CI agents? (Expected: negligible, <5% memory.)
-4. **venv sharing:** Should each worktree have its own venv or share the main venv? (Recommendation: share via symlink to save space.)
+4. ~~**venv sharing:** Should each worktree have its own venv or share the main venv?~~ → See Section 11 (planned).
 5. **Hook duplication:** Should we extract context checks into a shared utility module (e.g., `scripts/verify-context.ps1`) to avoid hook code duplication?
 
 ---
 
 ## Notes
+
+---
+
+## 11. Planned Feature: Worktree venv Strategy (v1.18.25)
+
+**Status:** 🟡 PLANNED
+**Tracked:** 2026-04-15
+
+### Problem
+
+When a worktree is added to the VS Code workspace as a new root folder,
+VS Code cannot find a `.venv` inside it (none exists yet). It repeatedly
+prompts the user to select or create a Python interpreter — even though the
+parent repo already has a fully configured venv. This degrades UX, especially
+with multiple parallel worktrees open simultaneously.
+
+### Design Decision: No User Prompt
+
+The coordinator **must** configure the Python interpreter at worktree creation
+time (Step 0d), before any agent or VS Code opens a file in the worktree.
+The task scope is known at creation time — the workflow ID and plan determine
+whether environment changes are expected — so prompting is entirely avoidable.
+
+### Strategy: Coordinator Decides Mode
+
+The coordinator selects the venv mode based on task scope:
+
+| Mode | When | How |
+|---|---|---|
+| `shared` (default) | No dependency-file changes expected | Write `python.defaultInterpreterPath` in worktree settings pointing to parent `.venv` |
+| `isolated` | Plan flags dep changes (new imports, package version updates) | Create a new `.venv` inside the worktree; clean up on Step 8 |
+
+**Config flag:** `WORKTREE_VENV_MODE=shared|isolated` in `af-env.conf`
+Default: `shared`. Coordinator may override to `isolated` per-workflow when
+the plan signals dependency changes.
+
+### Implementation: Path-Based Config (not Symlink)
+
+**Decision: use path-based config, not a symlink.**
+
+At Step 0d, after creating the worktree and adding it to `.code-workspace`,
+write `python.defaultInterpreterPath` into the worktree entry — either via
+the workspace file's `settings` key or a `.vscode/settings.json` written
+inside the worktree directory:
+
+```json
+{ "python.defaultInterpreterPath": "../../MP Field Data Analysis CT/.venv/Scripts/python.exe" }
+```
+
+This path is relative to the worktree root and resolves to the parent repo's
+venv. VS Code reads this on folder open and suppresses the interpreter prompt.
+
+For `isolated` mode: run `python -m venv {worktree}/.venv` after creation
+and point the setting there instead.
+
+### Q&A: Path-Based vs Symlink
+
+**Q: What would be the pro for symlink?**
+
+| | Symlink | Path-Based Config |
+|---|---|---|
+| Shell activation | `source .venv/bin/activate` works natively in worktree | Must point scripts at parent path explicitly |
+| VS Code auto-discovery | VS Code finds `.venv/` in root without any config | Requires explicit `pythonPath` setting (but same end result) |
+| pip install side-effects | Writes to shared venv (can be a feature or a footgun) | Same (both point at same venv) |
+| **Windows NTFS** | Requires Developer Mode or admin rights for symlinks | ✅ Works everywhere, no permissions needed |
+| **Deletion safety** | Risk: deleting worktree could follow symlink into parent | ✅ No risk — config is just a string path |
+| **Broken link risk** | Silently broken if parent venv is recreated or moved | ✅ Easy to validate and fail loudly |
+| **CI compatibility** | CI agents often restrict symlink creation | ✅ Always works |
+
+**Verdict: path-based config wins.** Symlinks offer shell convenience but the
+Windows NTFS friction, deletion risk, and CI incompatibility outweigh the
+benefit. Path config solves the VS Code prompt problem (the primary goal)
+without the downsides.
+
+### Step 0d Changes Needed (v1.18.25)
+
+1. After worktree creation, determine venv mode (config default + plan override).
+2. **Shared mode:** Compute relative path from worktree to parent `.venv`.
+  Write `python.defaultInterpreterPath` into a `.vscode/settings.json` inside
+  the worktree. Resolve platform-correctly:
+  - Windows: `{parent}/.venv/Scripts/python.exe`
+  - Linux/macOS: `{parent}/.venv/bin/python`
+3. **Isolated mode:** Run `python -m venv {worktree}/.venv` and point settings there.
+4. On Step 8 cleanup: if `isolated`, delete `{worktree}/.venv` before `git worktree remove`.
+
+### AF Config Addition (v1.18.25)
+
+```ini
+# WORKTREE_VENV_MODE: Python interpreter strategy for agent worktrees.
+# Values:
+#   shared   -- Worktree uses the parent repo's .venv (default, no duplication).
+#               The interpreter path is written to the worktree's VS Code settings
+#               at creation time to suppress the interpreter selection prompt.
+#   isolated -- A new .venv is created inside the worktree (use for tasks expected
+#               to change dependencies). Cleaned up automatically on Step 8.
+# The coordinator may override to isolated per-workflow when the plan
+# signals dependency changes are expected.
+WORKTREE_VENV_MODE=shared
+```
 
 - Document is **living** — update as implementation progresses.
 - Each phase should result in a commit to AAIG main with ticket ref.
