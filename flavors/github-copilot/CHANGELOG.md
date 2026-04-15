@@ -19,6 +19,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.18.7] -- 2026-04-14
 ---
 
+## [1.18.22] -- 2026-04-15
+
+### Added
+
+- **Deploy hardening set (backup lifecycle + safer preflight + dry-run contract).**
+  - Backup retention config key in `.github/af-env.conf`:
+    `BACKUP_PRUNE_DAYS=14`.
+  - Retention precedence in deploy scripts:
+    `CLI override > af-env.conf > default (14)`.
+  - `-UpdateHashes` / `--update-hashes` now also cleans leftover
+    `.af-backup-*` conflict backups.
+  - New preflight check for notebook projects:
+    if `NOTEBOOKS_ENABLED=true`, `.gitattributes` must include
+    `filter=nbstripout`.
+  - Deploy prints warning when target repository is on `agent/*` branch.
+  - Dry-run output now includes machine-readable line:
+    `DRYRUN_JSON {...}` for CI/log parsing.
+  - New regression smoke script:
+    `.github/scripts/test-deploy-flags.ps1`.
+
+### Changed
+
+- `README.md` documents backup retention config and expanded quick preflight
+  scope for notebook filter alignment.
+
+---
+
 ## [1.18.21] -- 2026-04-15
 
 ### Added

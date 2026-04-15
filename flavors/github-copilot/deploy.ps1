@@ -59,6 +59,7 @@
     Automatically delete stale .af-backup-* folders in the target root that
     are older than this many days.
     Set to 0 to disable pruning.
+    Precedence: CLI parameter > af-env.conf BACKUP_PRUNE_DAYS > default (14).
 
 .EXAMPLE
     .\deploy.ps1
@@ -99,8 +100,7 @@ param(
     [switch]$RequirePreflight,
     [ValidateSet('quick', 'full')]
     [string]$PreflightMode = 'quick',
-    [ValidateRange(0, 3650)]
-    [int]$BackupPruneDays = 14
+    [int]$BackupPruneDays = -1
 )
 
 Set-StrictMode -Version Latest
@@ -128,6 +128,47 @@ $TargetDir = (Resolve-Path $TargetDir).Path
 
 $TargetGitHub = Join-Path $TargetDir '.github'
 $TargetVSCode = Join-Path $TargetDir '.vscode'
+$TargetAFEnv = Join-Path $TargetGitHub 'af-env.conf'
+$script:BackupPruneDaysFromCli = $PSBoundParameters.ContainsKey('BackupPruneDays')
+
+function Get-AFEnvValue {
+    param(
+        [string]$Key,
+        [string]$Default = ''
+    )
+
+    if (-not (Test-Path $TargetAFEnv)) { return $Default }
+    $match = Select-String -Path $TargetAFEnv -Pattern "^$([regex]::Escape($Key))=(.+)$" -ErrorAction SilentlyContinue
+    if (-not $match) { return $Default }
+    return $match.Matches[0].Groups[1].Value.Trim()
+}
+
+function Resolve-BackupPruneDays {
+    param([int]$CliValue)
+
+    $defaultDays = 14
+    if ($script:BackupPruneDaysFromCli -and $CliValue -ge 0) {
+        return $CliValue
+    }
+
+    $fromConf = Get-AFEnvValue -Key 'BACKUP_PRUNE_DAYS' -Default ''
+    if ($fromConf -and $fromConf -match '^\d+$') {
+        return [int]$fromConf
+    }
+
+    return $defaultDays
+}
+
+function Get-CurrentGitBranch {
+    param([string]$RepoDir)
+
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return '' }
+    try {
+        return (& git -C $RepoDir branch --show-current 2>$null).Trim()
+    } catch {
+        return ''
+    }
+}
 
 # ── Read versions ──────────────────────────────────────────────────────────
 $AFVersion = if (Test-Path $VersionPath) {
@@ -380,6 +421,45 @@ function Invoke-PruneOldBackups {
     Write-Host "  Pruned $($staleBackups.Count) stale backup folder(s) older than $Days day(s)." -ForegroundColor Green
 }
 
+function Invoke-CleanupConflictBackups {
+    param([string]$RootDir)
+
+    $backups = Get-ChildItem -Path $RootDir -Directory -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like '.af-backup-*' }
+
+    if (-not $backups -or $backups.Count -eq 0) { return }
+
+    Write-Host ""
+    Write-Host "=== Conflict Backup Cleanup ===" -ForegroundColor Cyan
+    if ($DryRun) {
+        Write-Host "  [DRY RUN] Would remove $($backups.Count) conflict backup folder(s)." -ForegroundColor Yellow
+        foreach ($b in ($backups | Sort-Object LastWriteTime)) {
+            Write-Host "  WOULD   $($b.FullName)" -ForegroundColor Yellow
+        }
+        return
+    }
+
+    foreach ($b in ($backups | Sort-Object LastWriteTime)) {
+        Remove-Item $b.FullName -Recurse -Force
+        Write-Host "  CLEAN   $($b.FullName)" -ForegroundColor Cyan
+    }
+    Write-Host "  Removed $($backups.Count) conflict backup folder(s)." -ForegroundColor Green
+}
+
+function Test-NotebookGitFilterConfig {
+    if (-not (Test-Path $TargetAFEnv)) { return 0 }
+    $notebooksEnabled = Select-String -Path $TargetAFEnv -Pattern '^NOTEBOOKS_ENABLED=true$' -Quiet
+    if (-not $notebooksEnabled) { return 0 }
+
+    $gitattributesPath = Join-Path $TargetDir '.gitattributes'
+    if (-not (Test-Path $gitattributesPath)) { return 2 }
+
+    $hasFilter = Select-String -Path $gitattributesPath -Pattern 'filter=nbstripout' -Quiet
+    if (-not $hasFilter) { return 2 }
+
+    return 0
+}
+
 function Find-PythonCommand {
     $candidates = @('python', 'py', 'python3')
     foreach ($cmd in $candidates) {
@@ -434,6 +514,12 @@ function Invoke-IntegrityPreflight {
                 $scriptPath = Join-Path $AFRoot '.github/scripts/audit-tools.ps1'
                 & powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath | Out-Null
                 return $LASTEXITCODE
+            }
+        },
+        [PSCustomObject]@{
+            Name = 'Notebook git filter alignment (NOTEBOOKS_ENABLED=true)'
+            Run  = {
+                return (Test-NotebookGitFilterConfig)
             }
         }
     )
@@ -503,6 +589,8 @@ if ($UpdateHashes) {
     } else {
         Write-Host "  [DRY RUN] Would write .af-hashes with $($hashEntries.Count) entries" -ForegroundColor Yellow
     }
+    # When hashes are refreshed, previous conflict backups are no longer needed.
+    Invoke-CleanupConflictBackups -RootDir $TargetDir
     Write-Host ""
     exit 0
 }
@@ -717,15 +805,25 @@ if ($Preflight -or $RequirePreflight) {
     [void](Invoke-IntegrityPreflight -Mode $PreflightMode -Required:$RequirePreflight)
 }
 
+$resolvedBackupPruneDays = Resolve-BackupPruneDays -CliValue $BackupPruneDays
+if ($resolvedBackupPruneDays -lt 0 -or $resolvedBackupPruneDays -gt 3650) {
+    Write-Error 'BackupPruneDays must be in range 0..3650 (CLI or af-env.conf BACKUP_PRUNE_DAYS).'
+    exit 1
+}
+
 Write-Host ""
 Write-Host "=== AF Deployment ===" -ForegroundColor Cyan
 Write-Host "  Source  : $AFRoot"
 Write-Host "  Target  : $TargetDir"
 Write-Host "  Version : $AFVersion"
-if ($BackupPruneDays -gt 0) {
-    Write-Host "  Backup prune: enabled (older than $BackupPruneDays day(s))"
+if ($resolvedBackupPruneDays -gt 0) {
+    Write-Host "  Backup prune: enabled (older than $resolvedBackupPruneDays day(s))"
 } else {
     Write-Host "  Backup prune: disabled"
+}
+$currentBranch = Get-CurrentGitBranch -RepoDir $TargetDir
+if ($currentBranch -like 'agent/*') {
+    Write-Host "  WARNING: Target repo is on '$currentBranch'. Prefer running framework rollouts on dev/main." -ForegroundColor Yellow
 }
 if ($DryRun) { Write-Host '  [DRY RUN -- no changes will be made]' -ForegroundColor Yellow }
 Write-Host ""
@@ -859,7 +957,22 @@ if ($filesChanged -gt 0 -and $DeployedInfo) {
 }
 
 # Prune stale backups from previous deploy runs
-Invoke-PruneOldBackups -RootDir $TargetDir -Days $BackupPruneDays -ActiveBackupDir $script:BackupDir
+Invoke-PruneOldBackups -RootDir $TargetDir -Days $resolvedBackupPruneDays -ActiveBackupDir $script:BackupDir
+
+if ($DryRun) {
+    $dryRunSummary = [ordered]@{
+        mode = 'dry-run'
+        created = $script:Stats.Created
+        updated = $script:Stats.Updated
+        unchanged = $script:Stats.Unchanged
+        protected = $script:Stats.Protected
+        preserved = $script:Stats.Preserved
+        conflict = $script:Stats.Conflict
+        backup_prune_days = $resolvedBackupPruneDays
+    }
+    Write-Host ""
+    Write-Host ("  DRYRUN_JSON {0}" -f (($dryRunSummary | ConvertTo-Json -Compress))) -ForegroundColor DarkGray
+}
 
 # Backup cleanup
 if ($script:BackupDir -and (Test-Path $script:BackupDir)) {

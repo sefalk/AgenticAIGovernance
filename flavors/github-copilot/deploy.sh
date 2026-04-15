@@ -26,6 +26,9 @@ files are overwritten. If no conflicts remain after deploy, the backup is
 automatically deleted. If conflicts exist, the backup persists for manual
 recovery.
 
+Backup prune retention precedence:
+    CLI flag --backup-prune-days > af-env.conf BACKUP_PRUNE_DAYS > default 14.
+
 Options:
   -t, --target DIR       Project root (default: parent of AF directory)
   -n, --dry-run          Show what would be copied without making changes
@@ -50,7 +53,8 @@ UPDATE_HASHES=false
 PREFLIGHT=false
 REQUIRE_PREFLIGHT=false
 PREFLIGHT_MODE="quick"
-BACKUP_PRUNE_DAYS=14
+BACKUP_PRUNE_DAYS=""
+BACKUP_PRUNE_DAYS_CLI=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -62,7 +66,7 @@ while [[ $# -gt 0 ]]; do
         -p|--preflight)     PREFLIGHT=true; shift ;;
         -r|--require-preflight) REQUIRE_PREFLIGHT=true; shift ;;
         -m|--preflight-mode) PREFLIGHT_MODE="$2"; shift 2 ;;
-        -b|--backup-prune-days) BACKUP_PRUNE_DAYS="$2"; shift 2 ;;
+        -b|--backup-prune-days) BACKUP_PRUNE_DAYS="$2"; BACKUP_PRUNE_DAYS_CLI=true; shift 2 ;;
         -h|--help)          usage ;;
         *)                  echo "Unknown option: $1" >&2; usage ;;
     esac
@@ -72,11 +76,6 @@ case "$PREFLIGHT_MODE" in
     quick|full) ;;
     *) echo "Error: --preflight-mode must be quick|full" >&2; exit 1 ;;
 esac
-
-if [[ ! "$BACKUP_PRUNE_DAYS" =~ ^[0-9]+$ ]]; then
-    echo "Error: --backup-prune-days must be a non-negative integer" >&2
-    exit 1
-fi
 
 # ── Configuration ──────────────────────────────────────────────────────────
 AF_ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -97,6 +96,49 @@ TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
 
 TARGET_GITHUB="$TARGET_DIR/.github"
 TARGET_VSCODE="$TARGET_DIR/.vscode"
+TARGET_AF_ENV="$TARGET_GITHUB/af-env.conf"
+
+get_af_env_value() {
+    local key="$1"
+    local default_val="${2:-}"
+    if [[ ! -f "$TARGET_AF_ENV" ]]; then
+        echo "$default_val"
+        return
+    fi
+    local line
+    line="$(grep -E "^${key}=" "$TARGET_AF_ENV" | head -1 || true)"
+    if [[ -z "$line" ]]; then
+        echo "$default_val"
+        return
+    fi
+    echo "${line#*=}" | xargs
+}
+
+resolve_backup_prune_days() {
+    local default_days=14
+    if [[ "$BACKUP_PRUNE_DAYS_CLI" == "true" ]]; then
+        echo "$BACKUP_PRUNE_DAYS"
+        return
+    fi
+
+    local from_conf
+    from_conf="$(get_af_env_value BACKUP_PRUNE_DAYS "")"
+    if [[ "$from_conf" =~ ^[0-9]+$ ]]; then
+        echo "$from_conf"
+        return
+    fi
+
+    echo "$default_days"
+}
+
+get_current_git_branch() {
+    local repo_dir="$1"
+    if ! command -v git >/dev/null 2>&1; then
+        echo ""
+        return
+    fi
+    git -C "$repo_dir" branch --show-current 2>/dev/null | tr -d '[:space:]'
+}
 
 # ── Read versions ──────────────────────────────────────────────────────────
 AF_VERSION="unknown"
@@ -365,6 +407,53 @@ prune_old_backups() {
     echo "  Pruned ${#stale[@]} stale backup folder(s) older than $days day(s)."
 }
 
+cleanup_conflict_backups() {
+    local root_dir="$1"
+    local backups=()
+    while IFS= read -r -d '' dir; do
+        backups+=("$dir")
+    done < <(find "$root_dir" -maxdepth 1 -mindepth 1 -type d -name '.af-backup-*' -print0 2>/dev/null)
+
+    [[ ${#backups[@]} -eq 0 ]] && return
+
+    echo ""
+    echo "=== Conflict Backup Cleanup ==="
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "  [DRY RUN] Would remove ${#backups[@]} conflict backup folder(s)."
+        printf '%s\n' "${backups[@]}" | sort | while IFS= read -r d; do
+            echo "  WOULD   $d"
+        done
+        return
+    fi
+
+    printf '%s\n' "${backups[@]}" | sort | while IFS= read -r d; do
+        rm -rf "$d"
+        echo "  CLEAN   $d"
+    done
+    echo "  Removed ${#backups[@]} conflict backup folder(s)."
+}
+
+test_notebook_git_filter_config() {
+    if [[ ! -f "$TARGET_AF_ENV" ]]; then
+        return 0
+    fi
+
+    if ! grep -qE '^NOTEBOOKS_ENABLED=true$' "$TARGET_AF_ENV"; then
+        return 0
+    fi
+
+    local ga="$TARGET_DIR/.gitattributes"
+    if [[ ! -f "$ga" ]]; then
+        return 2
+    fi
+
+    if ! grep -q 'filter=nbstripout' "$ga"; then
+        return 2
+    fi
+
+    return 0
+}
+
 # ── Collect all source files ───────────────────────────────────────────────
 get_af_source_files() {
     # Outputs relative paths under .github/ (one per line)
@@ -390,6 +479,7 @@ run_integrity_preflight() {
     checks+=("Hook integration tests|powershell -NoProfile -ExecutionPolicy Bypass -File \"$AF_ROOT/.github/scripts/test-hooks.ps1\"")
     checks+=("Skills validation|$(command -v python3 >/dev/null 2>&1 && echo python3 || echo python) \"$AF_ROOT/.github/scripts/validate-skills.py\"")
     checks+=("Tool audit|powershell -NoProfile -ExecutionPolicy Bypass -File \"$AF_ROOT/.github/scripts/audit-tools.ps1\"")
+    checks+=("Notebook git filter alignment (NOTEBOOKS_ENABLED=true)|test_notebook_git_filter_config")
 
     if [[ "$mode" == "full" ]]; then
         checks+=("Worktree integration tests|powershell -NoProfile -ExecutionPolicy Bypass -File \"$AF_ROOT/.github/scripts/test-worktree-scripts.ps1\"")
@@ -457,6 +547,7 @@ if [[ "$UPDATE_HASHES" == "true" ]]; then
     else
         echo "  [DRY RUN] Would write .af-hashes with ${#DEPLOYED_HASHES[@]} entries"
     fi
+    cleanup_conflict_backups "$TARGET_DIR"
     echo ""
     exit 0
 fi
@@ -667,6 +758,16 @@ if [[ "$PREFLIGHT" == "true" || "$REQUIRE_PREFLIGHT" == "true" ]]; then
     run_integrity_preflight "$PREFLIGHT_MODE" "$REQUIRE_PREFLIGHT"
 fi
 
+BACKUP_PRUNE_DAYS="$(resolve_backup_prune_days)"
+if [[ ! "$BACKUP_PRUNE_DAYS" =~ ^[0-9]+$ ]]; then
+    echo "Error: backup prune days must be a non-negative integer (CLI or af-env.conf BACKUP_PRUNE_DAYS)" >&2
+    exit 1
+fi
+if [[ "$BACKUP_PRUNE_DAYS" -gt 3650 ]]; then
+    echo "Error: backup prune days must be <= 3650" >&2
+    exit 1
+fi
+
 echo ""
 echo "=== AF Deployment ==="
 echo "  Source  : $AF_ROOT"
@@ -676,6 +777,10 @@ if [[ "$BACKUP_PRUNE_DAYS" -gt 0 ]]; then
     echo "  Backup prune: enabled (older than $BACKUP_PRUNE_DAYS day(s))"
 else
     echo "  Backup prune: disabled"
+fi
+CURRENT_BRANCH="$(get_current_git_branch "$TARGET_DIR")"
+if [[ "$CURRENT_BRANCH" == agent/* ]]; then
+    echo "  WARNING: Target repo is on '$CURRENT_BRANCH'. Prefer running framework rollouts on dev/main."
 fi
 if [[ "$DRY_RUN" == "true" ]]; then
     echo "  [DRY RUN — no changes will be made]"
@@ -754,6 +859,11 @@ fi
 
 # Prune stale backups from previous deploy runs
 prune_old_backups "$TARGET_DIR" "$BACKUP_PRUNE_DAYS" "$BACKUP_DIR"
+
+if [[ "$DRY_RUN" == "true" ]]; then
+    echo ""
+    echo "  DRYRUN_JSON {\"mode\":\"dry-run\",\"created\":$STAT_CREATED,\"updated\":$STAT_UPDATED,\"unchanged\":$STAT_UNCHANGED,\"protected\":$STAT_PROTECTED,\"preserved\":$STAT_PRESERVED,\"conflict\":$STAT_CONFLICT,\"backup_prune_days\":$BACKUP_PRUNE_DAYS}"
+fi
 
 # Backup cleanup
 if [[ -n "$BACKUP_DIR" ]] && [[ -d "$BACKUP_DIR" ]]; then

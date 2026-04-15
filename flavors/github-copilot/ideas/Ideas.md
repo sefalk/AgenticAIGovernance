@@ -9,6 +9,37 @@
 
 ---
 
+## 🆕 **Deploy Hardening Backlog** (2026-04-15)
+
+**Status:** 🔄 IN PROGRESS  
+**Scope:** `deploy.ps1` + `deploy.sh` + `af-env.conf` + tests/docs  
+**Effort:** MEDIUM  
+**Impact:** HIGH (less operational noise, safer rollouts)
+
+### Work Items
+
+1. ✅ **Backup retention as project config (`BACKUP_PRUNE_DAYS`)**
+  - Add key to `af-env.conf`.
+  - Precedence model: CLI override > config > default.
+
+2. ✅ **Conflict-resolved backup auto-cleanup on `UpdateHashes`**
+  - After baseline refresh, clear stale `.af-backup-*` folders.
+
+3. ✅ **Notebook hygiene preflight check**
+  - If `NOTEBOOKS_ENABLED=true`, verify `.gitattributes` contains `filter=nbstripout`.
+  - Fail preflight in required mode, warn/fail report in optional mode.
+
+4. ✅ **Branch-context warning for rollout safety**
+  - Warn when deploy runs while target repo is on `agent/*` branch.
+
+5. ✅ **Machine-readable dry-run summary**
+  - Emit `DRYRUN_JSON {...}` in dry-run output for automation/CI parsing.
+
+6. 🔄 **Deploy flag regression tests**
+  - Add script coverage for backup prune precedence and dry-run JSON contract.
+
+---
+
 ## 🆕 **Git Worktrees for Parallel Agent Execution** (2026-04-14)
 
 **Status:** ⬜ TODO  

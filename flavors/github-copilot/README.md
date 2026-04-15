@@ -83,11 +83,12 @@ Use two deployment modes to balance speed and safety:
 
 **Backup retention:**
 - Deploy now auto-prunes stale `.af-backup-*` folders older than 14 days.
+- Team default can be set in `.github/af-env.conf` via `BACKUP_PRUNE_DAYS=<N>`.
 - Override via `-BackupPruneDays <N>` / `--backup-prune-days <N>`.
 - Set `0` to disable pruning.
 
 **Preflight profiles:**
-- `quick`: hook integration tests, skills validation, tool audit
+- `quick`: hook integration tests, skills validation, tool audit, notebook git-filter alignment (`NOTEBOOKS_ENABLED=true` projects)
 - `full`: quick + worktree integration tests
 
 <details>
