@@ -96,8 +96,13 @@ Use two deployment modes to balance speed and safety:
   ```
   Example: `MP Field Data Analysis CT` → `../MP Field Data Analysis CT_worktrees`
 - Override `WORKTREE_DIR` explicitly if needed (sibling paths, absolute paths, or inside-repo `.worktrees/`).
+- Configure Python mode via `WORKTREE_VENV_MODE=shared|isolated`:
+  - `shared` (default): worktree uses parent repo `.venv` via explicit interpreter path.
+  - `isolated`: worktree creates its own `.venv` (use for dependency-changing tasks).
 - **VS Code integration:** Worktree folder is automatically added to your `.code-workspace` file,
   making it visible in Explorer as a separate workspace root. Workspace is cleaned up on worktree removal.
+- **Interpreter prompt avoidance:** worktree bootstrap writes `python.defaultInterpreterPath`
+  into worktree settings, so VS Code should not repeatedly ask to select/create an interpreter.
 
 **Preflight profiles:**
 - `quick`: hook integration tests, skills validation, tool audit, notebook git-filter alignment (`NOTEBOOKS_ENABLED=true` projects)

@@ -16,6 +16,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.18.25] -- 2026-04-15
+
+### Added
+
+- **Worktree Python interpreter mode config** in `.github/af-env.conf`:
+  - New key: `WORKTREE_VENV_MODE=shared|isolated`.
+  - Default: `shared` (reuse parent repo `.venv`).
+  - `isolated` creates a dedicated `.venv` in each worktree.
+
+### Changed
+
+- **Coordinator Step 0d** now includes explicit Python interpreter setup policy:
+  - Reads `WORKTREE_VENV_MODE`.
+  - Configures `python.defaultInterpreterPath` in worktree settings.
+  - Falls back from `shared` to `isolated` when parent `.venv` is missing.
+  - Avoids prompting the human for interpreter selection unless both strategies fail.
+
+- **Coordinator Step 8** now documents isolated venv cleanup before worktree removal.
+
+- **Worktree bootstrap scripts** (`setup-worktree.ps1/.sh`) now:
+  - Read `WORKTREE_VENV_MODE` from `af-env.conf`.
+  - Use path-based interpreter configuration (`python.defaultInterpreterPath`).
+  - Support `shared` and `isolated` execution modes without symlink/junction dependency.
+
+### Documentation
+
+- Updated `README.md` to document `WORKTREE_VENV_MODE` and interpreter prompt avoidance.
+
 ## [1.18.24] -- 2026-04-15
 
 ### Added

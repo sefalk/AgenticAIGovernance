@@ -315,7 +315,20 @@ workflows** (single file, no parallel work expected).
 
 4. **Verify:** Confirm the directory exists and `.github/` is accessible within it.
 
-5. **Add to VS Code workspace:**
+5. **Resolve Python interpreter mode (no user prompt):**
+    - Read `WORKTREE_VENV_MODE` from `.github/af-env.conf` (default: `shared`).
+    - If mode is `shared`:
+       - Use parent repo interpreter path:
+          - Windows: `{repo_root}/.venv/Scripts/python.exe`
+          - Linux/macOS: `{repo_root}/.venv/bin/python`
+       - Write `python.defaultInterpreterPath` into `{worktree}/.vscode/settings.json`.
+       - If parent `.venv` is missing, fallback to isolated mode for this workflow.
+    - If mode is `isolated` (or fallback from missing shared venv):
+       - Create `{worktree}/.venv`.
+       - Write `python.defaultInterpreterPath` to that isolated interpreter.
+    - Do not ask the human to choose an interpreter unless both strategies fail.
+
+6. **Add to VS Code workspace:**
    - If a `.code-workspace` file exists at the repo root, add the worktree folder:
      ```json
      {
@@ -328,10 +341,10 @@ workflows** (single file, no parallel work expected).
    - If no `.code-workspace` file exists, create one in the repo root with the above structure.
    - Narrate: `"VS Code workspace updated to include worktree folder."`
 
-6. **Record:** Add `worktree: {absolute_path}` to the plan metadata
+7. **Record:** Add `worktree: {absolute_path}` to the plan metadata
    (or note it in the WIP checkpoint for Trivial/Quick Fix).
 
-7. **Narrate:** `"Worktree created at {path} on branch agent/{workflow-id}. Proceeding inside worktree."`
+8. **Narrate:** `"Worktree created at {path} on branch agent/{workflow-id}. Proceeding inside worktree."`
 
 All subsequent subagent calls (test-writer, implementer, refactorer) include
 the worktree path in the context block — see Subagent Context Injection.
@@ -614,9 +627,10 @@ removes the worktree:
 3. **Remove:** `git worktree remove {WORKTREE_DIR}/{workflow-id}`
 4. **Prune:** `git worktree prune`
 5. **Verify:** `git worktree list` must not show the removed path.
-6. **Clean up workspace (if .code-workspace exists):** Remove the worktree folder entry from the workspace file.
-7. **Narrate:** `"Worktree {path} removed. Branch agent/{id} cleanup complete."`
-8. **Log:** Record cleanup timestamp and final commit hash in the workflow log.
+6. **Isolated venv cleanup:** If this workflow used `WORKTREE_VENV_MODE=isolated`, remove `{worktree}/.venv` before worktree removal.
+7. **Clean up workspace (if .code-workspace exists):** Remove the worktree folder entry from the workspace file.
+8. **Narrate:** `"Worktree {path} removed. Branch agent/{id} cleanup complete."`
+9. **Log:** Record cleanup timestamp and final commit hash in the workflow log.
 
 ### Verdict Parsing Protocol
 
