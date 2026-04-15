@@ -19,6 +19,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.18.7] -- 2026-04-14
 ---
 
+## [1.18.18] -- 2026-04-15
+
+### Added
+
+- **Deploy preflight checks in both deploy scripts.**
+  - PowerShell: `deploy.ps1` now supports:
+    - `-Preflight` (run checks, non-blocking)
+    - `-RequirePreflight` (run checks, block on failure)
+    - `-PreflightMode quick|full` (default: `quick`)
+  - Bash: `deploy.sh` now supports:
+    - `--preflight` (run checks, non-blocking)
+    - `--require-preflight` (run checks, block on failure)
+    - `--preflight-mode quick|full` (default: `quick`)
+
+### Preflight Profiles
+
+- `quick`:
+  - hook integration tests (`.github/scripts/test-hooks.ps1`)
+  - skills validation (`.github/scripts/validate-skills.py`)
+  - tool audit (`.github/scripts/audit-tools.ps1`)
+- `full`:
+  - quick profile + worktree integration tests (`.github/scripts/test-worktree-scripts.ps1`)
+
+### Notes
+
+- `-RequirePreflight` / `--require-preflight` provides a true deployment gate.
+- Optional preflight mode still reports failures but allows deployment to continue.
+
+---
+
 ## [1.18.17] -- 2026-04-14
 
 ### Added

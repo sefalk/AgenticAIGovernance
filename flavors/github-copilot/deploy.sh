@@ -32,6 +32,9 @@ Options:
   -d, --diff             Compare AF source against deployed copy
   -f, --force            Overwrite customizable files
   -u, --update-hashes    Write baseline hashes from current AF source
+    -p, --preflight        Run integrity preflight checks (non-blocking)
+    -r, --require-preflight Run integrity preflight checks and block on failure
+    -m, --preflight-mode MODE  quick|full (default: quick)
   -h, --help             Show this help
 EOF
     exit 0
@@ -43,6 +46,9 @@ DRY_RUN=false
 DIFF_MODE=false
 FORCE=false
 UPDATE_HASHES=false
+PREFLIGHT=false
+REQUIRE_PREFLIGHT=false
+PREFLIGHT_MODE="quick"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -51,10 +57,18 @@ while [[ $# -gt 0 ]]; do
         -d|--diff)          DIFF_MODE=true; shift ;;
         -f|--force)         FORCE=true; shift ;;
         -u|--update-hashes) UPDATE_HASHES=true; shift ;;
+        -p|--preflight)     PREFLIGHT=true; shift ;;
+        -r|--require-preflight) REQUIRE_PREFLIGHT=true; shift ;;
+        -m|--preflight-mode) PREFLIGHT_MODE="$2"; shift 2 ;;
         -h|--help)          usage ;;
         *)                  echo "Unknown option: $1" >&2; usage ;;
     esac
 done
+
+case "$PREFLIGHT_MODE" in
+    quick|full) ;;
+    *) echo "Error: --preflight-mode must be quick|full" >&2; exit 1 ;;
+esac
 
 # ── Configuration ──────────────────────────────────────────────────────────
 AF_ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -323,6 +337,61 @@ get_af_source_files() {
     done
 }
 
+run_integrity_preflight() {
+    local mode="$1"
+    local required="$2"
+
+    echo "=== AF Preflight ($mode) ==="
+
+    local checks=()
+    checks+=("Hook integration tests|powershell -NoProfile -ExecutionPolicy Bypass -File \"$AF_ROOT/.github/scripts/test-hooks.ps1\"")
+    checks+=("Skills validation|$(command -v python3 >/dev/null 2>&1 && echo python3 || echo python) \"$AF_ROOT/.github/scripts/validate-skills.py\"")
+    checks+=("Tool audit|powershell -NoProfile -ExecutionPolicy Bypass -File \"$AF_ROOT/.github/scripts/audit-tools.ps1\"")
+
+    if [[ "$mode" == "full" ]]; then
+        checks+=("Worktree integration tests|powershell -NoProfile -ExecutionPolicy Bypass -File \"$AF_ROOT/.github/scripts/test-worktree-scripts.ps1\"")
+    fi
+
+    local failed=0
+    local total=0
+    local failures=()
+
+    for entry in "${checks[@]}"; do
+        IFS='|' read -r name cmd <<< "$entry"
+        ((total++)) || true
+        echo "  RUN     $name"
+        if eval "$cmd" >/dev/null 2>&1; then
+            echo "  PASS    $name"
+        else
+            local code=$?
+            echo "  FAIL    $name (exit $code)"
+            ((failed++)) || true
+            failures+=("$name [exit $code]")
+        fi
+    done
+
+    if [[ "$failed" -eq 0 ]]; then
+        echo "  RESULT  PASS ($total/$total)"
+        echo ""
+        return 0
+    fi
+
+    echo "  RESULT  FAIL ($((total-failed))/$total)"
+    for f in "${failures[@]}"; do
+        echo "          - $f"
+    done
+    echo ""
+
+    if [[ "$required" == "true" ]]; then
+        echo "Preflight required and failed. Deployment blocked."
+        exit 1
+    fi
+
+    echo "Preflight failed, but deployment will continue (optional mode)."
+    echo ""
+    return 0
+}
+
 # ── UpdateHashes mode ─────────────────────────────────────────────────────
 if [[ "$UPDATE_HASHES" == "true" ]]; then
     echo ""
@@ -551,6 +620,10 @@ fi
 # ══════════════════════════════════════════════════════════════════════════
 # DEPLOY MODE
 # ══════════════════════════════════════════════════════════════════════════
+if [[ "$PREFLIGHT" == "true" || "$REQUIRE_PREFLIGHT" == "true" ]]; then
+    run_integrity_preflight "$PREFLIGHT_MODE" "$REQUIRE_PREFLIGHT"
+fi
+
 echo ""
 echo "=== AF Deployment ==="
 echo "  Source  : $AF_ROOT"

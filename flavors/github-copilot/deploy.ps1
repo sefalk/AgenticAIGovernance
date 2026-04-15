@@ -42,6 +42,19 @@
     Write baseline hashes from current AF source. Run after resolving
     conflicts to establish the baseline for future 3-way merge detection.
 
+.PARAMETER Preflight
+    Run integrity preflight checks before deploy. In this mode, failed checks
+    are reported but do not block deployment.
+
+.PARAMETER RequirePreflight
+    Run integrity preflight checks before deploy and BLOCK deployment on any
+    failed check.
+
+.PARAMETER PreflightMode
+    Select preflight profile:
+    - quick: test-hooks + validate-skills + audit-tools
+    - full:  quick + test-worktree-scripts
+
 .EXAMPLE
     .\deploy.ps1
     Deploys AF to the parent directory.
@@ -57,6 +70,14 @@
 .EXAMPLE
     .\deploy.ps1 -UpdateHashes
     Writes baseline hashes after resolving merge conflicts.
+
+.EXAMPLE
+    .\deploy.ps1 -Preflight -DryRun
+    Runs quick integrity checks, reports results, and shows dry-run changes.
+
+.EXAMPLE
+    .\deploy.ps1 -RequirePreflight -PreflightMode full
+    Runs full integrity checks and blocks deploy if any check fails.
 #>
 [CmdletBinding()]
 param(
@@ -64,7 +85,11 @@ param(
     [switch]$DryRun,
     [switch]$Diff,
     [switch]$Force,
-    [switch]$UpdateHashes
+    [switch]$UpdateHashes,
+    [switch]$Preflight,
+    [switch]$RequirePreflight,
+    [ValidateSet('quick', 'full')]
+    [string]$PreflightMode = 'quick'
 )
 
 Set-StrictMode -Version Latest
@@ -308,6 +333,107 @@ function Backup-BeforeOverwrite {
     $script:BackupCount++
 }
 
+function Find-PythonCommand {
+    $candidates = @('python', 'py', 'python3')
+    foreach ($cmd in $candidates) {
+        $found = Get-Command $cmd -ErrorAction SilentlyContinue
+        if ($found) {
+            if ($cmd -eq 'py') {
+                return @($found.Source, '-3')
+            }
+            return @($found.Source)
+        }
+    }
+    return @()
+}
+
+function Invoke-IntegrityPreflight {
+    param(
+        [ValidateSet('quick', 'full')]
+        [string]$Mode,
+        [switch]$Required
+    )
+
+    Write-Host "=== AF Preflight ($Mode) ===" -ForegroundColor Cyan
+
+    $checks = @(
+        [PSCustomObject]@{
+            Name = 'Hook integration tests'
+            Run  = {
+                $scriptPath = Join-Path $AFRoot '.github/scripts/test-hooks.ps1'
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath | Out-Null
+                return $LASTEXITCODE
+            }
+        },
+        [PSCustomObject]@{
+            Name = 'Skills validation'
+            Run  = {
+                $scriptPath = Join-Path $AFRoot '.github/scripts/validate-skills.py'
+                $py = @(Find-PythonCommand)
+                if (-not $py -or $py.Count -eq 0) {
+                    return 127
+                }
+                if ($py.Count -gt 1) {
+                    & $py[0] $py[1] $scriptPath | Out-Null
+                } else {
+                    & $py[0] $scriptPath | Out-Null
+                }
+                return $LASTEXITCODE
+            }
+        },
+        [PSCustomObject]@{
+            Name = 'Tool audit'
+            Run  = {
+                $scriptPath = Join-Path $AFRoot '.github/scripts/audit-tools.ps1'
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath | Out-Null
+                return $LASTEXITCODE
+            }
+        }
+    )
+
+    if ($Mode -eq 'full') {
+        $checks += [PSCustomObject]@{
+            Name = 'Worktree integration tests'
+            Run  = {
+                $scriptPath = Join-Path $AFRoot '.github/scripts/test-worktree-scripts.ps1'
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath | Out-Null
+                return $LASTEXITCODE
+            }
+        }
+    }
+
+    $failed = @()
+    foreach ($check in $checks) {
+        Write-Host "  RUN     $($check.Name)"
+        $code = & $check.Run
+        if ($code -eq 0) {
+            Write-Host "  PASS    $($check.Name)" -ForegroundColor Green
+        } else {
+            Write-Host "  FAIL    $($check.Name) (exit $code)" -ForegroundColor Red
+            $failed += "$($check.Name) [exit $code]"
+        }
+    }
+
+    if ($failed.Count -eq 0) {
+        Write-Host "  RESULT  PASS ($($checks.Count)/$($checks.Count))" -ForegroundColor Green
+        Write-Host ""
+        return $true
+    }
+
+    Write-Host "  RESULT  FAIL ($($checks.Count - $failed.Count)/$($checks.Count))" -ForegroundColor Yellow
+    foreach ($f in $failed) { Write-Host "          - $f" -ForegroundColor Yellow }
+    Write-Host ""
+
+    if ($Required) {
+        Write-Host "Preflight required and failed. Deployment blocked." -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "Preflight failed, but deployment will continue (optional mode)." -ForegroundColor Yellow
+    Write-Host ""
+    return $false
+}
+
 # ── UpdateHashes mode ─────────────────────────────────────────────────────
 if ($UpdateHashes) {
     Write-Host ""
@@ -540,6 +666,10 @@ if ($Diff) {
 # ══════════════════════════════════════════════════════════════════════════
 # DEPLOY MODE
 # ══════════════════════════════════════════════════════════════════════════
+if ($Preflight -or $RequirePreflight) {
+    [void](Invoke-IntegrityPreflight -Mode $PreflightMode -Required:$RequirePreflight)
+}
+
 Write-Host ""
 Write-Host "=== AF Deployment ===" -ForegroundColor Cyan
 Write-Host "  Source  : $AFRoot"
