@@ -16,6 +16,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.18.24] -- 2026-04-15
+
+### Added
+
+- **Optional worktree support** via `WORKTREE_ENABLED` configuration flag.
+  - New config: `WORKTREE_ENABLED=true|false` in `.github/af-env.conf` (default: `true`).
+  - When `false`, agent workflows run in main checkout (useful for CI/CD or single-threaded environments).
+  - When `true` (default), coordinator bootstraps worktrees at Step 0d (existing behavior preserved).
+
+- **Auto-computed worktree paths** based on project name.
+  - `WORKTREE_DIR` now defaults to empty in `af-env.conf`.
+  - If `WORKTREE_DIR` is empty, coordinator auto-computes:
+    ```
+    ../{git_repo_folder_name}_worktrees
+    ```
+    Example: `MP Field Data Analysis CT` → `../MP Field Data Analysis CT_worktrees`
+  - Projects can still override by setting `WORKTREE_DIR` explicitly.
+
+- **Auto-add worktree folder to VS Code workspace**.
+  - When coordinator creates a worktree (Step 0d), it automatically creates or updates
+    `.code-workspace` file to include the worktree folder.
+  - Worktree folder appears in VS Code Explorer as a separate workspace root.
+  - On cleanup (Step 8), worktree folder is removed from workspace.
+
+### Changed
+
+- **Coordinator Step 0d (Worktree Bootstrap):** Restructured with explicit WORKTREE_ENABLED check.
+  - If disabled: proceed to Step 1 in main checkout.
+  - If enabled: perform full worktree setup + VS Code workspace registration.
+  - Auto-computes `WORKTREE_DIR` from repo name if not configured.
+  - Added workspace folder management logic.
+
+- **Coordinator Step 8 (Worktree Cleanup):** Updated to respect `WORKTREE_ENABLED` flag.
+  - Skip cleanup if `WORKTREE_ENABLED=false`.
+  - Added workspace file cleanup on removal.
+
+- **Subagent Context Injection:** Updated `work_location` field to handle optional worktrees.
+  - Context now uses `Work location: Worktree: {path}` or `Work location: Main checkout (worktrees disabled)`.
+
+### Documentation
+
+- Updated `.github/af-env.conf` template with comprehensive `WORKTREE_ENABLED` and `WORKTREE_DIR` docs.
+- Clarified that `WORKTREE_DIR` auto-derives from project folder name if left empty.
+
 ## [1.18.7] -- 2026-04-14
 ---
 

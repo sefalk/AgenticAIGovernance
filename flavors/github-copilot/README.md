@@ -87,6 +87,18 @@ Use two deployment modes to balance speed and safety:
 - Override via `-BackupPruneDays <N>` / `--backup-prune-days <N>`.
 - Set `0` to disable pruning.
 
+**Git worktree configuration:**
+- Agent workflows run in isolated **git worktrees** to enable parallel agent work.
+- Disable via `WORKTREE_ENABLED=false` in `.github/af-env.conf` (useful for CI/CD or single-threaded environments).
+- Worktree paths default to auto-computed project-scoped folder:
+  ```
+  WORKTREE_DIR=../{git_repo_folder_name}_worktrees
+  ```
+  Example: `MP Field Data Analysis CT` → `../MP Field Data Analysis CT_worktrees`
+- Override `WORKTREE_DIR` explicitly if needed (sibling paths, absolute paths, or inside-repo `.worktrees/`).
+- **VS Code integration:** Worktree folder is automatically added to your `.code-workspace` file,
+  making it visible in Explorer as a separate workspace root. Workspace is cleaned up on worktree removal.
+
 **Preflight profiles:**
 - `quick`: hook integration tests, skills validation, tool audit, notebook git-filter alignment (`NOTEBOOKS_ENABLED=true` projects)
 - `full`: quick + worktree integration tests
