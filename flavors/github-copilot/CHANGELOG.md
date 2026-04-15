@@ -19,6 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.18.7] -- 2026-04-14
 ---
 
+## [1.18.19] -- 2026-04-15
+
+### Added
+
+- **Recommended deployment policy documented in README.**
+  Added an explicit split between:
+  - developer iteration mode (`-Preflight` / `--preflight`, quick)
+  - release handoff mode (`-RequirePreflight` / `--require-preflight`, full)
+
+  This formalizes when preflight is advisory vs when it is a hard gate.
+
+---
+
 ## [1.18.18] -- 2026-04-15
 
 ### Added

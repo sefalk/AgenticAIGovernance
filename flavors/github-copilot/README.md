@@ -61,6 +61,30 @@ Use `-Diff` / `--diff` to compare source vs deployed before updating:
 .\_agent-framework\deploy.ps1 -Diff
 ```
 
+### Recommended Deployment Policy
+
+Use two deployment modes to balance speed and safety:
+
+1. **Developer iteration (fast, non-blocking checks)**
+  ```powershell
+  .\_agent-framework\deploy.ps1 -Preflight -PreflightMode quick
+  ```
+  ```bash
+  ./_agent-framework/deploy.sh --preflight --preflight-mode quick
+  ```
+
+2. **Release handoff (hard gate, blocks on failed checks)**
+  ```powershell
+  .\_agent-framework\deploy.ps1 -RequirePreflight -PreflightMode full
+  ```
+  ```bash
+  ./_agent-framework/deploy.sh --require-preflight --preflight-mode full
+  ```
+
+**Preflight profiles:**
+- `quick`: hook integration tests, skills validation, tool audit
+- `full`: quick + worktree integration tests
+
 <details>
 <summary>Manual setup (if you prefer not to use the deploy script)</summary>
 
