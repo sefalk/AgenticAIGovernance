@@ -35,7 +35,7 @@
 5. ✅ **Machine-readable dry-run summary**
   - Emit `DRYRUN_JSON {...}` in dry-run output for automation/CI parsing.
 
-6. 🔄 **Deploy flag regression tests**
+6. ✅ **Deploy flag regression tests**
   - Add script coverage for backup prune precedence and dry-run JSON contract.
 
 ---
