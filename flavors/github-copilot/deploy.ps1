@@ -55,6 +55,11 @@
     - quick: test-hooks + validate-skills + audit-tools
     - full:  quick + test-worktree-scripts
 
+.PARAMETER BackupPruneDays
+    Automatically delete stale .af-backup-* folders in the target root that
+    are older than this many days.
+    Set to 0 to disable pruning.
+
 .EXAMPLE
     .\deploy.ps1
     Deploys AF to the parent directory.
@@ -78,6 +83,10 @@
 .EXAMPLE
     .\deploy.ps1 -RequirePreflight -PreflightMode full
     Runs full integrity checks and blocks deploy if any check fails.
+
+.EXAMPLE
+    .\deploy.ps1 -BackupPruneDays 30
+    Keeps conflict backups for up to 30 days and prunes older ones.
 #>
 [CmdletBinding()]
 param(
@@ -89,7 +98,9 @@ param(
     [switch]$Preflight,
     [switch]$RequirePreflight,
     [ValidateSet('quick', 'full')]
-    [string]$PreflightMode = 'quick'
+    [string]$PreflightMode = 'quick',
+    [ValidateRange(0, 3650)]
+    [int]$BackupPruneDays = 14
 )
 
 Set-StrictMode -Version Latest
@@ -331,6 +342,42 @@ function Backup-BeforeOverwrite {
     }
     Copy-Item $TargetFile $backupPath
     $script:BackupCount++
+}
+
+function Invoke-PruneOldBackups {
+    param(
+        [string]$RootDir,
+        [int]$Days,
+        [string]$ActiveBackupDir
+    )
+
+    if ($Days -le 0) { return }
+
+    $cutoff = (Get-Date).AddDays(-$Days)
+    $staleBackups = Get-ChildItem -Path $RootDir -Directory -Force -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -like '.af-backup-*' -and
+            $_.LastWriteTime -lt $cutoff -and
+            (-not $ActiveBackupDir -or $_.FullName -ne $ActiveBackupDir)
+        }
+
+    if (-not $staleBackups -or $staleBackups.Count -eq 0) { return }
+
+    Write-Host ""
+    Write-Host "=== Backup Prune ===" -ForegroundColor Cyan
+    if ($DryRun) {
+        Write-Host "  [DRY RUN] Would remove $($staleBackups.Count) stale backup folder(s) older than $Days day(s)." -ForegroundColor Yellow
+        foreach ($b in ($staleBackups | Sort-Object LastWriteTime)) {
+            Write-Host "  WOULD   $($b.FullName)" -ForegroundColor Yellow
+        }
+        return
+    }
+
+    foreach ($b in ($staleBackups | Sort-Object LastWriteTime)) {
+        Remove-Item $b.FullName -Recurse -Force
+        Write-Host "  PRUNE   $($b.FullName)" -ForegroundColor Cyan
+    }
+    Write-Host "  Pruned $($staleBackups.Count) stale backup folder(s) older than $Days day(s)." -ForegroundColor Green
 }
 
 function Find-PythonCommand {
@@ -675,6 +722,11 @@ Write-Host "=== AF Deployment ===" -ForegroundColor Cyan
 Write-Host "  Source  : $AFRoot"
 Write-Host "  Target  : $TargetDir"
 Write-Host "  Version : $AFVersion"
+if ($BackupPruneDays -gt 0) {
+    Write-Host "  Backup prune: enabled (older than $BackupPruneDays day(s))"
+} else {
+    Write-Host "  Backup prune: disabled"
+}
 if ($DryRun) { Write-Host '  [DRY RUN -- no changes will be made]' -ForegroundColor Yellow }
 Write-Host ""
 
@@ -805,6 +857,9 @@ if ($filesChanged -gt 0 -and $DeployedInfo) {
         }
     }
 }
+
+# Prune stale backups from previous deploy runs
+Invoke-PruneOldBackups -RootDir $TargetDir -Days $BackupPruneDays -ActiveBackupDir $script:BackupDir
 
 # Backup cleanup
 if ($script:BackupDir -and (Test-Path $script:BackupDir)) {

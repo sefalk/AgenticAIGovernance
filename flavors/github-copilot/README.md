@@ -81,6 +81,11 @@ Use two deployment modes to balance speed and safety:
   ./_agent-framework/deploy.sh --require-preflight --preflight-mode full
   ```
 
+**Backup retention:**
+- Deploy now auto-prunes stale `.af-backup-*` folders older than 14 days.
+- Override via `-BackupPruneDays <N>` / `--backup-prune-days <N>`.
+- Set `0` to disable pruning.
+
 **Preflight profiles:**
 - `quick`: hook integration tests, skills validation, tool audit
 - `full`: quick + worktree integration tests

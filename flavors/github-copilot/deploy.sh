@@ -35,6 +35,7 @@ Options:
     -p, --preflight        Run integrity preflight checks (non-blocking)
     -r, --require-preflight Run integrity preflight checks and block on failure
     -m, --preflight-mode MODE  quick|full (default: quick)
+    -b, --backup-prune-days DAYS  Delete stale .af-backup-* older than DAYS (default: 14, 0=off)
   -h, --help             Show this help
 EOF
     exit 0
@@ -49,6 +50,7 @@ UPDATE_HASHES=false
 PREFLIGHT=false
 REQUIRE_PREFLIGHT=false
 PREFLIGHT_MODE="quick"
+BACKUP_PRUNE_DAYS=14
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -60,6 +62,7 @@ while [[ $# -gt 0 ]]; do
         -p|--preflight)     PREFLIGHT=true; shift ;;
         -r|--require-preflight) REQUIRE_PREFLIGHT=true; shift ;;
         -m|--preflight-mode) PREFLIGHT_MODE="$2"; shift 2 ;;
+        -b|--backup-prune-days) BACKUP_PRUNE_DAYS="$2"; shift 2 ;;
         -h|--help)          usage ;;
         *)                  echo "Unknown option: $1" >&2; usage ;;
     esac
@@ -69,6 +72,11 @@ case "$PREFLIGHT_MODE" in
     quick|full) ;;
     *) echo "Error: --preflight-mode must be quick|full" >&2; exit 1 ;;
 esac
+
+if [[ ! "$BACKUP_PRUNE_DAYS" =~ ^[0-9]+$ ]]; then
+    echo "Error: --backup-prune-days must be a non-negative integer" >&2
+    exit 1
+fi
 
 # ── Configuration ──────────────────────────────────────────────────────────
 AF_ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -320,6 +328,41 @@ backup_before_overwrite() {
     mkdir -p "$(dirname "$backup_path")"
     cp "$target_file" "$backup_path"
     ((BACKUP_COUNT++)) || true
+}
+
+prune_old_backups() {
+    local root_dir="$1"
+    local days="$2"
+    local active_backup_dir="$3"
+
+    [[ "$days" -le 0 ]] && return
+
+    local find_days=$((days - 1))
+    local stale=()
+    while IFS= read -r -d '' dir; do
+        if [[ -n "$active_backup_dir" ]] && [[ "$dir" == "$active_backup_dir" ]]; then
+            continue
+        fi
+        stale+=("$dir")
+    done < <(find "$root_dir" -maxdepth 1 -mindepth 1 -type d -name '.af-backup-*' -mtime +"$find_days" -print0 2>/dev/null)
+
+    [[ ${#stale[@]} -eq 0 ]] && return
+
+    echo ""
+    echo "=== Backup Prune ==="
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "  [DRY RUN] Would remove ${#stale[@]} stale backup folder(s) older than $days day(s)."
+        printf '%s\n' "${stale[@]}" | sort | while IFS= read -r d; do
+            echo "  WOULD   $d"
+        done
+        return
+    fi
+
+    printf '%s\n' "${stale[@]}" | sort | while IFS= read -r d; do
+        rm -rf "$d"
+        echo "  PRUNE   $d"
+    done
+    echo "  Pruned ${#stale[@]} stale backup folder(s) older than $days day(s)."
 }
 
 # ── Collect all source files ───────────────────────────────────────────────
@@ -629,6 +672,11 @@ echo "=== AF Deployment ==="
 echo "  Source  : $AF_ROOT"
 echo "  Target  : $TARGET_DIR"
 echo "  Version : $AF_VERSION"
+if [[ "$BACKUP_PRUNE_DAYS" -gt 0 ]]; then
+    echo "  Backup prune: enabled (older than $BACKUP_PRUNE_DAYS day(s))"
+else
+    echo "  Backup prune: disabled"
+fi
 if [[ "$DRY_RUN" == "true" ]]; then
     echo "  [DRY RUN — no changes will be made]"
 fi
@@ -703,6 +751,9 @@ if [[ "$DRY_RUN" == "true" ]]; then
     echo ""
     echo "  [DRY RUN — no files were changed. Remove --dry-run to apply.]"
 fi
+
+# Prune stale backups from previous deploy runs
+prune_old_backups "$TARGET_DIR" "$BACKUP_PRUNE_DAYS" "$BACKUP_DIR"
 
 # Backup cleanup
 if [[ -n "$BACKUP_DIR" ]] && [[ -d "$BACKUP_DIR" ]]; then

@@ -19,6 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.18.7] -- 2026-04-14
 ---
 
+## [1.18.21] -- 2026-04-15
+
+### Added
+
+- **Automatic stale backup pruning in deploy scripts.**
+  - `deploy.ps1` adds `-BackupPruneDays <N>` (default: `14`, `0` disables).
+  - `deploy.sh` adds `--backup-prune-days <N>` / `-b <N>` with same behavior.
+  - During deploy, stale `.af-backup-*` directories in the target root older
+    than the configured threshold are pruned automatically.
+  - Current run backup behavior remains unchanged: conflict backups are still
+    preserved for manual recovery.
+
+---
+
 ## [1.18.20] -- 2026-04-15
 
 ### Added
