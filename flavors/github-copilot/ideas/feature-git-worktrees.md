@@ -701,3 +701,35 @@ correctly, Option B is the right long-term answer and Option A is a stopgap.
 2. Should `deploy.ps1` gain a `-SkipConfig` flag for worktree deployments?
 3. Is there value in the `{worktree}/.github/.deploy-version` drift warning
    even if hook routing does not work as hoped?
+
+### Tooling Assessment: Docker / Dev Containers for Parallel Worktrees
+
+**Question:** Can Docker or Dev Containers resolve the parallel-worktree limits?
+
+**Assessment:** Yes, but only under a specific operating model.
+
+1. **What containers solve well:**
+   - Strong process and dependency isolation (one container per task/worktree).
+   - No shared-venv collision across concurrent tasks.
+   - Better reproducibility across developer machines.
+
+2. **What containers do not solve automatically:**
+   - Multi-root single-window hook routing ambiguity in VS Code.
+   - If all worktrees are still operated in one VS Code window, hook context
+     can remain ambiguous depending on VS Code routing behavior.
+
+3. **Safe operating model for containers:**
+   - One worktree per container.
+   - One VS Code window attached to that container/worktree.
+   - Avoid multi-root windows for concurrent agent tasks.
+   In this model, the single-sentinel limitation is operationally sidestepped.
+
+4. **Trade-offs / risks introduced:**
+   - Added platform/tooling complexity (`devcontainer.json`, image lifecycle).
+   - Potential Windows performance overhead (notably with OneDrive-backed paths).
+   - New drift class: container image drift unless image/tag pinning is enforced.
+
+5. **Decision guidance:**
+   - Low-to-moderate concurrency (1-2 active tasks): keep sentinel approach.
+   - Frequent high concurrency (3+ tasks, dependency variance): container-per-task
+     becomes the more robust long-term option.
