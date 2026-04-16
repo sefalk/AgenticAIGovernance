@@ -1,5 +1,6 @@
 # Agent-scoped Stop hook for the implementer agent.
 # copilot:modified  | implementer | 2026-03-19 | test log freshness check in stop hooks
+# copilot:modified  | implementer | 2026-04-16 | worktree-aware path resolution via active-worktree sentinel
 #
 # GREEN PHASE GATE (HARD -- blocks implementer from completing if tests fail)
 #
@@ -12,9 +13,20 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Worktree-aware path resolution (see ideas/feature-git-worktrees.md §12).
+# $mainRoot: main checkout where .github/ is deployed (derived from script location).
+# $codeRoot: active worktree if .active-worktree sentinel exists, else $mainRoot.
+$mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
+$codeRoot = $mainRoot
+$sentinel = Join-Path $mainRoot '.github/.active-worktree'
+if (Test-Path $sentinel) {
+    $p = (Get-Content $sentinel -Raw -ErrorAction SilentlyContinue).Trim()
+    if ($p -and (Test-Path $p)) { $codeRoot = $p }
+}
+
 # Load project config
 $SRC_DIR = 'src'
-$confPath = Join-Path (Get-Location) '.github/af-env.conf'
+$confPath = Join-Path $mainRoot '.github/af-env.conf'
 if (Test-Path $confPath) {
     $m = Select-String -Path $confPath -Pattern '^SRC_DIR=(.+)$'
     if ($m) { $SRC_DIR = $m.Matches[0].Groups[1].Value.Trim() }
@@ -37,7 +49,7 @@ if (-not $pytest) {
     exit 0
 }
 
-if (-not (Test-Path "tests/")) {
+if (-not (Test-Path (Join-Path $codeRoot 'tests'))) {
     $output = @{
         systemMessage = "implementer:Stop -- no tests/ directory, Green gate skipped"
     } | ConvertTo-Json -Compress
@@ -48,7 +60,7 @@ if (-not (Test-Path "tests/")) {
 # ---------- Test Log Freshness Check ----------
 # Accept last run if ALL tests passed AND no code changed since (committed or uncommitted).
 # No time limit — change detection is the criterion, not elapsed time.
-$testLogPath = Join-Path (Get-Location) '.github/test-log.json'
+$testLogPath = Join-Path $mainRoot '.github/test-log.json'
 $fromLog = $false
 if (Test-Path $testLogPath) {
     try {
@@ -56,8 +68,8 @@ if (Test-Path $testLogPath) {
         $allEntry = $null
         if ($log.PSObject.Properties.Name -contains 'all') { $allEntry = $log.all }
         if ($allEntry -and $allEntry.exit_code -eq 0 -and $allEntry.last_run) {
-            $commitsSince = git log --oneline --after="$($allEntry.last_run)" -- "$SRC_DIR/" 'tests/' 2>$null
-            $uncommitted = git diff --name-only HEAD -- "$SRC_DIR/" 'tests/' 2>$null
+            $commitsSince = git -C $codeRoot log --oneline --after="$($allEntry.last_run)" -- "$SRC_DIR/" 'tests/' 2>$null
+            $uncommitted = git -C $codeRoot diff --name-only HEAD -- "$SRC_DIR/" 'tests/' 2>$null
             if (-not $commitsSince -and -not $uncommitted) {
                 $fromLog = $true
             }
@@ -69,25 +81,27 @@ if ($fromLog) {
     $exitCode = 0
     $result = "Tests: accepted from test log ($($allEntry.passed)/$($allEntry.total) passed, no code changes since)"
 } else {
-    $scriptPath = Join-Path (Get-Location) '.github/scripts/run-tests.ps1'
+    $scriptPath = Join-Path $mainRoot '.github/scripts/run-tests.ps1'
+    Push-Location $codeRoot
     $result = & $scriptPath -Scope all 2>&1
     $exitCode = $LASTEXITCODE
+    Pop-Location
 }
 
 if ($exitCode -eq 0 -or $exitCode -eq 5) {
     # Tests pass -- now check provenance markers on changed .py files
     $changedPy = @()
     try {
-        $changedPy = git diff --name-only --cached --diff-filter=AM -- '*.py' 2>$null
+        $changedPy = git -C $codeRoot diff --name-only --cached --diff-filter=AM -- '*.py' 2>$null
         if (-not $changedPy) {
-            $changedPy = git diff --name-only HEAD --diff-filter=AM -- '*.py' 2>$null
+            $changedPy = git -C $codeRoot diff --name-only HEAD --diff-filter=AM -- '*.py' 2>$null
         }
     } catch {}
 
     $missingMarkers = @()
     foreach ($f in $changedPy) {
-        if ($f -and (Test-Path $f)) {
-            $firstLines = Get-Content $f -TotalCount 5 -ErrorAction SilentlyContinue | Out-String
+        if ($f -and (Test-Path (Join-Path $codeRoot $f))) {
+            $firstLines = Get-Content (Join-Path $codeRoot $f) -TotalCount 5 -ErrorAction SilentlyContinue | Out-String
             if ($firstLines -and $firstLines -notmatch 'copilot:(generated|modified)') {
                 $missingMarkers += $f
             }
@@ -113,7 +127,7 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
     })
 
     if ($changedSrcPy.Count -gt 0) {
-        $qualityScript = Join-Path (Get-Location) '.github/scripts/check-python-quality.py'
+        $qualityScript = Join-Path $mainRoot '.github/scripts/check-python-quality.py'
         if (-not (Test-Path $qualityScript)) {
             $output = @{
                 hookSpecificOutput = @{
@@ -126,7 +140,7 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
             exit 0
         }
 
-        $pythonExe = Join-Path (Get-Location) '.venv/Scripts/python.exe'
+        $pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
         if (-not (Test-Path $pythonExe)) {
             $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
             if ($pythonCmd) {
@@ -144,8 +158,10 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
             }
         }
 
+        Push-Location $codeRoot
         $qualityResult = & $pythonExe $qualityScript --files @($changedSrcPy) 2>&1
         $qualityExit = $LASTEXITCODE
+        Pop-Location
         if ($qualityExit -ne 0) {
             $summary = ($qualityResult | Select-Object -First 10 | Out-String).Trim()
             $output = @{
@@ -164,8 +180,8 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
     # Each new type: ignore / pyright: ignore / noqa must be its own standalone commit.
     $diffLines = @()
     try {
-        $diffLines = git diff --cached -- '*.py' 2>$null
-        if (-not $diffLines) { $diffLines = git diff HEAD -- '*.py' 2>$null }
+        $diffLines = git -C $codeRoot diff --cached -- '*.py' 2>$null
+        if (-not $diffLines) { $diffLines = git -C $codeRoot diff HEAD -- '*.py' 2>$null }
     } catch {}
     $ignorePattern = '#\s*(type:\s*ignore|pyright:\s*ignore|noqa)'
     $newIgnoreLines = @($diffLines | Where-Object { $_ -match '^\+[^+]' -and $_ -match $ignorePattern })

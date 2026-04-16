@@ -287,23 +287,77 @@ branches. It applies to **all workflows** (Full TDD, Quick Fix, Trivial Fix).
 
 ### Step 0d: Worktree Bootstrap
 
-Immediately after branch creation (or Step 0c verification), create the
-worktree for this workflow. **Skip only for Trivial Fix workflows** (single
-file, no parallel work expected).
+Immediately after branch creation (or Step 0c verification), decide whether to create
+a worktree based on `WORKTREE_ENABLED` setting.
 
-```bash
-# Read WORKTREE_DIR from af-env.conf (default: ../wt)
-git worktree add "$WORKTREE_DIR/$WORKFLOW_ID" -b "agent/$WORKFLOW_ID" dev
-```
+**If `WORKTREE_ENABLED=false`:** Skip worktree creation. All subagent work runs in the
+main repository checkout. Proceed directly to Step 1. *(Not recommended for parallel
+workflows; intended for CI/CD or single-threaded environments.)*
 
-1. **Read config:** Get `WORKTREE_DIR` from `.github/af-env.conf` (default: `../wt`).
+**If `WORKTREE_ENABLED=true` (default):** Create a worktree. **Skip only for Trivial Fix
+workflows** (single file, no parallel work expected).
+
+#### Worktree Setup (when WORKTREE_ENABLED=true)
+
+1. **Read and compute WORKTREE_DIR:**
+   - Get `WORKTREE_DIR` from `.github/af-env.conf`.
+   - If `WORKTREE_DIR` is empty or not set, compute it as:
+     ```
+     WORKTREE_DIR=../{git_repo_folder_name}_worktrees
+     ```
+     For example: `MP Field Data Analysis CT` → `../MP Field Data Analysis CT_worktrees`
+   - Record the resolved path for later use.
+
 2. **Check for stale worktrees:** Run `git worktree list --porcelain`.
    If prunable entries exist: run `git worktree prune` and report to human.
+
 3. **Create:** `git worktree add {WORKTREE_DIR}/{workflow-id} -b agent/{workflow-id} dev`
-4. **Verify:** Confirm the directory exists and `.github/` is accessible within it.
-5. **Record:** Add `worktree: {absolute_path}` to the plan metadata
+
+4. **Write active-worktree sentinel:** Immediately after creation, write the absolute
+   worktree path to `.github/.active-worktree` in the main checkout:
+   ```
+   Set-Content -Path .github/.active-worktree -Value {absolute_worktree_path} -NoNewline
+   ```
+   This allows hook scripts (pretooluse, stop) to resolve `$codeRoot` to the active
+   worktree instead of the main-checkout CWD. Quality gates (pytest, git status,
+   SRC_DIR lookups) will correctly target the worktree.
+   ⚠️ **Single-worktree constraint:** Only one active sentinel is supported. Creating
+   a second worktree while the first is active overwrites the sentinel — parallel
+   worktrees are not supported until Option B (auto-deploy) is verified.
+   See `ideas/feature-git-worktrees.md` §12–13.
+
+4b. **Verify:** Confirm the worktree directory exists and is accessible.
+
+5. **Resolve Python interpreter mode (no user prompt):**
+    - Read `WORKTREE_VENV_MODE` from `.github/af-env.conf` (default: `shared`).
+    - If mode is `shared`:
+       - Use parent repo interpreter path:
+          - Windows: `{repo_root}/.venv/Scripts/python.exe`
+          - Linux/macOS: `{repo_root}/.venv/bin/python`
+       - Write `python.defaultInterpreterPath` into `{worktree}/.vscode/settings.json`.
+       - If parent `.venv` is missing, fallback to isolated mode for this workflow.
+    - If mode is `isolated` (or fallback from missing shared venv):
+       - Create `{worktree}/.venv`.
+       - Write `python.defaultInterpreterPath` to that isolated interpreter.
+    - Do not ask the human to choose an interpreter unless both strategies fail.
+
+6. **Add to VS Code workspace:**
+   - If a `.code-workspace` file exists at the repo root, add the worktree folder:
+     ```json
+     {
+       "folders": [
+         { "path": "." },
+         { "path": "{WORKTREE_DIR}/{workflow-id}", "name": "agent/{workflow-id}" }
+       ]
+     }
+     ```
+   - If no `.code-workspace` file exists, create one in the repo root with the above structure.
+   - Narrate: `"VS Code workspace updated to include worktree folder."`
+
+7. **Record:** Add `worktree: {absolute_path}` to the plan metadata
    (or note it in the WIP checkpoint for Trivial/Quick Fix).
-6. **Narrate:** `"Worktree created at {path} on branch agent/{id}. Proceeding inside worktree."`
+
+8. **Narrate:** `"Worktree created at {path} on branch agent/{workflow-id}. Proceeding inside worktree."`
 
 All subsequent subagent calls (test-writer, implementer, refactorer) include
 the worktree path in the context block — see Subagent Context Injection.
@@ -319,12 +373,11 @@ coordinator-specific **phase checkpoints**.
 
 **Full TDD Workflow:**
 
-1. **Before Step 1:** Create feature branch and worktree:
-   ```
-   git checkout -b agent/{workflow-id}    # (if worktrees not used: old path)
-   git worktree add {WT_DIR}/{workflow-id} -b agent/{workflow-id} dev
-   ```
-   Or verify current branch relevance (Step 0c). See Step 0d for full worktree bootstrap.
+1. **Before Step 1:** Create feature branch and worktree (if enabled):
+   - Create branch: `git checkout -b agent/{workflow-id}`
+   - Bootstrap worktree (if `WORKTREE_ENABLED=true`): see Step 0d for full details
+   - If worktrees disabled: proceed in main checkout
+   - Or verify current branch relevance (Step 0c)
 2. **After Step 1:** Commit the plan: `git add {plan_file}` then
    `git commit -m "[agent:planner] implementation plan: {slug — what is planned}"`
 3. **After Step 3 (test-critic APPROVED):** Commit tests:
@@ -356,10 +409,14 @@ When invoking any subagent, prepend this **context block** to the prompt:
 > "Context: Complexity tier = {tier}. Target layers: {layers}.
 > Quality thresholds: coverage ≥ {line_cov}% line, ≥ {branch_cov}% branch;
 > complexity ≤ {cc_limit}.
-> Worktree: {absolute_worktree_path}. Branch: agent/{workflow-id}.
+> Work location: {work_location}. Branch: agent/{workflow-id}.
 > Retro lessons (if any): {retro_lessons_or_none}.
 > Before starting, read your relevant skills (listed in your Skills section)
 > by calling read_file on each SKILL.md that applies to this task."
+
+Where `{work_location}` is:
+- `Worktree: {absolute_worktree_path}` (if `WORKTREE_ENABLED=true`)
+- `Main checkout (worktrees disabled)` (if `WORKTREE_ENABLED=false`)
 
 Fill placeholders from the plan (or defaults from MANIFEST § 5 if no plan yet).
 For Trivial Fix / Review Only where no plan exists, use: tier = Trivial,
@@ -567,18 +624,31 @@ at session end.
 
 ### Step 8: Worktree Cleanup
 
+**Skip if either condition is true:**
+- `WORKTREE_ENABLED=false` (worktrees are disabled; no worktree was created)
+- No worktree was created (Trivial Fix workflows)
+
+If a worktree exists, proceed:
+
 After the human confirms the branch has been merged to dev, the coordinator
-removes the worktree. **Skip if no worktree was created (Trivial Fix).**
+removes the worktree:
 
 1. **Confirm merge:** Ask or wait for human confirmation:
    `"Please confirm branch agent/{id} has been merged to dev."`
 2. **Check clean:** Run `git status --porcelain` in the worktree directory.
    If dirty: halt and escalate — do NOT force-remove.
-3. **Remove:** `git worktree remove {WORKTREE_DIR}/{workflow-id}`
+3. **Delete active-worktree sentinel:** Remove `.github/.active-worktree` from the main checkout:
+   ```
+   Remove-Item -Force .github/.active-worktree -ErrorAction SilentlyContinue
+   ```
+   This returns hook scripts to main-checkout mode before worktree removal.
+4. **Remove:** `git worktree remove {WORKTREE_DIR}/{workflow-id}`
 4. **Prune:** `git worktree prune`
 5. **Verify:** `git worktree list` must not show the removed path.
-6. **Narrate:** `"Worktree {path} removed. Branch agent/{id} cleanup complete."`
-7. **Log:** Record cleanup timestamp and final commit hash in the workflow log.
+6. **Isolated venv cleanup:** If this workflow used `WORKTREE_VENV_MODE=isolated`, remove `{worktree}/.venv` before worktree removal.
+7. **Clean up workspace (if .code-workspace exists):** Remove the worktree folder entry from the workspace file.
+8. **Narrate:** `"Worktree {path} removed. Branch agent/{id} cleanup complete."`
+9. **Log:** Record cleanup timestamp and final commit hash in the workflow log.
 
 ### Verdict Parsing Protocol
 

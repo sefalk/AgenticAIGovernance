@@ -1,4 +1,5 @@
 # copilot:generated | implementer | 2026-03-16
+# copilot:modified  | implementer | 2026-04-16 | worktree-aware path resolution via active-worktree sentinel
 # Agent-scoped PostToolUse hook for the coordinator agent.
 #
 # TERMINAL FILE-WRITE DETECTOR (detective -- warns when terminal modifies source files)
@@ -16,9 +17,18 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Worktree-aware path resolution (see ideas/feature-git-worktrees.md §12).
+$mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
+$codeRoot = $mainRoot
+$sentinel = Join-Path $mainRoot '.github/.active-worktree'
+if (Test-Path $sentinel) {
+    $p = (Get-Content $sentinel -Raw -ErrorAction SilentlyContinue).Trim()
+    if ($p -and (Test-Path $p)) { $codeRoot = $p }
+}
+
 # Load project config
 $SRC_DIR = 'src'
-$confPath = Join-Path (Get-Location) '.github/af-env.conf'
+$confPath = Join-Path $mainRoot '.github/af-env.conf'
 if (Test-Path $confPath) {
     $m = Select-String -Path $confPath -Pattern '^SRC_DIR=(.+)$'
     if ($m) { $SRC_DIR = $m.Matches[0].Groups[1].Value.Trim() }
@@ -41,7 +51,7 @@ if ($toolName -notmatch 'terminal|Terminal|runInTerminal') {
 }
 
 # Check for modified/new files in source directories (fast -- scoped to two dirs)
-$status = git status --porcelain -- "$SRC_DIR/" tests/ 2>&1
+$status = git -C $codeRoot status --porcelain -- "$SRC_DIR/" tests/ 2>&1
 if (-not $status -or $status.Length -eq 0) {
     Write-Output '{}'
     exit 0

@@ -16,6 +16,110 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.18.26] -- 2026-04-16
+
+### Fixed
+
+- **Worktree-aware hook scripts** via `.github/.active-worktree` sentinel file.
+  All CWD-anchored hook scripts (`implementer-stop`, `refactorer-stop`,
+  `test-writer-stop`, `test-writer-pretooluse`, `refactorer-pretooluse`,
+  `coordinator-posttooluse`, `coordinator-postmerge`) now resolve two paths:
+  - `$mainRoot`: main checkout (derived from `$PSScriptRoot`), used for
+    `.github/` files (config, scripts, test-log).
+  - `$codeRoot`: active worktree path read from `.github/.active-worktree`
+    when present, otherwise `$mainRoot`. Used for `git` operations, pytest,
+    and source file lookups.
+  Previously, all hooks used `Get-Location` (VS Code CWD = main checkout),
+  so quality gates silently ran against the wrong directory when a worktree
+  was active. See `ideas/feature-git-worktrees.md` §12.
+
+- **Coordinator Step 0d** now writes `.github/.active-worktree` (absolute path)
+  immediately after `git worktree add`.
+
+- **Coordinator Step 8** now deletes `.github/.active-worktree` before removing
+  the worktree, returning hooks to main-checkout mode.
+
+- **`WORKTREE_ENABLED` default restored to `true`** (was temporarily set to
+  `false` in v1.18.25-patch while the hook issue was unresolved).
+
+### Known Limitation
+
+- Only **one active worktree at a time** is supported by the sentinel approach.
+  Parallel worktrees require Option B (auto-deploy into each WT) — see
+  `ideas/feature-git-worktrees.md` §13 for the decision analysis.
+
+## [1.18.25] -- 2026-04-15
+
+### Added
+
+- **Worktree Python interpreter mode config** in `.github/af-env.conf`:
+  - New key: `WORKTREE_VENV_MODE=shared|isolated`.
+  - Default: `shared` (reuse parent repo `.venv`).
+  - `isolated` creates a dedicated `.venv` in each worktree.
+
+### Changed
+
+- **Coordinator Step 0d** now includes explicit Python interpreter setup policy:
+  - Reads `WORKTREE_VENV_MODE`.
+  - Configures `python.defaultInterpreterPath` in worktree settings.
+  - Falls back from `shared` to `isolated` when parent `.venv` is missing.
+  - Avoids prompting the human for interpreter selection unless both strategies fail.
+
+- **Coordinator Step 8** now documents isolated venv cleanup before worktree removal.
+
+- **Worktree bootstrap scripts** (`setup-worktree.ps1/.sh`) now:
+  - Read `WORKTREE_VENV_MODE` from `af-env.conf`.
+  - Use path-based interpreter configuration (`python.defaultInterpreterPath`).
+  - Support `shared` and `isolated` execution modes without symlink/junction dependency.
+
+### Documentation
+
+- Updated `README.md` to document `WORKTREE_VENV_MODE` and interpreter prompt avoidance.
+
+## [1.18.24] -- 2026-04-15
+
+### Added
+
+- **Optional worktree support** via `WORKTREE_ENABLED` configuration flag.
+  - New config: `WORKTREE_ENABLED=true|false` in `.github/af-env.conf` (default: `true`).
+  - When `false`, agent workflows run in main checkout (useful for CI/CD or single-threaded environments).
+  - When `true` (default), coordinator bootstraps worktrees at Step 0d (existing behavior preserved).
+
+- **Auto-computed worktree paths** based on project name.
+  - `WORKTREE_DIR` now defaults to empty in `af-env.conf`.
+  - If `WORKTREE_DIR` is empty, coordinator auto-computes:
+    ```
+    ../{git_repo_folder_name}_worktrees
+    ```
+    Example: `MP Field Data Analysis CT` → `../MP Field Data Analysis CT_worktrees`
+  - Projects can still override by setting `WORKTREE_DIR` explicitly.
+
+- **Auto-add worktree folder to VS Code workspace**.
+  - When coordinator creates a worktree (Step 0d), it automatically creates or updates
+    `.code-workspace` file to include the worktree folder.
+  - Worktree folder appears in VS Code Explorer as a separate workspace root.
+  - On cleanup (Step 8), worktree folder is removed from workspace.
+
+### Changed
+
+- **Coordinator Step 0d (Worktree Bootstrap):** Restructured with explicit WORKTREE_ENABLED check.
+  - If disabled: proceed to Step 1 in main checkout.
+  - If enabled: perform full worktree setup + VS Code workspace registration.
+  - Auto-computes `WORKTREE_DIR` from repo name if not configured.
+  - Added workspace folder management logic.
+
+- **Coordinator Step 8 (Worktree Cleanup):** Updated to respect `WORKTREE_ENABLED` flag.
+  - Skip cleanup if `WORKTREE_ENABLED=false`.
+  - Added workspace file cleanup on removal.
+
+- **Subagent Context Injection:** Updated `work_location` field to handle optional worktrees.
+  - Context now uses `Work location: Worktree: {path}` or `Work location: Main checkout (worktrees disabled)`.
+
+### Documentation
+
+- Updated `.github/af-env.conf` template with comprehensive `WORKTREE_ENABLED` and `WORKTREE_DIR` docs.
+- Clarified that `WORKTREE_DIR` auto-derives from project folder name if left empty.
+
 ## [1.18.7] -- 2026-04-14
 ---
 

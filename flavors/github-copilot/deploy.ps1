@@ -395,14 +395,14 @@ function Invoke-PruneOldBackups {
     if ($Days -le 0) { return }
 
     $cutoff = (Get-Date).AddDays(-$Days)
-    $staleBackups = Get-ChildItem -Path $RootDir -Directory -Force -ErrorAction SilentlyContinue |
+    $staleBackups = @(Get-ChildItem -Path $RootDir -Directory -Force -ErrorAction SilentlyContinue |
         Where-Object {
             $_.Name -like '.af-backup-*' -and
             $_.LastWriteTime -lt $cutoff -and
             (-not $ActiveBackupDir -or $_.FullName -ne $ActiveBackupDir)
-        }
+        })
 
-    if (-not $staleBackups -or $staleBackups.Count -eq 0) { return }
+    if ($staleBackups.Count -eq 0) { return }
 
     Write-Host ""
     Write-Host "=== Backup Prune ===" -ForegroundColor Cyan
@@ -424,10 +424,10 @@ function Invoke-PruneOldBackups {
 function Invoke-CleanupConflictBackups {
     param([string]$RootDir)
 
-    $backups = Get-ChildItem -Path $RootDir -Directory -Force -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like '.af-backup-*' }
+    $backups = @(Get-ChildItem -Path $RootDir -Directory -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like '.af-backup-*' })
 
-    if (-not $backups -or $backups.Count -eq 0) { return }
+    if ($backups.Count -eq 0) { return }
 
     Write-Host ""
     Write-Host "=== Conflict Backup Cleanup ===" -ForegroundColor Cyan

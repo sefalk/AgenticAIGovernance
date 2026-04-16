@@ -1,5 +1,6 @@
 # Agent-scoped Stop hook for the refactorer agent.
 # copilot:modified  | implementer | 2026-03-19 | test log freshness check in stop hooks
+# copilot:modified  | implementer | 2026-04-16 | worktree-aware path resolution via active-worktree sentinel
 #
 # REFACTOR PHASE GATES (HARD -- blocks refactorer if tests fail or new files created)
 #
@@ -13,9 +14,20 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Worktree-aware path resolution (see ideas/feature-git-worktrees.md §12).
+# $mainRoot: main checkout where .github/ is deployed (derived from script location).
+# $codeRoot: active worktree if .active-worktree sentinel exists, else $mainRoot.
+$mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
+$codeRoot = $mainRoot
+$sentinel = Join-Path $mainRoot '.github/.active-worktree'
+if (Test-Path $sentinel) {
+    $p = (Get-Content $sentinel -Raw -ErrorAction SilentlyContinue).Trim()
+    if ($p -and (Test-Path $p)) { $codeRoot = $p }
+}
+
 # Load project config
 $SRC_DIR = 'src'
-$confPath = Join-Path (Get-Location) '.github/af-env.conf'
+$confPath = Join-Path $mainRoot '.github/af-env.conf'
 if (Test-Path $confPath) {
     $m = Select-String -Path $confPath -Pattern '^SRC_DIR=(.+)$'
     if ($m) { $SRC_DIR = $m.Matches[0].Groups[1].Value.Trim() }
@@ -35,7 +47,7 @@ if (-not $pytest) {
     exit 0
 }
 
-if (-not (Test-Path "tests/")) {
+if (-not (Test-Path (Join-Path $codeRoot 'tests'))) {
     $output = @{
         systemMessage = "refactorer:Stop -- no tests/ directory, test gate skipped"
     } | ConvertTo-Json -Compress
@@ -46,7 +58,7 @@ if (-not (Test-Path "tests/")) {
 # ---------- Test Log Freshness Check ----------
 # Accept last run if ALL tests passed AND no code changed since (committed or uncommitted).
 # No time limit — change detection is the criterion, not elapsed time.
-$testLogPath = Join-Path (Get-Location) '.github/test-log.json'
+$testLogPath = Join-Path $mainRoot '.github/test-log.json'
 $fromLog = $false
 if (Test-Path $testLogPath) {
     try {
@@ -54,8 +66,8 @@ if (Test-Path $testLogPath) {
         $allEntry = $null
         if ($log.PSObject.Properties.Name -contains 'all') { $allEntry = $log.all }
         if ($allEntry -and $allEntry.exit_code -eq 0 -and $allEntry.last_run) {
-            $commitsSince = git log --oneline --after="$($allEntry.last_run)" -- "$SRC_DIR/" 'tests/' 2>$null
-            $uncommitted = git diff --name-only HEAD -- "$SRC_DIR/" 'tests/' 2>$null
+            $commitsSince = git -C $codeRoot log --oneline --after="$($allEntry.last_run)" -- "$SRC_DIR/" 'tests/' 2>$null
+            $uncommitted = git -C $codeRoot diff --name-only HEAD -- "$SRC_DIR/" 'tests/' 2>$null
             if (-not $commitsSince -and -not $uncommitted) {
                 $fromLog = $true
             }
@@ -66,9 +78,11 @@ if (Test-Path $testLogPath) {
 if ($fromLog) {
     $exitCode = 0
 } else {
-    $scriptPath = Join-Path (Get-Location) '.github/scripts/run-tests.ps1'
+    $scriptPath = Join-Path $mainRoot '.github/scripts/run-tests.ps1'
+    Push-Location $codeRoot
     $result = & $scriptPath -Scope all 2>&1
     $exitCode = $LASTEXITCODE
+    Pop-Location
 }
 
 if ($exitCode -ne 0 -and $exitCode -ne 5) {
@@ -89,14 +103,14 @@ if ($exitCode -ne 0 -and $exitCode -ne 5) {
 $newFiles = @()
 
 # Check src/ for untracked .py files
-$statusSrc = & git status --porcelain "$SRC_DIR/" 2>$null |
+$statusSrc = & git -C $codeRoot status --porcelain "$SRC_DIR/" 2>$null |
     Where-Object { $_ -match '^\?\? ' } |
     ForEach-Object { ($_ -replace '^.. ', '').Trim('"') } |
     Where-Object { $_ -match '\.py$' }
 if ($statusSrc) { $newFiles += $statusSrc }
 
 # Check tests/ for untracked .py files
-$statusTests = & git status --porcelain "tests/" 2>$null |
+$statusTests = & git -C $codeRoot status --porcelain "tests/" 2>$null |
     Where-Object { $_ -match '^\?\? ' } |
     ForEach-Object { ($_ -replace '^.. ', '').Trim('"') } |
     Where-Object { $_ -match '\.py$' }
@@ -119,16 +133,16 @@ if ($newFiles.Count -gt 0) {
 
 $changedSrcPy = @()
 try {
-    $changedSrcPy = git diff --name-only --cached --diff-filter=AM -- "$SRC_DIR/" 2>$null |
+    $changedSrcPy = git -C $codeRoot diff --name-only --cached --diff-filter=AM -- "$SRC_DIR/" 2>$null |
         Where-Object { $_ -match '\.py$' }
     if (-not $changedSrcPy) {
-        $changedSrcPy = git diff --name-only HEAD --diff-filter=AM -- "$SRC_DIR/" 2>$null |
+        $changedSrcPy = git -C $codeRoot diff --name-only HEAD --diff-filter=AM -- "$SRC_DIR/" 2>$null |
             Where-Object { $_ -match '\.py$' }
     }
 } catch {}
 
 if ($changedSrcPy.Count -gt 0) {
-    $qualityScript = Join-Path (Get-Location) '.github/scripts/check-python-quality.py'
+    $qualityScript = Join-Path $mainRoot '.github/scripts/check-python-quality.py'
     if (-not (Test-Path $qualityScript)) {
         $output = @{
             hookSpecificOutput = @{
@@ -141,7 +155,7 @@ if ($changedSrcPy.Count -gt 0) {
         exit 0
     }
 
-    $pythonExe = Join-Path (Get-Location) '.venv/Scripts/python.exe'
+    $pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
     if (-not (Test-Path $pythonExe)) {
         $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
         if ($pythonCmd) {
@@ -159,8 +173,10 @@ if ($changedSrcPy.Count -gt 0) {
         }
     }
 
+    Push-Location $codeRoot
     $qualityResult = & $pythonExe $qualityScript --files @($changedSrcPy) 2>&1
     $qualityExit = $LASTEXITCODE
+    Pop-Location
     if ($qualityExit -ne 0) {
         $summary = ($qualityResult | Select-Object -First 10 | Out-String).Trim()
         $output = @{

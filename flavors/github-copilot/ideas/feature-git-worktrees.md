@@ -299,13 +299,437 @@ WORKTREE_BRANCH_PREFIX=agent
 1. **Rebase policy:** Should agents rebase feature branches daily? Or merge-only? (Recommended: merge-only to avoid history rewrite friction.)
 2. **Stale worktree audit:** Auto-delete worktrees older than N days? Or only manual + warnings?
 3. **Performance baseline:** What's the overhead of 3-5 parallel worktrees on CI agents? (Expected: negligible, <5% memory.)
-4. **venv sharing:** Should each worktree have its own venv or share the main venv? (Recommendation: share via symlink to save space.)
+4. ~~**venv sharing:** Should each worktree have its own venv or share the main venv?~~ → See Section 11 (planned).
 5. **Hook duplication:** Should we extract context checks into a shared utility module (e.g., `scripts/verify-context.ps1`) to avoid hook code duplication?
 
 ---
 
 ## Notes
 
+---
+
+## 11. Planned Feature: Worktree venv Strategy (v1.18.25)
+
+**Status:** 🟡 PLANNED
+**Tracked:** 2026-04-15
+
+### Problem
+
+When a worktree is added to the VS Code workspace as a new root folder,
+VS Code cannot find a `.venv` inside it (none exists yet). It repeatedly
+prompts the user to select or create a Python interpreter — even though the
+parent repo already has a fully configured venv. This degrades UX, especially
+with multiple parallel worktrees open simultaneously.
+
+### Design Decision: No User Prompt
+
+The coordinator **must** configure the Python interpreter at worktree creation
+time (Step 0d), before any agent or VS Code opens a file in the worktree.
+The task scope is known at creation time — the workflow ID and plan determine
+whether environment changes are expected — so prompting is entirely avoidable.
+
+### Strategy: Coordinator Decides Mode
+
+The coordinator selects the venv mode based on task scope:
+
+| Mode | When | How |
+|---|---|---|
+| `shared` (default) | No dependency-file changes expected | Write `python.defaultInterpreterPath` in worktree settings pointing to parent `.venv` |
+| `isolated` | Plan flags dep changes (new imports, package version updates) | Create a new `.venv` inside the worktree; clean up on Step 8 |
+
+**Config flag:** `WORKTREE_VENV_MODE=shared|isolated` in `af-env.conf`
+Default: `shared`. Coordinator may override to `isolated` per-workflow when
+the plan signals dependency changes.
+
+### Implementation: Path-Based Config (not Symlink)
+
+**Decision: use path-based config, not a symlink.**
+
+At Step 0d, after creating the worktree and adding it to `.code-workspace`,
+write `python.defaultInterpreterPath` into the worktree entry — either via
+the workspace file's `settings` key or a `.vscode/settings.json` written
+inside the worktree directory:
+
+```json
+{ "python.defaultInterpreterPath": "../../MP Field Data Analysis CT/.venv/Scripts/python.exe" }
+```
+
+This path is relative to the worktree root and resolves to the parent repo's
+venv. VS Code reads this on folder open and suppresses the interpreter prompt.
+
+For `isolated` mode: run `python -m venv {worktree}/.venv` after creation
+and point the setting there instead.
+
+### Q&A: Path-Based vs Symlink
+
+**Q: What would be the pro for symlink?**
+
+| | Symlink | Path-Based Config |
+|---|---|---|
+| Shell activation | `source .venv/bin/activate` works natively in worktree | Must point scripts at parent path explicitly |
+| VS Code auto-discovery | VS Code finds `.venv/` in root without any config | Requires explicit `pythonPath` setting (but same end result) |
+| pip install side-effects | Writes to shared venv (can be a feature or a footgun) | Same (both point at same venv) |
+| **Windows NTFS** | Requires Developer Mode or admin rights for symlinks | ✅ Works everywhere, no permissions needed |
+| **Deletion safety** | Risk: deleting worktree could follow symlink into parent | ✅ No risk — config is just a string path |
+| **Broken link risk** | Silently broken if parent venv is recreated or moved | ✅ Easy to validate and fail loudly |
+| **CI compatibility** | CI agents often restrict symlink creation | ✅ Always works |
+
+**Verdict: path-based config wins.** Symlinks offer shell convenience but the
+Windows NTFS friction, deletion risk, and CI incompatibility outweigh the
+benefit. Path config solves the VS Code prompt problem (the primary goal)
+without the downsides.
+
+### Step 0d Changes Needed (v1.18.25)
+
+1. After worktree creation, determine venv mode (config default + plan override).
+2. **Shared mode:** Compute relative path from worktree to parent `.venv`.
+  Write `python.defaultInterpreterPath` into a `.vscode/settings.json` inside
+  the worktree. Resolve platform-correctly:
+  - Windows: `{parent}/.venv/Scripts/python.exe`
+  - Linux/macOS: `{parent}/.venv/bin/python`
+3. **Isolated mode:** Run `python -m venv {worktree}/.venv` and point settings there.
+4. On Step 8 cleanup: if `isolated`, delete `{worktree}/.venv` before `git worktree remove`.
+
+### AF Config Addition (v1.18.25)
+
+```ini
+# WORKTREE_VENV_MODE: Python interpreter strategy for agent worktrees.
+# Values:
+#   shared   -- Worktree uses the parent repo's .venv (default, no duplication).
+#               The interpreter path is written to the worktree's VS Code settings
+#               at creation time to suppress the interpreter selection prompt.
+#   isolated -- A new .venv is created inside the worktree (use for tasks expected
+#               to change dependencies). Cleaned up automatically on Step 8.
+# The coordinator may override to isolated per-workflow when the plan
+# signals dependency changes are expected.
+WORKTREE_VENV_MODE=shared
+```
+
 - Document is **living** — update as implementation progresses.
 - Each phase should result in a commit to AAIG main with ticket ref.
 - Testing should cover at least 3 parallel task scenarios before merge.
+
+---
+
+## 12. Known Gap: Hook Scripts Are CWD-Anchored (Observed 2026-04-16)
+
+**Status:** ✅ RESOLVED v1.18.26 — sentinel Option A implemented
+
+### Confirmed Working
+
+The existing target-binding measures are effective at the coordinator/subagent
+prompt level:
+- Coordinator records the absolute worktree path at Step 0d and injects it
+  into every subagent context block (`Worktree: {absolute_path}`).
+- Subagents are aware of which worktree to work in and do so correctly.
+- Branch-proof hooks (`test-writer-pretooluse`, `refactorer-pretooluse`) block
+  writes if not on an `agent/*` branch.
+- `coordinator-postmerge` stop hook lists active worktrees as advisory context.
+
+This confirms the **central-controller / external-target** model is working at
+the agent instruction layer.
+
+### The New Problem: CWD-Anchored Hook Scripts
+
+All hook scripts use `Get-Location` (or equivalent) to resolve paths:
+
+```powershell
+# e.g. implementer-stop.ps1, refactorer-stop.ps1, coordinator-posttooluse.ps1
+$confPath = Join-Path (Get-Location) '.github/af-env.conf'
+$status   = git status --porcelain -- "$SRC_DIR/" tests/
+```
+
+`Get-Location` returns VS Code's active CWD — the **main checkout**, not the
+active worktree. Consequences:
+
+| Hook | What it does wrong |
+|---|---|
+| `implementer-stop` | Reads `SRC_DIR` from main checkout `af-env.conf`; runs pytest against main checkout; freshness check (`test-log.json`, git diff) targets main checkout |
+| `refactorer-stop` | Same: pytest + new-file check run in main checkout |
+| `coordinator-posttooluse` | Dirty-state detective reads `git status` from main checkout — never sees worktree changes |
+| `test-writer-stop` | pytest run from main checkout |
+| `test-writer-pretooluse` / `refactorer-pretooluse` | `git branch --show-current` reflects main checkout branch, not worktree's |
+
+**Net effect:** Quality gates (tests pass, no new files, dirty-state) check the
+wrong directory. They give false green on the main checkout while the worktree
+may have failing tests or unintended changes — or vice versa.
+
+### Candidate Solutions
+
+#### Option A — Sentinel File (`.github/.active-worktree`)
+
+**Idea:** Coordinator writes the absolute worktree path to
+`.github/.active-worktree` in the main checkout at Step 0d. All hook scripts
+read this file; if present, they `Push-Location` to the worktree path before
+running git/pytest, then `Pop-Location`.
+
+```powershell
+$sentinelPath = Join-Path $PSScriptRoot '../.active-worktree'
+$repoRoot     = if (Test-Path $sentinelPath) { Get-Content $sentinelPath -Raw | Trim() }
+                else                         { Get-Location }
+```
+
+- **Pros:** Persistent across VS Code sessions; no env-var lifetime issue;
+  single source of truth; easy to audit (`cat .github/.active-worktree`).
+- **Cons:** Only one "active" worktree at a time per main checkout (fine for
+  the current coordinator model); must be cleared at Step 8.
+
+#### Option B — Environment Variable (`ACTIVE_WORKTREE_PATH`)
+
+**Idea:** Coordinator sets `$env:ACTIVE_WORKTREE_PATH` at task start. Hooks
+read it.
+
+- **Pros:** No file I/O.
+- **Cons:** Env vars don't survive VS Code restarts or new terminal
+  sessions. Fragile.
+
+#### Option C — `git rev-parse --git-common-dir` + walk-up
+
+**Idea:** Hooks detect they are being run from a worktree by checking
+`git rev-parse --git-common-dir` vs `git rev-parse --git-dir`. If they
+differ, the current dir is a worktree and hooks can self-anchor. But hooks
+always run in VS Code's CWD (main checkout), so this never fires.
+
+- **Verdict:** Doesn't help — hooks don't run inside the worktree.
+
+#### Option D — Hooks Accept an Optional Worktree Path Argument
+
+**Idea:** Coordinator calls hooks explicitly (via `run_in_terminal`) with an
+argument: `.github/hooks/scripts/implementer-stop.ps1 -WorktreePath {abs_path}`.
+Hooks accept an optional `$WorktreePath` parameter; fall back to CWD if absent.
+
+- **Pros:** Explicit and auditable per invocation.
+- **Cons:** Requires coordinator to change how it invokes hooks; VS Code
+  trigger hooks (not manually called) still run without the argument —
+  so Stop hooks at agent completion would still be CWD-anchored.
+
+#### Option E — VS Code Multi-Root Workspace: Open Worktree as Root
+
+**Idea:** Already partially implemented (v1.18.24 auto-adds worktree to
+`.code-workspace`). If the user has the worktree root selected as the
+"active" folder in VS Code, `Get-Location` would return the worktree path.
+
+- **Pros:** Zero hook changes needed — CWD changes naturally.
+- **Cons:** Depends on the user manually selecting the worktree folder
+  in VS Code Explorer. Not deterministic. Stop hooks still fire from
+  whichever folder is the VS Code active root.
+
+### Recommended Solution: Option A (Sentinel File)
+
+**Rationale:**
+- Persistent, file-based, tool-independent.
+- Works for all hook types (pretooluse, posttooluse, stop).
+- Coordinator already writes to `.github/` (test-log.json, etc.) — same pattern.
+- Trivially auditable and clearable.
+- Option D is complementary but cannot cover VS Code-triggered Stop hooks.
+
+**Implementation sketch:**
+
+1. **Step 0d (coordinator):** After worktree creation, write absolute path to
+   `.github/.active-worktree`. Overwrite if file exists (only one active WT at a time).
+2. **Step 8 (coordinator):** Delete `.github/.active-worktree` after cleanup.
+3. **All hook scripts:** Replace `Get-Location` root resolution with:
+   ```powershell
+   function Get-RepoRoot {
+       $sentinel = Join-Path $PSScriptRoot '../.active-worktree'
+       if (Test-Path $sentinel) { return (Get-Content $sentinel -Raw).Trim() }
+       return (Get-Location).Path
+   }
+   $repoRoot = Get-RepoRoot
+   $confPath = Join-Path $repoRoot '.github/af-env.conf'
+   # git commands: git -C $repoRoot status ...
+   # pytest: Push-Location $repoRoot; pytest ...; Pop-Location
+   ```
+4. Add `.github/.active-worktree` to `.gitignore` (it is already ignored via
+   the `.github` rule — verify).
+
+**Scope:** ~6 hook scripts + coordinator Step 0d + Step 8 prose update.
+**Risk:** Low — fallback to `Get-Location` preserves current behaviour when
+no worktree is active.
+
+### Open Questions
+
+1. Should the sentinel file be a plain path, or a structured file (JSON with
+   `path`, `workflow_id`, `branch`) to support future multi-worktree parallelism?
+2. Should the `session-context` start hook also read the sentinel and inject the
+   active worktree path as session context? (Would surface it prominently at
+   every session start.)
+3. Future: if multiple worktrees are ever active simultaneously (different
+   VS Code windows), the single-sentinel model breaks. A registry file
+   (`{ "workflow-id": "/abs/path" }`) would scale — but is over-engineering
+   for now.
+
+---
+
+## 13. Architecture Decision: Where Should AAIG Live During Worktree Tasks? (2026-04-16)
+
+**Status:** 🔴 OPEN — decision pending
+
+### Context
+
+Section 12 describes a sentinel file (Option A) to make CWD-anchored hook
+scripts aware of the active worktree. A sentinel works for a single active
+worktree but breaks for parallel execution (only one sentinel path at a time).
+This section evaluates the deeper architectural question:
+
+> **Should AAIG be auto-deployed into each worktree at creation, so hooks
+> run natively in the correct context?**
+
+### How Hooks Currently Fire
+
+VS Code extension hooks (`run`, `stop`, `pretooluse`, `posttooluse`) are
+invoked by the VS Code process. They always run with CWD set to the
+**active workspace root that VS Code was opened against** — in a multi-root
+`.code-workspace`, this is typically the folder that was most recently
+active or the first root. Critically:
+
+- Hooks are loaded from the **main checkout's** `.github/hooks/` (the
+  deployed AAIG location).
+- Worktrees do not have a `.github/` directory — `.github` is gitignored
+  in the target project, so it is not part of the tracked working tree.
+  Each worktree is a fresh checkout of tracked files only.
+- **There is no mechanism by which a worktree's hooks fire instead of the
+  main checkout's hooks.** VS Code does not run hooks per-workspace-root.
+
+### Option A Revisited: Sentinel File (Parallelism Ceiling)
+
+```
+main checkout: .github/.active-worktree = /abs/path/to/wt/task-x
+hooks: read sentinel → redirect all path lookups to worktree
+```
+
+- ✅ No deployment complexity
+- ✅ Works for the current single-active-WT model
+- ❌ **Hard ceiling: one active task at a time.** Sentinel is overwritten
+  when a second WT is created; hooks now point to the wrong directory for
+  the first task.
+- A registry file (`{ task-x: path, task-y: path }`) could extend this,
+  but hooks would need a way to know *which* task is currently executing —
+  there is no reliable per-invocation identity available.
+
+### Option B: Auto-Deploy AAIG into Each Worktree
+
+**Idea:** When the coordinator creates a worktree (`git worktree add …`),
+it immediately runs `deploy.ps1 -TargetDir {worktree_path}` to install a
+full AAIG copy into `{worktree}/.github/`. Hooks then run natively in the
+worktree context because VS Code (if opened to the worktree root) uses
+that `.github/`.
+
+#### How It Would Work
+
+1. Coordinator Step 0d: after `git worktree add`, run
+   `deploy.ps1 -TargetDir {worktree_path}`.
+2. VS Code workspace: the worktree folder is already added as a root (v1.18.24).
+   If the user opens a file in the worktree folder, VS Code's active root
+   shifts to that folder, and hooks from `{worktree}/.github/hooks/` fire.
+3. Step 8 cleanup: worktree directory is removed entirely (including its
+   `.github/`) — no separate cleanup step needed.
+
+#### Parallelism
+
+Each worktree has its own `.github/` → its own `af-env.conf`, `test-log.json`,
+hooks. **Hooks for task-x fire from worktree-x's hooks; hooks for task-y
+fire from worktree-y's hooks.** No sentinel needed. True parallelism is
+possible.
+
+#### Risks
+
+| Risk | Description | Severity |
+|---|---|---|
+| **Deployment drift (config)** | `deploy.ps1` reads `af-env.conf` from the main checkout and merges it with the AAIG template. In v1.18.x, `UpdateConfig` only adds missing keys — but if a key was intentionally customised in the main checkout, it copies correctly. If `deploy.ps1` has a bug or the template changed, the worktree config may differ silently. | Medium |
+| **Deployment drift (intentional)** | If the user manually edits main checkout's `af-env.conf` between WT creation and task completion (e.g., changes `SRC_DIR`), the WT has the old value. This is actually **correct** (WT should be stable during its task) but feels surprising. | Low |
+| **Version drift** | If AAIG is updated in the AAIG repo and re-deployed to the main checkout mid-task, the worktree runs on the old deployed version. The main checkout and worktrees diverge on hook behaviour. | Low–Medium |
+| **Hook invocation uncertainty** | VS Code's per-root hook selection in multi-root workspaces is not officially documented for multi-root. If VS Code uses the *first* workspace root's hooks regardless of active file, auto-deploy gains nothing — hooks still run from the main checkout. This is the **critical unknown** and must be empirically verified. | High (if unknown) |
+| **Deploy time** | `deploy.ps1` copies ~50 files. On a fast SSD this is <1s. On OneDrive-synced paths (as in the MP project) it may be slower and trigger sync contention. | Low |
+| **Nested gitignore complexity** | The worktree's `.github/` is gitignored by the shared `.gitignore`. This is correct — we don't want AAIG committed. But the gitignore applies to the shared index, so attempts to `git status` inside the worktree still ignore `.github/`. No issue, just worth confirming. | Low |
+
+#### The Critical Unknown: VS Code Hook Routing in Multi-Root
+
+VS Code's hooks docs do not specify which workspace root's `copilot-instructions.md`
+or hooks folder is used when multiple roots are open and the user is editing
+a file under a specific root. Empirical testing needed:
+
+1. Open `.code-workspace` with two roots: main checkout + worktree.
+2. Open a file under the worktree root.
+3. Trigger a stop hook — does it load from `{worktree}/.github/hooks/` or
+   from `{main}/.github/hooks/`?
+
+If VS Code uses the **active file's nearest root**: auto-deploy works perfectly.
+If VS Code uses **the first root unconditionally**: auto-deploy gives no benefit
+for hook routing (but still provides correct `af-env.conf`, `test-log.json`, etc.
+for agent scripts that reference relative paths).
+
+### Option C: Hybrid (Deploy Minimal Config Only)
+
+**Idea:** Do not deploy full AAIG into worktrees. Only copy `af-env.conf`
+(and optionally `test-log.json`) from the main checkout into
+`{worktree}/.github/`. Hook scripts continue to run from the main checkout
+but resolve config via the sentinel pointing to the worktree.
+
+- ✅ No full deploy overhead or version drift
+- ✅ Config is always correct in the worktree
+- ❌ Doesn't solve hook routing (still CWD-anchored)
+- ❌ Still has the single-sentinel parallelism ceiling
+
+### Recommendation
+
+| Scenario | Recommended option |
+|---|---|
+| Single active worktree at a time (current reality) | **Option A (Sentinel)** — minimal complexity |
+| Multiple parallel worktrees in same VS Code window | **Option B (Auto-deploy)** — but verify hook routing first |
+| Multiple parallel worktrees in separate VS Code windows | **Option B** — each window opens one worktree root; hooks naturally use that root's `.github/` |
+
+**Proposed next step:** Empirically test Option B's hook routing (two roots,
+one `.code-workspace`, trigger stop hook from worktree). If VS Code routes
+correctly, Option B is the right long-term answer and Option A is a stopgap.
+
+### Deployment Drift Mitigation (if Option B adopted)
+
+1. Use `deploy.ps1 -SkipConfig` flag (to be implemented): copy all AAIG
+   files except `af-env.conf`. Inherit the main checkout's `af-env.conf`
+   by symlinking or copying once at creation time.
+2. Record the AAIG `VERSION` in a `{worktree}/.github/.deploy-version` file
+   at deploy time. Session-context hook can warn if main checkout's deployed
+   version differs from the worktree's — surfacing version drift explicitly.
+3. At Step 8 cleanup: `git worktree remove` deletes the entire worktree
+   directory, including `.github/`. No extra cleanup needed.
+
+### Open Questions
+
+1. Does VS Code route hooks by active-file's nearest workspace root or by
+   the first root in `.code-workspace`? (**Must verify empirically.**)
+2. Should `deploy.ps1` gain a `-SkipConfig` flag for worktree deployments?
+3. Is there value in the `{worktree}/.github/.deploy-version` drift warning
+   even if hook routing does not work as hoped?
+
+### Tooling Assessment: Docker / Dev Containers for Parallel Worktrees
+
+**Question:** Can Docker or Dev Containers resolve the parallel-worktree limits?
+
+**Assessment:** Yes, but only under a specific operating model.
+
+1. **What containers solve well:**
+   - Strong process and dependency isolation (one container per task/worktree).
+   - No shared-venv collision across concurrent tasks.
+   - Better reproducibility across developer machines.
+
+2. **What containers do not solve automatically:**
+   - Multi-root single-window hook routing ambiguity in VS Code.
+   - If all worktrees are still operated in one VS Code window, hook context
+     can remain ambiguous depending on VS Code routing behavior.
+
+3. **Safe operating model for containers:**
+   - One worktree per container.
+   - One VS Code window attached to that container/worktree.
+   - Avoid multi-root windows for concurrent agent tasks.
+   In this model, the single-sentinel limitation is operationally sidestepped.
+
+4. **Trade-offs / risks introduced:**
+   - Added platform/tooling complexity (`devcontainer.json`, image lifecycle).
+   - Potential Windows performance overhead (notably with OneDrive-backed paths).
+   - New drift class: container image drift unless image/tag pinning is enforced.
+
+5. **Decision guidance:**
+   - Low-to-moderate concurrency (1-2 active tasks): keep sentinel approach.
+   - Frequent high concurrency (3+ tasks, dependency variance): container-per-task
+     becomes the more robust long-term option.

@@ -11,7 +11,7 @@
 #   2. Validates the workflow ID slug
 #   3. Checks for stale worktrees and prunes them
 #   4. Creates the worktree at {WORKTREE_DIR}/{WorkflowId} on branch agent/{WorkflowId}
-#   5. Bootstraps the Python venv (sym-link strategy or fresh install)
+#   5. Configures Python interpreter mode (shared or isolated)
 #   6. Verifies .github/ hooks are accessible
 #   7. Prints the worktree path for the coordinator to record
 #
@@ -39,12 +39,15 @@ $confPath   = Join-Path $repoRoot '.github/af-env.conf'
 
 $WT_DIR     = '../wt'
 $BRANCH_PREFIX = 'agent'
+$WORKTREE_VENV_MODE = 'shared'
 
 if (Test-Path $confPath) {
     $m = Select-String -Path $confPath -Pattern '^WORKTREE_DIR=(.+)$'
     if ($m) { $WT_DIR = $m.Matches[0].Groups[1].Value.Trim() }
     $m2 = Select-String -Path $confPath -Pattern '^WORKTREE_BRANCH_PREFIX=(.+)$'
     if ($m2) { $BRANCH_PREFIX = $m2.Matches[0].Groups[1].Value.Trim() }
+    $m3 = Select-String -Path $confPath -Pattern '^WORKTREE_VENV_MODE=(.+)$'
+    if ($m3) { $WORKTREE_VENV_MODE = $m3.Matches[0].Groups[1].Value.Trim().ToLowerInvariant() }
 }
 
 # --- Validation ---
@@ -115,29 +118,64 @@ if (-not (Test-Path $hooksPath)) {
     Write-Host "  .github/hooks accessible: OK"
 }
 
-# --- Python venv bootstrap ---
-if (-not $SkipVenv) {
-    Write-Host "  Setting up Python venv..."
-    $mainVenv = Join-Path $repoRoot '.venv'
-    $wtVenv   = Join-Path $wtPath '.venv'
+# --- Python interpreter bootstrap ---
+function Set-WorktreeInterpreter {
+    param(
+        [string]$WorktreePath,
+        [string]$InterpreterPath
+    )
 
-    if (Test-Path $mainVenv) {
-        # Create a junction (Windows) or symlink to the main venv — avoids full reinstall
+    $vscodeDir = Join-Path $WorktreePath '.vscode'
+    $settingsPath = Join-Path $vscodeDir 'settings.json'
+
+    if (-not (Test-Path $vscodeDir)) {
+        New-Item -ItemType Directory -Path $vscodeDir -Force | Out-Null
+    }
+
+    $settings = @{}
+    if (Test-Path $settingsPath) {
         try {
-            New-Item -ItemType Junction -Path $wtVenv -Target $mainVenv -ErrorAction Stop | Out-Null
-            Write-Host "  Venv: junction to main .venv created ($(Split-Path $mainVenv -Leaf))"
+            $existing = Get-Content -Path $settingsPath -Raw | ConvertFrom-Json
+            if ($existing) {
+                $settings = @{}
+                foreach ($p in $existing.PSObject.Properties) {
+                    $settings[$p.Name] = $p.Value
+                }
+            }
         } catch {
-            Write-Warning "  Could not create venv junction: $_. Trying fresh install..."
-            $SkipVenv = $true
+            Write-Warning "  Could not parse existing settings.json. Overwriting with minimal interpreter settings."
+            $settings = @{}
         }
     }
 
-    if ($SkipVenv -or -not (Test-Path $mainVenv)) {
-        Write-Host "  Venv: no shared venv found -- creating fresh..."
+    $settings['python.defaultInterpreterPath'] = $InterpreterPath
+    ($settings | ConvertTo-Json -Depth 20) | Set-Content -Path $settingsPath
+    Write-Host "  VS Code interpreter configured: $InterpreterPath"
+}
+
+if (-not $SkipVenv) {
+    Write-Host "  Configuring Python interpreter mode..."
+    $mainPython = Join-Path $repoRoot '.venv/Scripts/python.exe'
+    $wtPython = Join-Path $wtPath '.venv/Scripts/python.exe'
+    $effectiveMode = $WORKTREE_VENV_MODE
+
+    if ($effectiveMode -ne 'shared' -and $effectiveMode -ne 'isolated') {
+        Write-Warning "  Unknown WORKTREE_VENV_MODE '$WORKTREE_VENV_MODE'. Falling back to 'shared'."
+        $effectiveMode = 'shared'
+    }
+
+    if ($effectiveMode -eq 'shared' -and (Test-Path $mainPython)) {
+        Set-WorktreeInterpreter -WorktreePath $wtPath -InterpreterPath $mainPython
+        Write-Host "  Venv mode: shared (parent repo .venv)"
+    } else {
+        if ($effectiveMode -eq 'shared') {
+            Write-Warning "  Shared mode requested but parent .venv not found. Falling back to isolated mode for this worktree."
+        }
+
         Push-Location $wtPath
         python -m venv .venv
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "  python -m venv failed (exit $LASTEXITCODE). Skipping venv setup."
+            Write-Warning "  python -m venv failed (exit $LASTEXITCODE). Interpreter may prompt in VS Code."
             Pop-Location
         } else {
             # Install deps using run-deps if available
@@ -147,12 +185,17 @@ if (-not $SkipVenv) {
             } else {
                 # Fallback: find dep file from af-env.conf
                 $depFile = 'requirements-dev.txt'
-                $m3 = Select-String -Path $confPath -Pattern '^DEP_DEV_FILE=(.+)$'
-                if ($m3) { $depFile = $m3.Matches[0].Groups[1].Value.Trim() }
+                $mDep = Select-String -Path $confPath -Pattern '^DEP_DEV_FILE=(.+)$'
+                if ($mDep) { $depFile = $mDep.Matches[0].Groups[1].Value.Trim() }
                 $pip = Join-Path $wtPath '.venv/Scripts/pip.exe'
                 if (Test-Path $pip) { & $pip install -r $depFile }
             }
             Pop-Location
+
+            if (Test-Path $wtPython) {
+                Set-WorktreeInterpreter -WorktreePath $wtPath -InterpreterPath $wtPython
+                Write-Host "  Venv mode: isolated (worktree-local .venv)"
+            }
         }
     }
 } else {
