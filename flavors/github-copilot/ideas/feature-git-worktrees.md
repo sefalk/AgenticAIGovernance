@@ -413,7 +413,7 @@ WORKTREE_VENV_MODE=shared
 
 ## 12. Known Gap: Hook Scripts Are CWD-Anchored (Observed 2026-04-16)
 
-**Status:** 🔴 OPEN — not yet resolved
+**Status:** ✅ RESOLVED v1.18.26 — sentinel Option A implemented
 
 ### Confirmed Working
 

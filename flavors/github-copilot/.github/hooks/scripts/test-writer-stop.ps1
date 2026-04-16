@@ -1,4 +1,5 @@
 # Agent-scoped Stop hook for the test-writer agent.
+# copilot:modified  | implementer | 2026-04-16 | worktree-aware path resolution via active-worktree sentinel
 #
 # RED PHASE GATE (HARD -- blocks test-writer if new tests do NOT fail)
 #
@@ -13,6 +14,15 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Worktree-aware path resolution (see ideas/feature-git-worktrees.md §12).
+$mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
+$codeRoot = $mainRoot
+$sentinel = Join-Path $mainRoot '.github/.active-worktree'
+if (Test-Path $sentinel) {
+    $p = (Get-Content $sentinel -Raw -ErrorAction SilentlyContinue).Trim()
+    if ($p -and (Test-Path $p)) { $codeRoot = $p }
+}
+
 # Read stdin (hook input JSON -- required by protocol)
 $null = [Console]::In.ReadToEnd()
 
@@ -25,7 +35,7 @@ if (-not $pytest) {
     exit 0
 }
 
-if (-not (Test-Path "tests/")) {
+if (-not (Test-Path (Join-Path $codeRoot 'tests'))) {
     $output = @{
         systemMessage = "test-writer:Stop -- no tests/ directory, Red gate skipped"
     } | ConvertTo-Json -Compress
@@ -35,8 +45,10 @@ if (-not (Test-Path "tests/")) {
 
 # ---------- Gate 1: Red phase -- new tests must FAIL ----------
 
+Push-Location $codeRoot
 $result = & pytest tests/ -q --tb=line --no-header 2>&1
 $exitCode = $LASTEXITCODE
+Pop-Location
 
 # Exit code 0 = all tests pass → Red phase violation (tests should fail)
 # Exit code 1 = some tests fail → Red phase satisfied
@@ -65,15 +77,15 @@ if ($exitCode -eq 5) {
 
 # ---------- Gate 2: Provenance markers on new test files (H5) ----------
 
-$newTestFiles = & git status --porcelain "tests/" 2>$null |
+$newTestFiles = & git -C $codeRoot status --porcelain "tests/" 2>$null |
     Where-Object { $_ -match '^\?\? ' -or $_ -match '^A ' } |
     ForEach-Object { ($_ -replace '^.. ', '').Trim('"') } |
     Where-Object { $_ -match '\.py$' }
 
 $missingMarkers = @()
 foreach ($f in $newTestFiles) {
-    if (Test-Path $f) {
-        $header = Get-Content $f -TotalCount 5 -ErrorAction SilentlyContinue
+    if (Test-Path (Join-Path $codeRoot $f)) {
+        $header = Get-Content (Join-Path $codeRoot $f) -TotalCount 5 -ErrorAction SilentlyContinue
         $headerText = $header -join "`n"
         if ($headerText -notmatch 'copilot:generated') {
             $missingMarkers += $f

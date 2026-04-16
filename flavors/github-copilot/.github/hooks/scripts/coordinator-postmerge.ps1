@@ -1,4 +1,5 @@
 # copilot:generated | implementer | 2026-04-14
+# copilot:modified  | implementer | 2026-04-16 | worktree-aware path resolution via active-worktree sentinel
 # Agent-scoped Stop hook for the coordinator agent -- post-merge worktree cleanup gate.
 #
 # WORKTREE CLEANUP GATE (HARD -- verifies worktree is clean before removal)
@@ -11,6 +12,9 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Worktree-aware path resolution (see ideas/feature-git-worktrees.md §12).
+$mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
+
 # Read and parse stdin
 $raw = [Console]::In.ReadToEnd()
 try {
@@ -22,7 +26,7 @@ try {
 
 # Read WORKTREE_DIR from af-env.conf
 $WT_DIR = '../wt'
-$confPath = Join-Path (Get-Location) '.github/af-env.conf'
+$confPath = Join-Path $mainRoot '.github/af-env.conf'
 if (Test-Path $confPath) {
     $m = Select-String -Path $confPath -Pattern '^WORKTREE_DIR=(.+)$'
     if ($m) { $WT_DIR = $m.Matches[0].Groups[1].Value.Trim() }

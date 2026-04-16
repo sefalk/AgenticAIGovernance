@@ -313,7 +313,20 @@ workflows** (single file, no parallel work expected).
 
 3. **Create:** `git worktree add {WORKTREE_DIR}/{workflow-id} -b agent/{workflow-id} dev`
 
-4. **Verify:** Confirm the directory exists and `.github/` is accessible within it.
+4. **Write active-worktree sentinel:** Immediately after creation, write the absolute
+   worktree path to `.github/.active-worktree` in the main checkout:
+   ```
+   Set-Content -Path .github/.active-worktree -Value {absolute_worktree_path} -NoNewline
+   ```
+   This allows hook scripts (pretooluse, stop) to resolve `$codeRoot` to the active
+   worktree instead of the main-checkout CWD. Quality gates (pytest, git status,
+   SRC_DIR lookups) will correctly target the worktree.
+   ⚠️ **Single-worktree constraint:** Only one active sentinel is supported. Creating
+   a second worktree while the first is active overwrites the sentinel — parallel
+   worktrees are not supported until Option B (auto-deploy) is verified.
+   See `ideas/feature-git-worktrees.md` §12–13.
+
+4b. **Verify:** Confirm the worktree directory exists and is accessible.
 
 5. **Resolve Python interpreter mode (no user prompt):**
     - Read `WORKTREE_VENV_MODE` from `.github/af-env.conf` (default: `shared`).
@@ -624,7 +637,12 @@ removes the worktree:
    `"Please confirm branch agent/{id} has been merged to dev."`
 2. **Check clean:** Run `git status --porcelain` in the worktree directory.
    If dirty: halt and escalate — do NOT force-remove.
-3. **Remove:** `git worktree remove {WORKTREE_DIR}/{workflow-id}`
+3. **Delete active-worktree sentinel:** Remove `.github/.active-worktree` from the main checkout:
+   ```
+   Remove-Item -Force .github/.active-worktree -ErrorAction SilentlyContinue
+   ```
+   This returns hook scripts to main-checkout mode before worktree removal.
+4. **Remove:** `git worktree remove {WORKTREE_DIR}/{workflow-id}`
 4. **Prune:** `git worktree prune`
 5. **Verify:** `git worktree list` must not show the removed path.
 6. **Isolated venv cleanup:** If this workflow used `WORKTREE_VENV_MODE=isolated`, remove `{worktree}/.venv` before worktree removal.

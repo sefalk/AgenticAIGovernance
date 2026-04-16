@@ -1,5 +1,6 @@
 # copilot:generated | implementer | 2026-03-16
 # copilot:modified  | implementer | 2026-04-14 | add branch context proof gate
+# copilot:modified  | implementer | 2026-04-16 | worktree-aware path resolution via active-worktree sentinel
 # Agent-scoped PreToolUse hook for the test-writer agent.
 #
 # TDD PHASE ISOLATION (HARD -- blocks test-writer from editing production code)
@@ -14,9 +15,18 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Worktree-aware path resolution (see ideas/feature-git-worktrees.md §12).
+$mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
+$codeRoot = $mainRoot
+$sentinel = Join-Path $mainRoot '.github/.active-worktree'
+if (Test-Path $sentinel) {
+    $p = (Get-Content $sentinel -Raw -ErrorAction SilentlyContinue).Trim()
+    if ($p -and (Test-Path $p)) { $codeRoot = $p }
+}
+
 # Load project config
 $SRC_DIR = 'src'
-$confPath = Join-Path (Get-Location) '.github/af-env.conf'
+$confPath = Join-Path $mainRoot '.github/af-env.conf'
 if (Test-Path $confPath) {
     $m = Select-String -Path $confPath -Pattern '^SRC_DIR=(.+)$'
     if ($m) { $SRC_DIR = $m.Matches[0].Groups[1].Value.Trim() }
@@ -39,7 +49,7 @@ if ($toolName -notmatch 'editFile|createFile|createDir|editNotebook') {
 }
 
 # Branch context proof -- block file edits if not on an agent/* branch
-$currentBranch = git branch --show-current 2>$null
+$currentBranch = git -C $codeRoot branch --show-current 2>$null
 if ($currentBranch -and $currentBranch -notmatch '^agent/') {
     @{
         hookSpecificOutput = @{

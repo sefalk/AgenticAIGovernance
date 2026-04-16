@@ -16,6 +16,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.18.26] -- 2026-04-16
+
+### Fixed
+
+- **Worktree-aware hook scripts** via `.github/.active-worktree` sentinel file.
+  All CWD-anchored hook scripts (`implementer-stop`, `refactorer-stop`,
+  `test-writer-stop`, `test-writer-pretooluse`, `refactorer-pretooluse`,
+  `coordinator-posttooluse`, `coordinator-postmerge`) now resolve two paths:
+  - `$mainRoot`: main checkout (derived from `$PSScriptRoot`), used for
+    `.github/` files (config, scripts, test-log).
+  - `$codeRoot`: active worktree path read from `.github/.active-worktree`
+    when present, otherwise `$mainRoot`. Used for `git` operations, pytest,
+    and source file lookups.
+  Previously, all hooks used `Get-Location` (VS Code CWD = main checkout),
+  so quality gates silently ran against the wrong directory when a worktree
+  was active. See `ideas/feature-git-worktrees.md` §12.
+
+- **Coordinator Step 0d** now writes `.github/.active-worktree` (absolute path)
+  immediately after `git worktree add`.
+
+- **Coordinator Step 8** now deletes `.github/.active-worktree` before removing
+  the worktree, returning hooks to main-checkout mode.
+
+- **`WORKTREE_ENABLED` default restored to `true`** (was temporarily set to
+  `false` in v1.18.25-patch while the hook issue was unresolved).
+
+### Known Limitation
+
+- Only **one active worktree at a time** is supported by the sentinel approach.
+  Parallel worktrees require Option B (auto-deploy into each WT) — see
+  `ideas/feature-git-worktrees.md` §13 for the decision analysis.
+
 ## [1.18.25] -- 2026-04-15
 
 ### Added
