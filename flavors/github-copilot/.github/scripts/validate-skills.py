@@ -271,9 +271,10 @@ def validate_skill_dir(
         for err in validate_argument_hint(str(fm["argument-hint"])):
             errors.append(f"{prefix}: {err}")
 
-    # activation (optional)
-    if "activation" in fm:
-        activation = fm["activation"]
+    # activation (optional — nested under metadata.activation)
+    metadata = fm.get("metadata")
+    if isinstance(metadata, dict) and "activation" in metadata:
+        activation = metadata["activation"]
         if isinstance(activation, dict):
             act_errors, act_warnings = validate_activation(
                 activation, known_agents=known_agents
@@ -283,7 +284,12 @@ def validate_skill_dir(
             for warn in act_warnings:
                 warnings.append(f"{prefix}: {warn}")
         else:
-            errors.append(f"{prefix}: activation must be a mapping")
+            errors.append(f"{prefix}: metadata.activation must be a mapping")
+    elif "activation" in fm:
+        errors.append(
+            f"{prefix}: 'activation' must be nested under 'metadata' "
+            "(use metadata.activation, not top-level activation)"
+        )
 
     # Verify SKILL.md has a top-level heading
     if not re.search(r"^# .+", content, re.MULTILINE):

@@ -2,11 +2,12 @@
 name: python-dev
 description: Python development best practices — code quality, testing, error handling, environment management, and tooling conventions. Reference skill for general Python development across projects.
 argument-hint: '[focus: quality|testing|errors|environment|tooling]'
-activation:
-  signals:
-    file_patterns: ["**/pyproject.toml", "**/*.py"]
-  agents: [implementer, refactorer, code-critic]
-  priority: recommended
+metadata:
+  activation:
+    signals:
+      file_patterns: ["**/pyproject.toml", "**/*.py"]
+    agents: [implementer, refactorer, code-critic]
+    priority: recommended
 ---
 
 # Python Development

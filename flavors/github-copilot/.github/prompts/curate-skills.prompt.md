@@ -67,16 +67,16 @@ Read every `SKILL.md` frontmatter in:
 1. `.github/skills/` — currently active skills
 2. `.github/skills/_available/` — available but inactive skills
 
-For each skill, extract:
-- `activation.signals` — matching criteria
-- `activation.agents` — target agent files
-- `activation.priority` — required / recommended / optional
+For each skill, extract from the `metadata.activation` block:
+- `metadata.activation.signals` — matching criteria
+- `metadata.activation.agents` — target agent files
+- `metadata.activation.priority` — required / recommended / optional
 
-Skills **without** `activation:` metadata are skipped (not yet curated).
+Skills **without** a `metadata.activation` block are skipped (not yet curated).
 
 ## Step 4: Match Signals to Tech Stack
 
-For each skill with activation metadata:
+For each skill with `metadata.activation`:
 
 1. **`priority: required`** with **no signals** → always activate (framework invariant)
 2. **`priority: required`** with **signals** → activate only if a signal matches
@@ -105,7 +105,7 @@ Produce two lists:
 **Deactivate** (remove from `skills/`):
 - Currently active skills whose signals do NOT match the tech stack
   AND whose `priority` is NOT `required`
-- Only suggest deactivation for skills that have activation metadata
+- Only suggest deactivation for skills that have `metadata.activation`
   (never deactivate skills without metadata — they may be manually managed)
 
 **No change:**
@@ -148,7 +148,7 @@ For each skill to **deactivate**:
 1. Remove the folder `skills/{name}/`
    (the copy in `_available/` remains untouched)
 
-For each affected **agent** file (from the skill's `activation.agents`):
+For each affected **agent** file (from the skill's `metadata.activation.agents`):
 1. Open `.github/agents/{agent}.agent.md`
 2. Find the `## Skills` section
 3. Add or remove the skill reference line:

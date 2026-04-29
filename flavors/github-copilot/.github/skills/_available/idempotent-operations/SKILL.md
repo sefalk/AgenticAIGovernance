@@ -2,11 +2,12 @@
 name: idempotent-operations
 description: Design operations that can be safely retried by autonomous agents without causing unintended side effects — idempotency keys, UPSERTs, guard clauses, and retry-safe patterns.
 argument-hint: '[domain: api|database|workflow|scripts] [focus: design|testing|debugging]'
-activation:
-  signals:
-    python_packages: [fastapi, celery, sqlalchemy, sqlmodel]
-  agents: [implementer, refactorer]
-  priority: recommended
+metadata:
+  activation:
+    signals:
+      python_packages: [fastapi, celery, sqlalchemy, sqlmodel]
+    agents: [implementer, refactorer]
+    priority: recommended
 ---
 
 # Idempotent Operations

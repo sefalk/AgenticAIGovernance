@@ -2,12 +2,13 @@
 name: git-worktrees
 description: Bootstrap, manage, and clean up git worktrees for parallel agent task execution. Lifecycle commands, coordinator step 0d/8, troubleshooting locked/stale worktrees, and VS Code integration.
 argument-hint: '[workflow-id] [base-branch]'
-activation:
-  signals:
-    af_config:
-      WORKTREE_ENABLED: true
-  agents: [coordinator]
-  priority: recommended
+metadata:
+  activation:
+    signals:
+      af_config:
+        WORKTREE_ENABLED: true
+    agents: [coordinator]
+    priority: recommended
 ---
 <!-- copilot:generated | implementer | 2026-04-14 -->
 

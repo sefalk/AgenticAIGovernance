@@ -72,7 +72,7 @@ manually when the developer decides to re-evaluate.
      │  Tech Stack   │ │  to Stack        │ │  Changes     │
      └──────────────┘ └──────────────────┘ └─────────────┘
      pyproject.toml    SKILL.md frontmatter   Copy/delete skills
-     package.json      activation.signals     Edit agent sections
+     package.json      metadata.activation    Edit agent sections
      af-env.conf       Confidence gating      Update INDEX
      imports scan                             Update instructions
      planning docs
@@ -232,22 +232,24 @@ On confirmation, the command:
 
 ### 3.1 SKILL.md Frontmatter Extension
 
-Add optional `activation` fields to each SKILL.md:
+Add optional `activation` fields to each SKILL.md, nested under the
+VS Code-supported `metadata` key:
 
 ```yaml
 ---
 name: integration-testing
 description: >-
   Verify multiple components work together — test containers, ...
-activation:
-  signals:
-    python_packages: [fastapi, flask, django, sqlalchemy, sqlmodel, httpx]
-    js_packages: [express, nestjs, next]
-    file_patterns: ["**/test_integration_*.py", "**/tests/integration/**"]
-    af_config:
-      WORKTREE_ENABLED: true    # only for git-worktrees
-  agents: [test-writer, test-critic, implementer]
-  priority: recommended   # required | recommended | optional
+metadata:
+  activation:
+    signals:
+      python_packages: [fastapi, flask, django, sqlalchemy, sqlmodel, httpx]
+      js_packages: [express, nestjs, next]
+      file_patterns: ["**/test_integration_*.py", "**/tests/integration/**"]
+      af_config:
+        WORKTREE_ENABLED: true    # only for git-worktrees
+    agents: [test-writer, test-critic, implementer]
+    priority: recommended   # required | recommended | optional
 ---
 ```
 
@@ -469,7 +471,7 @@ tools:
 2. Parse dependency files (pyproject.toml, package.json)
 3. Scan planning/documentation files for structured tech-stack sections
    (see §2.2 Phase 1, source 6 — structured markers only)
-4. Scan `skills/_available/` and `skills/` for activation metadata
+4. Scan `skills/_available/` and `skills/` for `metadata.activation` blocks
 5. Match tech-stack signals → produce activate/deactivate lists,
    applying confidence gating (see §2.2 confidence matrix)
 6. Present summary table with affected files
@@ -696,7 +698,8 @@ with zero throwaway work.
 
 ### Phase A+B: `validate-skills.py` Extension
 
-Extend the existing validation script to verify activation metadata:
+Extend the existing validation script to verify activation metadata
+(nested under `metadata.activation` in SKILL.md frontmatter):
 - `priority` must be one of: `required`, `recommended`, `optional`
 - `agents` values must match existing `.agent.md` filenames (minus extension)
 - `signals` keys must be from the known set: `python_packages`,

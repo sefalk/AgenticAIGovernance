@@ -2,12 +2,13 @@
 name: security-testing
 description: Identify vulnerabilities before attackers do — SAST, DAST, dependency scanning, secret detection, OWASP Top 10 coverage, and fuzzing.
 argument-hint: '[project or component] [focus: sast|dast|deps|secrets|owasp|all]'
-activation:
-  signals:
-    python_packages: [fastapi, flask, django, starlette]
-    js_packages: [express, nestjs, next, koa]
-  agents: [test-writer, code-critic]
-  priority: recommended
+metadata:
+  activation:
+    signals:
+      python_packages: [fastapi, flask, django, starlette]
+      js_packages: [express, nestjs, next, koa]
+    agents: [test-writer, code-critic]
+    priority: recommended
 ---
 
 # Security Testing

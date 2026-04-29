@@ -2,9 +2,10 @@
 name: human-escalation
 description: Protocol for agents to gracefully halt execution and transfer context to a human when progress is blocked, ambiguous, or exceeding retry limits.
 argument-hint: '[blocker description] — invoke when stuck or at iteration limit'
-activation:
-  agents: [test-writer, implementer, refactorer, arbiter]
-  priority: required
+metadata:
+  activation:
+    agents: [test-writer, implementer, refactorer, arbiter]
+    priority: required
 ---
 
 # Human Escalation Protocol
