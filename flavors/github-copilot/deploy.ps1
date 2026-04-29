@@ -940,6 +940,15 @@ if ($staleSkills.Count -gt 0) {
     }
 }
 
+# ── Curated skills reminder ────────────────────────────────────────────────
+# If the project has a curated-assignments.json, remind the user to reapply
+# curated skill state after deploy (agent sections, activated/deactivated folders).
+$curatedJsonPath = Join-Path $TargetGitHub 'skills\curated-assignments.json'
+if (Test-Path $curatedJsonPath) {
+    Write-Host ""
+    Write-Host "  Curated skills detected -- run /curate-skills --reapply to restore agent skill references." -ForegroundColor Cyan
+}
+
 # ── Version-stale detection ────────────────────────────────────────────────
 # Warn when files were updated/created but VERSION hasn't changed since last
 # deploy. This catches the common mistake of forgetting to bump VERSION.

@@ -3,6 +3,9 @@ name: error-handling
 description: Error hierarchies, retry strategies, resilience patterns, and structured error responses. Use when designing error handling or reviewing error paths.
 argument-hint: '[module or function] [pattern: hierarchy|retry|circuit-breaker|fallback]'
 disable-model-invocation: true
+activation:
+  agents: [test-writer, implementer, code-critic]
+  priority: required
 ---
 
 # Error Handling & Resilience Skill

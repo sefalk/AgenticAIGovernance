@@ -2,6 +2,12 @@
 name: configuration-management
 description: Govern how applications discover and consume runtime settings — environment variables, config hierarchies, feature flags, 12-factor methodology, and startup validation.
 argument-hint: '[config concern] [environment: dev|staging|prod]'
+activation:
+  signals:
+    python_packages: [python-dotenv, pydantic-settings, dynaconf]
+    js_packages: [dotenv, config, convict]
+  agents: [implementer, code-critic]
+  priority: recommended
 ---
 
 # Configuration Management

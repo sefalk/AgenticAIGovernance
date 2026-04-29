@@ -50,6 +50,10 @@ MAX_NAME_LEN = 64
 MAX_DESC_LEN = 1024
 MAX_HINT_LEN = 128
 
+# Activation metadata
+VALID_PRIORITIES = {"required", "recommended", "optional"}
+VALID_SIGNAL_KEYS = {"python_packages", "js_packages", "file_patterns", "af_config", "imports"}
+
 
 # ---------------------------------------------------------------------------
 # YAML parsing (minimal — avoid external dependency)
@@ -132,7 +136,77 @@ def validate_argument_hint(hint: str) -> list[str]:
     return errors
 
 
-def validate_skill_dir(skill_dir: Path, *, deep: bool = True) -> list[str]:
+def validate_activation(
+    activation: dict,
+    known_agents: set[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Validate the optional activation metadata block.
+
+    Returns (errors, warnings).
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    # priority
+    priority = activation.get("priority")
+    if priority is None:
+        errors.append("activation: missing 'priority' field")
+    elif str(priority) not in VALID_PRIORITIES:
+        errors.append(
+            f"activation.priority '{priority}' must be one of: "
+            + ", ".join(sorted(VALID_PRIORITIES))
+        )
+
+    # agents
+    agents = activation.get("agents")
+    if agents is None:
+        errors.append("activation: missing 'agents' field")
+    elif isinstance(agents, list):
+        for agent in agents:
+            agent_str = str(agent)
+            if known_agents is not None and agent_str not in known_agents:
+                errors.append(
+                    f"activation.agents: '{agent_str}' does not match "
+                    "any .agent.md file"
+                )
+    else:
+        errors.append("activation.agents must be a list")
+
+    # signals (optional)
+    signals = activation.get("signals")
+    if signals is not None:
+        if isinstance(signals, dict):
+            unknown_keys = set(signals.keys()) - VALID_SIGNAL_KEYS
+            for key in sorted(unknown_keys):
+                errors.append(
+                    f"activation.signals: unknown key '{key}' "
+                    f"(valid: {', '.join(sorted(VALID_SIGNAL_KEYS))})"
+                )
+        else:
+            errors.append("activation.signals must be a mapping")
+
+    # Unusual combo warning: required + non-empty signals
+    if (
+        priority is not None
+        and str(priority) == "required"
+        and signals
+        and isinstance(signals, dict)
+        and any(signals.values())
+    ):
+        warnings.append(
+            "activation: priority=required with signals is unusual "
+            "(required skills are typically framework invariants with no signals)"
+        )
+
+    return errors, warnings
+
+
+def validate_skill_dir(
+    skill_dir: Path,
+    *,
+    deep: bool = True,
+    known_agents: set[str] | None = None,
+) -> tuple[list[str], list[str]]:
     """Validate a single skill directory.
 
     Parameters
@@ -142,14 +216,23 @@ def validate_skill_dir(skill_dir: Path, *, deep: bool = True) -> list[str]:
     deep : bool
         If True, validate frontmatter contents. If False, only check
         that SKILL.md exists (used for _available/ light scan).
+    known_agents : set[str] | None
+        Set of known agent names (from .agent.md filenames). Used to
+        validate activation.agents references.
+
+    Returns
+    -------
+    tuple[list[str], list[str]]
+        (errors, warnings)
     """
     errors: list[str] = []
+    warnings: list[str] = []
     prefix = skill_dir.name
 
     skill_md = skill_dir / "SKILL.md"
     if not skill_md.exists():
         errors.append(f"{prefix}: missing SKILL.md")
-        return errors
+        return errors, warnings
 
     content = skill_md.read_text(encoding="utf-8")
 
@@ -157,7 +240,7 @@ def validate_skill_dir(skill_dir: Path, *, deep: bool = True) -> list[str]:
     fm = parse_frontmatter(content)
     if fm is None:
         errors.append(f"{prefix}: invalid or missing YAML frontmatter")
-        return errors
+        return errors, warnings
 
     if not deep:
         # Light scan: just verify name field exists and matches dir
@@ -165,7 +248,7 @@ def validate_skill_dir(skill_dir: Path, *, deep: bool = True) -> list[str]:
             errors.append(
                 f"{prefix}: name '{fm['name']}' does not match directory"
             )
-        return errors
+        return errors, warnings
 
     # --- Deep validation ---
 
@@ -188,11 +271,25 @@ def validate_skill_dir(skill_dir: Path, *, deep: bool = True) -> list[str]:
         for err in validate_argument_hint(str(fm["argument-hint"])):
             errors.append(f"{prefix}: {err}")
 
+    # activation (optional)
+    if "activation" in fm:
+        activation = fm["activation"]
+        if isinstance(activation, dict):
+            act_errors, act_warnings = validate_activation(
+                activation, known_agents=known_agents
+            )
+            for err in act_errors:
+                errors.append(f"{prefix}: {err}")
+            for warn in act_warnings:
+                warnings.append(f"{prefix}: {warn}")
+        else:
+            errors.append(f"{prefix}: activation must be a mapping")
+
     # Verify SKILL.md has a top-level heading
     if not re.search(r"^# .+", content, re.MULTILINE):
         errors.append(f"{prefix}: SKILL.md missing top-level '# ' heading")
 
-    return errors
+    return errors, warnings
 
 
 # ---------------------------------------------------------------------------
@@ -309,6 +406,18 @@ def discover_skill_dirs(path: Path) -> set[str]:
     }
 
 
+def discover_agent_names(github_dir: Path) -> set[str]:
+    """Return set of agent names from .agent.md files in agents/."""
+    agents_dir = github_dir / "agents"
+    if not agents_dir.is_dir():
+        return set()
+    return {
+        f.stem.removesuffix(".agent")
+        for f in agents_dir.iterdir()
+        if f.is_file() and f.name.endswith(".agent.md")
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run validation and return exit code."""
     parser = argparse.ArgumentParser(
@@ -356,21 +465,31 @@ def main(argv: list[str] | None = None) -> int:
         discover_skill_dirs(available_root) if available_root.is_dir() else set()
     )
 
+    # --- Discover agent names (for activation.agents validation) ---
+    known_agents = discover_agent_names(github_dir)
+
     errors: list[str] = []
     warnings: list[str] = []
 
     # --- Validate active skills (deep) ---
     for name in sorted(active_dirs):
         skill_dir = skills_root / name
-        errors.extend(validate_skill_dir(skill_dir, deep=True))
+        errs, warns = validate_skill_dir(
+            skill_dir, deep=True, known_agents=known_agents
+        )
+        errors.extend(errs)
+        warnings.extend(warns)
 
     # --- Validate _available/ skills ---
     deep_avail = args.deep_available
     for name in sorted(available_dirs):
         skill_dir = available_root / name
-        errs = validate_skill_dir(skill_dir, deep=deep_avail)
+        errs, warns = validate_skill_dir(
+            skill_dir, deep=deep_avail, known_agents=known_agents
+        )
         if deep_avail:
             errors.extend(errs)
+            warnings.extend(warns)
         else:
             # Light scan: missing SKILL.md is an error, everything else is a warning
             for e in errs:
@@ -378,6 +497,7 @@ def main(argv: list[str] | None = None) -> int:
                     errors.extend([e])
                 else:
                     warnings.append(e)
+            warnings.extend(warns)
 
     # --- INDEX.md cross-reference ---
     errors.extend(

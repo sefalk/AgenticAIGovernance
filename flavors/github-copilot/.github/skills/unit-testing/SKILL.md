@@ -2,6 +2,9 @@
 name: unit-testing
 description: Verify correctness of individual units of code in isolation. AAA pattern, test doubles, language-specific guidance, edge cases, and quality gates for coverage and mutation score.
 argument-hint: '[function or module to test] [language]'
+activation:
+  agents: [test-writer, test-critic, implementer, code-critic]
+  priority: required
 ---
 
 # Unit Testing

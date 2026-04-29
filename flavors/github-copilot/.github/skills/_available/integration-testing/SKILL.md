@@ -2,6 +2,13 @@
 name: integration-testing
 description: Verify that multiple components work correctly together — test containers, data management, service integration patterns, and CI organization.
 argument-hint: '[integration boundary to test] [language]'
+activation:
+  signals:
+    python_packages: [fastapi, flask, django, sqlalchemy, sqlmodel, httpx]
+    js_packages: [express, nestjs, next]
+    file_patterns: ["**/test_integration_*.py", "**/tests/integration/**"]
+  agents: [test-writer, test-critic, implementer]
+  priority: recommended
 ---
 
 # Integration Testing

@@ -857,6 +857,15 @@ if [[ "$DRY_RUN" == "true" ]]; then
     echo "  [DRY RUN — no files were changed. Remove --dry-run to apply.]"
 fi
 
+# ── Curated skills reminder ────────────────────────────────────────────────
+# If the project has a curated-assignments.json, remind the user to reapply
+# curated skill state after deploy (agent sections, activated/deactivated folders).
+curated_json="$TARGET_GITHUB/skills/curated-assignments.json"
+if [[ -f "$curated_json" ]]; then
+    echo ""
+    echo "  Curated skills detected -- run /curate-skills --reapply to restore agent skill references."
+fi
+
 # Prune stale backups from previous deploy runs
 prune_old_backups "$TARGET_DIR" "$BACKUP_PRUNE_DAYS" "$BACKUP_DIR"
 
