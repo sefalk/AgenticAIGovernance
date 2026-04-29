@@ -77,6 +77,8 @@ def parse_frontmatter(content: str) -> dict | None:
         return yaml.safe_load(raw)
     except ImportError:
         pass
+    except yaml.YAMLError:
+        return None
 
     # Minimal fallback: key: value pairs (single-line values only)
     result: dict[str, str] = {}

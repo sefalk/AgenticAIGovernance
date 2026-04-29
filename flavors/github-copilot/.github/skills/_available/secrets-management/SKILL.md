@@ -6,7 +6,7 @@ metadata:
   activation:
     signals:
       python_packages: [fastapi, flask, django, python-dotenv, boto3, azure-identity]
-      js_packages: [dotenv, @aws-sdk/client-secrets-manager]
+      js_packages: [dotenv, "@aws-sdk/client-secrets-manager"]
     agents: [implementer, code-critic]
     priority: recommended
 ---
