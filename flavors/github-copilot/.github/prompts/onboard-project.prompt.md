@@ -153,4 +153,22 @@ Ask the user to confirm the findings. Then update these files:
 - Preserve the existing file structure — only replace placeholder content
 - Respect `.af-manifest` ownership boundaries
 
+## Step 10: Offer Skill Curation
+
+After all onboarding changes are applied, check whether skill curation
+has already been performed:
+
+1. If `skills/curated-assignments.json` exists → skip (already curated)
+2. If it does NOT exist → tell the user:
+
+   > "Onboarding complete. Your skills can be optimised for this tech stack.
+   > Run `/curate-skills` to activate matching skills and deactivate
+   > irrelevant ones."
+   >
+   > **Tip:** Use `/setup-project` next time to run deploy + onboard +
+   > curate in one step.
+
+This is informational only — do NOT auto-run skill curation from here.
+The `/setup-project` prompt handles the integrated flow.
+
 ${input:notes:Any special notes about your project (optional)}

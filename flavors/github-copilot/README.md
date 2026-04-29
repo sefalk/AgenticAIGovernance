@@ -31,7 +31,18 @@ suggestions. You stay in control through mandatory escalation points.
 
 1. **Place** the `_agent-framework/` directory in your project root
    (or clone it as a subdirectory).
-2. **Run the deploy script** to install AF files into `.github/` and `.vscode/`:
+2. **Run `/setup-project`** in Copilot Chat — this runs the full pipeline
+   (deploy → onboard → curate skills) in one step. Review the combined
+   summary and confirm once.
+3. **Start using** — open Copilot Chat and type `@coordinator <your task>`,
+   or use `/tdd-feature`, `/quick-fix`, or `/review-code` slash commands.
+
+<details>
+<summary><strong>Manual setup</strong> (step-by-step alternative)</summary>
+
+If you prefer running each phase separately:
+
+1. **Deploy:** Run the deploy script:
    ```powershell
    # Windows — preview first, then deploy
    .\_agent-framework\deploy.ps1 -DryRun
@@ -42,13 +53,12 @@ suggestions. You stay in control through mandatory escalation points.
    ./_agent-framework/deploy.sh --dry-run
    ./_agent-framework/deploy.sh
    ```
-   The script copies only AF-owned files (see `.github/.af-manifest`).
-   Existing non-AF files (`workflows/`, `CODEOWNERS`, etc.) are never touched.
-3. **Run `/onboard-project`** in Copilot Chat — it analyses your codebase,
-   detects existing `.github/` files, shows what AF will add vs. what
-   conflicts exist, and auto-fills configuration. Review before confirming.
-4. **Start using** — open Copilot Chat and type `@coordinator <your task>`,
-   or use `/tdd-feature`, `/quick-fix`, or `/review-code` slash commands.
+2. **Onboard:** Run `/onboard-project` in Copilot Chat — analyses your
+   codebase and auto-fills configuration.
+3. **Curate skills:** Run `/curate-skills` — matches skills to your tech
+   stack and activates/deactivates them.
+
+</details>
 
 ### Updating the AF
 
@@ -109,7 +119,7 @@ Use two deployment modes to balance speed and safety:
 - `full`: quick + worktree integration tests
 
 <details>
-<summary>Manual setup (if you prefer not to use the deploy script)</summary>
+<summary>Manual file copy (if you prefer not to use any script or prompt)</summary>
 
 1. **Copy AF-owned directories** from `_agent-framework/.github/` into your
    project's `.github/`. AF owns: `agents/`, `hooks/`, `instructions/`,
@@ -118,7 +128,8 @@ Use two deployment modes to balance speed and safety:
    `copilot-instructions.md`. See `.github/.af-manifest` for the full list.
    **Do NOT overwrite** existing non-AF files.
 2. **Copy** `.vscode/toolsets.jsonc` into your `.vscode/` folder.
-3. **Run `/onboard-project`** and follow prompts.
+3. **Run `/onboard-project`** to auto-fill configuration, then
+   `/curate-skills` to match skills to your tech stack.
 
 </details>
 
@@ -286,8 +297,10 @@ CHANGELOG.md                               # Release history (Keep a Changelog f
 │   ├── INDEX.md                           # Auto-generated skill index with agent matrix
 │   └── ... (35 more)                      # See skills/ directory for full list
 ├── prompts/                               # Reusable slash commands
-│   ├── find-skill.prompt.md               # /find-skill → search skill library by topic
+│   ├── setup-project.prompt.md            # /setup-project → deploy + onboard + curate (all-in-one)
 │   ├── onboard-project.prompt.md          # /onboard-project → auto-fill config
+│   ├── curate-skills.prompt.md            # /curate-skills → match skills to tech stack
+│   ├── find-skill.prompt.md               # /find-skill → search skill library by topic
 │   ├── audit-config.prompt.md             # /audit-config → detect config drift
 │   ├── validate-framework.prompt.md       # /validate-framework → AF integrity scan
 │   ├── simulate.prompt.md                 # /simulate → dry-run workflow prediction
@@ -399,11 +412,13 @@ from your description.
 
 | Command | What It Does |
 |---|---|
+| `/setup-project` | **Full setup** — deploy + onboard + curate skills in one step |
+| `/onboard-project` | Analyse project and auto-fill AF config (onboarding only) |
+| `/curate-skills` | Match skills to tech stack, activate/deactivate |
 | `/audit-config` | Detect drift between AF config and project |
 | `/validate-framework` | Scan AF files for internal consistency |
 | `/find-skill` | Search the skill library by topic |
 | `/simulate` | Dry-run a task without executing |
-| `/onboard-project` | First-time project setup wizard |
 | `/retro-summary` | Aggregate past workflow lessons |
 
 Standalone utilities run independently — the coordinator doesn't invoke
