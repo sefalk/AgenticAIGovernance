@@ -67,6 +67,36 @@
 
 ---
 
+## 🆕 **Automated Skill Curation** (2026-04-29)
+
+**Status:** ⬜ TODO
+**Scope:** New `/curate-skills` prompt + SKILL.md frontmatter extension + deploy/onboard integration
+**Effort:** MEDIUM (phased delivery — Phase A alone is LOW effort, HIGH impact)
+**Impact:** HIGH (eliminates silent skill gaps, resolves onboarding contradiction)
+
+**Problem:** The AF ships a generic default skill set. Projects miss relevant
+skills (e.g., `integration-testing` for FastAPI projects) and carry irrelevant
+ones (e.g., `git-worktrees` when disabled). Activation is a manual 4-step
+process (move folder, edit agents, update INDEX, update instructions).
+`/onboard-project` Step 8 recommends skills but Step 9 forbids modifying
+agent files — a contradiction that ensures recommendations are never applied.
+
+**Proposed solution:** Standalone `/curate-skills` slash command that:
+1. Discovers tech stack from project metadata (pyproject.toml, package.json, af-env.conf)
+2. Matches against activation signals declared in SKILL.md frontmatter
+3. Presents activate/deactivate diff; on confirmation, moves folders, edits agent
+   `## Skills` sections, regenerates INDEX.md and copilot-instructions.md
+4. Can be invoked any time — during onboarding, after dependency changes, or on demand
+
+**Integration:** `/onboard-project` Step 8 delegates to `/curate-skills` when
+metadata exists, solving the Step 8/9 contradiction. Deploy gains a
+`--curate-skills` post-deploy reminder.
+
+**See:** `ideas/feature-skill-curation.md` — detailed feature plan with
+matching rules, edge cases, and phased implementation.
+
+---
+
 ## 1) ✅ DONE — AF should not reference AAIG (2026-03-09)
 
 AF should not reference to AAIG. The content must be integrated into AF fully. Can AF integrate any additional information into agents/skills/hooks. Note that core principles should be considered.
