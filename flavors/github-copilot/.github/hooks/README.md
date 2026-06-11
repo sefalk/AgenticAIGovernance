@@ -120,7 +120,7 @@ All hooks can return JSON via stdout:
 
 ### `agent-hooks.json` — Active Hooks (ready to use)
 
-Four hooks are **active** out of the box:
+Five hooks are **active** out of the box:
 
 #### SessionStart: Session Context Injection
 
@@ -140,6 +140,21 @@ current git state without needing to be told.
 - Last commit hash + message
 - Python version
 - Project directory name
+
+#### SessionStart: ADO MCP Readiness
+
+**Scripts:** `scripts/session-mcp-readiness.ps1` (Windows) / `scripts/session-mcp-readiness.sh` (Unix)
+
+Checks whether Azure DevOps provider capabilities are ready for use.
+The hook reports `READY`, `DEGRADED`, or `BLOCKED` based on
+`ADO_CAPABILITY_MODE` and the presence of required defaults in
+`.github/af-env.conf`.
+
+**What it checks:**
+- `ADO_CAPABILITY_MODE`
+- `ADO_PROJECT` availability
+- Optional wiki/linking hints such as `ADO_WIKI_IDENTIFIER`, `ADO_REPOSITORY_ID`, and `ADO_REPOSITORY_NAME`
+- ADO agent naming guardrail (`ado-` prefix)
 
 #### PreToolUse: Dangerous Command Safety Gate
 

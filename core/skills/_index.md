@@ -1,6 +1,6 @@
 # Skills Toolbox -- Manifest & Usage Guide
 
-**Version: 2.5 | Date: 2026-03-05**
+**Version: 2.6 | Date: 2026-06-11**
 
 ## Purpose
 
@@ -175,6 +175,8 @@ related: [list of related skill filenames without path]  # source of truth for #
 
 | Skill | File | Applies To | Complexity | Description |
 |-------|------|------------|------------|-------------|
+| Azure DevOps Work Item Management | `ado_work_item_management.md` | `all` | intermediate | Provider-specific lifecycle for ADO work items with confidence matching and non-destructive updates |
+| Azure DevOps Wiki Management | `ado_wiki_management.md` | `all` | intermediate | Provider-specific lifecycle for ADO wiki page updates with traceable change summaries |
 | CI/CD | `ci_cd.md` | `all` | foundational | When setting up or improving build/deploy pipelines |
 | Containerization | `containerization.md` | `api`, `web`, `microservice`, `cloud` | intermediate | When packaging apps in containers. Dockerfile, multi-stage, Compose |
 | Infrastructure as Code | `infrastructure_as_code.md` | `cloud` | advanced | When managing cloud resources declaratively. Terraform, Pulumi |

@@ -1,6 +1,6 @@
-**Version: 1.0 | Date: 2026-02-26**
+**Version: 1.1 | Date: 2026-06-11**
 **Level: 2 | Domain: Software Development**
-**Derived from:** [L1_Core_Principles.md](../L1_Core_Principles.md) (Level 1, v3.8)
+**Derived from:** [L1_Core_Principles.md](../L1_Core_Principles.md) (Level 1, v3.9)
 
 ---
 
@@ -40,7 +40,7 @@ This artifact derives domain-specific rules for software development from the Le
 
 ### From: Transparency/Traceability (L1)
 
-**R-SD-08:** Every code change SHALL be linked to a tracked work item (issue, ticket, or task). Unlinked changes SHALL NOT be integrated into the primary branch without explicit justification in the commit message.
+**R-SD-08:** Every code change SHALL be linked to a tracked work item (issue, ticket, or task) when a project tracker integration is available or marked required at Level 4. If tracker integration is marked optional and unavailable, the change SHALL be linked via a local traceability artifact (decision log/plan/log entry) and synchronized later when access is restored.
 
 **R-SD-09:** Commit messages SHALL follow a structured format that includes: type of change (feat, fix, refactor, docs, test, chore), scope, and a concise description. The specific format (e.g., Conventional Commits) is defined at Level 4.
 

@@ -12,7 +12,7 @@ tests, implementation, refactoring, code review, documentation — autonomously.
 Critics review every output; hooks enforce quality gates with real code, not
 suggestions. You stay in control through mandatory escalation points.
 
-- **11 specialised agents** (1 coordinator + 10 workers) with isolated contexts
+- **13 specialised agents** (1 coordinator + 10 core workers + 2 optional ADO workers) with isolated contexts
 - **Test-Driven Development** enforced as separate Red → Green → Refactor phases
 - **Deterministic hooks** run pytest, scan for secrets, block destructive commands
 - **Maker-Checker pattern** — every agent's output is reviewed by a critic
@@ -162,6 +162,8 @@ You → @coordinator
         ├─→ refactorer (subagent)           → returns cleaned code
         ├─→ code-critic (subagent)          → returns APPROVED/REJECTED
         ├─→ documenter (subagent)           → returns workflow log
+        ├─→ ado-work-item-manager (optional)→ provider sync for work items
+        ├─→ ado-wiki-manager (optional)      → provider sync for wiki updates
         └─→ compliance-checker (subagent)   → returns post-flight status
 ```
 
@@ -212,7 +214,7 @@ As of v1.18.6, agents no longer have hardcoded model lists. Instead:
 This design was replaced for simplicity and maintainability.
 
 **Rationale:** Company model updates happen frequently. Hardcoding models
-in 11 agent files created maintenance overhead. Dynamic model selection via
+in 13 agent files created maintenance overhead. Dynamic model selection via
 user preference is simpler and future-proof.
 
 </details>
@@ -243,7 +245,7 @@ CHANGELOG.md                               # Release history (Keep a Changelog f
 ├── GOVERNANCE.md                          # Governance model and AI provenance rules
 ├── TROUBLESHOOTING.md                     # Common issues and diagnostic steps
 ├── .af-manifest                           # AF-owned file registry (controls deploy)
-├── agents/                                # 11 agent definitions
+├── agents/                                # 13 agent definitions (includes optional ADO workers)
 │   ├── coordinator.agent.md               # 🎯 Main entry point (user-facing)
 │   ├── planner.agent.md                   # Worker: task decomposer
 │   ├── test-writer.agent.md               # Worker: failing tests (Red phase)
@@ -254,10 +256,12 @@ CHANGELOG.md                               # Release history (Keep a Changelog f
 │   ├── arbiter.agent.md                   # Worker: dispute resolution
 │   ├── documenter.agent.md                # Worker: workflow logging
 │   ├── researcher.agent.md                # Worker: external research & domain expertise
-│   └── compliance-checker.agent.md        # Worker: workflow compliance watchdog (bookends)
+│   ├── compliance-checker.agent.md        # Worker: workflow compliance watchdog (bookends)
+│   ├── ado-work-item-manager.agent.md     # Optional worker: Azure DevOps work item lifecycle
+│   └── ado-wiki-manager.agent.md          # Optional worker: Azure DevOps wiki lifecycle
 ├── hooks/                                 # Agent hooks (deterministic enforcement)
 │   ├── README.md                          # Hook documentation and templates
-│   ├── agent-hooks.json                   # Active hooks: all 4 lifecycle events
+│   ├── agent-hooks.json                   # Active hooks: 5 total hook commands
 │   ├── quality-gates.json.template        # Reference: example hook patterns
 │   └── scripts/                           # Hook implementation scripts
 │       ├── session-context.ps1            # SessionStart: inject git/env context (Windows)
@@ -360,7 +364,7 @@ Unlike instructions ("please run the formatter"), hooks guarantee execution.
 | **Secret Scan** | `PostToolUse` | Scans edited files for hardcoded secrets (gitleaks or regex fallback) |
 | **Test Gate** | `Stop` | Runs `pytest tests/ -q --tb=line` before session ends |
 
-All four hooks work out of the box — no configuration needed.
+All five hooks work out of the box — no configuration needed.
 `quality-gates.json.template` is kept as a reference for additional hook patterns.
 
 ### Agent-Scoped Hooks (in agent YAML frontmatter)

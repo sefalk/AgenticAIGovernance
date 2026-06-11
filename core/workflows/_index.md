@@ -1,6 +1,6 @@
 # Workflows — Manifest & Selection Guide
 
-**Version: 1.1 | Date: 2026-03-05**
+**Version: 1.2 | Date: 2026-06-11**
 
 ## Purpose
 
@@ -26,11 +26,23 @@ This directory contains Level-3 Workflow templates derived from Level-2 Domain R
 | Respond to a security incident, investigate a breach | [L3_Incident_Response.md](L3_Incident_Response.md) | Security Ops |
 | Audit for security, scan for vulnerabilities, assess security posture | [L3_Security_Audit.md](L3_Security_Audit.md) | Security Ops |
 | Write docs, create API reference, draft ADR or runbook, update changelog | [L3_Technical_Writing.md](L3_Technical_Writing.md) | Technical Writing |
+| Integrate optional external platform capabilities (tracker/wiki/provider APIs) | [L3_Platform_Capability_Integration.md](L3_Platform_Capability_Integration.md) | Cross-Domain Integration |
 | Refactor existing code (no new behavior) | Use [L3_Feature_Development.md](L3_Feature_Development.md) **Refactoring Mode** section | Software Dev |
 | Conduct a GDPR / HIPAA / SOC2 compliance audit, map PII data flows | ⚠️ **No dedicated workflow.** Use generic fallback. Read `skills/security/compliance_regulatory.md`. `L3_Compliance_Audit.md` is a known planned workflow. | Security Ops |
 | Modify a database schema (add/drop/alter columns, indexes, constraints) | Use [L3_Feature_Development.md](L3_Feature_Development.md) **with critical caveat:** for tables > `[L4-DEFINED: row threshold]` rows or live traffic, HALT and plan a **zero-downtime migration** (expand-contract pattern) before any `ALTER TABLE`. Naive migrations can cause production table locks. `L3_Database_Migration.md` is a known planned workflow. | Software Dev |
 
 > **Fallback:** If no workflow matches, use the generic default sequence: **Plan → Review Plan → Execute → Verify → Review Output** (defined in `L1_Framework_Architecture.md`).
+
+## External Integration Availability Rule
+
+Some workflows use external systems (issue trackers, wiki providers,
+deployment APIs, registry services). Before using such steps:
+
+1. Run the project-defined availability probe from the L4 contract.
+2. If capability is marked **Required** and probe fails: HALT and escalate.
+3. If capability is marked **Optional** and probe fails: continue with the
+	project-defined fallback (local artifact/log + deferred sync).
+4. Record probe outcome and fallback usage in the action log.
 
 ## Workflow Catalog
 
@@ -45,6 +57,7 @@ This directory contains Level-3 Workflow templates derived from Level-2 Domain R
 | Incident Response | `L3_Incident_Response.md` | 5 | Agent Autonomy Boundaries table | `L2_Security_Operations.md` |
 | Security Audit | `L3_Security_Audit.md` | 5 | Proactive SAST/SCA/DAST scanning | `L2_Security_Operations.md` |
 | Technical Writing | `L3_Technical_Writing.md` | 5 | Mandatory code-example verification | `L2_Technical_Writing.md` |
+| Platform Capability Integration | `L3_Platform_Capability_Integration.md` | 4 | Required/optional provider probe with graceful degradation | `L1_Core_Principles.md`, `L1_Framework_Architecture.md` |
 
 ## Adding New Workflows
 

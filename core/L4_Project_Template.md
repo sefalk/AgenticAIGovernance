@@ -67,6 +67,29 @@ Explicitly map the tools your project uses to resolve ambiguity for the agent:
 | **Type Checking** | [e.g., `tsc`, `pyright`] |
 | **Security Audit** | [e.g., `npm audit`, `snyk`] |
 
+## 5a. External Capability Providers (Optionality Contract)
+
+Define which external platforms are integrated for this project and whether
+they are required or optional.
+
+| Provider | Capability | Required? | Availability Probe | Fallback if Unavailable |
+|----------|------------|-----------|--------------------|-------------------------|
+| [e.g., `ado`] | [e.g., `work-items`] | [Required/Optional] | [e.g., MCP auth + list call] | [e.g., local decision log + deferred sync] |
+| [e.g., `ado`] | [e.g., `wiki`] | [Required/Optional] | [e.g., get page metadata] | [e.g., markdown artifact + deferred publish] |
+| [e.g., `gh`] | [e.g., `issues`] | [Required/Optional] | [e.g., API token + repo access] | [e.g., local issue draft file] |
+
+## 5b. Provider Worker Naming Convention
+
+If provider-scoped workers are used, follow:
+
+`{provider}-{capability}-{role}`
+
+| Worker | Purpose |
+|--------|---------|
+| [e.g., `ado-work-item-manager`] | [e.g., issue/work item lifecycle tracking] |
+| [e.g., `ado-wiki-manager`] | [e.g., wiki content lifecycle] |
+| [e.g., `gh-issue-manager`] | [e.g., GitHub issue lifecycle] |
+
 ## 6. Active Specializations
 
 List the domains and skills selected by the User during the **Specialization Prompt** (L0 Phase 3, Step 3). These are actively prioritized by the agent:

@@ -9,23 +9,26 @@
 
 | # | Skill | Description | Referenced by |
 |---|-------|-------------|---------------|
-| 1 | `code-review` | Structured code review guidance. Diff analysis, blast radius, automation-first review, anti-pattern detection, and review artifact templates. | test-critic, code-critic |
-| 2 | `dependency-management` | Dependency selection, version pinning, lockfiles, vulnerability scanning, and license compliance. | implementer, code-critic |
-| 3 | `design-patterns` | Proven design patterns — creational, structural, behavioural, DDD, architecture. When to use, when NOT to use, and Python-idiomatic examples. | planner, implementer, refactorer, arbiter |
-| 4 | `documentation` | Documentation standards — code comments, docstrings, READMEs, ADRs, changelogs. | documenter |
-| 5 | `error-handling` | Error hierarchies, retry strategies, resilience patterns, and structured error responses. | test-writer, implementer |
-| 6 | `hexagonal-architecture` | Ports and Adapters to isolate core business logic from frameworks and infrastructure. Domain isolation, dependency inversion, and testability by design. | implementer, refactorer, code-critic, arbiter |
-| 7 | `human-escalation` | Protocol for agents to gracefully halt execution and transfer context to a human when progress is blocked, ambiguous, or exceeding retry limits. | test-writer, implementer, refactorer, arbiter |
-| 8 | `metrics` | Collect and report code quality metrics — coverage, complexity, mutation score, lint violations. | code-critic |
-| 9 | `property-testing` | Write property-based tests with hypothesis. Invariant templates, strategy patterns, and best practices for functions with wide input spaces. | test-writer, test-critic |
-| 10 | `pydantic` | Pydantic for Python domain models, configuration, and data validation — BaseModel, field validators, serialization, settings, and hexagonal architecture integration. | implementer, refactorer |
-| 11 | `refactoring` | Disciplined code restructuring without behaviour change. Code smells, refactoring catalog, safe workflow, and IDE-assisted moves. | refactorer |
-| 12 | `risk-management` | Systematically identify, assess, and mitigate project risks — risk registers, scoring matrices, response strategies, contingency planning, and review cadence. | planner |
-| 13 | `secure-coding` | Prevent vulnerabilities during development — input validation, injection prevention, authentication, authorization, cryptography, and error handling. | code-critic |
-| 14 | `static-analysis` | Run and interpret static analysis tools — Ruff, mypy, Bandit, Radon. Covers configuration, complexity thresholds, editor integration, and failure handling. | implementer, code-critic |
-| 15 | `task-decomposition` | Break complex objectives into manageable, estimable, and assignable units of work using WBS, INVEST criteria, and vertical slicing. | planner |
-| 16 | `unit-testing` | Verify correctness of individual units of code in isolation. AAA pattern, test doubles, language-specific guidance, edge cases, and coverage quality gates. | test-writer, test-critic |
-| 17 | `git-worktrees` | Create, manage, and remove git worktrees for parallel agent task execution. Lifecycle commands, context verification, troubleshooting, and recovery procedures. | coordinator |
+| 1 | `ado-shared` | Shared Azure DevOps integration patterns — defaults, required/optional probe handling, and fallback traceability. | ado-work-item-manager, ado-wiki-manager |
+| 2 | `ado-workitem` | Azure DevOps work item lifecycle guidance — confidence matching, clarifications, and non-destructive updates. | ado-work-item-manager |
+| 3 | `ado-wiki` | Azure DevOps wiki lifecycle guidance — target resolution, non-destructive updates, and change summaries. | ado-wiki-manager |
+| 4 | `code-review` | Structured code review guidance. Diff analysis, blast radius, automation-first review, anti-pattern detection, and review artifact templates. | test-critic, code-critic |
+| 5 | `dependency-management` | Dependency selection, version pinning, lockfiles, vulnerability scanning, and license compliance. | implementer, code-critic |
+| 6 | `design-patterns` | Proven design patterns — creational, structural, behavioural, DDD, architecture. When to use, when NOT to use, and Python-idiomatic examples. | planner, implementer, refactorer, arbiter |
+| 7 | `documentation` | Documentation standards — code comments, docstrings, READMEs, ADRs, changelogs. | documenter |
+| 8 | `error-handling` | Error hierarchies, retry strategies, resilience patterns, and structured error responses. | test-writer, implementer |
+| 9 | `hexagonal-architecture` | Ports and Adapters to isolate core business logic from frameworks and infrastructure. Domain isolation, dependency inversion, and testability by design. | implementer, refactorer, code-critic, arbiter |
+| 10 | `human-escalation` | Protocol for agents to gracefully halt execution and transfer context to a human when progress is blocked, ambiguous, or exceeding retry limits. | test-writer, implementer, refactorer, arbiter |
+| 11 | `metrics` | Collect and report code quality metrics — coverage, complexity, mutation score, lint violations. | code-critic |
+| 12 | `property-testing` | Write property-based tests with hypothesis. Invariant templates, strategy patterns, and best practices for functions with wide input spaces. | test-writer, test-critic |
+| 13 | `pydantic` | Pydantic for Python domain models, configuration, and data validation — BaseModel, field validators, serialization, settings, and hexagonal architecture integration. | implementer, refactorer |
+| 14 | `refactoring` | Disciplined code restructuring without behaviour change. Code smells, refactoring catalog, safe workflow, and IDE-assisted moves. | refactorer |
+| 15 | `risk-management` | Systematically identify, assess, and mitigate project risks — risk registers, scoring matrices, response strategies, contingency planning, and review cadence. | planner |
+| 16 | `secure-coding` | Prevent vulnerabilities during development — input validation, injection prevention, authentication, authorization, cryptography, and error handling. | code-critic |
+| 17 | `static-analysis` | Run and interpret static analysis tools — Ruff, mypy, Bandit, Radon. Covers configuration, complexity thresholds, editor integration, and failure handling. | implementer, code-critic |
+| 18 | `task-decomposition` | Break complex objectives into manageable, estimable, and assignable units of work using WBS, INVEST criteria, and vertical slicing. | planner |
+| 19 | `unit-testing` | Verify correctness of individual units of code in isolation. AAA pattern, test doubles, language-specific guidance, edge cases, and coverage quality gates. | test-writer, test-critic |
+| 20 | `git-worktrees` | Create, manage, and remove git worktrees for parallel agent task execution. Lifecycle commands, context verification, troubleshooting, and recovery procedures. | coordinator |
 
 ## Agent Skill Matrix
 
@@ -42,6 +45,8 @@
 | **arbiter** | human-escalation, design-patterns, hexagonal-architecture |
 | **researcher** | data-pipeline-design, data-modeling, data-quality |
 | **compliance-checker** | *(no skills — process checkpoint agent)* |
+| **ado-work-item-manager** | ado-workitem, ado-shared |
+| **ado-wiki-manager** | ado-wiki, ado-shared |
 | **coordinator** | *(no skills — orchestrates agents)* |
 
 ## Available for Activation (34 skills in `skills/_available/`)

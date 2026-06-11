@@ -232,11 +232,12 @@ foreach ($es in $expectedScripts) {
     }
 }
 
-# Check 6: Verify agent-hooks.json global hooks (session-context, block-dangerous, scan-secrets, stop-tests)
+# Check 6: Verify agent-hooks.json global hooks (session-context, session-mcp-readiness, block-dangerous, scan-secrets, stop-tests)
 $globalScripts = @(
     'block-dangerous.ps1',
     'scan-secrets.ps1',
     'session-context.ps1',
+    'session-mcp-readiness.ps1',
     'stop-tests.ps1'
 )
 $globalMissing = @()
