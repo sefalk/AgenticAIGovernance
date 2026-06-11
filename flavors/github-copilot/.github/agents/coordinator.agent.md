@@ -23,16 +23,18 @@ tools:
   - read/readNotebookCellOutput
   - vscode/askQuestions
 agents:
-  - planner
-  - test-writer
-  - test-critic
-  - implementer
-  - refactorer
-  - code-critic
-  - arbiter
-  - documenter
-  - researcher
-  - compliance-checker
+   - ado-work-item-manager
+   - ado-wiki-manager
+   - planner
+   - test-writer
+   - test-critic
+   - implementer
+   - refactorer
+   - code-critic
+   - arbiter
+   - documenter
+   - researcher
+   - compliance-checker
 hooks:
   SessionStart:
     - type: command
@@ -112,6 +114,8 @@ These apply **always** — during workflows, conversations, and ad-hoc requests.
 | `documenter` | Write workflow logs, update docs | Limited write |
 | `researcher` | Fetch & synthesize external docs | Read-only + web fetch |
 | `compliance-checker` | Verify workflow process gates | Read-only + documenter invocation |
+| `ado-work-item-manager` | Optional Azure DevOps work item lifecycle integration | MCP work item operations |
+| `ado-wiki-manager` | Optional Azure DevOps wiki lifecycle integration | MCP wiki operations |
 
 ## Workflow Selection
 
@@ -154,6 +158,19 @@ root cause, fix rationale, and alternatives considered.
 Set complexity tier to **Standard** minimum.
 Boundary heuristic: if the commit message would need a paragraph to explain
 the *why*, it's Quick Fix.
+
+### Optional ADO Sync Workflow (when provider capability is enabled)
+
+```
+ado-work-item-manager(resolve) -> compliance-checker(pre)
+                               -> ado-wiki-manager (optional, task-dependent)
+                               -> ado-work-item-manager(finalize)
+                               -> compliance-checker(post)
+```
+
+Use this only when the project contract defines Azure DevOps capability as
+required or optional. If optional and unavailable, require degraded fallback
+output and continue with local traceability artifacts.
 
 ### Review Only (user asks to review existing code)
 

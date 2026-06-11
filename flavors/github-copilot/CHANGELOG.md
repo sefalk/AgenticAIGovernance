@@ -5,6 +5,26 @@ All notable changes to the Agent Framework are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+<!-- copilot:modified | implementer | 2026-06-11 | documented optional ADO capability workers and fallback governance -->
+
+## [Unreleased]
+
+### Added
+
+- Optional Azure DevOps capability workers for work item and wiki lifecycle
+  handling: `ado-work-item-manager` and `ado-wiki-manager`.
+- Shared ADO integration skills for provider defaults, optional probe
+  handling, and non-destructive update guidance.
+- Generic governance updates for platform optionality, graceful degradation,
+  and fallback traceability when ADO is unavailable or out of scope.
+
+### Changed
+
+- Coordinator, manifest, and quality-gate docs now treat ADO integrations as
+  optional capabilities rather than hard requirements.
+- Project and flavor guidance now use the provider-scoped `ado-` naming
+  convention consistently.
+
 ## Versioning Rules
 
 - **Major** — breaking changes: removed files, renamed agents, changed contract

@@ -53,6 +53,20 @@ to count.
 
 **Human override:** The human can change the tier at plan approval time.
 
+## Agent Naming Convention (Provider Workers)
+
+Provider-scoped integration workers should use the pattern
+`{provider}-{capability}-{role}` to keep responsibilities explicit and portable.
+
+Examples:
+
+- `ado-work-item-manager`
+- `ado-wiki-manager`
+- `gh-issue-manager`
+
+Naming violations are SOFT unless they cause broken orchestration references,
+which is treated as HARD.
+
 ## Per-Agent Exit Gates
 
 Each agent must verify its applicable gates before returning. Gates
@@ -166,6 +180,27 @@ reference the metric thresholds from MANIFEST § 5.
 | Post-flight: workflow log YAML exists | HARD | Check `.github/logs/{workflow-id}.yaml` | Standard+ |
 | Post-flight: retro snippet exists | HARD | Check `retros/auto/{workflow-id}.md` | Standard+ |
 | Post-flight: provenance markers on new files | SOFT | Read first 5 lines of new files | Standard+ |
+
+### Ado-Work-Item-Manager
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| Capability classification acknowledged (required/optional) | HARD | Output explicitly states required/optional path | Standard+ |
+| Availability probe outcome recorded | HARD | Probe result included (READY/DEGRADED/BLOCKED) | Standard+ |
+| Required unavailable => BLOCKED | HARD | If required and unavailable, operation halts with escalation | Standard+ |
+| Optional unavailable => fallback artifact | HARD | If optional and unavailable, fallback/pending-sync output exists | Standard+ |
+| Non-destructive update policy followed | SOFT | Reviewer checks append/targeted update behavior | Standard+ |
+
+### Ado-Wiki-Manager
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| Capability classification acknowledged (required/optional) | HARD | Output explicitly states required/optional path | Standard+ |
+| Availability probe outcome recorded | HARD | Probe result included (READY/DEGRADED/BLOCKED) | Standard+ |
+| Required unavailable => BLOCKED | HARD | If required and unavailable, operation halts with escalation | Standard+ |
+| Optional unavailable => fallback artifact | HARD | If optional and unavailable, fallback/pending-sync output exists | Standard+ |
+| Existing page read before update | HARD | Update mode includes read-before-write (except create) | Standard+ |
+| Change summary quality | SOFT | Reviewer checks traceability and clarity | Standard+ |
 
 ## Agent Exit Protocol
 

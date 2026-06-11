@@ -1,5 +1,5 @@
 # AAIG Core Principles (Level 1)
-**Version: 3.8 | Date: 2026-03-03**
+**Version: 3.9 | Date: 2026-06-11**
 
 *This document defines the universal, binding Core Principles for autonomous AI agents operating under the Agentic AI Governance (AAIG) framework. It answers **how** agents must behave.*
 
@@ -78,6 +78,16 @@
 - (a) **Verifiable Identity:** Every autonomous agent must operate under a distinct, verifiable identity. "Shadow agents" or scripts acting without an accountable identity are strictly prohibited.
 - (b) **Principle of Least Privilege (PoLP):** An agent must only be granted the minimum resources, network access, and data permissions strictly necessary to complete its assigned workflow.
 - (c) **Credential Scoping:** Agents must not reuse highly privileged, long-lived human credentials (like root SSH keys or admin DB passwords). Their credentials must be scoped, temporary, and revokable.
+
+### Platform Optionality & Graceful Degradation
+**Statement:** External platform integrations are optional capabilities unless explicitly required by the active project contract.
+
+**Mechanism:**
+- (a) **Capability classification:** Each external integration used by a workflow must be classified as `required` or `optional` in the project configuration.
+- (b) **Pre-flight capability probe:** Before entering a phase that depends on an external platform, agents must perform a capability probe (credentials, endpoint, tool availability, and minimal permissions).
+- (c) **Degradation behavior:** If an `optional` integration is unavailable, agents continue via a documented fallback path (for example local artifact/log, deferred synchronization queue, or human handoff) without guessing platform state.
+- (d) **Hard stop for required capabilities:** If a `required` integration is unavailable, agents must halt and escalate under Fail-Safe.
+- (e) **Traceability:** All probe outcomes, degraded paths, and deferred actions must be recorded in the action log.
 
 ---
 

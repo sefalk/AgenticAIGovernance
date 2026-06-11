@@ -239,7 +239,7 @@ to the AF element that enforces it.
 
 | Rule | Statement |
 |---|---|
-| **R-SD-08** | Every code change SHALL be linked to a tracked work item. Unlinked changes SHALL NOT be integrated without explicit justification. |
+| **R-SD-08** | Every code change SHALL be linked to a tracked work item when tracker capability is available/required. If tracker capability is optional and unavailable, the change SHALL be linked via local traceability artifacts and marked for deferred synchronization. |
 | **R-SD-09** | Commit messages SHALL follow a structured format (type, scope, description). Specific format defined at L4. |
 | **R-SD-10** | All third-party dependencies SHALL be declared in a lockfile or deterministic dependency specification. |
 

@@ -33,6 +33,8 @@ The agent team uses the **Coordinator-Worker pattern**:
 | `documenter` | Workflow logs, doc updates | Documentation |
 | `researcher` | Fetch & synthesize external docs | Research (pre-flight) |
 | `compliance-checker` | Verify workflow process gates | Compliance (bookends) |
+| `ado-work-item-manager` | Optional provider worker for Azure DevOps work item lifecycle | Optional integration |
+| `ado-wiki-manager` | Optional provider worker for Azure DevOps wiki lifecycle | Optional integration |
 
 ### Subagent Execution
 
@@ -228,6 +230,8 @@ Every agent operates under a distinct, verifiable identity:
 - All commits, logs, and provenance markers attribute actions to the agent name
 - No "shadow agents" — every autonomous action is traceable to a named agent
 - Agents must not impersonate other agents or the human user
+- Provider-scoped workers should use `{provider}-{capability}-{role}` naming
+  (for example `ado-work-item-manager`, `ado-wiki-manager`)
 
 ### Least Privilege — R-SD-21, R-SD-22
 
@@ -281,6 +285,7 @@ Configuration lives in `.github/hooks/*.json`.
 | Event | Hook | What It Does |
 |---|---|---|
 | `SessionStart` | Session Context | Injects git branch, last commit, Python version |
+| `SessionStart` | ADO MCP Readiness | Reports ADO capability availability and fallback state |
 | `PreToolUse` | Safety Gate | Prompts confirmation for `rm -rf`, `DROP TABLE`, `--force`, etc. |
 | `PostToolUse` | Secret Scan | Scans edited files for hardcoded secrets (gitleaks or regex fallback) |
 | `Stop` | Test Gate | Runs `pytest tests/ -q --tb=line` before session ends |
@@ -365,7 +370,7 @@ enforces it.
 | R-SD-04 | All production code has automated tests (≥ 60%) | § 2 TDD, § 5 Quality Gates |
 | R-SD-05 | Static analysis with zero errors before integration | § 5 Gate 1 Auto-Check, pylance-lint tools |
 | R-SD-06 | Quality gates enforced programmatically | § 5 Quality Gates, § 8 Agent Hooks |
-| R-SD-08 | Changes linked to tracked work items | planner agent (plan linkage) |
+| R-SD-08 | Changes linked to tracked work items (or fallback traceability when tracker is optional/unavailable) | planner + optional ado-work-item-manager |
 | R-SD-09 | Structured commit messages | § 7 Git Conventions |
 | R-SD-11 | No secrets in source code | § 5 Gate 4 Security |
 | R-SD-12 | Dependencies scanned for known CVEs | § 5 Gate 4 Security, code-critic `pip-audit` |

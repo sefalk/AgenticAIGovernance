@@ -6,6 +6,12 @@
         "command": "bash .github/hooks/scripts/session-context.sh",
         "windows": "powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\session-context.ps1",
         "timeout": 10
+      },
+      {
+        "type": "command",
+        "command": "bash .github/hooks/scripts/session-mcp-readiness.sh",
+        "windows": "powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\session-mcp-readiness.ps1",
+        "timeout": 10
       }
     ],
     "PreToolUse": [

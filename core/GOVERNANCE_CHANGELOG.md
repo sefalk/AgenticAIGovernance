@@ -7,6 +7,27 @@ All changes to **Level 0** and **Level 1** governance documents are recorded her
 ## [Unreleased]
 
 ### Changed
+- **L1 Core Principles (v3.8 -> v3.9):**
+  - Added **Platform Optionality & Graceful Degradation** principle.
+  - Defined required vs optional external capability classification.
+  - Added mandatory pre-flight capability probes and explicit fallback behavior.
+  - Formalized hard-stop behavior for unavailable required capabilities.
+- **L1 Framework Architecture (v1.3 -> v1.4):**
+  - Added **Capability Worker** role for provider-scoped integrations.
+  - Added provider-scoped worker naming convention (`{provider}-{capability}-{role}`).
+  - Added **External Capability Cells** pattern (worker + skills + quality gates).
+  - Clarified capability cells are optional unless required by L4 contract.
+- **L4 Project Template (v1.1 unchanged):**
+  - Added external capability optionality contract section (required/optional + probes + fallback).
+  - Added provider worker naming section to keep project instantiation consistent.
+- **L3 Workflow Index (v1.1 unchanged):**
+  - Added explicit workflow selection rule for unavailable external integrations and fallback execution.
+- **L2 Software Development Domain Rules (v1.0 -> v1.1):**
+  - Updated R-SD-08 to support optional tracker integrations with mandatory fallback traceability when unavailable.
+- **L3 Platform Capability Integration Workflow (new):**
+  - Added generic provider-agnostic workflow for required/optional external capability probing, execution, and fallback paths.
+- **Skills Toolbox Index (v2.5 -> v2.6):**
+  - Added devops skills: Azure DevOps work item management and Azure DevOps wiki management.
 - **L0 Assimilation Protocol (v1.4 -> v1.5):**
   - **Phase 1 Update (Syntactic Schema Discovery):** Added a mandate for the agent to explicitly research the strict syntactic schema of the target host (e.g., valid frontmatter, macro triggers) before generating files.
   - **Phase 3 Update (Capability Maximization):** Strengthened the compilation mandate. Agents must map AAIG roles to the *maximum* permission-constrained features natively available (e.g., native tool grants, isolated memory scopes).

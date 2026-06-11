@@ -1,5 +1,5 @@
 # AAIG Framework Architecture
-**Version: 1.3 | Date: 2026-03-06**
+**Version: 1.4 | Date: 2026-06-11**
 
 *This document defines the structural architecture, hierarchical levels, and roles of the Agentic AI Governance (AAIG) framework. It answers **how** the framework is organized.*
 
@@ -27,6 +27,21 @@ This framework organizes agent governance into five hierarchical levels, progres
 *   **Primary Agent:** The agent executing the task, responsible for producing the deliverable and proposing quality gates.
 *   **Reviewer:** Evaluates the Primary Agent's output against applicable rules and quality gates. In multi-agent setups, the Reviewer must not be the same agent as the Primary.
 *   **Quality-Owner:** The agent or human responsible for approving quality gate definitions. Defaults to the human User.
+*   **Capability Worker (optional):** A specialized worker that integrates with one external platform capability (for example issue tracking, wiki, CI/CD, or artifact registry) through a narrow interface.
+
+### 3.1 Capability Worker Naming (Provider-Scoped)
+
+When a worker is dedicated to a specific external provider, use the pattern:
+
+`{provider}-{capability}-{role}`
+
+Examples:
+
+- `ado-work-item-manager`
+- `ado-wiki-manager`
+- `gh-issue-manager`
+
+This naming is descriptive, portable, and avoids overloading domain-focused workers.
 
 ## 4. Bootstrapping & Role Combination
 When fewer agents are available than roles require, roles may be combined with the following constraints:
@@ -51,6 +66,16 @@ Operational artifacts (action logs, ADRs) are not level-classified but must stil
 The framework includes a **Skills Toolbox** (`/skills/`)—a library of detailed skill templates. Skills are expert-knowledge resources invoked during Level-2, Level-3, or Level-4 derivation. During Full-Spectrum Assimilation (L0 Phase 3), all skills are deployed. The User's **Specialization Prompt** selection determines which are **Active** (loaded into the native IDE integration folder) and which are **Deployed (Dormant)** (listed in a reference manifest, available for on-demand activation).
 
 When multiple Level-3 workflows are available, the agent must classify the task and select the appropriate workflow based on entry criteria. If none match, the agent falls back to a generic default sequence: Plan -> Review Plan -> Execute -> Verify -> Review Output.
+
+### 7.1 External Capability Cells
+
+External integrations should be modeled as capability cells:
+
+- a provider-scoped worker,
+- a reusable skill package (shared + capability-specific),
+- and explicit quality gates for availability, fallback behavior, and traceability.
+
+Capability cells are optional unless marked as required by the L4 contract.
 
 **Multi-Workflow Orchestration:** When a single task spans multiple domains (e.g., ML + Infrastructure + Software Dev), decompose it into sub-tasks, one per workflow. Apply the **dependency rule**: if Workflow B requires an artifact from Workflow A (e.g., GPU cluster must exist before model training), run A first, then B. If sub-tasks are independent, run them in parallel branches using the Branch-Per-Agent-Isolation pattern (`multi_agent_coordination.md`). Document the sub-task dependency graph in the `WIP.md` or implementation plan before starting.
 
