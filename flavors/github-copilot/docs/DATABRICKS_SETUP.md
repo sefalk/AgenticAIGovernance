@@ -7,10 +7,18 @@ for your project and configure it for deterministic Databricks workflow executio
 
 ## Prerequisites
 
-- Databricks CLI >= 0.213.0 (check with `databricks --version`)
+- Databricks CLI >= 0.292.0 (check with `databricks --version`)
+- For Lakeflow Jobs-heavy workflows, prefer CLI >= 1.0.0
 - Authenticated Databricks profile (test with `databricks auth profiles`)
 - At least one all-purpose cluster or job cluster in your workspace
 - (Optional) Defined Databricks jobs for your project
+
+### Profile Selection Rule (Critical)
+
+- Never auto-select a Databricks profile when multiple exist.
+- List all profiles and select explicitly for each workflow.
+- Use `-p <profile_name>` / `--profile <profile_name>` on every command.
+- Do not rely on implicit shell state for profile selection.
 
 ## Step 1: Enable the Skill (Framework Setup)
 

@@ -6,6 +6,7 @@ description: 'Deterministic Databricks workflow orchestration — metastore dete
 # Databricks Execution Patterns
 
 <!-- copilot:generated | implementer | 2026-06-22 | AAIG generalized from MP Usage XP -->
+<!-- copilot:modified | implementer | 2026-06-22 | aligned with official Databricks skill conventions for CLI/version/profile safeguards -->
 
 ## Purpose
 
@@ -44,12 +45,18 @@ Before running any Databricks workload:
    ```
    (Tests auth + profile exists without full list cost)
 
-2. **Determine metastore mode:**
+2. **Profile selection discipline (critical):**
+  - Never auto-select a profile when multiple profiles exist.
+  - List available profiles and let user choose explicitly.
+  - Use explicit profile on every command (`-p <profile>` or `--profile <profile>`).
+  - Do not rely on implicit shell state for profile selection.
+
+3. **Determine metastore mode:**
    - Will this task need table/catalog operations?
-   - If NO: skip to step 3
+  - If NO: skip to step 4
    - If YES: run capability probe (see section below)
 
-3. **Define run objectives and success criteria:**
+4. **Define run objectives and success criteria:**
    - PASS condition: What indicates success?
    - FAIL condition: What is the expected negative-test failure?
 
@@ -277,7 +284,9 @@ Do not mix stderr and stdout into single JSON parse.
 
 ## Databricks CLI Version Requirement
 
-**Minimum: Databricks CLI >= 0.213.0**
+**Minimum: Databricks CLI >= 0.292.0**
+
+For Lakeflow Jobs-heavy workflows, prefer CLI `>= 1.0.0`.
 
 Supports:
 - `jobs run-now` (required for defined job path)
@@ -287,6 +296,40 @@ Supports:
 Check version:
 ```
 databricks --version
+```
+
+## Unity Catalog CLI Guardrails (Common CLI Pitfalls)
+
+Use positional arguments for UC schema/table commands.
+
+Correct examples:
+```
+databricks schemas list <CATALOG> -p <profile>
+databricks tables list <CATALOG> <SCHEMA> -p <profile>
+databricks tables get <CATALOG>.<SCHEMA>.<TABLE> -p <profile>
+```
+
+Incorrect examples (do not use):
+```
+databricks schemas list --catalog-name <CATALOG>
+databricks tables list --catalog <CATALOG>
+```
+
+Non-existent command family pitfalls:
+```
+databricks sql-warehouses list
+databricks execute-statement
+databricks sql execute
+```
+
+Prefer:
+```
+databricks warehouses list -p <profile>
+```
+
+When uncertain, check command help first:
+```
+databricks <command> --help
 ```
 
 ## Minimal Command Playbook

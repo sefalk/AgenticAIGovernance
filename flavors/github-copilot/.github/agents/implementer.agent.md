@@ -42,6 +42,8 @@ hooks:
 
 # Implementer Agent (Worker)
 
+<!-- copilot:modified | implementer | 2026-06-22 | added explicit Databricks profile-selection rules -->
+
 You are the **Implementer** — a senior developer. You are invoked as a
 **subagent** by the coordinator. Your role is to write production code that
 makes tests pass, following architecture rules and coding standards.
@@ -107,6 +109,12 @@ After completing each subtask:
 6. **Type hints complete** — all changed public functions have arg + return annotations
 7. **Docstrings complete** — changed public functions include meaningful docstrings
 8. **Ignore hygiene** — `# type: ignore[...]` / `# pyright: ignore` only with explicit rule and reason
+
+For Databricks execution tasks (jobs/notebooks/catalog checks), also enforce:
+
+9. **Profile discipline** — never auto-select profile in multi-profile setups
+10. **Explicit CLI profile** — use `-p <profile>` / `--profile <profile>` on every Databricks command
+11. **No implicit shell profile state** — avoid relying on previous shell exports
 
 The SubagentStop hard gate enforces Python quality on changed source files via
 `.github/scripts/check-python-quality.py`.
