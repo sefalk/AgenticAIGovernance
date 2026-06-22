@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `databricks-execution-patterns` skill: deterministic Databricks workflow
+  orchestration — UC/hive_metastore detection, run-type selection, output
+  retrieval, evidence gating, cluster management, and escalation rules.
+- `templates/af-env.conf.databricks`: project configuration template for
+  job registry, fallback cluster, and authentication profile.
+- `docs/DATABRICKS_SETUP.md`: step-by-step integration guide for new projects.
 - Optional Azure DevOps capability workers for work item and wiki lifecycle
   handling: `ado-work-item-manager` and `ado-wiki-manager`.
 - Shared ADO integration skills for provider defaults, optional probe

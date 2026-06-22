@@ -1,0 +1,62 @@
+# Databricks Configuration for af-env.conf
+#
+# This template should be copied into your project's `.github/af-env.conf`
+# if your project executes Databricks workloads (jobs, notebooks, diagnostics).
+#
+# See `.github/skills/databricks-execution-patterns/SKILL.md` for framework guidance.
+#
+# Deploy marks this [customizable] — it won't be overwritten on updates.
+
+# ============================================================================
+# Databricks Job Registry (project-specific)
+# ============================================================================
+# Add job IDs here as jobs are created and stabilized.
+# Referenced by agents via databricks-execution-patterns skill.
+#
+# Format:
+#   DATABRICKS_JOB_<DESCRIPTION>=<job_id>
+#   DATABRICKS_JOB_<DESCRIPTION>=<job_name>
+#
+# Examples:
+#   DATABRICKS_JOB_VALIDATION=1234567890
+#   DATABRICKS_JOB_EVIDENCE_AB=1234567891
+#   DATABRICKS_JOB_ALIGNMENT_CHECK=1234567892
+#
+# Placeholder entries (replace with actual IDs):
+#
+DATABRICKS_JOB_SAMPLE_1=<job_id_here>
+DATABRICKS_JOB_SAMPLE_2=<job_id_here>
+
+# ============================================================================
+# Databricks Cluster Configuration
+# ============================================================================
+# FALLBACK_CLUSTER_ID is used when a run is stuck in PENDING state > 60s.
+# Must be an all-purpose cluster ID (not a job cluster).
+#
+# How to find your all-purpose cluster ID:
+#   databricks clusters list -p <profile> --output json | jq '.clusters[] | select(.cluster_type=="ALL_PURPOSE")'
+#
+DATABRICKS_FALLBACK_CLUSTER_ID=<cluster_id_here>
+
+# ============================================================================
+# Databricks Authentication
+# ============================================================================
+# PROFILE is the authentication context for all databricks CLI commands.
+# Corresponds to entries in ~/.databrickscfg
+#
+# Create a profile:
+#   databricks configure --token -p <profile_name>
+#
+# Verify it exists:
+#   databricks auth profiles
+#
+DATABRICKS_PROFILE=<profile_name_here>
+
+# ============================================================================
+# Optional: Databricks Workspace & Catalog (for advanced scenarios)
+# ============================================================================
+# If your project tracks UC catalog/schema targets or hive_metastore defaults:
+#
+# DATABRICKS_WORKSPACE_URL=https://<your-workspace>.cloud.databricks.com
+# DATABRICKS_CATALOG=<your_catalog_name>
+# DATABRICKS_SCHEMA=<your_schema_name>
