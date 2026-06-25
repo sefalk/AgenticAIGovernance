@@ -192,6 +192,12 @@ reference the metric thresholds from MANIFEST § 5.
 | Required unavailable => BLOCKED | HARD | If required and unavailable, operation halts with escalation | Standard+ |
 | Optional unavailable => fallback artifact | HARD | If optional and unavailable, fallback/pending-sync output exists | Standard+ |
 | Non-destructive update policy followed | SOFT | Reviewer checks append/targeted update behavior | Standard+ |
+| No Close at finalize (Resolve only, pre-merge) | HARD | Finalize never sets Closed; item is Resolved or kept Active | Standard+ |
+| AC coverage map posted before any closure transition | HARD | Verify an AC->evidence map comment exists for the item | Standard+ |
+| Closure only against merged evidence | HARD | Closed only post-merge; otherwise `CLOSE_PENDING_MERGE` or `BLOCKED_CLOSURE` | Standard+ |
+| AC fully covered (map correctness) | SOFT | Reviewer checks each AC maps to real evidence | Standard+ |
+| No bulk-close of linked work items | HARD | Each linked item closed only after its own AC verification | Standard+ |
+| Multi-phase detection is deterministic; child closed not parent | HARD | Feature/tag/child signal used; Feature stays open, delivered phase closed via child story | Standard+ |
 
 ### Ado-Wiki-Manager
 

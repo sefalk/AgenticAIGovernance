@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional PR config keys in `af-env.conf`: `ADO_DEFAULT_TARGET_BRANCH`,
   `ADO_PR_AUTOCOMPLETE_BRANCHES`, `ADO_PR_HUMAN_ONLY_BRANCHES`,
   `ADO_PR_DEFAULT_REVIEWERS`.
+- **Closure acceptance-criteria gate** (two-stage, post-merge) and
+  **multi-phase spec modeling** in `ado-work-item-manager`: finalize only
+  Resolves (never Closes), an AC coverage map is posted before any closure,
+  closure happens post-merge against merged evidence, no bulk-close, and
+  multi-phase work is modeled as a Feature with phase child stories
+  (deterministic detection; mis-typed single stories are flagged, not closed).
+  The `ado-pr-manager` never sets `transitionWorkItems` (no PR-driven
+  auto-close).
 
 ### Changed
 

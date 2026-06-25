@@ -3,8 +3,8 @@ category: devops
 applies_to: [all]
 complexity: intermediate
 maturity: draft
-version: "1.0"
-last_reviewed: 2026-06-11
+version: "1.1"
+last_reviewed: 2026-06-25
 related: [ci_cd, version_control, configuration_management, documentation]
 ---
 # Azure DevOps Work Item Management
@@ -50,6 +50,31 @@ preserving AAIG traceability and fallback behavior.
 - Add relationship links only when relation semantics are clear.
 - If unresolved identifiers block native linking, record explicit degraded mode.
 
+### Acceptance-Criteria Closure Gate (two-stage, post-merge)
+
+Closure must never rest on unmerged work or acceptance-criteria assumptions.
+
+- **Stage 1 (finalize, pre-merge):** the integration request is not yet
+  merged. Post an **AC coverage map** (each acceptance criterion -> evidence
+  or `UNMET`) and set at most **Resolved** — never **Closed**.
+- **Stage 2 (post-merge):** only after the request is merged and every AC
+  maps to merged evidence, set **Closed**. If the merge cannot be confirmed,
+  defer closure (`CLOSE_PENDING_MERGE`).
+- **Never bulk-close** linked items; verify acceptance criteria per item.
+- The AC coverage map is the **checkable** artifact; the mapping's
+  correctness is a reviewer (SOFT) judgment.
+
+### Multi-Phase Spec Modeling
+
+- Detect a multi-phase **container** deterministically: tracker item is an
+  epic/feature type, carries a `multi-phase` tag, or already has child
+  stories. Do not infer from free-text alone.
+- A single user story spanning multiple phases is **mis-typed** — keep it
+  open, flag the smell, and propose a feature with phase child stories
+  (confirmation required) instead of closing it.
+- Close the delivered phase's **child story**, never the parent; the parent
+  stays open until all children are closed.
+
 ## Quality Gates
 
 | Gate | Threshold | Notes |
@@ -59,6 +84,9 @@ preserving AAIG traceability and fallback behavior.
 | Type-specific fields complete | 100% | Or blocked with reason |
 | Non-destructive policy respected | 100% | Reviewer check |
 | References valid or pending-sync | 100% | No fabricated links |
+| AC coverage map before closure | 100% | Map artifact posted before any close/resolve transition |
+| Closure only against merged evidence | 100% | No Close pre-merge; defer or block otherwise |
+| Multi-phase closes child not parent | 100% | Deterministic detection; parent stays open |
 
 ## Anti-Patterns
 
@@ -68,6 +96,7 @@ preserving AAIG traceability and fallback behavior.
 | Description-only updates | Loses semantic structure | Map to dedicated fields where possible |
 | Forced relation guesses | Creates false dependency graph | Ask/flag advisory instead |
 | Silent degraded mode | Hidden integration failure | Explicitly mark pending-sync/degraded |
+| Premature / bulk closure | Closes items whose AC are unmet; multi-phase work vanishes in a closed parent | Two-stage post-merge AC gate; per-item verification; close child stories, not the feature |
 
 ## See Also
 
