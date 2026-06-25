@@ -11,6 +11,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Optional `ado-pr-manager`** capability worker + **`ado-pr`** skill:
+  request-based integration via Azure DevOps pull requests with a
+  branch-scoped completion policy (integration branch autonomous via
+  autocomplete; protected branch human-only). Terminal-free (MCP only) — the
+  coordinator pushes the feature branch, the worker manages the PR.
+- Two-path integration model in `git-workflow.instructions.md`: pure git
+  (default; push/merge human-controlled) vs optional request-based
+  integration, gated by `ADO_CAPABILITY_MODE`.
+- Optional PR config keys in `af-env.conf`: `ADO_DEFAULT_TARGET_BRANCH`,
+  `ADO_PR_AUTOCOMPLETE_BRANCHES`, `ADO_PR_HUMAN_ONLY_BRANCHES`,
+  `ADO_PR_DEFAULT_REVIEWERS`.
+
+### Changed
+
+- **PR review hardening:** the traceability thread must be posted with a
+  resolved status (so a `comment resolution = Required` policy cannot block
+  the PR's own autocomplete); autocomplete is only set after the work-item
+  link is confirmed (so a `linked work items = Required` policy cannot stall
+  an autocompleting PR).
+- **compliance-checker** now enforces the integration path post-flight
+  (request-based vs pure git) as a HARD gate.
+- **session-mcp-readiness** probe validates PR completion config keys
+  (`ADO_DEFAULT_TARGET_BRANCH`, `ADO_PR_AUTOCOMPLETE_BRANCHES`,
+  `ADO_PR_HUMAN_ONLY_BRANCHES`) when ADO capability is active.
+- **ado-shared** is documented as the canonical (DRY) source for shared
+  `ado-*` worker boilerplate (execution defaults, repo resolution, gate
+  summary). Provider neutrality is labeled a design goal, not yet delivered.
+- `block-dangerous` hook narrows the push guard: feature-branch pushes pass;
+  force pushes and pushes naming protected branches still prompt.
+- `MANIFEST.md` git conventions and coordinator workflow are now
+  integration-path aware (pure git vs request-based).
+
 - `databricks-execution-patterns` skill: deterministic Databricks workflow
   orchestration — UC/hive_metastore detection, run-type selection, output
   retrieval, evidence gating, cluster management, and escalation rules.

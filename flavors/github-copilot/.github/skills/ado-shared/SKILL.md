@@ -45,3 +45,19 @@ A capability run is incomplete unless it reports:
 - probe result
 - required/optional decision path
 - execution mode (`platform` or `fallback`)
+
+## Canonical Boilerplate (DRY)
+
+This skill is the **single source** for behavior shared by all `ado-*`
+workers, so the individual agents reference it instead of restating it:
+
+- **Execution defaults:** read `.github/af-env.conf`; pass `ADO_PROJECT`
+  explicitly on every project-aware MCP call; never rely on interactive
+  project prompts.
+- **Repository resolution order:** `ADO_REPOSITORY_ID` -> `ADO_REPOSITORY_NAME`
+  -> list-and-match.
+- **Gate summary format:** every worker ends with the standard Gate Summary
+  block including the `Skills Read` line.
+
+When these rules change, update them here once; workers should not duplicate
+the detail.

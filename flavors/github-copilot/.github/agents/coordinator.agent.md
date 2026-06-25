@@ -25,6 +25,7 @@ tools:
 agents:
    - ado-work-item-manager
    - ado-wiki-manager
+   - ado-pr-manager
    - planner
    - test-writer
    - test-critic
@@ -118,6 +119,7 @@ These apply **always** — during workflows, conversations, and ad-hoc requests.
 | `compliance-checker` | Verify workflow process gates | Read-only + documenter invocation |
 | `ado-work-item-manager` | Optional Azure DevOps work item lifecycle integration | MCP work item operations |
 | `ado-wiki-manager` | Optional Azure DevOps wiki lifecycle integration | MCP wiki operations |
+| `ado-pr-manager` | Optional Azure DevOps pull request integration (request-based merges) | MCP PR operations (no git) |
 
 ## Workflow Selection
 
@@ -168,11 +170,29 @@ ado-work-item-manager(resolve) -> compliance-checker(pre)
                                -> ado-wiki-manager (optional, task-dependent)
                                -> ado-work-item-manager(finalize)
                                -> compliance-checker(post)
+                               -> [push feature branch] -> ado-pr-manager (optional)
 ```
 
 Use this only when the project contract defines Azure DevOps capability as
 required or optional. If optional and unavailable, require degraded fallback
 output and continue with local traceability artifacts.
+
+**Integration path selection (Mandatory):**
+
+- **Pure git (default, `ADO_CAPABILITY_MODE=off`):** do not run
+  `ado-pr-manager`. The coordinator commits locally; push and merge remain
+  human-controlled. End the workflow with the standard "ready for push" note.
+- **Request-based (optional, ADO PR capability enabled):** after a clean
+  post-flight, the coordinator pushes the feature branch `agent/{id}` from
+  the active work location (main checkout or worktree, per
+  `WORKTREE_ENABLED`) with `git push -u origin agent/{id}` — never a
+  protected branch, never force. Then invoke `ado-pr-manager` to open/update
+  the PR and apply the branch-scoped completion policy (integration branch
+  autocompletes; protected branch is human-only). If the PR manager returns
+  `BLOCKED (branch not published)`, push and re-invoke.
+
+See `instructions/git-workflow.instructions.md` for the full two-path
+integration contract.
 
 ### Review Only (user asks to review existing code)
 

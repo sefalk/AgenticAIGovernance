@@ -9,9 +9,10 @@
 
 | # | Skill | Description | Referenced by |
 |---|-------|-------------|---------------|
-| 1 | `ado-shared` | Shared Azure DevOps integration patterns — defaults, required/optional probe handling, and fallback traceability. | ado-work-item-manager, ado-wiki-manager |
+| 1 | `ado-shared` | Shared Azure DevOps integration patterns — defaults, required/optional probe handling, and fallback traceability. | ado-work-item-manager, ado-wiki-manager, ado-pr-manager |
 | 2 | `ado-workitem` | Azure DevOps work item lifecycle guidance — confidence matching, clarifications, and non-destructive updates. | ado-work-item-manager |
 | 3 | `ado-wiki` | Azure DevOps wiki lifecycle guidance — target resolution, non-destructive updates, and change summaries. | ado-wiki-manager |
+| 3a | `ado-pr` | Azure DevOps pull request lifecycle — branch publication precondition, PR create/update, work-item/plan linking, and branch-scoped autocomplete policy (integration branch autonomous, protected branch human-only). | ado-pr-manager |
 | 4 | `code-review` | Structured code review guidance. Diff analysis, blast radius, automation-first review, anti-pattern detection, and review artifact templates. | test-critic, code-critic |
 | 5 | `databricks-execution-patterns` | Deterministic Databricks workflow orchestration — metastore detection, run-type selection, output retrieval, evidence gating, cluster management. | coordinator, implementer, ado-work-item-manager |
 | 6 | `dependency-management` | Dependency selection, version pinning, lockfiles, vulnerability scanning, and license compliance. | implementer, code-critic |
@@ -48,6 +49,7 @@
 | **compliance-checker** | *(no skills — process checkpoint agent)* |
 | **ado-work-item-manager** | ado-workitem, ado-shared, databricks-execution-patterns |
 | **ado-wiki-manager** | ado-wiki, ado-shared |
+| **ado-pr-manager** | ado-pr, ado-shared |
 
 ## Available for Activation (34 skills in `skills/_available/`)
 

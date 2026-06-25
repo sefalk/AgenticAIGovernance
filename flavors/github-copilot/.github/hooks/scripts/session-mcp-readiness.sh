@@ -50,6 +50,13 @@ else
     if [[ -z "$repo_id" && -z "$repo_name" ]]; then
         advisories+=("ADO_REPOSITORY_ID/ADO_REPOSITORY_NAME missing (branch artifact links may degrade to comments)")
     fi
+
+    if [[ "$mode" != "off" ]]; then
+        grep -q '^ADO_DEFAULT_TARGET_BRANCH=' "$conf_path" || advisories+=("ADO_DEFAULT_TARGET_BRANCH missing (PR integration defaults to dev)")
+        if ! grep -q '^ADO_PR_AUTOCOMPLETE_BRANCHES=' "$conf_path" || ! grep -q '^ADO_PR_HUMAN_ONLY_BRANCHES=' "$conf_path"; then
+            advisories+=("ADO_PR_AUTOCOMPLETE_BRANCHES/ADO_PR_HUMAN_ONLY_BRANCHES missing (PR completion policy uses defaults)")
+        fi
+    fi
 fi
 
 while IFS= read -r -d '' f; do

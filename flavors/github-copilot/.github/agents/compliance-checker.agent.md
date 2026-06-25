@@ -91,6 +91,7 @@ The coordinator invokes you with `mode=post-flight` and provides:
 | Retro snippet exists | Check `retros/auto/{workflow-id}.md` | **MISSING** |
 | Provenance markers on new files | Read first 5 lines of each new file, check for `copilot:generated` | **WARNING** |
 | Provenance markers on modified files | Check for `copilot:modified` in substantially changed files | **ADVISORY** |
+| Integration path matches capability mode | Read `ADO_CAPABILITY_MODE` from `af-env.conf`: if `required`, a PR must have been opened (request-based); if `off`, no PR worker ran (pure git). Mismatch = wrong integration path | **MISSING** for request-based |
 
 ### Post-Flight Return Format
 
@@ -101,6 +102,7 @@ The coordinator invokes you with `mode=post-flight` and provides:
 - **Plan file:** {OK: status=COMPLETED | MISSING: status not updated}
 - **Workflow log:** {OK: exists at {path} | MISSING: not found}
 - **Retro snippet:** {OK: exists at {path} | MISSING: not found}
+- **Integration path:** {OK: matches mode | MISSING: required PR not opened | N/A: pure git}
 
 ### Provenance Markers
 - **New files checked:** {count}
