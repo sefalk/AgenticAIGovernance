@@ -50,6 +50,18 @@ if (-not (Test-Path $confPath)) {
     if (-not $repoIdMatch -and -not $repoNameMatch) {
         $advisories.Add('ADO_REPOSITORY_ID/ADO_REPOSITORY_NAME missing (branch artifact links may degrade to comments)')
     }
+
+    if ($mode -ne 'off') {
+        $targetMatch = $conf | Select-String -Pattern '^ADO_DEFAULT_TARGET_BRANCH=(.+)$'
+        if (-not $targetMatch) {
+            $advisories.Add('ADO_DEFAULT_TARGET_BRANCH missing (PR integration defaults to dev)')
+        }
+        $acMatch = $conf | Select-String -Pattern '^ADO_PR_AUTOCOMPLETE_BRANCHES=(.+)$'
+        $hoMatch = $conf | Select-String -Pattern '^ADO_PR_HUMAN_ONLY_BRANCHES=(.+)$'
+        if (-not $acMatch -or -not $hoMatch) {
+            $advisories.Add('ADO_PR_AUTOCOMPLETE_BRANCHES/ADO_PR_HUMAN_ONLY_BRANCHES missing (PR completion policy uses defaults)')
+        }
+    }
 }
 
 $agentsDir = Join-Path $repoRoot '.github/agents'

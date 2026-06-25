@@ -36,7 +36,8 @@ $patterns = @(
     'Remove-Item.*-Recurse'         # recursive delete (PowerShell)
     'DROP\s+(TABLE|DATABASE)'       # SQL destructive
     'TRUNCATE\s+TABLE'              # SQL destructive
-    'git\s+push\b'                  # any push (local→remote boundary)
+    'git\s+push\b.*(--force|-f)\b'  # force push (always confirm)
+    'git\s+push\b.*\b(main|master|dev)\b'  # push naming a protected branch
     'git\s+merge\b'                 # any merge (topology change)
     'git\s+branch\s+-[dD]\b'       # branch deletion
     'git\s+rebase\b'               # history rewrite

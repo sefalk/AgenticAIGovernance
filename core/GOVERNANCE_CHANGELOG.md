@@ -26,8 +26,12 @@ All changes to **Level 0** and **Level 1** governance documents are recorded her
   - Updated R-SD-08 to support optional tracker integrations with mandatory fallback traceability when unavailable.
 - **L3 Platform Capability Integration Workflow (new):**
   - Added generic provider-agnostic workflow for required/optional external capability probing, execution, and fallback paths.
+- **L3 Platform Capability Integration Workflow (v1.0 -> v1.1):**
+  - Added **Pull / Merge Request Integration** specialization with explicit path separation (pure git default vs optional request-based) and the branch-scoped completion policy (autonomous integration branch, human-only protected branch).
 - **Skills Toolbox Index (v2.5 -> v2.6):**
   - Added devops skills: Azure DevOps work item management and Azure DevOps wiki management.
+- **Skills Toolbox Index (v2.6 -> v2.7):**
+  - Added devops skill: provider-agnostic Pull / Merge Request Integration.
 - **L0 Assimilation Protocol (v1.4 -> v1.5):**
   - **Phase 1 Update (Syntactic Schema Discovery):** Added a mandate for the agent to explicitly research the strict syntactic schema of the target host (e.g., valid frontmatter, macro triggers) before generating files.
   - **Phase 3 Update (Capability Maximization):** Strengthened the compilation mandate. Agents must map AAIG roles to the *maximum* permission-constrained features natively available (e.g., native tool grants, isolated memory scopes).

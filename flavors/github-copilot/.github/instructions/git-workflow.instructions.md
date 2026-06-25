@@ -11,12 +11,18 @@ the git conventions from the [Agent Team Manifest](../MANIFEST.md).
 
 ## Cardinal Rule
 
-**Local git is coordinator-executed; remote git is human-controlled.**
+**Local git is coordinator-executed; integration follows the configured path.**
 
 The coordinator autonomously executes local, reversible git operations
 (branch creation, staging specific files, committing) at reviewed
-checkpoints. Operations with remote or irreversible effects require
-explicit human approval.
+checkpoints. **Integration** into shared branches follows one of two paths
+(see *Integration Paths* below):
+
+- **Pure git (default):** remote push and merge are human-controlled.
+- **Request-based (optional):** when a PR/MR provider capability is enabled,
+  the coordinator pushes the feature branch and an integration worker manages
+  the request; merge into shared branches happens through the request, not
+  local `git merge`.
 
 ### Autonomy Boundary
 
@@ -29,8 +35,11 @@ explicit human approval.
 | `git branch --show-current` | Coordinator | Read-only |
 | `git branch --list` | Coordinator | Read-only |
 | `git checkout {existing-branch}` | Coordinator | Only when human-directed |
-| `git push` (any form) | **Human** | Crosses local→remote boundary |
-| `git merge` | **Human** | Topology change; main protection |
+| `git push` (pure-git default) | **Human** | Crosses local→remote boundary |
+| `git push origin agent/{id}` (request-based path only) | Coordinator | Publishes feature branch for the request; never a protected branch |
+| `git push` to protected branches (`dev`/`main`/`master`) | **Forbidden** | Integration is request-based, never a direct push |
+| `git push --force` (any) | **Forbidden** | Destructive remote rewrite |
+| `git merge` (local, to shared branch) | **Human / Forbidden** | Human in pure-git; replaced by requests in request-based path |
 | `git branch -d / -D` | **Human** | Irreversible deletion |
 | `git reset --hard` | **Human** | Destructive state rewrite |
 | `git rebase` | **Human** | History rewrite risk |
@@ -43,6 +52,40 @@ The `block-dangerous` hook enforces this boundary as a safety net
 independent of coordinator instructions. No worker agent (test-writer,
 implementer, refactorer, etc.) executes git commands — only the
 coordinator does.
+
+## Integration Paths
+
+Integration into shared branches follows exactly one path, selected by
+configuration. **Pure git is the safe default.**
+
+### Pure Git (default)
+
+No request provider configured (`ADO_CAPABILITY_MODE=off` or no PR capability).
+The coordinator commits locally; **push and merge are human-controlled**. The
+workflow ends with a "ready for push" note to the human. No integration
+worker runs. Most projects use this path.
+
+### Request-Based Integration (optional)
+
+A PR/MR provider capability is enabled (e.g. Azure DevOps via
+`ado-pr-manager`). Then:
+
+- The coordinator pushes the **feature branch** `agent/{id}` (only) to the
+  remote, from the active work location (main checkout or worktree per
+  `WORKTREE_ENABLED`). Never a protected branch, never force.
+- An **integration worker** (no terminal/git access) opens/updates the
+  request via the provider API and applies the **branch-scoped completion
+  policy**:
+  - **Integration branch** (e.g. `dev`): autonomous — the worker may set
+    auto-complete; the platform merges once branch policies pass.
+  - **Protected/release branch** (e.g. `main`): human-only — the worker
+    creates the request; a human completes it.
+- Merge into shared branches happens **through the request**, never via local
+  `git merge`.
+
+The completion control is a **server-side branch policy plus permission
+scoping** (no policy-bypass on the agent identity) — agent prompts are
+conventions, not the security boundary.
 
 ## Branch Lifecycle
 

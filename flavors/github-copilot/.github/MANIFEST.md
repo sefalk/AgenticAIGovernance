@@ -35,6 +35,7 @@ The agent team uses the **Coordinator-Worker pattern**:
 | `compliance-checker` | Verify workflow process gates | Compliance (bookends) |
 | `ado-work-item-manager` | Optional provider worker for Azure DevOps work item lifecycle | Optional integration |
 | `ado-wiki-manager` | Optional provider worker for Azure DevOps wiki lifecycle | Optional integration |
+| `ado-pr-manager` | Optional provider worker for Azure DevOps pull request integration (request-based merges) | Optional integration |
 
 ### Subagent Execution
 
@@ -231,7 +232,7 @@ Every agent operates under a distinct, verifiable identity:
 - No "shadow agents" — every autonomous action is traceable to a named agent
 - Agents must not impersonate other agents or the human user
 - Provider-scoped workers should use `{provider}-{capability}-{role}` naming
-  (for example `ado-work-item-manager`, `ado-wiki-manager`)
+  (for example `ado-work-item-manager`, `ado-wiki-manager`, `ado-pr-manager`)
 
 ### Least Privilege — R-SD-21, R-SD-22
 
@@ -256,9 +257,14 @@ Agents receive only the tools and permissions needed for their role:
 - Human commits: conventional commits format
 - **Local git is coordinator-executed** — the coordinator creates branches,
   stages specific files, and commits at reviewed checkpoints
-- **Remote and destructive git is human-controlled** — push, merge to main,
-  branch deletion, hard reset, rebase require human approval
-- The `block-dangerous` hook enforces the remote/destructive boundary
+- **Integration follows the configured path** — pure git by default (push and
+  merge human-controlled); or, when a PR/MR provider capability is enabled,
+  request-based: the coordinator pushes the feature branch and `ado-pr-manager`
+  manages the request (integration branch autocompletes; protected branch is
+  human-completed)
+- **Destructive git is human-controlled** — branch deletion, hard reset,
+  rebase, force push, and pushes to protected branches require human action
+- The `block-dangerous` hook enforces the destructive/protected boundary
 - One atomic commit per workflow phase (plan, tests, implementation, docs)
 - See `instructions/git-workflow.instructions.md` for the full protocol
 

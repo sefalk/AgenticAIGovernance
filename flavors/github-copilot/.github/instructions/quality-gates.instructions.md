@@ -62,6 +62,7 @@ Examples:
 
 - `ado-work-item-manager`
 - `ado-wiki-manager`
+- `ado-pr-manager`
 - `gh-issue-manager`
 
 Naming violations are SOFT unless they cause broken orchestration references,
@@ -179,6 +180,7 @@ reference the metric thresholds from MANIFEST § 5.
 | Post-flight: plan file status = COMPLETED | HARD | Read plan file, check status field | Standard+ |
 | Post-flight: workflow log YAML exists | HARD | Check `.github/logs/{workflow-id}.yaml` | Standard+ |
 | Post-flight: retro snippet exists | HARD | Check `retros/auto/{workflow-id}.md` | Standard+ |
+| Post-flight: integration path matches capability mode | HARD | If `ADO_CAPABILITY_MODE=required`, a PR was opened; if `off`, no PR worker ran | Standard+ |
 | Post-flight: provenance markers on new files | SOFT | Read first 5 lines of new files | Standard+ |
 
 ### Ado-Work-Item-Manager
@@ -201,6 +203,20 @@ reference the metric thresholds from MANIFEST § 5.
 | Optional unavailable => fallback artifact | HARD | If optional and unavailable, fallback/pending-sync output exists | Standard+ |
 | Existing page read before update | HARD | Update mode includes read-before-write (except create) | Standard+ |
 | Change summary quality | SOFT | Reviewer checks traceability and clarity | Standard+ |
+
+### Ado-Pr-Manager
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| No terminal/git operations performed | HARD | Verify the agent used only MCP/read tools (no push/merge) | Standard+ |
+| Remote branch present before PR | HARD | Verify source branch exists on remote, or `BLOCKED (branch not published)` reported | Standard+ |
+| Target branch resolved | HARD | Verify PR target branch present (default `ADO_DEFAULT_TARGET_BRANCH`) | Standard+ |
+| PR created or existing PR updated (no duplicate) | HARD | Verify single active PR for the source branch | Standard+ |
+| Work item linked to PR | HARD | Verify work item linked at creation, or `NEEDS_WORKITEM_LINK` reported for deferred linking, or explicit none-with-reason | Standard+ |
+| Completion policy applied by target | HARD | Integration branch → autocomplete set; protected/unresolved → human-only, no autocomplete | Standard+ |
+| Plan reference attached | SOFT | Reviewer checks clickable URL (remote-verified) or `pending push` fallback | Standard+ |
+| Traceability thread posted | SOFT | Reviewer checks a PR thread summarizes work item, plan, and completion mode (idempotent) | Standard+ |
+| Reviewers/PR description quality | SOFT | Reviewer checks description completeness and reviewer assignment | Deep |
 
 ## Agent Exit Protocol
 

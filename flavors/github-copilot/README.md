@@ -12,7 +12,7 @@ tests, implementation, refactoring, code review, documentation — autonomously.
 Critics review every output; hooks enforce quality gates with real code, not
 suggestions. You stay in control through mandatory escalation points.
 
-- **13 specialised agents** (1 coordinator + 10 core workers + 2 optional ADO workers) with isolated contexts
+- **14 specialised agents** (1 coordinator + 10 core workers + 3 optional ADO workers) with isolated contexts
 - **Test-Driven Development** enforced as separate Red → Green → Refactor phases
 - **Deterministic hooks** run pytest, scan for secrets, block destructive commands
 - **Maker-Checker pattern** — every agent's output is reviewed by a critic
@@ -164,6 +164,7 @@ You → @coordinator
         ├─→ documenter (subagent)           → returns workflow log
         ├─→ ado-work-item-manager (optional)→ provider sync for work items
         ├─→ ado-wiki-manager (optional)      → provider sync for wiki updates
+        ├─→ ado-pr-manager (optional)        → request-based integration (PR)
         └─→ compliance-checker (subagent)   → returns post-flight status
 ```
 
@@ -245,7 +246,7 @@ CHANGELOG.md                               # Release history (Keep a Changelog f
 ├── GOVERNANCE.md                          # Governance model and AI provenance rules
 ├── TROUBLESHOOTING.md                     # Common issues and diagnostic steps
 ├── .af-manifest                           # AF-owned file registry (controls deploy)
-├── agents/                                # 13 agent definitions (includes optional ADO workers)
+├── agents/                                # 14 agent definitions (includes optional ADO workers)
 │   ├── coordinator.agent.md               # 🎯 Main entry point (user-facing)
 │   ├── planner.agent.md                   # Worker: task decomposer
 │   ├── test-writer.agent.md               # Worker: failing tests (Red phase)
@@ -258,7 +259,8 @@ CHANGELOG.md                               # Release history (Keep a Changelog f
 │   ├── researcher.agent.md                # Worker: external research & domain expertise
 │   ├── compliance-checker.agent.md        # Worker: workflow compliance watchdog (bookends)
 │   ├── ado-work-item-manager.agent.md     # Optional worker: Azure DevOps work item lifecycle
-│   └── ado-wiki-manager.agent.md          # Optional worker: Azure DevOps wiki lifecycle
+│   ├── ado-wiki-manager.agent.md          # Optional worker: Azure DevOps wiki lifecycle
+│   └── ado-pr-manager.agent.md            # Optional worker: Azure DevOps pull request integration
 ├── hooks/                                 # Agent hooks (deterministic enforcement)
 │   ├── README.md                          # Hook documentation and templates
 │   ├── agent-hooks.json                   # Active hooks: 5 total hook commands

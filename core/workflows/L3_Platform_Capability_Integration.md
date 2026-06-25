@@ -1,4 +1,4 @@
-**Version: 1.0 | Date: 2026-06-11**
+**Version: 1.1 | Date: 2026-06-25**
 **Level: 3 | Domain: Cross-Domain Integration**
 **Derived from:** [L1_Core_Principles.md](../L1_Core_Principles.md), [L1_Framework_Architecture.md](../L1_Framework_Architecture.md)
 
@@ -100,3 +100,48 @@ planes) in a provider-agnostic, auditable way.
 | Optional capability unavailable => fallback used | HARD | Fallback artifact exists |
 | Least-privilege credentials confirmed | SOFT | Reviewer confirms scope |
 | Traceability record complete | HARD | Log includes references or pending-sync marker |
+
+## Specialization — Pull / Merge Request Integration
+
+Request-based integration (pull/merge requests) is a specialization of this
+workflow for the **code integration** capability. It is **optional**: the
+default is the pure-git path (local commits; push and merge human-controlled).
+When a project enables a request provider, the following applies.
+
+### Path Selection
+
+- **Pure git (default):** no request provider configured; the orchestrator
+  commits locally and push/merge stay human-controlled. No integration
+  worker runs.
+- **Request-based (optional):** a provider capability is enabled; the
+  orchestrator publishes the feature branch and an integration worker manages
+  the request.
+
+### Branch-Scoped Completion Policy
+
+| Target branch class | Mode | Completion |
+|---|---|---|
+| Integration branch | Autonomous | Worker may set auto-complete; platform merges once policies pass |
+| Protected/release branch | Human-only | Worker creates/updates only; human completes |
+| Unresolved / other | Safe default | Treated as human-only |
+
+### Responsibility Split
+
+- The **orchestrator** owns local git including the single push of the
+  feature branch from the active work location; never pushes protected
+  branches and never force-pushes.
+- The **integration worker** has no terminal/git access; it verifies the
+  branch is published, then manages the request through the provider API.
+
+### Provider Neutrality
+
+The contract is provider-agnostic. The first concrete provider is Azure
+DevOps (an `ado-pr-manager` worker). GitHub pull requests and GitLab merge
+requests can implement the same contract through analogous workers without
+changing this workflow.
+
+> **Known limitation:** only the Azure DevOps worker exists today. GitHub and
+> GitLab workers are contract-compatible but **not yet implemented** —
+> provider neutrality is a design goal, not a delivered capability.
+
+See the `pr_integration_management` skill for the detailed behavior contract.
