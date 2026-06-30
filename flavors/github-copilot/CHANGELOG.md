@@ -6,11 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 <!-- copilot:modified | implementer | 2026-06-11 | documented optional ADO capability workers and fallback governance -->
+<!-- copilot:modified | implementer | 2026-06-30 | added optional ado-pipeline-manager capability worker -->
 
 ## [Unreleased]
 
 ### Added
 
+- **Optional `ado-pipeline-manager`** capability worker: registers/runs/monitors
+  an Azure DevOps PR quality-gate pipeline via MCP and emits Build Validation
+  branch-policy settings for a human to apply (no MCP tool exists for policy
+  creation). Terminal-free (MCP only), gated by `ADO_CAPABILITY_MODE`, with gate
+  branches read from `ADO_GATE_BRANCHES`. Integrated into the coordinator
+  (roster + optional pipeline workflow) and the per-agent quality-gate exit
+  gates. New optional config key `ADO_GATE_BRANCHES` in `af-env.conf`.
 - **Optional `ado-pr-manager`** capability worker + **`ado-pr`** skill:
   request-based integration via Azure DevOps pull requests with a
   branch-scoped completion policy (integration branch autonomous via

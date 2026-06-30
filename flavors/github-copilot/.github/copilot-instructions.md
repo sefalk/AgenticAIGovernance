@@ -91,7 +91,7 @@ skills when their task falls within the skill's scope.
 
 | Skill | Directory | Primary Consumer |
 |---|---|---|
-| **ado-shared** | `skills/ado-shared/` | ado-work-item-manager, ado-wiki-manager |
+| **ado-shared** | `skills/ado-shared/` | ado-work-item-manager, ado-wiki-manager, ado-pipeline-manager |
 | **ado-workitem** | `skills/ado-workitem/` | ado-work-item-manager |
 | **ado-wiki** | `skills/ado-wiki/` | ado-wiki-manager |
 | **code-review** | `skills/code-review/` | test-critic, code-critic |

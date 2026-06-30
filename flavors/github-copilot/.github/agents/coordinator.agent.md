@@ -26,6 +26,7 @@ agents:
    - ado-work-item-manager
    - ado-wiki-manager
    - ado-pr-manager
+   - ado-pipeline-manager
    - planner
    - test-writer
    - test-critic
@@ -120,6 +121,7 @@ These apply **always** — during workflows, conversations, and ad-hoc requests.
 | `ado-work-item-manager` | Optional Azure DevOps work item lifecycle integration | MCP work item operations |
 | `ado-wiki-manager` | Optional Azure DevOps wiki lifecycle integration | MCP wiki operations |
 | `ado-pr-manager` | Optional Azure DevOps pull request integration (request-based merges) | MCP PR operations (no git) |
+| `ado-pipeline-manager` | Optional Azure DevOps pipeline integration: register/run/monitor a PR quality-gate pipeline; emit branch-policy settings (human-applied) | MCP pipeline operations (no git) |
 
 ## Workflow Selection
 
@@ -176,6 +178,27 @@ ado-work-item-manager(resolve) -> compliance-checker(pre)
 Use this only when the project contract defines Azure DevOps capability as
 required or optional. If optional and unavailable, require degraded fallback
 output and continue with local traceability artifacts.
+
+### Optional ADO Pipeline Workflow (when provider capability is enabled)
+
+```
+compliance-checker(pre)
+        -> [implementer: pipeline YAML + gate script]
+        -> code-critic -> documenter
+        -> ado-pipeline-manager (register + run + verify)  [optional]
+        -> compliance-checker(post)
+        -> [push feature branch] -> ado-pr-manager (optional)
+```
+
+Use this when the deliverable is establishing or operating an Azure DevOps
+pipeline (e.g., a PR quality-gate / build-validation pipeline). The
+**implementer** authors the pipeline YAML and any gate script; the
+**ado-pipeline-manager** registers the definition, runs it to verify
+(cross-checking agent-pool availability), and emits the exact Build Validation
+branch-policy settings. **Attaching the branch policy is human-guided** — no
+MCP tool exists for policy creation; the coordinator relays the emitted
+settings to the human. When `ADO_CAPABILITY_MODE=off`, do not run
+`ado-pipeline-manager`.
 
 **Integration path selection (Mandatory):**
 

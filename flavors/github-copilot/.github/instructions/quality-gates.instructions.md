@@ -63,6 +63,7 @@ Examples:
 - `ado-work-item-manager`
 - `ado-wiki-manager`
 - `ado-pr-manager`
+- `ado-pipeline-manager`
 - `gh-issue-manager`
 
 Naming violations are SOFT unless they cause broken orchestration references,
@@ -223,6 +224,19 @@ reference the metric thresholds from MANIFEST § 5.
 | Plan reference attached | SOFT | Reviewer checks clickable URL (remote-verified) or `pending push` fallback | Standard+ |
 | Traceability thread posted | SOFT | Reviewer checks a PR thread summarizes work item, plan, and completion mode (idempotent) | Standard+ |
 | Reviewers/PR description quality | SOFT | Reviewer checks description completeness and reviewer assignment | Deep |
+
+### Ado-Pipeline-Manager
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| No terminal/git operations performed | HARD | Verify the agent used only MCP/read tools | Standard+ |
+| Pipeline YAML present on the target branch | HARD | `repo_get_file_content` confirms the YAML on the branch | Standard+ |
+| Definition registered or reused (no duplicate) | HARD | `pipelines_get_build_definitions` checked before create | Standard+ |
+| Run triggered and final status reported | HARD | `pipelines_run_pipeline` + `pipelines_get_build_status` | Standard+ |
+| Agent-pool readiness classified | HARD | Distinguish `queued-no-agent` from `started`; report BLOCKED on no agent | Standard+ |
+| `ADO_PROJECT` injected on project-aware calls | HARD | Explicit project on every MCP call | Standard+ |
+| Build Validation policy settings emitted for human | SOFT | Reviewer checks the policy settings block (buildDefinitionId, isBlocking, branch scopes from `ADO_GATE_BRANCHES`) | Standard+ |
+| Never creates/relaxes branch policies or completes PRs | HARD | Verify no policy mutation and no PR completion | Standard+ |
 
 ## Agent Exit Protocol
 
