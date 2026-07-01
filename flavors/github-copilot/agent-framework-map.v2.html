@@ -661,7 +661,7 @@
         <table class="hook-matrix" style="margin-bottom:1rem;">
           <tr><th>Event</th><th>Script</th><th>Purpose</th><th>Action</th></tr>
           <tr data-detail="hook-session"><td>SessionStart</td><td>session-context</td><td>Inject git branch, commit, Python version</td><td>additionalContext</td></tr>
-          <tr data-detail="hook-block"><td>PreToolUse</td><td>block-dangerous</td><td>Prompt for destructive commands</td><td>ask / deny</td></tr>
+          <tr data-detail="hook-block"><td>PreToolUse</td><td>block-dangerous</td><td>Classify terminal commands (auto-approve / prompt / hard-deny)</td><td>allow / ask / deny</td></tr>
           <tr data-detail="hook-secrets"><td>PostToolUse</td><td>scan-secrets</td><td>Scan for hardcoded secrets</td><td>block if found</td></tr>
           <tr data-detail="hook-tests"><td>Stop</td><td>stop-tests</td><td>Artifact existence check (retired from testing)</td><td>warn (advisory)</td></tr>
         </table>
@@ -872,8 +872,8 @@ const HOOKS_DETAIL = {
     desc: 'Injects git branch, last commit hash, and Python version into every agent session as additionalContext. Agents start aware of their environment.',
     enforcement: 'Informational (injects context, does not block)' },
   'hook-block': { name: 'Safety Gate (block-dangerous)', event: 'PreToolUse', scope: 'Global', script: 'block-dangerous.ps1/.sh',
-    desc: 'Intercepts terminal commands and prompts for confirmation on destructive patterns: rm -rf, DROP TABLE, --force, git push, git reset --hard, etc.',
-    enforcement: 'HARD -- prompts user to confirm (permissionDecision: ask)' },
+    desc: 'Three-tier terminal command classifier: auto-approves safe commands (read-only, tests, feature-branch git, cloud reads), prompts for durable changes, and hard-denies destructive ones (force push, protected-branch push, reset --hard, rebase, rm -rf, DROP TABLE). Configurable via AUTONOMY_LEVEL / AUTONOMY_CAT_* in af-env.conf.',
+    enforcement: 'HARD -- allow / ask / deny (permissionDecision)' },
   'hook-secrets': { name: 'Secret Scan', event: 'PostToolUse', scope: 'Global', script: 'scan-secrets.ps1/.sh',
     desc: 'Scans edited files for hardcoded secrets, API keys, tokens using gitleaks (if available) or regex fallback patterns.',
     enforcement: 'HARD -- blocks if secrets found' },

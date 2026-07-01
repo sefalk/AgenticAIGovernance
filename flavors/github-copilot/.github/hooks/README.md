@@ -156,27 +156,79 @@ The hook reports `READY`, `DEGRADED`, or `BLOCKED` based on
 - Optional wiki/linking hints such as `ADO_WIKI_IDENTIFIER`, `ADO_REPOSITORY_ID`, and `ADO_REPOSITORY_NAME`
 - ADO agent naming guardrail (`ado-` prefix)
 
-#### PreToolUse: Dangerous Command Safety Gate
+#### PreToolUse: Terminal Command Autonomy Classifier
 
 **Scripts:** `scripts/block-dangerous.ps1` (Windows) / `scripts/block-dangerous.sh` (Unix)
 
-Intercepts terminal commands and **prompts for user confirmation** when a
-command matches a destructive pattern. Does **not** block outright — lets
-the user approve if the action is intentional.
+Classifies every terminal command into one of three tiers to reduce approval
+friction while keeping destructive actions blocked:
 
-**Patterns caught:**
+| Tier | Decision | Behaviour |
+|---|---|---|
+| **deny** | `permissionDecision=deny` | Hard-blocked outright + agent notice on how to override. |
+| **allow** | `permissionDecision=allow` | Auto-approved (no prompt). Gated by autonomy config. |
+| **ask** | `permissionDecision=ask` | Prompts for confirmation (durable change). |
+| _default_ | `{}` | Defers to the user's VS Code approval settings. |
 
-| Pattern | Example |
-|---|---|
-| `rm -rf` | `rm -rf /important-data` |
-| `Remove-Item -Recurse` | `Remove-Item C:\ -Recurse -Force` |
-| `DROP TABLE/DATABASE` | `DROP TABLE production.users` |
-| `TRUNCATE TABLE` | `TRUNCATE TABLE logs` |
-| `git push --force` | `git push origin main --force` |
-| `git reset --hard` | `git reset --hard HEAD~5` |
-| `--no-verify` | `git commit --no-verify` |
-| `chmod -R 777` | `chmod -R 777 /var/www` |
-| `mkfs.` / `dd` / `format` | Disk formatting commands |
+**Configuration** lives in `.github/af-env.conf`:
+
+- `AUTONOMY_LEVEL` — `conservative` \| `balanced` (default) \| `autonomous`.
+  Sets category defaults.
+- `AUTONOMY_CAT_*` — per-category overrides (`auto` \| `ask` \| `deny`) that
+  win over the level default. Categories: `GIT_READ`, `GIT_FEATURE`, `TESTS`,
+  `FS_READ`, `PKG_INSTALL`, `DATABRICKS`, `CLOUD_READ`.
+- `PROTECTED_BRANCHES` — branches that may never be pushed to / merged into
+  directly (default `main,master,dev`). Feature-branch (`agent/*`) git ops
+  are branch-aware and auto-approve; protected-branch pushes hard-deny.
+
+**Level → category defaults:**
+
+| Category | conservative | balanced | autonomous |
+|---|---|---|---|
+| Git read (`status`/`diff`/`log`/…) | auto | auto | auto |
+| Filesystem read (`ls`/`cat`/`grep`/…) | auto | auto | auto |
+| Tests/lint (`pytest`/`ruff check`/`mypy`) | ask | auto | auto |
+| Git feature branch (`commit`/`add <files>`/push `agent/*`) | ask | auto | auto |
+| Package install (`pip`/`conda install`) | ask | ask | **auto** |
+| Databricks CLI (mutating) | ask | ask | ask |
+| Cloud read (`databricks list/get`, `az show/list`) | ask | **auto** | **auto** |
+
+**deny tier (level-independent):** force push, push to a protected branch,
+`git reset --hard`, `git rebase`, branch deletion, `git add .`/`-A`/`--force`,
+`--no-verify`, broad `rm -rf`, recursive force delete, `dd`/`mkfs`/drive
+format, `chmod -R 777`, pipe-to-shell (`| bash`/`| iex`), `DROP`/`TRUNCATE`.
+When a command is denied, the agent will not run it — it can instead prepare
+the exact command for you to paste and run yourself, or you can relax the
+relevant `AUTONOMY_CAT_*` setting.
+
+**ask tier:** `git merge`, `git checkout <existing>`, `git tag`, `pip
+install/uninstall` (unless `pkg=auto`), `ruff format` (writes), mutating
+`databricks`/`az`, single-file `Remove-Item`/`rm`, `mv`/`cp`/`mkdir`.
+
+**Segment-based auto-allow:** the command is split on `;`, `&&`, `||`, `|`,
+and newlines, and auto-approved only when **every** segment is individually
+safe. This lets common composites through — e.g. `cd … ; pytest … 2>&1 |
+Select-Object -Last 30` — while still refusing anything with an unknown or
+mutating segment (`pytest ; ./deploy.sh` → prompt). `2>&1`-style fd
+duplication is treated as safe; file-write redirects (`> file`, `>> file`),
+background/inline `&`, command substitution (`$(…)`), backticks, and grouping
+/ subshell / scriptblock metacharacters **outside quotes** (`(…)`, `{…}`) are
+never auto-allowed — because `Write-Host (Remove-Item x)` or bash `(rm x)`
+would execute the inner command. Quotes are stripped before that check, so
+conventional-commit messages like `"fix(scope): …"` still auto-allow.
+
+Read-only helpers that also auto-allow: `pip list/show/freeze/check`,
+`whoami`, `hostname`, `Get-Date`, `Get-Process`, `Get-Service`, switching
+to an existing `agent/*` branch (`git checkout agent/…`), and — from the
+`balanced` level — read-only cloud calls (`databricks <group> list/get`,
+`az … show/list`). Cloud reads that touch secrets/credentials/tokens
+(`az keyvault secret show`, `databricks secrets get`, `az … get-access-token`)
+are **excluded** and still prompt, so credentials are never auto-printed.
+
+**Fail-safe:** DENY is scanned across the whole command string first, so a
+hidden dangerous segment (`… ; rm -rf /`, `Write-Host (git push --force)`) is
+blocked even inside a composite. On any parse ambiguity the hook returns `{}`
+(prompt) — it never accidentally auto-approves.
 
 #### PostToolUse: Secret Detection Scan
 
