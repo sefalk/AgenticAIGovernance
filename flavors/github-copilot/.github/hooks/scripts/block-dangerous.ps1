@@ -57,6 +57,11 @@ $protected = @((Get-AfEnv 'PROTECTED_BRANCHES' 'main,master,dev') -split ',' |
     ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if ($protected.Count -eq 0) { $protected = @('main', 'master', 'dev') }
 $protAlt = ($protected | ForEach-Object { [regex]::Escape($_) }) -join '|'
+$curBranch = (git rev-parse --abbrev-ref HEAD 2>$null)
+# Optional executable path prefix (e.g. .venv\Scripts\, ./, /usr/bin/) and .exe suffix,
+# so path-invoked tools like `.venv\Scripts\pytest.exe` are recognised.
+$pathPfx = '([^\s]*[\\/])?'
+$exe = '(\.exe)?'
 
 # Category defaults per level. Per-category overrides win when non-empty.
 $levelDefaults = @{
@@ -152,7 +157,7 @@ function Test-SafeSegment([string]$seg) {
     # ( & is not split on because it also appears in fd redirects like 2>&1 )
     if ($s -match '(?<![0-9>&])&(?!&)') { return $false }
     # navigation (no data change)
-    if ($s -match '(?i)^(cd|Set-Location|pushd|popd)\b') { return $true }
+    if ($s -match '(?i)^(cd|Set-Location|pushd|popd|Push-Location|Pop-Location)\b') { return $true }
     # safe display / filter commands (typical pipe right-hand side)
     if ($s -match '(?i)^(Select-Object|Select-String|Sort-Object|Measure-Object|Out-String|Out-Host|Format-Table|Format-List|Get-Unique|more|wc|findstr|grep|ConvertFrom-Json|ConvertTo-Json)\b') { return $true }
     # version probes: <binary> [flags] --version (no positional file arg before it)
@@ -165,17 +170,25 @@ function Test-SafeSegment([string]$seg) {
         if ($s -match '^\s*git\s+add\s+\S') { return $true }
         if ($s -match '^\s*git\s+(checkout|switch)\s+-[bc]\s+agent/') { return $true }
         if ($s -match '^\s*git\s+(checkout|switch)\s+agent/') { return $true }
-        if ($s -match '^\s*git\s+push\b' -and $s -match 'agent/' -and $s -notmatch "(\s|:)($protAlt)(\s|$)") { return $true }
+        if ($s -match '^\s*git\s+push\b' -and $s -notmatch "(\s|:)($protAlt)(\s|$)") {
+            if ($s -match 'agent/') { return $true }                                  # explicit feature target
+            if ($curBranch -and ($protected -notcontains $curBranch)) { return $true } # bare push on a feature branch
+        }
         if ($s -match '^\s*git\s+(restore|switch\s+agent/)\b') { return $true }
     }
-    # tests / lint / typecheck (no durable change)
-    if ($catTests -eq 'auto' -and ($s -match '(?i)^\s*(python\s+-m\s+)?(pytest|mypy|pyright)\b' -or $s -match '(?i)^\s*ruff\s+(check|format\s+--check)\b' -or $s -match '(?i)run-tests')) { return $true }
+    # tests / lint / typecheck / static analysis (read-only, no durable change).
+    # Accepts a path prefix so `.venv\Scripts\pytest.exe` etc. are recognised.
+    if ($catTests -eq 'auto' -and (
+            $s -match "(?i)^\s*$pathPfx(pytest|mypy|pyright|tox|nox|radon|bandit|flake8|pylint|vulture|pip-audit)$exe\b" -or
+            $s -match "(?i)^\s*${pathPfx}python(\d)?$exe\s+-m\s+(pytest|mypy|pyright)\b" -or
+            $s -match "(?i)^\s*${pathPfx}ruff$exe\s+(check|format\s+--check)\b" -or
+            $s -match '(?i)run-tests')) { return $true }
     # read-only filesystem & info commands
     if ($catFsRead -eq 'auto' -and $s -match '(?i)^\s*(ls|dir|Get-ChildItem|cat|type|Get-Content|head|tail|Test-Path|pwd|Get-Location|where(\.exe)?|Get-Command|Get-Date|whoami|hostname|Get-Process|Get-Service|echo|Write-Output|Write-Host)\b') { return $true }
     # read-only package / environment queries
-    if ($catFsRead -eq 'auto' -and $s -match '(?i)^\s*(pip3?|python\s+-m\s+pip)\s+(list|show|freeze|check)\b') { return $true }
+    if ($catFsRead -eq 'auto' -and ($s -match "(?i)^\s*${pathPfx}pip3?$exe\s+(list|show|freeze|check)\b" -or $s -match '(?i)^\s*python(\d)?\s+-m\s+pip\s+(list|show|freeze|check)\b')) { return $true }
     # package managers (autonomy-gated)
-    if ($catPkg -eq 'auto' -and ($s -match '(?i)^\s*(pip3?|python\s+-m\s+pip)\s+(install|uninstall)\b' -or $s -match '(?i)^\s*conda\s+(install|remove)\b')) { return $true }
+    if ($catPkg -eq 'auto' -and ($s -match "(?i)^\s*${pathPfx}pip3?$exe\s+(install|uninstall)\b" -or $s -match '(?i)^\s*python(\d)?\s+-m\s+pip\s+(install|uninstall)\b' -or $s -match "(?i)^\s*${pathPfx}conda$exe\s+(install|remove)\b")) { return $true }
     # read-only cloud CLI queries (databricks list/get, az show/list).
     # Excludes anything touching secrets/credentials/tokens (would print them).
     if ($catCloudRead -eq 'auto' -and $s -notmatch '(?i)(secret|credential|token|password|keyvault|get-access-token)' -and ($s -match '(?i)^\s*databricks\s+[\w-]+\s+(list|get|ls|show)\b' -or $s -match '(?i)^\s*az\s+.+\b(show|list)\b')) { return $true }

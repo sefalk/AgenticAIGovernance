@@ -46,6 +46,10 @@ case "$level" in conservative|balanced|autonomous) ;; *) level=balanced ;; esac
 protected=$(get_af_env PROTECTED_BRANCHES 'main,master,dev')
 prot_alt=$(echo "$protected" | sed -E 's/[[:space:]]//g; s/,/|/g')
 [ -z "$prot_alt" ] && prot_alt='main|master|dev'
+cur_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+# Optional executable path prefix (.venv/bin/, .venv\Scripts\, ./, /usr/bin/) and .exe suffix.
+path_pfx='(\S*[\\/])?'
+exe='(\.exe)?'
 
 # category resolver: override wins, else level default
 cat_default() {
@@ -132,7 +136,7 @@ is_safe_segment() {
     # background / inline chaining operator ( & ) not handled by the split
     # ( & is not split on because it also appears in fd redirects like 2>&1 )
     if printf '%s' "$SEG" | grep -qE '(^|[^0-9>&])&([^&]|$)'; then return 1; fi
-    sm '^(cd|Set-Location|pushd|popd)\b' && return 0
+    sm '^(cd|Set-Location|pushd|popd|Push-Location|Pop-Location)\b' && return 0
     sm '^(Select-Object|Select-String|Sort-Object|Measure-Object|Out-String|Out-Host|Format-Table|Format-List|Get-Unique|more|wc|findstr|grep|ConvertFrom-Json|ConvertTo-Json)\b' && return 0
     sm '^[[:space:]]*[[:alnum:]._/-]+([[:space:]]+-{1,2}[[:alnum:]=.,_-]+)*[[:space:]]+--version\b' && return 0
     if [ "$cat_git_read" = "auto" ]; then
@@ -143,18 +147,27 @@ is_safe_segment() {
         sm '^\s*git\s+add\s+\S' && return 0
         sm '^\s*git\s+(checkout|switch)\s+-[bc]\s+agent/' && return 0
         sm '^\s*git\s+(checkout|switch)\s+agent/' && return 0
-        if sm '^\s*git\s+push\b' && sm 'agent/' && ! sm "(\s|:)($prot_alt)(\s|$)"; then return 0; fi
+        if sm '^\s*git\s+push\b' && ! sm "(\s|:)($prot_alt)(\s|$)"; then
+            if sm 'agent/'; then return 0; fi
+            if [ -n "$cur_branch" ] && ! echo "$cur_branch" | grep -qxE "$prot_alt"; then return 0; fi
+        fi
         sm '^\s*git\s+(restore|switch\s+agent/)\b' && return 0
     fi
     if [ "$cat_tests" = "auto" ]; then
-        sm '^\s*(python\s+-m\s+)?(pytest|mypy|pyright)\b|^\s*ruff\s+(check|format\s+--check)\b|run-tests' && return 0
+        sm "^\s*${path_pfx}(pytest|mypy|pyright|tox|nox|radon|bandit|flake8|pylint|vulture|pip-audit)${exe}\b" && return 0
+        sm "^\s*${path_pfx}python([0-9])?${exe}\s+-m\s+(pytest|mypy|pyright)\b" && return 0
+        sm "^\s*${path_pfx}ruff${exe}\s+(check|format\s+--check)\b" && return 0
+        sm 'run-tests' && return 0
     fi
     if [ "$cat_fs_read" = "auto" ]; then
         sm '^\s*(ls|dir|Get-ChildItem|cat|type|Get-Content|head|tail|Test-Path|pwd|Get-Location|where(\.exe)?|Get-Command|Get-Date|whoami|hostname|Get-Process|Get-Service|echo|Write-Output|Write-Host)\b' && return 0
-        sm '^\s*(pip3?|python\s+-m\s+pip)\s+(list|show|freeze|check)\b' && return 0
+        sm "^\s*${path_pfx}pip3?${exe}\s+(list|show|freeze|check)\b" && return 0
+        sm '^\s*python([0-9])?\s+-m\s+pip\s+(list|show|freeze|check)\b' && return 0
     fi
     if [ "$cat_pkg" = "auto" ]; then
-        sm '^\s*(pip3?|python\s+-m\s+pip)\s+(install|uninstall)\b|^\s*conda\s+(install|remove)\b' && return 0
+        sm "^\s*${path_pfx}pip3?${exe}\s+(install|uninstall)\b" && return 0
+        sm '^\s*python([0-9])?\s+-m\s+pip\s+(install|uninstall)\b' && return 0
+        sm "^\s*${path_pfx}conda${exe}\s+(install|remove)\b" && return 0
     fi
     if [ "$cat_cloud_read" = "auto" ]; then
         # read-only cloud CLI; exclude anything touching secrets/credentials/tokens

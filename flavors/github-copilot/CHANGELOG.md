@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AUTONOMY_CAT_*` overrides (`GIT_READ`, `GIT_FEATURE`, `TESTS`, `FS_READ`,
   `PKG_INSTALL`, `DATABRICKS`, `CLOUD_READ`) in `af-env.conf`. Cloud reads that
   touch secrets/credentials/tokens are excluded and always prompt.
+  Path-invoked tools (`.venv\Scripts\pytest.exe`, `.venv/bin/ruff`, …), static
+  analysis tools (`radon`/`bandit`/`flake8`/`pylint`/`vulture`/`pip-audit`),
+  `Push-Location`/`Pop-Location`, and branch-aware bare `git push` (auto only
+  when the current branch is a non-protected feature branch) are recognised.
 - **Researcher web-fetch allowlist**: `researcher-pretooluse` auto-approves
   fetches to `WEB_FETCH_ALLOWLIST` domains (official docs) and prompts for other
   domains with an offer to add them; credential-bearing URLs no longer
