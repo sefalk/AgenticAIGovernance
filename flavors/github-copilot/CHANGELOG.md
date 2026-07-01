@@ -7,11 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- copilot:modified | implementer | 2026-06-11 | documented optional ADO capability workers and fallback governance -->
 <!-- copilot:modified | implementer | 2026-06-30 | added optional ado-pipeline-manager capability worker -->
+<!-- copilot:modified | implementer | 2026-07-01 | three-tier terminal autonomy classifier + web-fetch allowlist -->
 
 ## [Unreleased]
 
 ### Added
 
+- **Three-tier terminal autonomy classifier** (`block-dangerous` hook rewrite):
+  every terminal command is classified `allow` (auto-approved), `ask` (prompt),
+  or `deny` (hard-blocked) instead of the previous prompt-only pattern list.
+  Auto-approval is segment-based (safe only when every `;`/`&&`/`||`/`|`/newline
+  segment is individually safe), branch-aware (feature-branch git auto;
+  protected-branch push/reset/rebase/branch-deletion hard-denied), and fail-safe
+  (grouping/subshell/`$(...)`/backticks/file-write redirects never auto-approve;
+  DENY is scanned across the whole command string). Configurable via
+  `AUTONOMY_LEVEL` (`conservative` | `balanced` | `autonomous`) and per-category
+  `AUTONOMY_CAT_*` overrides (`GIT_READ`, `GIT_FEATURE`, `TESTS`, `FS_READ`,
+  `PKG_INSTALL`, `DATABRICKS`, `CLOUD_READ`) in `af-env.conf`. Cloud reads that
+  touch secrets/credentials/tokens are excluded and always prompt.
+- **Researcher web-fetch allowlist**: `researcher-pretooluse` auto-approves
+  fetches to `WEB_FETCH_ALLOWLIST` domains (official docs) and prompts for other
+  domains with an offer to add them; credential-bearing URLs no longer
+  short-circuit the allowlist decision.
+- New `af-env.conf` keys: `AUTONOMY_LEVEL`, `AUTONOMY_CAT_*`,
+  `PROTECTED_BRANCHES`, `WEB_FETCH_ALLOWLIST`.
 - **Optional `ado-pipeline-manager`** capability worker: registers/runs/monitors
   an Azure DevOps PR quality-gate pipeline via MCP and emits Build Validation
   branch-policy settings for a human to apply (no MCP tool exists for policy
@@ -54,8 +73,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ado-shared** is documented as the canonical (DRY) source for shared
   `ado-*` worker boilerplate (execution defaults, repo resolution, gate
   summary). Provider neutrality is labeled a design goal, not yet delivered.
-- `block-dangerous` hook narrows the push guard: feature-branch pushes pass;
-  force pushes and pushes naming protected branches still prompt.
+- `block-dangerous` hook is now a three-tier autonomy classifier (see Added):
+  feature-branch pushes auto-approve; force pushes and pushes naming a
+  protected branch are hard-denied (previously prompt-only).
 - `MANIFEST.md` git conventions and coordinator workflow are now
   integration-path aware (pure git vs request-based).
 

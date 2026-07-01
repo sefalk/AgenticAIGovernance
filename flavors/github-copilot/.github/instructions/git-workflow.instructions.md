@@ -51,7 +51,12 @@ checkpoints. **Integration** into shared branches follows one of two paths
 The `block-dangerous` hook enforces this boundary as a safety net
 independent of coordinator instructions. No worker agent (test-writer,
 implementer, refactorer, etc.) executes git commands — only the
-coordinator does.
+coordinator does. The hook is a three-tier classifier: feature-branch git
+ops (`commit`, staging specific files, creating and pushing `agent/*`
+branches) and read-only/test commands are **auto-approved** per the autonomy
+policy in `.github/af-env.conf`; force pushes, pushes naming a protected
+branch, `git reset --hard`, `git rebase`, and branch deletion are
+**hard-denied** (with an agent notice on how to override deliberately).
 
 ## Integration Paths
 

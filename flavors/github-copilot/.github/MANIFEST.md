@@ -264,7 +264,9 @@ Agents receive only the tools and permissions needed for their role:
   human-completed)
 - **Destructive git is human-controlled** — branch deletion, hard reset,
   rebase, force push, and pushes to protected branches require human action
-- The `block-dangerous` hook enforces the destructive/protected boundary
+- The `block-dangerous` hook enforces the destructive/protected boundary as a
+  three-tier classifier (auto-approve safe / prompt durable / hard-deny
+  destructive), tuned via `AUTONOMY_LEVEL` / `AUTONOMY_CAT_*` in `af-env.conf`
 - One atomic commit per workflow phase (plan, tests, implementation, docs)
 - See `instructions/git-workflow.instructions.md` for the full protocol
 
@@ -292,7 +294,7 @@ Configuration lives in `.github/hooks/*.json`.
 |---|---|---|
 | `SessionStart` | Session Context | Injects git branch, last commit, Python version |
 | `SessionStart` | ADO MCP Readiness | Reports ADO capability availability and fallback state |
-| `PreToolUse` | Safety Gate | Prompts confirmation for `rm -rf`, `DROP TABLE`, `--force`, etc. |
+| `PreToolUse` | Safety Gate | Three-tier classifier: auto-approve safe commands, prompt durable changes, hard-deny `rm -rf`/`DROP TABLE`/force push/etc. |
 | `PostToolUse` | Secret Scan | Scans edited files for hardcoded secrets (gitleaks or regex fallback) |
 | `Stop` | Test Gate | Runs `pytest tests/ -q --tb=line` before session ends |
 
@@ -300,6 +302,7 @@ Configuration lives in `.github/hooks/*.json`.
 
 - Exit code `0` → success, parse stdout JSON
 - Exit code `2` → blocking error, stop processing
+- `permissionDecision: "allow"` → auto-approve a tool call (no prompt)
 - `permissionDecision: "ask"` → prompt user to confirm a tool call
 - `permissionDecision: "deny"` → block a specific tool call
 - `decision: "block"` (in `Stop` hook) → prevent session from ending
