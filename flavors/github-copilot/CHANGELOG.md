@@ -8,8 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- copilot:modified | implementer | 2026-06-11 | documented optional ADO capability workers and fallback governance -->
 <!-- copilot:modified | implementer | 2026-06-30 | added optional ado-pipeline-manager capability worker -->
 <!-- copilot:modified | implementer | 2026-07-01 | three-tier terminal autonomy classifier + web-fetch allowlist -->
+<!-- copilot:modified | implementer | 2026-07-02 | released 1.19.0 (rolled Unreleased); added auto-version pre-commit hook -->
 
 ## [Unreleased]
+
+## [1.19.0] -- 2026-07-02
 
 ### Added
 
@@ -46,6 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new items fell to the project default area — this key existed in a downstream
   project but was never generalized). Documented in the `ado-workitem` skill,
   the core `ado_work_item_management` skill, and a new SOFT routing gate.
+- **Auto-version pre-commit hook** (`.githooks/pre-commit`) — bumps the patch
+  component of `VERSION` whenever `flavors/github-copilot/**` or `core/**`
+  source changes and `VERSION` was not itself staged (a deliberate minor/major
+  cut stages `VERSION`, so the hook skips). Prevents the version drift that
+  stranded `1.18.26`. Enable once with `git config core.hooksPath .githooks`.
 - **Optional `ado-pipeline-manager`** capability worker: registers/runs/monitors
   an Azure DevOps PR quality-gate pipeline via MCP and emits Build Validation
   branch-policy settings for a human to apply (no MCP tool exists for policy

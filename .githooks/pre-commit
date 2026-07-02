@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Auto-version pre-commit hook for the Agent Framework.
+#
+# Keeps flavors/github-copilot/VERSION in lockstep with source edits so the
+# version can never silently go stale (the drift that stranded 1.18.26).
+#
+# Behaviour:
+#   - If any staged file is under `flavors/github-copilot/` or `core/`, AND
+#   - VERSION was NOT itself manually staged (i.e. this is not a deliberate
+#     minor/major release cut) THEN bump the PATCH component and stage it.
+#   - A deliberate release cut stages VERSION explicitly -> the hook skips,
+#     so it never double-bumps on top of a chosen minor/major version.
+#
+# Enable once per clone:
+#   git config core.hooksPath .githooks
+#
+# Bypass for a single commit (e.g. docs-only): git commit --no-verify
+
+set -euo pipefail
+
+VERSION_FILE="flavors/github-copilot/VERSION"
+
+# Nothing to do if the VERSION file is missing.
+[ -f "$VERSION_FILE" ] || exit 0
+
+staged="$(git diff --cached --name-only)"
+
+# Only act when Agent Framework source actually changed.
+if ! printf '%s\n' "$staged" | grep -qE '^(flavors/github-copilot/|core/)'; then
+    exit 0
+fi
+
+# Deliberate release cut: VERSION already staged -> respect the chosen version.
+if printf '%s\n' "$staged" | grep -qx "$VERSION_FILE"; then
+    exit 0
+fi
+
+cur="$(tr -d ' \t\r\n' < "$VERSION_FILE")"
+if ! printf '%s' "$cur" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo "[pre-commit] VERSION '$cur' is not semver X.Y.Z -- skipping auto-bump." >&2
+    exit 0
+fi
+
+major="${cur%%.*}"
+rest="${cur#*.}"
+minor="${rest%%.*}"
+patch="${rest#*.}"
+patch=$((patch + 1))
+new="${major}.${minor}.${patch}"
+
+printf '%s\n' "$new" > "$VERSION_FILE"
+git add "$VERSION_FILE"
+echo "[pre-commit] AF VERSION auto-bumped ${cur} -> ${new}"
+exit 0
