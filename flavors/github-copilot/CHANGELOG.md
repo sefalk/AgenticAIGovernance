@@ -12,6 +12,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Branch-to-Work-Item Association (R-SD-08)** operationalized in
+  `git-workflow.instructions.md`: when tracker capability is active
+  (`ADO_CAPABILITY_MODE != off`) the branch slug carries the work item id
+  (`agent/{work-item-id}-{workflow-id}`) and the work item must link the branch
+  + plan path; missing association is a HARD compliance post-flight gate.
+  Enforced by the `compliance-checker` and the quality-gates spec. Backflowed
+  from a downstream project where it was already in use.
+- **Protected-wiki (`TF402455`) handling** in `ado-wiki-manager` + `ado-wiki`
+  skill: a PR-required `wikiMaster` policy no longer causes blind retries — the
+  agent takes the PR route (branch + wiki page + PR, human-completed) and falls
+  back to a DEGRADED handoff with ready page markdown. Documents the known
+  `wiki_create_or_update_page` `branch`-param limitation. Added
+  `repo_create_branch` / `repo_create_pull_request` to the worker's tools.
+
 ## [1.19.0] -- 2026-07-02
 
 ### Added

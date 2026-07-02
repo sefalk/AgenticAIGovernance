@@ -11,6 +11,9 @@ tools:
   - microsoft/azure-devops-mcp/wiki_get_page_by_path
   - microsoft/azure-devops-mcp/wiki_get_page_content
   - microsoft/azure-devops-mcp/wiki_create_or_update_page
+  - microsoft/azure-devops-mcp/wiki_list_wikis
+  - microsoft/azure-devops-mcp/repo_create_branch
+  - microsoft/azure-devops-mcp/repo_create_pull_request
 ---
 
 # ADO Wiki Manager Agent
@@ -39,11 +42,40 @@ Consult these skills when relevant to the task:
 - If wiki capability is **required**, unavailable ADO access is BLOCKED.
 - If **optional**, create fallback markdown summary and mark `pending-sync`.
 
+## Protected Wiki (PR-required) Handling
+
+Some wikis are code-wikis with a branch policy on the default branch
+(`wikiMaster`), so a direct page write fails with **`TF402455` (pushes to this
+branch are not permitted; use a pull request)**. Do **not** retry the same
+direct write — it will keep failing.
+
+On `TF402455`:
+
+1. **PR route (preferred).** Create a feature branch in the wiki repository
+   (`repo_create_branch` from `wikiMaster`; the wiki's `repositoryId` equals
+   its wiki id), write the page on that branch, then open a PR to `wikiMaster`
+   (`repo_create_pull_request`). Protected-branch completion is **human-only**
+   — the human merges the PR to publish the page.
+   - **Known MCP limitation:** on some azure-devops-mcp builds the
+     `wiki_create_or_update_page` `branch` parameter is unreliable and fails
+     with `version '{0}' invalid` for any non-default branch. If the
+     branch-scoped write fails this way, do not loop — go to step 2 and report
+     the tool limitation explicitly.
+2. **Fallback (DEGRADED).** Emit the full page markdown as a fallback artifact
+   and hand off to the human (create via the ADO wiki UI or a wiki PR). Report
+   `status=DEGRADED`, `blocking issue = wiki branch policy (TF402455)`, and
+   include the ready-to-paste content.
+
+Never relax or remove the wiki branch policy — that is a human/UI decision. If
+direct writes previously worked and now return `TF402455`, the policy was
+added since; state this in the handoff so the human can decide whether to scope
+the policy to exempt the service identity.
+
 ## Return Format
 
 ```markdown
 ## ADO Wiki Result
-- **Status:** {UPDATED | CREATED | NEEDS_CONFIRMATION | DEGRADED | BLOCKED}
+- **Status:** {UPDATED | CREATED | PR_OPENED | NEEDS_CONFIRMATION | DEGRADED | BLOCKED}
 - **Path:** {wiki path}
 - **Update mode:** {append | section-rewrite | full-replace}
 - **Actions performed:** {resolved | read | created | updated | fallback}

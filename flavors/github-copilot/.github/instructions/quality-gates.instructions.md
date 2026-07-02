@@ -182,6 +182,7 @@ reference the metric thresholds from MANIFEST § 5.
 | Post-flight: workflow log YAML exists | HARD | Check `.github/logs/{workflow-id}.yaml` | Standard+ |
 | Post-flight: retro snippet exists | HARD | Check `retros/auto/{workflow-id}.md` | Standard+ |
 | Post-flight: integration path matches capability mode | HARD | If `ADO_CAPABILITY_MODE=required`, a PR was opened; if `off`, no PR worker ran | Standard+ |
+| Post-flight: branch-to-work-item association (R-SD-08) | HARD | When tracker capability is active (`ADO_CAPABILITY_MODE != off`): branch slug contains the work item id, the work item links the branch + plan path. Tracker off ⇒ local traceability artifact instead. | Standard+ |
 | Post-flight: provenance markers on new files | SOFT | Read first 5 lines of new files | Standard+ |
 
 ### Ado-Work-Item-Manager

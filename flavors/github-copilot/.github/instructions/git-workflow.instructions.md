@@ -114,6 +114,22 @@ agent/{workflow-id}
   `feat-bucketing-v2`, `refactor-extract-ports`
 - The **planner** suggests the branch name; the **coordinator** creates it
 - One branch per workflow — do not reuse branches across unrelated tasks
+- **When tracker capability is active** (`ADO_CAPABILITY_MODE != off`), prefix
+  the slug with the resolved work item id:
+  `agent/{work-item-id}-{workflow-id}` (e.g. `agent/2885-fix-pipeline-pythonpath`).
+
+### Branch-to-Work-Item Association (R-SD-08)
+
+Operationalizes core rule R-SD-08 (changes linked to a tracked work item).
+Applies to Standard and Deep workflows **when tracker capability is active**
+(`ADO_CAPABILITY_MODE != off`). With tracker capability off, the association
+falls back to local traceability artifacts (plan/log) per R-SD-08.
+
+1. The branch slug must contain the resolved work item id.
+2. The related work item must include a branch artifact link **or** an
+   explicit branch-reference comment.
+3. The work item must reference the implementation plan path.
+4. Missing association is a **HARD** gate failure in compliance post-flight.
 
 ### Branch Cleanup
 
