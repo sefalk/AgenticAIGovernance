@@ -58,9 +58,9 @@ cat_default() {
         conservative)
             case "$1" in git_read|fs_read) echo auto ;; *) echo ask ;; esac ;;
         autonomous)
-            case "$1" in git_read|fs_read|tests|git_feature|pkg|cloud_read) echo auto ;; *) echo ask ;; esac ;;
+            case "$1" in git_read|fs_read|tests|git_feature|git_merge|pkg|cloud_read) echo auto ;; *) echo ask ;; esac ;;
         *) # balanced
-            case "$1" in git_read|fs_read|tests|git_feature|cloud_read) echo auto ;; *) echo ask ;; esac ;;
+            case "$1" in git_read|fs_read|tests|git_feature|git_merge|cloud_read) echo auto ;; *) echo ask ;; esac ;;
     esac
 }
 resolve_cat() {
@@ -71,6 +71,7 @@ resolve_cat() {
 }
 cat_git_read=$(resolve_cat git_read AUTONOMY_CAT_GIT_READ)
 cat_git_feature=$(resolve_cat git_feature AUTONOMY_CAT_GIT_FEATURE)
+cat_git_merge=$(resolve_cat git_merge AUTONOMY_CAT_GIT_MERGE)
 cat_tests=$(resolve_cat tests AUTONOMY_CAT_TESTS)
 cat_fs_read=$(resolve_cat fs_read AUTONOMY_CAT_FS_READ)
 cat_pkg=$(resolve_cat pkg AUTONOMY_CAT_PKG_INSTALL)
@@ -94,7 +95,8 @@ deny_patterns=(
     "git\s+push\b.*(\s|:)($prot_alt)(\s|$)"
     'git\s+reset\s+--hard'
     'git\s+rebase\b'
-    'git\s+branch\s+-[dD]\b'
+    'git\s+branch\b.*--force\b'
+    "git\s+branch\s+-d\b.*(\s|:)($prot_alt)(\s|$)"
     'git\s+add\s+(\S+\s+)*(--force|-f)(\s|$)'
     'git\s+add\s+(-\S+\s+)*\.(\s|$)'
     'git\s+add\s+(\S+\s+)*-A(\s|$)'
@@ -112,6 +114,11 @@ deny_patterns=(
 for p in "${deny_patterns[@]}"; do
     if matches "$p"; then emit deny "$deny_msg"; fi
 done
+# Branch force-deletion (-D) needs a CASE-SENSITIVE check (grep without -i) so
+# that the safe lowercase -d (merged-only) is not denied.
+if printf '%s' "$command_str" | grep -qE 'git[[:space:]]+branch[[:space:]]+(\S+[[:space:]]+)*-D([[:space:]]|$)'; then
+    emit deny "$deny_msg"
+fi
 # Category-scoped deny (when autonomy policy sets a category to 'deny').
 if [ "$cat_pkg" = "deny" ] && matches '\bpip3?\s+(install|uninstall)\b|\bconda\s+(install|remove)\b'; then
     emit deny "$deny_msg"
@@ -158,11 +165,17 @@ is_safe_segment() {
             ref=$(printf '%s' "$SEG" | sed -E 's/^[[:space:]]*git[[:space:]]+checkout[[:space:]]+([[:alnum:]_./-]+)[[:space:]]*$/\1/')
             if git rev-parse --verify --quiet "${ref}^{commit}" >/dev/null 2>&1; then return 0; fi
         fi
+        # delete a merged, non-protected branch (git -d refuses unmerged; -D/--force denied above)
+        if sm '^\s*git\s+branch\s+(\S+\s+)*-d(\s|$)' && ! printf '%s' "$SEG" | grep -qE '\s-D\b' && ! sm '--force\b' && ! sm "(\s|:)($prot_alt)(\s|$)"; then return 0; fi
         if sm '^\s*git\s+push\b' && ! sm "(\s|:)($prot_alt)(\s|$)"; then
             if sm 'agent/'; then return 0; fi
             if [ -n "$cur_branch" ] && ! echo "$cur_branch" | grep -qxE "$prot_alt"; then return 0; fi
         fi
         sm '^\s*git\s+(restore|switch\s+agent/)\b' && return 0
+    fi
+    if [ "$cat_git_merge" = "auto" ]; then
+        # reversible topology changes (pull/merge/cherry-pick/revert) -- reflog-recoverable
+        sm '^\s*git\s+(pull|merge|cherry-pick|revert)\b' && return 0
     fi
     if [ "$cat_tests" = "auto" ]; then
         sm "^\s*${path_pfx}(pytest|mypy|pyright|tox|nox|radon|bandit|flake8|pylint|vulture|pip-audit)${exe}\b" && return 0

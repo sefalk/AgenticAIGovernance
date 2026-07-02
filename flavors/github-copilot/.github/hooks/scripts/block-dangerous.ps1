@@ -65,9 +65,9 @@ $exe = '(\.exe)?'
 
 # Category defaults per level. Per-category overrides win when non-empty.
 $levelDefaults = @{
-    conservative = @{ git_read = 'auto'; fs_read = 'auto'; tests = 'ask';  git_feature = 'ask';  pkg = 'ask';  databricks = 'ask'; cloud_read = 'ask'  }
-    balanced     = @{ git_read = 'auto'; fs_read = 'auto'; tests = 'auto'; git_feature = 'auto'; pkg = 'ask';  databricks = 'ask'; cloud_read = 'auto' }
-    autonomous   = @{ git_read = 'auto'; fs_read = 'auto'; tests = 'auto'; git_feature = 'auto'; pkg = 'auto'; databricks = 'ask'; cloud_read = 'auto' }
+    conservative = @{ git_read = 'auto'; fs_read = 'auto'; tests = 'ask';  git_feature = 'ask';  git_merge = 'ask';  pkg = 'ask';  databricks = 'ask'; cloud_read = 'ask'  }
+    balanced     = @{ git_read = 'auto'; fs_read = 'auto'; tests = 'auto'; git_feature = 'auto'; git_merge = 'auto'; pkg = 'ask';  databricks = 'ask'; cloud_read = 'auto' }
+    autonomous   = @{ git_read = 'auto'; fs_read = 'auto'; tests = 'auto'; git_feature = 'auto'; git_merge = 'auto'; pkg = 'auto'; databricks = 'ask'; cloud_read = 'auto' }
 }
 if (-not $levelDefaults.ContainsKey($level)) { $level = 'balanced' }
 function Resolve-Category([string]$name, [string]$envKey) {
@@ -77,6 +77,7 @@ function Resolve-Category([string]$name, [string]$envKey) {
 }
 $catGitRead    = Resolve-Category 'git_read'    'AUTONOMY_CAT_GIT_READ'
 $catGitFeature = Resolve-Category 'git_feature' 'AUTONOMY_CAT_GIT_FEATURE'
+$catGitMerge   = Resolve-Category 'git_merge'   'AUTONOMY_CAT_GIT_MERGE'
 $catTests      = Resolve-Category 'tests'       'AUTONOMY_CAT_TESTS'
 $catFsRead     = Resolve-Category 'fs_read'     'AUTONOMY_CAT_FS_READ'
 $catPkg        = Resolve-Category 'pkg'         'AUTONOMY_CAT_PKG_INSTALL'
@@ -106,7 +107,8 @@ $denyRules = @(
     @{ p = "git\s+push\b.*(\s|:)($protAlt)(\s|$)";    why = 'push to a protected branch' }
     @{ p = 'git\s+reset\s+--hard';                    why = 'hard reset (state rewrite)' }
     @{ p = 'git\s+rebase\b';                          why = 'rebase (history rewrite)' }
-    @{ p = 'git\s+branch\s+-[dD]\b';                  why = 'branch deletion' }
+    @{ p = 'git\s+branch\b.*--force\b';                why = 'force branch deletion (--force)' }
+    @{ p = "git\s+branch\s+-d\b.*(\s|:)($protAlt)(\s|$)"; why = 'deleting a protected branch' }
     @{ p = 'git\s+add\s+(\S+\s+)*(--force|-f)(\s|$)'; why = 'git add --force (bypass .gitignore)' }
     @{ p = 'git\s+add\s+(-\S+\s+)*\.(\s|$)';          why = 'git add . (banned wildcard)' }
     @{ p = 'git\s+add\s+(\S+\s+)*-A(\s|$)';           why = 'git add -A (banned wildcard)' }
@@ -125,6 +127,11 @@ foreach ($r in $denyRules) {
     if ($command -match $r.p) {
         Emit 'deny' ("Policy hard-deny: $($r.why). $denyTail")
     }
+}
+# Branch force-deletion (-D) needs a CASE-SENSITIVE check so that the safe
+# lowercase -d (which git only allows for already-merged branches) is not denied.
+if ($command -cmatch 'git\s+branch\s+(\S+\s+)*-D(\s|$)') {
+    Emit 'deny' ("Policy hard-deny: force branch deletion (-D deletes unmerged commits). $denyTail")
 }
 # Category-scoped deny (when autonomy policy sets a category to 'deny').
 if ($catPkg -eq 'deny' -and ($command -match '(?i)\bpip3?\s+(install|uninstall)\b' -or $command -match '(?i)\bconda\s+(install|remove)\b')) {
@@ -182,12 +189,19 @@ function Test-SafeSegment([string]$seg) {
         # checkout an existing ref (branch/tag/commit) -- verified so a file
         # pathspec (which would discard changes) is NOT auto-approved
         if ($s -match '^\s*git\s+checkout\s+([\w./-]+)\s*$' -and (git rev-parse --verify --quiet "$($Matches[1])^{commit}" 2>$null)) { return $true }
+        # delete a merged, non-protected branch: `git branch -d` only removes a
+        # branch git considers fully merged (it refuses otherwise) and the ref is
+        # recreatable, so it is safe. Force (-D/--force) and protected are denied above.
+        if ($s -match '^\s*git\s+branch\s+(\S+\s+)*-d(\s|$)' -and $s -cnotmatch '\s-D\b' -and $s -notmatch '--force\b' -and $s -notmatch "(\s|:)($protAlt)(\s|$)") { return $true }
         if ($s -match '^\s*git\s+push\b' -and $s -notmatch "(\s|:)($protAlt)(\s|$)") {
             if ($s -match 'agent/') { return $true }                                  # explicit feature target
             if ($curBranch -and ($protected -notcontains $curBranch)) { return $true } # bare push on a feature branch
         }
         if ($s -match '^\s*git\s+(restore|switch\s+agent/)\b') { return $true }
     }
+    # reversible topology changes (pull / merge / cherry-pick / revert) --
+    # recoverable via reflog / ORIG_HEAD, so safe to run autonomously.
+    if ($catGitMerge -eq 'auto' -and $s -match '^\s*git\s+(pull|merge|cherry-pick|revert)\b') { return $true }
     # tests / lint / typecheck / static analysis (read-only, no durable change).
     # Accepts a path prefix so `.venv\Scripts\pytest.exe` etc. are recognised.
     if ($catTests -eq 'auto' -and (

@@ -175,8 +175,8 @@ friction while keeping destructive actions blocked:
 - `AUTONOMY_LEVEL` — `conservative` \| `balanced` (default) \| `autonomous`.
   Sets category defaults.
 - `AUTONOMY_CAT_*` — per-category overrides (`auto` \| `ask` \| `deny`) that
-  win over the level default. Categories: `GIT_READ`, `GIT_FEATURE`, `TESTS`,
-  `FS_READ`, `PKG_INSTALL`, `DATABRICKS`, `CLOUD_READ`.
+  win over the level default. Categories: `GIT_READ`, `GIT_FEATURE`,
+  `GIT_MERGE`, `TESTS`, `FS_READ`, `PKG_INSTALL`, `DATABRICKS`, `CLOUD_READ`.
 - `PROTECTED_BRANCHES` — branches that may never be pushed to / merged into
   directly (default `main,master,dev`). Feature-branch (`agent/*`) git ops
   are branch-aware and auto-approve; protected-branch pushes hard-deny.
@@ -188,22 +188,25 @@ friction while keeping destructive actions blocked:
 | Git read (`status`/`diff`/`log`/…) | auto | auto | auto |
 | Filesystem read (`ls`/`cat`/`grep`/…) | auto | auto | auto |
 | Tests/lint (`pytest`/`ruff check`/`mypy`) | ask | auto | auto |
-| Git feature branch (`commit`/`add <files>`/push `agent/*`) | ask | auto | auto |
+| Git feature branch (`commit`/`add <files>`/push `agent/*`/`branch -d` merged) | ask | auto | auto |
+| Reversible git (`pull`/`merge`/`cherry-pick`/`revert`) | ask | auto | auto |
 | Package install (`pip`/`conda install`) | ask | ask | **auto** |
 | Databricks CLI (mutating) | ask | ask | ask |
 | Cloud read (`databricks list/get`, `az show/list`) | ask | **auto** | **auto** |
 
 **deny tier (level-independent):** force push, push to a protected branch,
-`git reset --hard`, `git rebase`, branch deletion, `git add .`/`-A`/`--force`,
-`--no-verify`, broad `rm -rf`, recursive force delete, `dd`/`mkfs`/drive
-format, `chmod -R 777`, pipe-to-shell (`| bash`/`| iex`), `DROP`/`TRUNCATE`.
+`git reset --hard`, `git rebase`, **force** branch deletion (`-D`/`--force`)
+and deleting a protected branch, `git add .`/`-A`/`--force`, `--no-verify`,
+broad `rm -rf`, recursive force delete, `dd`/`mkfs`/drive format,
+`chmod -R 777`, pipe-to-shell (`| bash`/`| iex`), `DROP`/`TRUNCATE`.
 When a command is denied, the agent will not run it — it can instead prepare
 the exact command for you to paste and run yourself, or you can relax the
 relevant `AUTONOMY_CAT_*` setting.
 
-**ask tier:** `git merge`, `git checkout <existing>`, `git tag`, `pip
-install/uninstall` (unless `pkg=auto`), `ruff format` (writes), mutating
-`databricks`/`az`, single-file `Remove-Item`/`rm`, `mv`/`cp`/`mkdir`.
+**ask tier:** `git tag <name>` (create), `pip install/uninstall` (unless
+`pkg=auto`), `ruff format` (writes), mutating `databricks`/`az`, single-file
+`Remove-Item`/`rm`, `mv`/`cp`/`mkdir`. (`git merge`/`pull`, `git switch`, and
+`git branch -d` of a merged non-protected branch auto-approve at `balanced`.)
 
 **Segment-based auto-allow:** the command is split on `;`, `&&`, `||`, `|`,
 and newlines, and auto-approved only when **every** segment is individually

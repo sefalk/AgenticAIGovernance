@@ -34,14 +34,16 @@ checkpoints. **Integration** into shared branches follows one of two paths
 | `git status`, `git diff` | Coordinator | Read-only |
 | `git branch --show-current` | Coordinator | Read-only |
 | `git branch --list` | Coordinator | Read-only |
-| `git checkout {existing-branch}` | Coordinator | Only when human-directed |
+| `git checkout {existing-branch}` | Coordinator | Reversible switch; verified ref only (file pathspec still prompts) |
+| `git switch {branch}` | Coordinator | Branch switch never touches files |
 | `git push` (pure-git default) | **Human** | Crosses local→remote boundary |
 | `git push origin agent/{id}` (request-based path only) | Coordinator | Publishes feature branch for the request; never a protected branch |
 | `git push` to protected branches (`dev`/`main`/`master`) | **Forbidden** | Integration is request-based, never a direct push |
 | `git push --force` (any) | **Forbidden** | Destructive remote rewrite |
-| `git merge` (local, to shared branch) | **Human / Forbidden** | Human in pure-git; replaced by requests in request-based path |
-| `git branch -d / -D` | **Human** | Irreversible deletion |
-| `git reset --hard` | **Human** | Destructive state rewrite |
+| `git pull` / `git merge` / `cherry-pick` / `revert` (local) | Coordinator | Reversible topology change (reflog / `ORIG_HEAD`); protected-branch push still gated |
+| `git branch -d {merged, non-protected}` | Coordinator | git deletes only merged branches; ref recreatable |
+| `git branch -D` (force) / delete protected | **Forbidden** | Deletes unmerged commits / protected branch |
+| `git reset --hard` | **Human** | Destructive state rewrite (loses uncommitted work) |
 | `git rebase` | **Human** | History rewrite risk |
 | `git worktree add ../wt/{id} -b agent/{id}` | Coordinator | Local, fully reversible |
 | `git worktree remove ../wt/{id}` | Coordinator | Local cleanup after human merge |
@@ -53,10 +55,13 @@ independent of coordinator instructions. No worker agent (test-writer,
 implementer, refactorer, etc.) executes git commands — only the
 coordinator does. The hook is a three-tier classifier: feature-branch git
 ops (`commit`, staging specific files, creating and pushing `agent/*`
-branches) and read-only/test commands are **auto-approved** per the autonomy
-policy in `.github/af-env.conf`; force pushes, pushes naming a protected
-branch, `git reset --hard`, `git rebase`, and branch deletion are
-**hard-denied** (with an agent notice on how to override deliberately).
+branches), reversible topology changes (`pull`, `merge`, `cherry-pick`,
+`revert`), merged non-protected branch deletion (`git branch -d`), and
+read-only/test commands are **auto-approved** per the autonomy policy in
+`.github/af-env.conf`; force pushes, pushes naming a protected branch,
+`git reset --hard`, `git rebase`, force/protected branch deletion (`-D`),
+and destructive shell commands are **hard-denied** (with an agent notice on
+how to override deliberately).
 
 ## Integration Paths
 

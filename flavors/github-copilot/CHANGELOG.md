@@ -22,9 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (grouping/subshell/`$(...)`/backticks/file-write redirects never auto-approve;
   DENY is scanned across the whole command string). Configurable via
   `AUTONOMY_LEVEL` (`conservative` | `balanced` | `autonomous`) and per-category
-  `AUTONOMY_CAT_*` overrides (`GIT_READ`, `GIT_FEATURE`, `TESTS`, `FS_READ`,
-  `PKG_INSTALL`, `DATABRICKS`, `CLOUD_READ`) in `af-env.conf`. Cloud reads that
+  `AUTONOMY_CAT_*` overrides (`GIT_READ`, `GIT_FEATURE`, `GIT_MERGE`, `TESTS`,
+  `FS_READ`, `PKG_INSTALL`, `DATABRICKS`, `CLOUD_READ`) in `af-env.conf`. Cloud reads that
   touch secrets/credentials/tokens are excluded and always prompt.
+  Reversible topology changes (`git pull`/`merge`/`cherry-pick`/`revert`,
+  reflog-recoverable) and merged non-protected branch deletion (`git branch -d`,
+  which git allows only for fully-merged branches) auto-approve at `balanced`;
+  force deletion (`-D`/`--force`), `reset --hard`, and `rebase` stay denied.
   Path-invoked tools (`.venv\Scripts\pytest.exe`, `.venv/bin/ruff`, …), static
   analysis tools (`radon`/`bandit`/`flake8`/`pylint`/`vulture`/`pip-audit`),
   `Push-Location`/`Pop-Location`, and branch-aware bare `git push` (auto only
