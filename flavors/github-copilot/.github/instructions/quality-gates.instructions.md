@@ -192,6 +192,7 @@ reference the metric thresholds from MANIFEST § 5.
 | Availability probe outcome recorded | HARD | Probe result included (READY/DEGRADED/BLOCKED) | Standard+ |
 | Required unavailable => BLOCKED | HARD | If required and unavailable, operation halts with escalation | Standard+ |
 | Optional unavailable => fallback artifact | HARD | If optional and unavailable, fallback/pending-sync output exists | Standard+ |
+| Board routing applied on create | SOFT | New items set Area Path from `ADO_DEFAULT_AREA_PATH` (and Iteration from `ADO_DEFAULT_ITERATION_PATH`), or the run warns that the project default area is used | Standard+ |
 | Non-destructive update policy followed | SOFT | Reviewer checks append/targeted update behavior | Standard+ |
 | No Close at finalize (Resolve only, pre-merge) | HARD | Finalize never sets Closed; item is Resolved or kept Active | Standard+ |
 | AC coverage map posted before any closure transition | HARD | Verify an AC->evidence map comment exists for the item | Standard+ |

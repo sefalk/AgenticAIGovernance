@@ -3,8 +3,8 @@ category: devops
 applies_to: [all]
 complexity: intermediate
 maturity: draft
-version: "1.1"
-last_reviewed: 2026-06-25
+version: "1.2"
+last_reviewed: 2026-07-02
 related: [ci_cd, version_control, configuration_management, documentation]
 ---
 # Azure DevOps Work Item Management
@@ -37,6 +37,20 @@ preserving AAIG traceability and fallback behavior.
 - Bug: observed, expected, repro, impact.
 - User Story: business goal, value hypothesis, acceptance criteria.
 - Task: technical objective, constraints, done definition.
+
+### Work Item Routing (Board / Area / Iteration)
+
+New items must be routed to the correct board so they are visible to the
+owning team. On **create**:
+
+- Set the **Area Path** from the project's configured default
+  (`ADO_DEFAULT_AREA_PATH`) — the Area Path determines the owning board/team.
+- Set the **Iteration Path** from the configured default
+  (`ADO_DEFAULT_ITERATION_PATH`) when present; otherwise inherit from parent.
+- When no default Area Path is configured, the platform uses the project
+  default area — **warn**, because items may land on an unexpected board.
+- On **update**, do not silently move an item's Area/Iteration; a board move is
+  an explicit, human-confirmed action.
 
 ### Non-Destructive Update Strategy
 

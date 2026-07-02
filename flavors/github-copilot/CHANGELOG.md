@@ -39,6 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   short-circuit the allowlist decision.
 - New `af-env.conf` keys: `AUTONOMY_LEVEL`, `AUTONOMY_CAT_*`,
   `PROTECTED_BRANCHES`, `WEB_FETCH_ALLOWLIST`.
+- **Work item board routing** — new optional `af-env.conf` keys
+  `ADO_DEFAULT_AREA_PATH`, `ADO_DEFAULT_ITERATION_PATH`, `ADO_DEFAULT_TEAM`.
+  The `ado-work-item-manager` now sets `System.AreaPath` / `System.IterationPath`
+  from these on create so new items land on the owning team's board (previously
+  new items fell to the project default area — this key existed in a downstream
+  project but was never generalized). Documented in the `ado-workitem` skill,
+  the core `ado_work_item_management` skill, and a new SOFT routing gate.
 - **Optional `ado-pipeline-manager`** capability worker: registers/runs/monitors
   an Azure DevOps PR quality-gate pipeline via MCP and emits Build Validation
   branch-policy settings for a human to apply (no MCP tool exists for policy

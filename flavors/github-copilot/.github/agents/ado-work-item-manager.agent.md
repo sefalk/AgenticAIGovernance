@@ -35,7 +35,10 @@ Consult these skills when relevant to the task:
 
 ## Responsibilities
 
-1. Resolve or create the best matching work item.
+1. Resolve or create the best matching work item. On **create**, apply the
+   board-routing defaults from `.github/af-env.conf` (`ADO_DEFAULT_AREA_PATH`,
+   `ADO_DEFAULT_ITERATION_PATH`, `ADO_DEFAULT_TEAM`) so items land on the
+   correct board/team — see the **ado-workitem** skill (Work Item Routing).
 2. Apply confidence policy and clarification loop by work item type.
 3. Update items non-destructively.
 4. Add branch/plan/reference links where available.

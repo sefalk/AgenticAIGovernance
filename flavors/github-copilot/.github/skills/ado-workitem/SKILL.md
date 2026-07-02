@@ -21,6 +21,21 @@ Provider-specific guidance for Azure DevOps work item operations.
 - User Story: business goal, value hypothesis, acceptance criteria.
 - Task: technical objective, constraints, done criteria.
 
+## Work Item Routing (Area / Iteration / Team)
+
+On **create**, apply routing defaults from `.github/af-env.conf` so items land
+on the intended board — otherwise Azure DevOps uses the project default area
+and items may appear on an unexpected board/team:
+
+- Set `System.AreaPath` from `ADO_DEFAULT_AREA_PATH` when present (this decides
+  the owning board/team). If empty, warn that the project default area is used.
+- Set `System.IterationPath` from `ADO_DEFAULT_ITERATION_PATH` when present;
+  otherwise inherit from the parent item / project default.
+- Use `ADO_DEFAULT_TEAM` for team-scoped board or query calls when set.
+- Pass these fields explicitly on the create call; never rely on interactive
+  prompts. On update, do not overwrite an existing area/iteration unless the
+  human explicitly requests a move.
+
 ## Update Strategy
 
 - Append or targeted rewrite only.
