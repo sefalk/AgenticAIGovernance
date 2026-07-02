@@ -163,13 +163,25 @@ function Test-SafeSegment([string]$seg) {
     # version probes: <binary> [flags] --version (no positional file arg before it)
     if ($s -match '(?i)^\s*[\w./\\-]+(\s+-{1,2}[\w=.,-]+)*\s+--version\b') { return $true }
     # git read-only
-    if ($catGitRead -eq 'auto' -and $s -match '^\s*git\s+(status|diff|log|show|branch(\s+--(list|show-current))?|rev-parse|rev-list|remote|blame|describe|shortlog|for-each-ref|ls-files|stash\s+list|config\s+--get|fetch)\b') { return $true }
+    if ($catGitRead -eq 'auto') {
+        if ($s -match '^\s*git\s+(status|diff|log|show|rev-parse|rev-list|remote|blame|describe|shortlog|for-each-ref|ls-files|config\s+--get|fetch)\b') { return $true }
+        if ($s -match '^\s*git\s+stash\s+list\b') { return $true }
+        # branch listing (creating a ref is harmless; delete/rename/copy excluded)
+        if ($s -match '^\s*git\s+branch\b' -and $s -notmatch '\s-[dDmMcC]\b' -and $s -notmatch '--(delete|move|copy|force)\b') { return $true }
+        # tag listing (create/delete/annotate/sign/force excluded)
+        if ($s -match '^\s*git\s+tag\b' -and $s -notmatch '\s-[adfsm]\b' -and $s -notmatch '--(delete|force|sign|annotate)\b' -and $s -notmatch '^\s*git\s+tag\s+[^\s-]') { return $true }
+    }
     # git feature-branch work
     if ($catGitFeature -eq 'auto') {
         if ($s -match '^\s*git\s+commit\b') { return $true }
         if ($s -match '^\s*git\s+add\s+\S') { return $true }
         if ($s -match '^\s*git\s+(checkout|switch)\s+-[bc]\s+agent/') { return $true }
         if ($s -match '^\s*git\s+(checkout|switch)\s+agent/') { return $true }
+        # switch to a branch (never touches files, so always safe)
+        if ($s -match '^\s*git\s+switch\s+[\w./-]+\s*$') { return $true }
+        # checkout an existing ref (branch/tag/commit) -- verified so a file
+        # pathspec (which would discard changes) is NOT auto-approved
+        if ($s -match '^\s*git\s+checkout\s+([\w./-]+)\s*$' -and (git rev-parse --verify --quiet "$($Matches[1])^{commit}" 2>$null)) { return $true }
         if ($s -match '^\s*git\s+push\b' -and $s -notmatch "(\s|:)($protAlt)(\s|$)") {
             if ($s -match 'agent/') { return $true }                                  # explicit feature target
             if ($curBranch -and ($protected -notcontains $curBranch)) { return $true } # bare push on a feature branch

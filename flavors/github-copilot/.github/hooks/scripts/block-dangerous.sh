@@ -140,13 +140,24 @@ is_safe_segment() {
     sm '^(Select-Object|Select-String|Sort-Object|Measure-Object|Out-String|Out-Host|Format-Table|Format-List|Get-Unique|more|wc|findstr|grep|ConvertFrom-Json|ConvertTo-Json)\b' && return 0
     sm '^[[:space:]]*[[:alnum:]._/-]+([[:space:]]+-{1,2}[[:alnum:]=.,_-]+)*[[:space:]]+--version\b' && return 0
     if [ "$cat_git_read" = "auto" ]; then
-        sm '^\s*git\s+(status|diff|log|show|branch(\s+--(list|show-current))?|rev-parse|rev-list|remote|blame|describe|shortlog|for-each-ref|ls-files|stash\s+list|config\s+--get|fetch)\b' && return 0
+        sm '^\s*git\s+(status|diff|log|show|rev-parse|rev-list|remote|blame|describe|shortlog|for-each-ref|ls-files|config\s+--get|fetch)\b' && return 0
+        sm '^\s*git\s+stash\s+list\b' && return 0
+        if sm '^\s*git\s+branch\b' && ! sm '\s-[dDmMcC]\b' && ! sm '--(delete|move|copy|force)\b'; then return 0; fi
+        if sm '^\s*git\s+tag\b' && ! sm '\s-[adfsm]\b' && ! sm '--(delete|force|sign|annotate)\b' && ! sm '^\s*git\s+tag\s+[^\s-]'; then return 0; fi
     fi
     if [ "$cat_git_feature" = "auto" ]; then
         sm '^\s*git\s+commit\b' && return 0
         sm '^\s*git\s+add\s+\S' && return 0
         sm '^\s*git\s+(checkout|switch)\s+-[bc]\s+agent/' && return 0
         sm '^\s*git\s+(checkout|switch)\s+agent/' && return 0
+        # switch to a branch (never touches files, so always safe)
+        sm '^[[:space:]]*git[[:space:]]+switch[[:space:]]+[[:alnum:]_./-]+[[:space:]]*$' && return 0
+        # checkout an existing ref (branch/tag/commit) -- verified so a file
+        # pathspec (which would discard changes) is NOT auto-approved
+        if printf '%s' "$SEG" | grep -qE '^[[:space:]]*git[[:space:]]+checkout[[:space:]]+[[:alnum:]_./-]+[[:space:]]*$'; then
+            ref=$(printf '%s' "$SEG" | sed -E 's/^[[:space:]]*git[[:space:]]+checkout[[:space:]]+([[:alnum:]_./-]+)[[:space:]]*$/\1/')
+            if git rev-parse --verify --quiet "${ref}^{commit}" >/dev/null 2>&1; then return 0; fi
+        fi
         if sm '^\s*git\s+push\b' && ! sm "(\s|:)($prot_alt)(\s|$)"; then
             if sm 'agent/'; then return 0; fi
             if [ -n "$cur_branch" ] && ! echo "$cur_branch" | grep -qxE "$prot_alt"; then return 0; fi
