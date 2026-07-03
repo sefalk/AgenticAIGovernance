@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ADO_WIKI_IDENTIFIER`), repo-specific docs are versioned in the code as a
   **code wiki** at the new configurable `ADO_CODE_WIKI_PATH` (default
   `docs/wiki`). Added `ADO_CODE_WIKI_PATH` to the `af-env.conf` template.
+- **Wiki schema, health check & index conventions** in the `ado-wiki` skill
+  (adapted from the LLM-Wiki pattern): enumerated page types + required YAML
+  frontmatter with a controlled vocabulary to curb taxonomy drift; a
+  new-page-vs-edit heuristic and minimalism/synthesis rule; an index/routing
+  page plus a change-log convention (git history for code wikis, an append-only
+  `## [YYYY-MM-DD]` changelog for the project wiki); and a **wiki lint pass**
+  (deterministic schema/broken-link/orphan/duplicate checks as HARD, plus
+  qualitative staleness/contradiction/drift/coverage checks as SOFT) with a
+  maker-checker publish gate. The `ado-wiki-manager` gained matching
+  responsibilities and a `LINTED` status.
 - **Branch-to-Work-Item Association (R-SD-08)** operationalized in
   `git-workflow.instructions.md`: when tracker capability is active
   (`ADO_CAPABILITY_MODE != off`) the branch slug carries the work item id

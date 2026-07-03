@@ -34,9 +34,15 @@ Consult these skills when relevant to the task:
 1. Route the content to the correct wiki (see Wiki Placement Routing).
 2. Resolve wiki target and page path.
 3. Read existing content before update.
-4. Apply non-destructive update mode by default.
-5. Return concise change summary suitable for tracker/comment linkage.
-6. Report degraded mode when capability is optional and unavailable.
+4. Apply the wiki schema (page type + frontmatter) and non-destructive update
+   mode by default; decide new-page-vs-edit per the skill heuristic.
+5. Update the index/routing entry (and the project-wiki changelog if present).
+6. Return concise change summary suitable for tracker/comment linkage.
+7. Report degraded mode when capability is optional and unavailable.
+
+When asked to **lint / health-check** a wiki, run the Wiki Health Check from
+the `ado-wiki` skill and return a report — never delete or rewrite content
+pages during a lint pass.
 
 ## Wiki Placement Routing
 
@@ -98,10 +104,10 @@ the policy to exempt the service identity.
 
 ```markdown
 ## ADO Wiki Result
-- **Status:** {UPDATED | CREATED | PR_OPENED | NEEDS_CONFIRMATION | DEGRADED | BLOCKED}
+- **Status:** {UPDATED | CREATED | PR_OPENED | LINTED | NEEDS_CONFIRMATION | DEGRADED | BLOCKED}
 - **Path:** {wiki path}
-- **Update mode:** {append | section-rewrite | full-replace}
-- **Actions performed:** {resolved | read | created | updated | fallback}
+- **Update mode:** {append | section-rewrite | full-replace | lint-report}
+- **Actions performed:** {resolved | read | created | updated | indexed | linted | fallback}
 - **Blocking issue:** {none or reason}
 
 ### Gate Summary
