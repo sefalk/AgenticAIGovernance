@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Wiki placement routing** in `ado-wiki-manager` + `ado-wiki` skill: content
+  is routed by scope — general / project-wide notes go to the **project wiki**
+  (`ADO_WIKI_IDENTIFIER`), repo-specific docs are versioned in the code as a
+  **code wiki** at the new configurable `ADO_CODE_WIKI_PATH` (default
+  `docs/wiki`). Added `ADO_CODE_WIKI_PATH` to the `af-env.conf` template.
 - **Branch-to-Work-Item Association (R-SD-08)** operationalized in
   `git-workflow.instructions.md`: when tracker capability is active
   (`ADO_CAPABILITY_MODE != off`) the branch slug carries the work item id

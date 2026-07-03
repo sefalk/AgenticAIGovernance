@@ -9,6 +9,20 @@ disable-model-invocation: true
 
 Provider-specific guidance for Azure DevOps wiki page operations.
 
+## Wiki Placement Routing
+
+Azure DevOps has two wiki kinds — route by content scope:
+
+- **Project wiki** (`ADO_WIKI_IDENTIFIER`): general / project-wide content —
+  cross-repo overview, operational notes, branch-policy guidance, conventions.
+- **Code wiki** (in-repo, `ADO_CODE_WIKI_PATH`, default `docs/wiki`):
+  repo-specific docs versioned with the code. Written as Markdown in the code
+  repository (commit/PR on the repo's branch), *not* in the project wiki, so
+  docs review and version together with the code.
+
+Every repo can publish its own code wiki; the project wiki stays the central
+index. `ADO_CODE_WIKI_PATH` is configurable per project in `.github/af-env.conf`.
+
 ## Target Resolution
 
 1. Resolve wiki identifier and page path.

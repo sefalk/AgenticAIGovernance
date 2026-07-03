@@ -31,11 +31,34 @@ Consult these skills when relevant to the task:
 
 ## Responsibilities
 
-1. Resolve wiki target and page path.
-2. Read existing content before update.
-3. Apply non-destructive update mode by default.
-4. Return concise change summary suitable for tracker/comment linkage.
-5. Report degraded mode when capability is optional and unavailable.
+1. Route the content to the correct wiki (see Wiki Placement Routing).
+2. Resolve wiki target and page path.
+3. Read existing content before update.
+4. Apply non-destructive update mode by default.
+5. Return concise change summary suitable for tracker/comment linkage.
+6. Report degraded mode when capability is optional and unavailable.
+
+## Wiki Placement Routing
+
+Azure DevOps supports two wiki kinds; choose the target by the content's scope
+before writing:
+
+| Content scope | Target | Where |
+|---|---|---|
+| **General / project-wide** (cross-repo overview, operational notes, branch-policy guidance, conventions) | **Project wiki** | `ADO_WIKI_IDENTIFIER` (the provisioned `*.wiki` repo) |
+| **Repo-specific** (a single repo's architecture, pipeline, module docs) | **Code wiki** — versioned in the repo | in-repo path `ADO_CODE_WIKI_PATH` (default `docs/wiki`) |
+
+Rules:
+
+- Repo-scoped documentation is written as Markdown files under
+  `ADO_CODE_WIKI_PATH` in the **code repository** (a commit/PR on the repo's
+  own branch), so docs version and review together with the code. It is
+  *not* written to the project wiki.
+- Project-wide notes that apply across repos go to the project wiki
+  (`ADO_WIKI_IDENTIFIER`).
+- Each repo can carry its own code wiki; the project wiki stays the central
+  index/overview. When unsure, ask which scope the content belongs to.
+- `ADO_CODE_WIKI_PATH` is configurable per project via `.github/af-env.conf`.
 
 ## Required vs Optional Behavior
 
