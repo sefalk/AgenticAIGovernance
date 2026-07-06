@@ -1,5 +1,6 @@
 ---
 name: arbiter
+model: __AF_TIER_PREMIUM__
 description: 'Resolve maker-critic disagreements on design decisions. Read-only advisory role — does NOT modify files or run tests. Produces a binding recommendation or escalates to human.'
 user-invocable: false
 tools:

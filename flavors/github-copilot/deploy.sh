@@ -285,7 +285,67 @@ file_hash() {
         md5sum "$1" | cut -d' ' -f1
     fi
 }
-
+# ── Agent model tier resolution ────────────────────────────────────────
+# Subagent .agent.md files carry a tier placeholder (__AF_TIER_PREMIUM__ etc.)
+# resolved at deploy time from the target af-env.conf (AF_MODEL_TIER_*) or the
+# curated defaults below. Multiple comma-separated entries become a prioritized
+# YAML array (VS Code tries each until available). Keep in sync with deploy.ps1.
+declare -A TIER_DEFAULTS=(
+    [PREMIUM]='Claude Opus 4.8 (copilot), Claude Opus 4.7 (copilot), Claude Sonnet 5 (copilot)'
+    [BALANCED]='Claude Sonnet 5 (copilot), Claude Sonnet 4.6 (copilot), Claude Sonnet 4.5 (copilot)'
+    [EFFICIENT]='Claude Haiku 4.5 (copilot), Claude Sonnet 5 (copilot)'
+)
+tier_yaml() {
+    # $1 = tier name; prints a `model:` line or a multi-line YAML array
+    local tier="$1" val
+    val="$(get_af_env_value "AF_MODEL_TIER_$tier" "")"
+    [[ -z "$val" ]] && val="${TIER_DEFAULTS[$tier]}"
+    local IFS=',' arr m count=0
+    read -ra arr <<< "$val"
+    for m in "${arr[@]}"; do
+        m="$(printf '%s' "$m" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+        [[ -n "$m" ]] && ((count++)) || true
+    done
+    if [[ $count -le 1 ]]; then
+        m="$(printf '%s' "${arr[0]}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+        printf 'model: %s' "$m"
+    else
+        printf 'model:'
+        for m in "${arr[@]}"; do
+            m="$(printf '%s' "$m" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+            [[ -z "$m" ]] && continue
+            printf '\n  - %s' "$m"
+        done
+    fi
+}
+has_tier_token() { grep -qE '__AF_TIER_(PREMIUM|BALANCED|EFFICIENT)__' "$1"; }
+tier_resolve_file() {
+    # $1 = source path; writes resolved content to a new temp file, echoes path
+    local src="$1" tmp line stripped cr tier
+    tmp="$(mktemp)"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        stripped="${line%$'\r'}"; cr=""; [[ "$stripped" != "$line" ]] && cr=$'\r'
+        if [[ "$stripped" =~ ^model:[[:space:]]*__AF_TIER_(PREMIUM|BALANCED|EFFICIENT)__[[:space:]]*$ ]]; then
+            tier="${BASH_REMATCH[1]}"
+            printf '%s\n' "$(tier_yaml "$tier")"
+        else
+            printf '%s%s\n' "$stripped" "$cr"
+        fi
+    done < "$src" > "$tmp"
+    printf '%s' "$tmp"
+}
+source_hash_resolved() {
+    # Hash of the deployed content: resolved bytes for tier files, raw otherwise.
+    local src="$1" tmp h
+    if has_tier_token "$src"; then
+        tmp="$(tier_resolve_file "$src")"
+        h="$(file_hash "$tmp")"
+        rm -f "$tmp"
+        printf '%s' "$h"
+    else
+        file_hash "$src"
+    fi
+}
 # ── Hash-based 3-way merge ────────────────────────────────────────────────
 HASH_FILE="$TARGET_GITHUB/.af-hashes"
 declare -A BASELINE_HASHES
@@ -533,7 +593,7 @@ if [[ "$UPDATE_HASHES" == "true" ]]; then
     DEPLOYED_HASHES=()
     while IFS= read -r rel; do
         src="$SOURCE_GITHUB/$rel"
-        DEPLOYED_HASHES["$rel"]="$(file_hash "$src")"
+        DEPLOYED_HASHES["$rel"]="$(source_hash_resolved "$src")"
     done < <(get_af_source_files)
     for f in "${MANIFEST_VSCODE_FILES[@]}"; do
         src="$SOURCE_VSCODE/$f"
@@ -563,7 +623,7 @@ deploy_file() {
         is_custom=true
     fi
     local source_hash
-    source_hash="$(file_hash "$src")"
+    source_hash="$(source_hash_resolved "$src")"
 
     # ── New file: always deploy ──
     if [[ ! -f "$tgt" ]]; then
@@ -648,7 +708,12 @@ deploy_file() {
     if [[ "$DRY_RUN" != "true" ]]; then
         backup_before_overwrite "$tgt" "$display"
         mkdir -p "$(dirname "$tgt")"
-        cp "$src" "$tgt"
+        if has_tier_token "$src"; then
+            local rtmp; rtmp="$(tier_resolve_file "$src")"
+            cp "$rtmp" "$tgt"; rm -f "$rtmp"
+        else
+            cp "$src" "$tgt"
+        fi
     fi
 }
 
@@ -672,7 +737,7 @@ if [[ "$DIFF_MODE" == "true" ]]; then
             printf "  -> project   %-50s  New in AF\n" ".github/$rel"
             ((DIFF_COUNT++)) || true
         else
-            sh="$(file_hash "$src")"
+            sh="$(source_hash_resolved "$src")"
             th="$(file_hash "$tgt")"
             if [[ "$sh" != "$th" ]]; then
                 bh="${BASELINE_HASHES[$rel]:-}"

@@ -1,5 +1,6 @@
 ---
 name: researcher
+model: __AF_TIER_EFFICIENT__
 description: 'Fetch and synthesize external documentation — third-party APIs, versioned library docs, or external standards not available in the codebase or skills library.'
 user-invocable: true
 tools:

@@ -14,6 +14,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-agent model tiers (deploy-resolved).** Subagents now pin their model via
+  a tier placeholder (`__AF_TIER_PREMIUM__` / `__AF_TIER_BALANCED__` /
+  `__AF_TIER_EFFICIENT__`) in their `.agent.md` frontmatter; the deploy replaces
+  it with the concrete model list from the target `af-env.conf`
+  (`AF_MODEL_TIER_*`) or the curated built-in defaults, writing a prioritized
+  YAML array so VS Code tries each model until one is available (drift-resilient
+  — VS Code does not understand tier tokens natively, so the deploy resolves
+  them). The **coordinator stays unpinned** (inherits the model picker). Tiers:
+  PREMIUM = arbiter, code-critic; BALANCED = planner, implementer, test-critic;
+  EFFICIENT = test-writer, refactorer, documenter, researcher,
+  compliance-checker, and the ado-* workers. This stops every subagent from
+  inheriting a premium model (previously nothing was pinned, so an Opus pick ran
+  the whole pipeline on Opus). Token resolution is hash-stable (baseline hashes
+  the resolved content, so re-deploys are no-ops) and byte-identical for the
+  ~136 non-agent files. Documented in `copilot-authoring.instructions.md`.
+
 - **`FS_WRITE` autonomy category** in the `block-dangerous` classifier: an
   opt-in tier for *harmless, non-read-only* local filesystem writes — `Out-File`,
   `Set-Content`, `Add-Content`, `New-Item`/`mkdir`, `Move-Item`/`Copy-Item`,

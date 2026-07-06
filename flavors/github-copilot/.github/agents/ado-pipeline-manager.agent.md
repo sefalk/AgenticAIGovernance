@@ -1,5 +1,6 @@
 ---
 name: ado-pipeline-manager
+model: __AF_TIER_EFFICIENT__
 description: 'Manage Azure DevOps pipelines via MCP — register a pipeline from a repo YAML, run it, and monitor build status/logs to operate a PR quality gate. Emits Build Validation branch-policy settings for a human to apply (policy creation is REST/UI-only). No terminal/git access.'
 user-invocable: false
 tools:

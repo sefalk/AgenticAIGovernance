@@ -1,5 +1,6 @@
 ---
 name: documenter
+model: __AF_TIER_EFFICIENT__
 description: 'Write handoff logs, workflow summaries, and update the architecture map. Lightweight end-of-workflow agent with limited write tools.'
 user-invocable: false
 tools:

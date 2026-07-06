@@ -1,5 +1,6 @@
 ---
 name: code-critic
+model: __AF_TIER_PREMIUM__
 description: 'Review code for architecture compliance, quality gates, and metrics. Read-only — does NOT modify files. Produces APPROVED, REJECTED, or ESCALATE verdicts.'
 user-invocable: false
 tools:

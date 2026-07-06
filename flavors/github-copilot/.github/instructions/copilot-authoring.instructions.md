@@ -69,6 +69,32 @@ tools: ['edit/editFiles', 'execute/runTests']
 - `agents: []` — no subagent access
 - Listing an agent in `agents:` overrides its `disable-model-invocation: true`
 
+### Model Assignment (Tier Placeholders)
+
+<!-- copilot:modified | implementer | 2026-07-06 | model tier convention -->
+
+Subagents pin their model via a **tier placeholder** that the deploy resolves to
+a concrete model list. The **coordinator stays unpinned** (no `model:` field) so
+it inherits the user's model picker.
+
+```yaml
+---
+name: implementer
+model: __AF_TIER_BALANCED__
+---
+```
+
+- Tokens: `__AF_TIER_PREMIUM__`, `__AF_TIER_BALANCED__`, `__AF_TIER_EFFICIENT__`.
+- The deploy replaces the token with the list from the target `af-env.conf`
+  (`AF_MODEL_TIER_*`) or the curated defaults in `deploy.ps1` / `deploy.sh`.
+  A multi-entry list becomes a prioritized YAML array — VS Code tries each until
+  one is available (drift-resilient).
+- **Curating drift:** when the model line-up changes, update the tier arrays in
+  `af-env.conf` (or the deploy defaults) and re-deploy — never edit each agent.
+- Tiers: PREMIUM = deep reasoning (arbiter, code-critic); BALANCED = planner,
+  implementer, test-critic; EFFICIENT = concrete tasks (test-writer, refactorer,
+  documenter, researcher, compliance-checker, ado-* workers).
+
 ## 3. Known Gotchas
 
 ### 3.1 Handoff Prompts: No Block Scalars

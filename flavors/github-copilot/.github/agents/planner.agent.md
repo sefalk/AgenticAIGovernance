@@ -1,5 +1,6 @@
 ---
 name: planner
+model: __AF_TIER_BALANCED__
 description: 'Plan and decompose tasks. Analyse the codebase, define subtasks with acceptance criteria. Read-only — does NOT modify files.'
 user-invocable: false
 tools:

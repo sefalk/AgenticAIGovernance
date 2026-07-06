@@ -1,5 +1,6 @@
 ---
 name: refactorer
+model: __AF_TIER_EFFICIENT__
 description: 'Clean up code without changing behaviour (Refactor phase of TDD). All tests must remain green after changes.'
 user-invocable: false
 tools:

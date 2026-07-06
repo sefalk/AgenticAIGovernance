@@ -1,5 +1,6 @@
 ---
 name: test-critic
+model: __AF_TIER_BALANCED__
 description: 'Review test quality, meaningful assertions, and domain invariant coverage. Read-only — does NOT modify files. Produces APPROVED, REJECTED, or ESCALATE verdicts.'
 user-invocable: false
 tools:

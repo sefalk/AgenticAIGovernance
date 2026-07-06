@@ -143,6 +143,61 @@ function Get-AFEnvValue {
     return $match.Matches[0].Groups[1].Value.Trim()
 }
 
+# ── Agent model tier resolution ────────────────────────────────────────────
+# Subagent .agent.md files carry a tier placeholder (__AF_TIER_PREMIUM__ etc.)
+# in their `model:` frontmatter. At deploy time it is replaced with the concrete
+# model list for that tier, resolved from the TARGET project's af-env.conf
+# (AF_MODEL_TIER_*) or, if unset, the curated defaults below. A multi-entry list
+# becomes a YAML array so VS Code tries each model until one is available
+# (drift-resilient). Curate these defaults when the model line-up changes.
+$script:TierDefaults = @{
+    PREMIUM   = 'Claude Opus 4.8 (copilot), Claude Opus 4.7 (copilot), Claude Sonnet 5 (copilot)'
+    BALANCED  = 'Claude Sonnet 5 (copilot), Claude Sonnet 4.6 (copilot), Claude Sonnet 4.5 (copilot)'
+    EFFICIENT = 'Claude Haiku 4.5 (copilot), Claude Sonnet 5 (copilot)'
+}
+function Get-TierModels([string]$Tier) {
+    $val = Get-AFEnvValue -Key "AF_MODEL_TIER_$Tier" -Default ''
+    if (-not $val) { $val = $script:TierDefaults[$Tier] }
+    return @($val -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+function Resolve-TierTokens([string]$Text) {
+    $nl = if ($Text.Contains("`r`n")) { "`r`n" } else { "`n" }
+    foreach ($tier in 'PREMIUM', 'BALANCED', 'EFFICIENT') {
+        $token = "__AF_TIER_${tier}__"
+        if ($Text -notmatch [regex]::Escape($token)) { continue }
+        $models = Get-TierModels $tier
+        if ($models.Count -le 1) {
+            $repl = "model: $($models[0])"
+        } else {
+            $repl = "model:$nl" + (($models | ForEach-Object { "  - $_" }) -join $nl)
+        }
+        # Match the whole `model: <token>` line without consuming the line break
+        # (lookahead), so CRLF/LF endings are preserved. Model names contain no
+        # '$', so a literal replacement string is safe.
+        $pattern = '(?m)^model:[ \t]*' + [regex]::Escape($token) + '[ \t]*(?=\r?\n|$)'
+        $Text = [regex]::Replace($Text, $pattern, $repl)
+    }
+    return $Text
+}
+function Get-TierTransform([string]$Source) {
+    # Returns transformed content if the file carries a tier token, else $null.
+    $raw = [System.IO.File]::ReadAllText($Source)
+    if ($raw -notmatch '__AF_TIER_(PREMIUM|BALANCED|EFFICIENT)__') { return $null }
+    return (Resolve-TierTokens $raw)
+}
+function Get-StringHashUpper([string]$Text) {
+    $enc = New-Object System.Text.UTF8Encoding($false)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $h = $sha.ComputeHash($enc.GetBytes($Text)) } finally { $sha.Dispose() }
+    return (($h | ForEach-Object { $_.ToString('X2') }) -join '')
+}
+function Get-SourceHashResolved([string]$Source) {
+    # Hash of the deployed content: resolved bytes for tier files, raw otherwise.
+    $t = Get-TierTransform $Source
+    if ($null -ne $t) { return Get-StringHashUpper $t }
+    return (Get-FileHash $Source).Hash
+}
+
 function Resolve-BackupPruneDays {
     param([int]$CliValue)
 
@@ -575,7 +630,7 @@ if ($UpdateHashes) {
     $hashEntries = @{}
     foreach ($rel in $sourceFiles) {
         $src = Join-Path $SourceGitHub $rel
-        $hashEntries[$rel] = (Get-FileHash $src).Hash
+        $hashEntries[$rel] = Get-SourceHashResolved $src
     }
     foreach ($f in $ManifestVSCodeFiles) {
         $src = Join-Path $SourceVSCode $f
@@ -608,7 +663,8 @@ function Publish-SingleFile {
     }
     $isCustom = $script:CustomizableFiles.Contains($HashKey)
     $exists = Test-Path $Target
-    $sourceHash = (Get-FileHash $Source).Hash
+    $transform = Get-TierTransform $Source
+    $sourceHash = if ($null -ne $transform) { Get-StringHashUpper $transform } else { (Get-FileHash $Source).Hash }
 
     # ── New file: always deploy ──
     if (-not $exists) {
@@ -692,7 +748,11 @@ function Publish-SingleFile {
         Backup-BeforeOverwrite -TargetFile $Target -DisplayPath $DisplayPath
         $dir = Split-Path $Target -Parent
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        Copy-Item $Source $Target -Force
+        if ($null -ne $transform) {
+            [System.IO.File]::WriteAllText($Target, $transform, (New-Object System.Text.UTF8Encoding($false)))
+        } else {
+            Copy-Item $Source $Target -Force
+        }
     }
 }
 
@@ -717,7 +777,7 @@ if ($Diff) {
             $tgt = Join-Path $TargetGitHub $rel
             if (-not (Test-Path $tgt)) {
                 $diffs += [PSCustomObject]@{ File = ".github/$rel"; Direction = '-> project'; Status = 'New in AF (not deployed)' }
-            } elseif ((Get-FileHash $src).Hash -ne (Get-FileHash $tgt).Hash) {
+            } elseif ((Get-SourceHashResolved $src) -ne (Get-FileHash $tgt).Hash) {
                 $bh = $script:BaselineHashes[$rel]
                 if ($bh) {
                     $sh = (Get-FileHash $src).Hash

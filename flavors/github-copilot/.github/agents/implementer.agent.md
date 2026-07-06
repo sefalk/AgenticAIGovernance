@@ -1,5 +1,6 @@
 ---
 name: implementer
+model: __AF_TIER_BALANCED__
 description: 'Implement code changes following plans, architecture rules, and TDD. Full editing and execution tools.'
 user-invocable: false
 tools:

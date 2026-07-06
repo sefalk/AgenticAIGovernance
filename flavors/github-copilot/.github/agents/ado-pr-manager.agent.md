@@ -1,5 +1,6 @@
 ---
 name: ado-pr-manager
+model: __AF_TIER_EFFICIENT__
 description: 'Manage Azure DevOps pull requests via MCP. Creates/updates PRs for the pushed feature branch, links work items and plans, and applies the branch-scoped autocomplete policy (integration branch autonomous, protected branch human-only). No terminal/git access.'
 user-invocable: false
 tools:

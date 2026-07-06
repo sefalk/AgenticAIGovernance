@@ -1,5 +1,6 @@
 ---
 name: ado-wiki-manager
+model: __AF_TIER_EFFICIENT__
 description: 'Manage Azure DevOps wiki pages via MCP with non-destructive updates and traceable change summaries.'
 user-invocable: false
 tools:

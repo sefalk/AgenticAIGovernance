@@ -1,5 +1,6 @@
 ---
 name: ado-work-item-manager
+model: __AF_TIER_EFFICIENT__
 description: 'Manage Azure DevOps work items via MCP with confidence-based matching, non-destructive updates, and traceable linking.'
 user-invocable: false
 tools:

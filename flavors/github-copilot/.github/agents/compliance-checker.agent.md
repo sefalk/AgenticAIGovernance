@@ -1,5 +1,6 @@
 ---
 name: compliance-checker
+model: __AF_TIER_EFFICIENT__
 description: 'Workflow compliance watchdog. Invoked as mandatory bookend (pre-flight and post-flight) by the coordinator to verify process gates that drift under context pressure.'
 user-invocable: false
 tools:
