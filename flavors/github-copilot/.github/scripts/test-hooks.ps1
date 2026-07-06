@@ -136,48 +136,53 @@ Write-Output ""
 
 Write-Output "## block-dangerous.ps1"
 
-# Should ASK for dangerous commands
-Assert-Ask "git push triggers ask" `
+# ── DENY: hard-blocked, level-independent ────────────────────────────────
+Assert-Deny "push to protected branch is denied" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"git push origin main"}}'
 
-Assert-Ask "git merge triggers ask" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git merge feature"}}'
-
-Assert-Ask "git rebase triggers ask" `
+Assert-Deny "git rebase is denied" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"git rebase main"}}'
 
-Assert-Ask "git reset --hard triggers ask" `
+Assert-Deny "git reset --hard is denied" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"git reset --hard HEAD~1"}}'
 
-Assert-Ask "rm -rf triggers ask" `
+Assert-Deny "rm -rf broad path is denied" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"rm -rf /tmp/data"}}'
 
-Assert-Ask "Remove-Item -Recurse triggers ask" `
+Assert-Deny "recursive force delete is denied" `
     "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./build -Recurse"}}'
+    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./build -Recurse -Force"}}'
 
-Assert-Ask "git branch -D triggers ask" `
+Assert-Deny "git branch -D is denied" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"git branch -D old-branch"}}'
 
-Assert-Ask "--no-verify triggers ask" `
+Assert-Deny "--no-verify is denied" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"git commit --no-verify -m test"}}'
 
-Assert-Ask "git add . triggers ask" `
+Assert-Deny "git add . is denied" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"git add ."}}'
 
-Assert-Ask "git add -A triggers ask" `
+Assert-Deny "git add -A is denied" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"git add -A"}}'
 
-# Should ALLOW safe commands
+# ── ASK: durable change, confirm (balanced defaults) ─────────────────────
+Assert-Ask "single-file delete asks by default (FS_WRITE opt-in)" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}'
+
+Assert-Ask "recursive (no force) delete asks" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./build -Recurse"}}'
+
+# ── ALLOW: safe under balanced defaults ──────────────────────────────────
 Assert-Allow "git status is safe" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"git status"}}'
@@ -193,6 +198,30 @@ Assert-Allow "git add specific file is safe" `
 Assert-Allow "git commit is safe" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"fix: typo\""}}'
+
+Assert-Allow "git merge auto-allowed at balanced default" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"git merge feature"}}'
+
+# Improvement: git config read (no value) is read-only
+Assert-Allow "git config read is safe" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"git config --global user.email"}}'
+
+# Improvement: pip show via call-operator + quoted python path is read-only
+Assert-Allow "pip show via call operator is safe" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"& \".venv/Scripts/python.exe\" -m pip show ruff"}}'
+
+# Improvement: ASK scan ignores quoted literals (no false databricks-export ask)
+Assert-Allow "commit message mentioning databricks export does not false-ask" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"populate databricks.yml from prod job export\""}}'
+
+# Improvement: separators inside quotes do not split the command
+Assert-Allow "separators inside quotes do not split" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"fix: a; b | c\""}}'
 
 Assert-Allow "non-terminal tool ignored" `
     "block-dangerous.ps1" `

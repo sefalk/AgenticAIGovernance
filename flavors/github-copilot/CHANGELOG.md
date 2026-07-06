@@ -14,6 +14,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`FS_WRITE` autonomy category** in the `block-dangerous` classifier: an
+  opt-in tier for *harmless, non-read-only* local filesystem writes — `Out-File`,
+  `Set-Content`, `Add-Content`, `New-Item`/`mkdir`, `Move-Item`/`Copy-Item`,
+  `mv`/`cp`, a `> file` redirect, and **single-file** `Remove-Item`/`rm`.
+  Recursive/force deletes and broad `rm` stay hard-denied. Default `ask`
+  (`auto` only at the `autonomous` level); set `AUTONOMY_CAT_FS_WRITE=auto` to
+  stop prompts for scratch writes. This lets a project allow harmless writes
+  while still asking/blocking the critical ones, complementing the existing
+  read-only vs durable distinction.
+
+### Fixed
+
+- **`block-dangerous` classifier precision** (fewer spurious prompts, same
+  safety floor):
+  - **Quote-aware segment splitting** — `;` / `|` *inside* a quoted string
+    (e.g. a commit message or `-Pattern 'a|b'`) no longer splits the command.
+  - **ASK scan runs on the quote-stripped command** — a commit message
+    mentioning e.g. "databricks … export" no longer false-triggers an ASK rule.
+  - **`git config <key>` reads** (no value) are recognized as read-only.
+  - **`pip show/list/freeze/check` via a call operator / quoted interpreter
+    path** (`& ".venv/Scripts/python.exe" -m pip show …`) is recognized as
+    read-only; a leading `& "path"` call operator and a leading `$var =`
+    assignment are unwrapped before classification; `Join-Path`/`Split-Path`/
+    `Resolve-Path` are treated as pure helpers; `databricks current-user` is a
+    read.
+  - Stale hook tests updated to the three-tier classifier (destructive commands
+    now assert `deny`, `git merge` asserts `allow`); added regression tests for
+    each fix above.
+
 - **Wiki placement routing** in `ado-wiki-manager` + `ado-wiki` skill: content
   is routed by scope — general / project-wide notes go to the **project wiki**
   (`ADO_WIKI_IDENTIFIER`), repo-specific docs are versioned in the code as a

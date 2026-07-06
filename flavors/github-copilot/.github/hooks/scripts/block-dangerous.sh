@@ -58,7 +58,7 @@ cat_default() {
         conservative)
             case "$1" in git_read|fs_read) echo auto ;; *) echo ask ;; esac ;;
         autonomous)
-            case "$1" in git_read|fs_read|tests|git_feature|git_merge|pkg|cloud_read) echo auto ;; *) echo ask ;; esac ;;
+            case "$1" in git_read|fs_read|fs_write|tests|git_feature|git_merge|pkg|cloud_read) echo auto ;; *) echo ask ;; esac ;;
         *) # balanced
             case "$1" in git_read|fs_read|tests|git_feature|git_merge|cloud_read) echo auto ;; *) echo ask ;; esac ;;
     esac
@@ -77,6 +77,7 @@ cat_fs_read=$(resolve_cat fs_read AUTONOMY_CAT_FS_READ)
 cat_pkg=$(resolve_cat pkg AUTONOMY_CAT_PKG_INSTALL)
 cat_databricks=$(resolve_cat databricks AUTONOMY_CAT_DATABRICKS)
 cat_cloud_read=$(resolve_cat cloud_read AUTONOMY_CAT_CLOUD_READ)
+cat_fs_write=$(resolve_cat fs_write AUTONOMY_CAT_FS_WRITE)
 
 emit() {
     # $1 = decision, $2 = reason
@@ -87,6 +88,9 @@ EOF
 }
 
 matches() { echo "$command_str" | grep -qEi "$1"; }
+# ASK-tier scan runs on the quote-stripped command (set later) so quoted
+# literals (e.g. a commit message) do not falsely trigger a rule.
+matches_stripped() { echo "$stripped_guard" | grep -qEi "$1"; }
 
 # ===================== TIER 1 -- DENY (hard) =====================
 deny_msg="Policy hard-deny. The agent will not run this. If genuinely required, either (a) run it yourself -- the agent can prepare the exact command for you to paste and execute -- or (b) make a conscious decision to relax the autonomy policy in .github/af-env.conf."
@@ -138,16 +142,28 @@ sm() { printf '%s' "$SEG" | grep -qEi "$1"; }
 is_safe_segment() {
     SEG="$(printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
     [ -z "$SEG" ] && return 0
+    # strip a leading simple assignment ($x = ...) -- no side effect beyond its RHS
+    SEG="$(printf '%s' "$SEG" | sed -E 's/^\$[[:alnum:]_:]+[[:space:]]*=[[:space:]]*//')"
+    # strip a leading call operator (& "path/tool" ...) -- benign invocation wrapper
+    SEG="$(printf '%s' "$SEG" | sed -E 's/^&[[:space:]]+//')"
+    SEG="$(printf '%s' "$SEG" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
     # file-write redirect (excludes fd duplication like 2>&1, >&1)
-    if printf '%s' "$SEG" | grep -qE '>>?[[:space:]]*[^&[:space:]>]'; then return 1; fi
+    if printf '%s' "$SEG" | grep -qE '>>?[[:space:]]*[^&[:space:]>]'; then
+        if [ "$cat_fs_write" != "auto" ]; then return 1; fi
+        # FS_WRITE=auto: strip the file redirect and vet the left command
+        SEG="$(printf '%s' "$SEG" | sed -E 's/>>?[[:space:]]*[^[:space:]&>|]+//g' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+        [ -z "$SEG" ] && return 0
+    fi
     # background / inline chaining operator ( & ) not handled by the split
     # ( & is not split on because it also appears in fd redirects like 2>&1 )
     if printf '%s' "$SEG" | grep -qE '(^|[^0-9>&])&([^&]|$)'; then return 1; fi
     sm '^(cd|Set-Location|pushd|popd|Push-Location|Pop-Location)\b' && return 0
-    sm '^(Select-Object|Select-String|Sort-Object|Measure-Object|Out-String|Out-Host|Format-Table|Format-List|Get-Unique|more|wc|findstr|grep|ConvertFrom-Json|ConvertTo-Json)\b' && return 0
+    sm '^(Select-Object|Select-String|Sort-Object|Measure-Object|Out-String|Out-Host|Format-Table|Format-List|Get-Unique|Join-Path|Split-Path|Resolve-Path|more|wc|findstr|grep|ConvertFrom-Json|ConvertTo-Json)\b' && return 0
     sm '^[[:space:]]*[[:alnum:]._/-]+([[:space:]]+-{1,2}[[:alnum:]=.,_-]+)*[[:space:]]+--version\b' && return 0
     if [ "$cat_git_read" = "auto" ]; then
         sm '^\s*git\s+(status|diff|log|show|rev-parse|rev-list|remote|blame|describe|shortlog|for-each-ref|ls-files|config\s+--get|fetch)\b' && return 0
+        # read-only config access: recognised read flags + at most one key, nothing after
+        sm '^\s*git\s+config\s+(--(global|local|system|worktree|get|get-all|get-regexp|list|show-origin|show-scope)\s+)*[[:alnum:]._-]*\s*$' && return 0
         sm '^\s*git\s+stash\s+list\b' && return 0
         if sm '^\s*git\s+branch\b' && ! sm '\s-[dDmMcC]\b' && ! sm '--(delete|move|copy|force)\b'; then return 0; fi
         if sm '^\s*git\s+tag\b' && ! sm '\s-[adfsm]\b' && ! sm '--(delete|force|sign|annotate)\b' && ! sm '^\s*git\s+tag\s+[^\s-]'; then return 0; fi
@@ -186,7 +202,7 @@ is_safe_segment() {
     if [ "$cat_fs_read" = "auto" ]; then
         sm '^\s*(ls|dir|Get-ChildItem|cat|type|Get-Content|head|tail|Test-Path|pwd|Get-Location|where(\.exe)?|Get-Command|Get-Date|whoami|hostname|Get-Process|Get-Service|echo|Write-Output|Write-Host)\b' && return 0
         sm "^\s*${path_pfx}pip3?${exe}\s+(list|show|freeze|check)\b" && return 0
-        sm '^\s*python([0-9])?\s+-m\s+pip\s+(list|show|freeze|check)\b' && return 0
+        sm '^\s*"?(\S*[\\/])?python([0-9])?(\.exe)?"?\s+-m\s+pip\s+(list|show|freeze|check)\b' && return 0
     fi
     if [ "$cat_pkg" = "auto" ]; then
         sm "^\s*${path_pfx}pip3?${exe}\s+(install|uninstall)\b" && return 0
@@ -197,11 +213,18 @@ is_safe_segment() {
         # read-only cloud CLI; exclude anything touching secrets/credentials/tokens
         if ! printf '%s' "$SEG" | grep -qiE '(secret|credential|token|password|keyvault|get-access-token)'; then
             sm '^\s*databricks\s+[[:alnum:]_-]+\s+(list|get|ls|show)\b' && return 0
+            sm '^\s*databricks\s+current-user\b' && return 0
             sm '^\s*az\s+.+\b(show|list)\b' && return 0
         fi
     fi
     if [ "$cat_databricks" = "auto" ]; then
         sm '^\s*databricks\b' && return 0
+    fi
+    # local filesystem writes (opt-in via AUTONOMY_CAT_FS_WRITE). Recursive/force
+    # deletes and broad rm are hard-denied above, so only the safe subset is here.
+    if [ "$cat_fs_write" = "auto" ]; then
+        sm '^\s*(Out-File|Set-Content|Add-Content|Tee-Object|New-Item|mkdir|md|Move-Item|Copy-Item|mv|cp|touch)\b' && return 0
+        if sm '^\s*(Remove-Item|rm|del|erase)\b' && ! sm '(-recurse|-force|\*)' && ! sm '(^|\s)-[rf]{1,2}\b'; then return 0; fi
     fi
     return 1
 }
@@ -212,7 +235,25 @@ is_safe_segment() {
 # so conventional-commit messages like "fix(scope): ..." are not falsely blocked.
 stripped_guard=$(printf '%s' "$command_str" | sed -E 's/"[^"]*"//g' | sed -E "s/'[^']*'//g")
 if ! printf '%s' "$stripped_guard" | grep -qE '[`({]'; then
-    seg_lines=$(printf '%s' "$command_str" | sed -E 's/\|\||&&|;/\n/g' | sed -E 's/\|/\n/g')
+    seg_lines=$(printf '%s' "$command_str" | "$PYTHON" -c 'import sys
+s=sys.stdin.read()
+out=[];cur=[];q=None;i=0
+while i<len(s):
+    c=s[i]
+    if q:
+        cur.append(c)
+        if c==q:q=None
+        i+=1;continue
+    if c=="\"" or c=="\x27":
+        q=c;cur.append(c);i+=1;continue
+    n=s[i+1] if i+1<len(s) else ""
+    if (c=="&" and n=="&") or (c=="|" and n=="|"):
+        out.append("".join(cur));cur=[];i+=2;continue
+    if c==";" or c=="|" or c=="\n":
+        out.append("".join(cur));cur=[];i+=1;continue
+    cur.append(c);i+=1
+out.append("".join(cur))
+sys.stdout.write("\n".join(x.replace("\n"," ") for x in out))')
     any=0; allsafe=1
     while IFS= read -r seg; do
         [ -z "$(printf '%s' "$seg" | tr -d '[:space:]')" ] && continue
@@ -241,7 +282,7 @@ ask_patterns=(
     '(Move-Item|Copy-Item|New-Item|mkdir|mv|cp)\b'
 )
 for p in "${ask_patterns[@]}"; do
-    if matches "$p"; then
+    if matches_stripped "$p"; then
         emit ask 'This command makes a durable change. Please confirm it is intentional.'
     fi
 done

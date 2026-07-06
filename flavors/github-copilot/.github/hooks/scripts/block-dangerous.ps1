@@ -65,9 +65,9 @@ $exe = '(\.exe)?'
 
 # Category defaults per level. Per-category overrides win when non-empty.
 $levelDefaults = @{
-    conservative = @{ git_read = 'auto'; fs_read = 'auto'; tests = 'ask';  git_feature = 'ask';  git_merge = 'ask';  pkg = 'ask';  databricks = 'ask'; cloud_read = 'ask'  }
-    balanced     = @{ git_read = 'auto'; fs_read = 'auto'; tests = 'auto'; git_feature = 'auto'; git_merge = 'auto'; pkg = 'ask';  databricks = 'ask'; cloud_read = 'auto' }
-    autonomous   = @{ git_read = 'auto'; fs_read = 'auto'; tests = 'auto'; git_feature = 'auto'; git_merge = 'auto'; pkg = 'auto'; databricks = 'ask'; cloud_read = 'auto' }
+    conservative = @{ git_read = 'auto'; fs_read = 'auto'; fs_write = 'ask';  tests = 'ask';  git_feature = 'ask';  git_merge = 'ask';  pkg = 'ask';  databricks = 'ask'; cloud_read = 'ask'  }
+    balanced     = @{ git_read = 'auto'; fs_read = 'auto'; fs_write = 'ask';  tests = 'auto'; git_feature = 'auto'; git_merge = 'auto'; pkg = 'ask';  databricks = 'ask'; cloud_read = 'auto' }
+    autonomous   = @{ git_read = 'auto'; fs_read = 'auto'; fs_write = 'auto'; tests = 'auto'; git_feature = 'auto'; git_merge = 'auto'; pkg = 'auto'; databricks = 'ask'; cloud_read = 'auto' }
 }
 if (-not $levelDefaults.ContainsKey($level)) { $level = 'balanced' }
 function Resolve-Category([string]$name, [string]$envKey) {
@@ -83,6 +83,36 @@ $catFsRead     = Resolve-Category 'fs_read'     'AUTONOMY_CAT_FS_READ'
 $catPkg        = Resolve-Category 'pkg'         'AUTONOMY_CAT_PKG_INSTALL'
 $catDatabricks = Resolve-Category 'databricks'  'AUTONOMY_CAT_DATABRICKS'
 $catCloudRead  = Resolve-Category 'cloud_read'  'AUTONOMY_CAT_CLOUD_READ'
+$catFsWrite    = Resolve-Category 'fs_write'    'AUTONOMY_CAT_FS_WRITE'
+
+# Split a command into top-level segments on ; && || | and newlines, honoring
+# single/double quotes so separators INSIDE a quoted string (e.g. a commit
+# message or a -Pattern 'a|b') do not split the command.
+function Split-TopLevel([string]$cmd) {
+    $segs = New-Object System.Collections.Generic.List[string]
+    $sb = New-Object System.Text.StringBuilder
+    $q = [char]0
+    for ($i = 0; $i -lt $cmd.Length; $i++) {
+        $c = $cmd[$i]
+        if ($q -ne [char]0) {
+            [void]$sb.Append($c)
+            if ($c -eq $q) { $q = [char]0 }
+            continue
+        }
+        if ($c -eq '"' -or $c -eq "'") { $q = $c; [void]$sb.Append($c); continue }
+        $n = if ($i + 1 -lt $cmd.Length) { $cmd[$i + 1] } else { [char]0 }
+        if (($c -eq '&' -and $n -eq '&') -or ($c -eq '|' -and $n -eq '|')) {
+            $segs.Add($sb.ToString()); [void]$sb.Clear(); $i++; continue
+        }
+        if ($c -eq ';' -or $c -eq '|' -or $c -eq "`n") {
+            $segs.Add($sb.ToString()); [void]$sb.Clear(); continue
+        }
+        if ($c -eq "`r") { continue }
+        [void]$sb.Append($c)
+    }
+    $segs.Add($sb.ToString())
+    return , $segs.ToArray()
+}
 
 function Emit([string]$decision, [string]$reason) {
     @{
@@ -159,19 +189,31 @@ function Test-WriteRedirect([string]$seg) {
 function Test-SafeSegment([string]$seg) {
     $s = $seg.Trim()
     if (-not $s) { return $true }
-    if (Test-WriteRedirect $s) { return $false }
+    # strip a leading simple assignment ($x = ...) -- no side effect beyond its RHS
+    if ($s -match '^\s*\$[\w:]+\s*=\s*(.+)$') { $s = $Matches[1].Trim() }
+    # strip a leading call operator (& "path\tool" ...) -- benign invocation wrapper
+    if ($s -match '^\s*&\s+(.+)$') { $s = $Matches[1].Trim() }
+    if (Test-WriteRedirect $s) {
+        if ($catFsWrite -ne 'auto') { return $false }
+        # FS_WRITE=auto: a file redirect is allowed; strip it and vet the left command
+        $s = ($s -replace '>>?\s*[^\s&>|]+', '').Trim()
+        if (-not $s) { return $true }
+    }
     # background / inline chaining operator ( & ) that the split does not handle;
     # ( & is not split on because it also appears in fd redirects like 2>&1 )
     if ($s -match '(?<![0-9>&])&(?!&)') { return $false }
     # navigation (no data change)
     if ($s -match '(?i)^(cd|Set-Location|pushd|popd|Push-Location|Pop-Location)\b') { return $true }
     # safe display / filter commands (typical pipe right-hand side)
-    if ($s -match '(?i)^(Select-Object|Select-String|Sort-Object|Measure-Object|Out-String|Out-Host|Format-Table|Format-List|Get-Unique|more|wc|findstr|grep|ConvertFrom-Json|ConvertTo-Json)\b') { return $true }
+    if ($s -match '(?i)^(Select-Object|Select-String|Sort-Object|Measure-Object|Out-String|Out-Host|Format-Table|Format-List|Get-Unique|Join-Path|Split-Path|Resolve-Path|more|wc|findstr|grep|ConvertFrom-Json|ConvertTo-Json)\b') { return $true }
     # version probes: <binary> [flags] --version (no positional file arg before it)
     if ($s -match '(?i)^\s*[\w./\\-]+(\s+-{1,2}[\w=.,-]+)*\s+--version\b') { return $true }
     # git read-only
     if ($catGitRead -eq 'auto') {
         if ($s -match '^\s*git\s+(status|diff|log|show|rev-parse|rev-list|remote|blame|describe|shortlog|for-each-ref|ls-files|config\s+--get|fetch)\b') { return $true }
+        # read-only config access: only recognised read flags + at most one key,
+        # nothing after (a trailing value token would make it a write).
+        if ($s -match '^\s*git\s+config\s+(--(global|local|system|worktree|get|get-all|get-regexp|list|show-origin|show-scope)\s+)*[\w.-]*\s*$') { return $true }
         if ($s -match '^\s*git\s+stash\s+list\b') { return $true }
         # branch listing (creating a ref is harmless; delete/rename/copy excluded)
         if ($s -match '^\s*git\s+branch\b' -and $s -notmatch '\s-[dDmMcC]\b' -and $s -notmatch '--(delete|move|copy|force)\b') { return $true }
@@ -212,14 +254,20 @@ function Test-SafeSegment([string]$seg) {
     # read-only filesystem & info commands
     if ($catFsRead -eq 'auto' -and $s -match '(?i)^\s*(ls|dir|Get-ChildItem|cat|type|Get-Content|head|tail|Test-Path|pwd|Get-Location|where(\.exe)?|Get-Command|Get-Date|whoami|hostname|Get-Process|Get-Service|echo|Write-Output|Write-Host)\b') { return $true }
     # read-only package / environment queries
-    if ($catFsRead -eq 'auto' -and ($s -match "(?i)^\s*${pathPfx}pip3?$exe\s+(list|show|freeze|check)\b" -or $s -match '(?i)^\s*python(\d)?\s+-m\s+pip\s+(list|show|freeze|check)\b')) { return $true }
+    if ($catFsRead -eq 'auto' -and ($s -match "(?i)^\s*${pathPfx}pip3?$exe\s+(list|show|freeze|check)\b" -or $s -match '(?i)^\s*"?(\S*[\\/])?python(\d)?(\.exe)?"?\s+-m\s+pip\s+(list|show|freeze|check)\b')) { return $true }
     # package managers (autonomy-gated)
     if ($catPkg -eq 'auto' -and ($s -match "(?i)^\s*${pathPfx}pip3?$exe\s+(install|uninstall)\b" -or $s -match '(?i)^\s*python(\d)?\s+-m\s+pip\s+(install|uninstall)\b' -or $s -match "(?i)^\s*${pathPfx}conda$exe\s+(install|remove)\b")) { return $true }
     # read-only cloud CLI queries (databricks list/get, az show/list).
     # Excludes anything touching secrets/credentials/tokens (would print them).
-    if ($catCloudRead -eq 'auto' -and $s -notmatch '(?i)(secret|credential|token|password|keyvault|get-access-token)' -and ($s -match '(?i)^\s*databricks\s+[\w-]+\s+(list|get|ls|show)\b' -or $s -match '(?i)^\s*az\s+.+\b(show|list)\b')) { return $true }
+    if ($catCloudRead -eq 'auto' -and $s -notmatch '(?i)(secret|credential|token|password|keyvault|get-access-token)' -and ($s -match '(?i)^\s*databricks\s+[\w-]+\s+(list|get|ls|show)\b' -or $s -match '(?i)^\s*databricks\s+current-user\b' -or $s -match '(?i)^\s*az\s+.+\b(show|list)\b')) { return $true }
     # databricks CLI (autonomy-gated)
     if ($catDatabricks -eq 'auto' -and $s -match '(?i)^\s*databricks\b') { return $true }
+    # local filesystem writes (opt-in via AUTONOMY_CAT_FS_WRITE). Recursive/force
+    # deletes and broad rm are hard-denied above, so only the safe subset is here.
+    if ($catFsWrite -eq 'auto') {
+        if ($s -match '(?i)^\s*(Out-File|Set-Content|Add-Content|Tee-Object|New-Item|mkdir|md|Move-Item|Copy-Item|mv|cp|touch)\b') { return $true }
+        if ($s -match '(?i)^\s*(Remove-Item|rm|del|erase)\b' -and $s -notmatch '(?i)(-recurse|-force|\*)' -and $s -notmatch '(^|\s)-[rf]{1,2}\b') { return $true }
+    }
     return $false
 }
 
@@ -230,7 +278,7 @@ function Test-SafeSegment([string]$seg) {
 # "fix(scope): ..." are not falsely suppressed.
 $strippedForGuard = $command -replace '"[^"]*"', '' -replace "'[^']*'", ''
 if ($strippedForGuard -notmatch '[`({]') {
-    $segments = $command -split '\|\||&&|;|\||\r?\n'
+    $segments = Split-TopLevel $command
     $anySeg = $false
     $allSafe = $true
     foreach ($seg in $segments) {
@@ -259,8 +307,10 @@ $askRules = @(
     '(?i)(^|\s)rm\b'
     '(?i)(Move-Item|Copy-Item|New-Item|mkdir|mv|cp)\b'
 )
+# Scan the quote-stripped command so quoted literals (e.g. a commit message
+# mentioning "databricks ... export") do not falsely trigger an ASK rule.
 foreach ($p in $askRules) {
-    if ($command -match $p) {
+    if ($strippedForGuard -match $p) {
         Emit 'ask' 'This command makes a durable change. Please confirm it is intentional.'
     }
 }
