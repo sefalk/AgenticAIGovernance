@@ -7,6 +7,7 @@ disable-model-invocation: true
 # Azure DevOps Pull Request Skill
 
 <!-- copilot:generated | implementer | 2026-06-25 -->
+<!-- copilot:modified | implementer | 2026-07-06 | enforce noFastForward merge strategy -->
 
 ## Purpose
 
@@ -67,8 +68,16 @@ The completion behavior is determined by the PR **target branch**:
 
 - **Autocomplete branches** (`ADO_PR_AUTOCOMPLETE_BRANCHES`, default `dev`):
   autonomous mode (A2). Call `repo_update_pull_request` with
-  `autoComplete: true` (optionally `mergeStrategy`, `deleteSourceBranch`) so
+  `autoComplete: true` with `mergeStrategy` set from `ADO_PR_MERGE_STRATEGY`
+  (default `noFastForward`) and `deleteSourceBranch: true` so
   the platform merges it once branch policies pass.
+- **Merge strategy (Mandatory):** always pass `mergeStrategy` from
+  `ADO_PR_MERGE_STRATEGY` (default `noFastForward`). Never use `squash` for
+  `agent/*` branches: squash creates a new commit that does not contain the
+  feature-branch tip, so the coordinator's post-merge `git branch -d agent/*`
+  fails as "not fully merged" and the only cleanup left is a policy-denied
+  force-delete. `noFastForward` keeps the branch tip reachable and lets safe
+  deletion succeed.
 - **Human-only branches** (`ADO_PR_HUMAN_ONLY_BRANCHES`, default `main`):
   human mode (A1). Create/update the PR only; never set `autoComplete`/`status`.
 - **Unresolved / other targets:** safe default is human-only.
