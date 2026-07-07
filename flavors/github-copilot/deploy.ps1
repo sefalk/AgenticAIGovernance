@@ -338,7 +338,7 @@ function Get-AFSourceFiles {
         $srcDir = Join-Path $SourceGitHub $dir
         if (Test-Path $srcDir) {
             Get-ChildItem $srcDir -Recurse -File | ForEach-Object {
-                $rel = $_.FullName.Substring($SourceGitHub.Length).TrimStart('\', '/')
+                $rel = ($_.FullName.Substring($SourceGitHub.Length).TrimStart('\', '/')) -replace '\\', '/'
                 $files += $rel
             }
         }
@@ -356,7 +356,9 @@ function Read-HashFile {
     if (Test-Path $path) {
         Get-Content $path | ForEach-Object {
             if ($_ -match '^([^#=]+)=(.+)$') {
-                $hashes[$Matches[1].Trim()] = $Matches[2].Trim()
+                # Normalize keys to forward slashes so a baseline written on Windows
+                # (backslash keys) matches the forward-slash manifest/customizable set.
+                $hashes[($Matches[1].Trim() -replace '\\', '/')] = $Matches[2].Trim()
             }
         }
     }
@@ -894,7 +896,7 @@ foreach ($dir in $ManifestDirs) {
     $srcDir = Join-Path $SourceGitHub $dir
     if (-not (Test-Path $srcDir)) { continue }
     Get-ChildItem $srcDir -Recurse -File | ForEach-Object {
-        $rel = $_.FullName.Substring($SourceGitHub.Length).TrimStart('\', '/')
+        $rel = ($_.FullName.Substring($SourceGitHub.Length).TrimStart('\', '/')) -replace '\\', '/'
         Publish-SingleFile -Source $_.FullName `
                           -Target (Join-Path $TargetGitHub $rel) `
                           -DisplayPath ".github/$rel" `

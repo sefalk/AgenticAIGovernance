@@ -358,7 +358,7 @@ read_hash_file() {
             if [[ "$hline" =~ ^([^#=]+)=(.+)$ ]]; then
                 local key="${BASH_REMATCH[1]}"
                 local val="${BASH_REMATCH[2]}"
-                key="$(echo "$key" | sed 's/[[:space:]]*$//')"
+                key="$(echo "$key" | sed 's/[[:space:]]*$//' | tr '\\' '/')"
                 val="$(echo "$val" | sed 's/^[[:space:]]*//')"
                 BASELINE_HASHES["$key"]="$val"
             fi

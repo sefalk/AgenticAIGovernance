@@ -42,6 +42,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Deploy: customizable-file detection for files inside directories (Windows).**
+  `deploy.ps1` built hash keys with backslashes on Windows while the
+  `[customizable]` set (and the `.af-manifest`) use forward slashes, so
+  customizable files *inside directories* (e.g. `scripts/run-tests.sh`,
+  `skills/INDEX.md`) were not recognized as customizable and could be reported
+  as `UPDATE`/`CONFLICT` instead of `PROTECT`/`PRESERVE`. Path keys are now
+  normalized to forward slashes everywhere (source traversal + hash-file read),
+  and existing backslash baselines migrate transparently on read. `deploy.sh`
+  normalizes baseline keys on read too, for cross-platform compatibility.
+  (Surfaced by the deploy-as-MCP PoC, which reimplements this correctly.)
+
 - **Work-item status decoupled from git/PR (WIT drift fix).** Two state machines
   were fighting over work-item status: ADO auto-transitions items on PR
   completion while governance sets status evidence-based via the
