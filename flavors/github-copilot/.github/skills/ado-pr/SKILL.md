@@ -8,6 +8,7 @@ disable-model-invocation: true
 
 <!-- copilot:generated | implementer | 2026-06-25 -->
 <!-- copilot:modified | implementer | 2026-07-06 | enforce noFastForward merge strategy -->
+<!-- copilot:modified | implementer | 2026-07-07 | set transitionWorkItems:false in the autocomplete call (MCP default is true) -->
 
 ## Purpose
 
@@ -68,9 +69,11 @@ The completion behavior is determined by the PR **target branch**:
 
 - **Autocomplete branches** (`ADO_PR_AUTOCOMPLETE_BRANCHES`, default `dev`):
   autonomous mode (A2). Call `repo_update_pull_request` with
-  `autoComplete: true` with `mergeStrategy` set from `ADO_PR_MERGE_STRATEGY`
-  (default `noFastForward`) and `deleteSourceBranch: true` so
-  the platform merges it once branch policies pass.
+  `autoComplete: true`, `mergeStrategy` from `ADO_PR_MERGE_STRATEGY`
+  (default `noFastForward`), `deleteSourceBranch: true`, and
+  `transitionWorkItems: false` (the MCP default is `true` — always set it
+  explicitly in the same call) so the platform merges it once branch policies
+  pass without auto-transitioning linked work items.
 - **Merge strategy (Mandatory):** always pass `mergeStrategy` from
   `ADO_PR_MERGE_STRATEGY` (default `noFastForward`). Never use `squash` for
   `agent/*` branches: squash creates a new commit that does not contain the

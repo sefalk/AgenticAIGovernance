@@ -42,6 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`ado-pr-manager` work-item auto-transition hardening.** The autocomplete call
+  now **always** passes `transitionWorkItems: false` in the *same*
+  `repo_update_pull_request` call that enables autocomplete. The azure-devops-mcp
+  default is `true`, so merely "not setting it to true" was insufficient — a fast
+  autocomplete merge could transition (close) linked work items and outrun a
+  separate corrective call. Applied to both the `ado-pr-manager` agent and the
+  `ado-pr` skill.
+
 - **`block-dangerous` classifier precision** (fewer spurious prompts, same
   safety floor):
   - **Quote-aware segment splitting** — `;` / `|` *inside* a quoted string
