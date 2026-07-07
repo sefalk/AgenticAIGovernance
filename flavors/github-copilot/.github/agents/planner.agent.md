@@ -19,7 +19,7 @@ tools:
   - read/getNotebookSummary
   - read/readNotebookCellOutput
   - vscode/askQuestions
-  - vscode.mermaid-chat-features/renderMermaidDiagram
+  - vscode.mermaid-markdown-features/renderMermaidDiagram
 ---
 
 # Planner Agent (Worker)

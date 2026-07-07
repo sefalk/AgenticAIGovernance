@@ -19,7 +19,7 @@ tools:
   - execute/runTask
   - edit/editNotebook
   - read/getNotebookSummary
-  - vscode.mermaid-chat-features/renderMermaidDiagram
+  - vscode.mermaid-markdown-features/renderMermaidDiagram
 hooks:
   PostToolUse:
     - type: command

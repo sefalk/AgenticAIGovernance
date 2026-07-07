@@ -56,7 +56,7 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 | `todo` | R/W | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **VS Code UI** | | | | | | | | | | | | |
 | `vscode/askQuestions` | X | ✅ | ✅ | — | — | — | — | — | — | — | — | — |
-| `vscode.mermaid-chat-features/renderMermaidDiagram` | W | — | ✅ | — | — | — | — | — | ✅ | — | — | — |
+| `vscode.mermaid-markdown-features/renderMermaidDiagram` | W | — | ✅ | — | — | — | — | — | ✅ | — | — | — |
 
 ## Excluded Tools — Rationale
 

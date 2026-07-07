@@ -67,8 +67,8 @@ ms-python.python/getPythonEnvironmentInfo
 ms-python.python/getPythonExecutableCommand
 ms-python.python/installPythonPackage
 
-## Mermaid (vscode.mermaid-chat-features)
-vscode.mermaid-chat-features/renderMermaidDiagram
+## Mermaid (vscode.mermaid-markdown-features)
+vscode.mermaid-markdown-features/renderMermaidDiagram
 vscode/getProjectSetupInfo
 vscode/installExtension
 vscode/runCommand
