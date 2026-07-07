@@ -42,6 +42,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Work-item status decoupled from git/PR (WIT drift fix).** Two state machines
+  were fighting over work-item status: ADO auto-transitions items on PR
+  completion while governance sets status evidence-based via the
+  work-item-manager — causing premature auto-close, mis-attributed branches
+  (work pinned to the wrong item), WIT-less units of work, and reactively-created
+  items. Now: (A) `transitionWorkItems: false` is a **HARD gate** on the
+  `ado-pr-manager` autocomplete call — the PR never touches WIT status; (B) a
+  new coordinator **Step 0a "Work-Item First"** resolves/creates the item, sets
+  it **Active**, and puts its id in the branch slug *before* the branch exists —
+  one work item per unit of work, no branch without a WIT; (C) lifecycle follows
+  commits (New→Active→Resolved on post-merge with AC-map→Closed at
+  verification); (D) the R-SD-08 compliance gate now also checks the branch-slug
+  WIT id **equals** the PR-linked id and that the item was Active at work start;
+  (E) a **post-merge reconciliation** step is the single point where code and
+  WIT state reconnect (evidence-based). The **work-item-manager is the sole
+  authority over WIT status.** Touches `coordinator`, `compliance-checker`,
+  `ado-pr-manager`, `git-workflow.instructions.md`, and `quality-gates`.
+
 - **`ado-pr-manager` work-item auto-transition hardening.** The autocomplete call
   now **always** passes `transitionWorkItems: false` in the *same*
   `repo_update_pull_request` call that enables autocomplete. The azure-devops-mcp

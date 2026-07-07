@@ -6,6 +6,8 @@ applyTo: '**'
 
 # Git Workflow
 
+<!-- copilot:modified | implementer | 2026-07-07 | WIT-status decoupling: work-item-first, one-WIT-per-unit, id-match, post-merge reconciliation -->
+
 These rules define how agents interact with git. They consolidate and extend
 the git conventions from the [Agent Team Manifest](../MANIFEST.md).
 
@@ -125,11 +127,37 @@ Applies to Standard and Deep workflows **when tracker capability is active**
 (`ADO_CAPABILITY_MODE != off`). With tracker capability off, the association
 falls back to local traceability artifacts (plan/log) per R-SD-08.
 
-1. The branch slug must contain the resolved work item id.
-2. The related work item must include a branch artifact link **or** an
-   explicit branch-reference comment.
-3. The work item must reference the implementation plan path.
-4. Missing association is a **HARD** gate failure in compliance post-flight.
+1. **Work-item first.** Resolve or create the work item **before** the branch,
+   and set it to **Active** at work start. No branch is created without a
+   resolved work item (tracker active).
+2. **One work item per unit of work.** Each distinct unit of work gets its own
+   work item — do not pin unrelated concerns (infra/dependency bumps, tooling
+   fixes, analysis tasks) to whatever work item happens to be open. If a task
+   spans several concerns, split them.
+3. The branch slug must contain the resolved work item id.
+4. The work item id in the branch slug **must equal** the work item linked by
+   the pull request (no cross-attribution).
+5. The related work item must include a branch artifact link **or** an explicit
+   branch-reference comment, and must reference the implementation plan path.
+6. Missing or mismatched association is a **HARD** gate failure in compliance
+   post-flight.
+
+### Work-Item Status Authority (Decoupling)
+
+**Git/PR = code integration; the work-item-manager is the sole authority over
+work-item status.** The two state machines are decoupled and reconnect at
+exactly one point: post-merge, evidence-based reconciliation.
+
+- The PR **never** transitions work items: the `ado-pr-manager` always passes
+  `transitionWorkItems: false` in the same call that enables autocomplete (the
+  azure-devops-mcp default is `true`). A fast autocomplete merge must not
+  auto-close linked items or outrun a corrective call.
+- Work-item lifecycle follows the commit lifecycle:
+  **New → Active** (at work start, before the branch) **→ Resolved**
+  (post-merge into the integration branch, with an AC→evidence map) **→ Closed**
+  (only at verification / promotion, against merged evidence).
+- The `ado-work-item-manager` performs every status transition; the coordinator
+  triggers the post-merge reconciliation once the merge is confirmed.
 
 ### Branch Cleanup
 

@@ -58,6 +58,7 @@ The coordinator invokes you with `mode=pre-flight` and provides:
 | WIP.md state is consistent | If found, status is valid (`IN_PROGRESS`, `PAUSED`, `CANCELLED`) | **WARNING** |
 | Retro directory scanned | `retros/auto/` was checked for lessons | **ADVISORY** |
 | Branch relates to task description | Compare branch slug semantics to task | **ADVISORY** |
+| Work-item first (tracker active) | If `ADO_CAPABILITY_MODE != off`: a resolved work item exists, is **Active**, and its id prefixes the branch slug | **BLOCKING** when tracker active |
 
 ### Pre-Flight Return Format
 
@@ -93,7 +94,7 @@ The coordinator invokes you with `mode=post-flight` and provides:
 | Provenance markers on new files | Read first 5 lines of each new file, check for `copilot:generated` | **WARNING** |
 | Provenance markers on modified files | Check for `copilot:modified` in substantially changed files | **ADVISORY** |
 | Integration path matches capability mode | Read `ADO_CAPABILITY_MODE` from `af-env.conf`: if `required`, a PR must have been opened (request-based); if `off`, no PR worker ran (pure git). Mismatch = wrong integration path | **MISSING** for request-based |
-| Branch-to-work-item association (R-SD-08) | If `ADO_CAPABILITY_MODE != off`: the branch slug contains the resolved work item id AND the work item links the branch + plan path. If `off`: a local traceability artifact (plan/log) references the change instead. | **MISSING** when tracker active |
+| Branch-to-work-item association (R-SD-08) | If `ADO_CAPABILITY_MODE != off`: the branch-slug work item id **equals** the work item id linked by the PR (no cross-attribution), the work item was **Active** at work start, and it links the branch + plan path. If `off`: a local traceability artifact (plan/log) references the change instead. | **MISSING** when tracker active |
 
 ### Post-Flight Return Format
 

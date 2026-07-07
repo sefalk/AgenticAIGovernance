@@ -178,11 +178,12 @@ reference the metric thresholds from MANIFEST § 5.
 |---|---|---|---|
 | Pre-flight: branch not on main/master | HARD | Check branch name | Standard+ |
 | Pre-flight: plan directory resolved | HARD | Verify directory exists | Standard+ |
+| Pre-flight: work-item first (tracker active) | HARD | When `ADO_CAPABILITY_MODE != off`: a resolved work item exists, is Active, and its id prefixes the branch slug | Standard+ |
 | Post-flight: plan file status = COMPLETED | HARD | Read plan file, check status field | Standard+ |
 | Post-flight: workflow log YAML exists | HARD | Check `.github/logs/{workflow-id}.yaml` | Standard+ |
 | Post-flight: retro snippet exists | HARD | Check `retros/auto/{workflow-id}.md` | Standard+ |
 | Post-flight: integration path matches capability mode | HARD | If `ADO_CAPABILITY_MODE=required`, a PR was opened; if `off`, no PR worker ran | Standard+ |
-| Post-flight: branch-to-work-item association (R-SD-08) | HARD | When tracker capability is active (`ADO_CAPABILITY_MODE != off`): branch slug contains the work item id, the work item links the branch + plan path. Tracker off ⇒ local traceability artifact instead. | Standard+ |
+| Post-flight: branch-to-work-item association (R-SD-08) | HARD | When tracker capability is active (`ADO_CAPABILITY_MODE != off`): the branch-slug work item id equals the PR-linked work item id (no cross-attribution), the item was Active at work start, and it links the branch + plan path. Tracker off ⇒ local traceability artifact instead. | Standard+ |
 | Post-flight: provenance markers on new files | SOFT | Read first 5 lines of new files | Standard+ |
 
 ### Ado-Work-Item-Manager
@@ -223,6 +224,7 @@ reference the metric thresholds from MANIFEST § 5.
 | PR created or existing PR updated (no duplicate) | HARD | Verify single active PR for the source branch | Standard+ |
 | Work item linked to PR | HARD | Verify work item linked at creation, or `NEEDS_WORKITEM_LINK` reported for deferred linking, or explicit none-with-reason | Standard+ |
 | Completion policy applied by target | HARD | Integration branch → autocomplete set; protected/unresolved → human-only, no autocomplete | Standard+ |
+| No work-item auto-transition on autocomplete | HARD | The autocomplete call passed `transitionWorkItems: false` (never `true`; the azure-devops-mcp default is `true`) | Standard+ |
 | Plan reference attached | SOFT | Reviewer checks clickable URL (remote-verified) or `pending push` fallback | Standard+ |
 | Traceability thread posted | SOFT | Reviewer checks a PR thread summarizes work item, plan, and completion mode (idempotent) | Standard+ |
 | Reviewers/PR description quality | SOFT | Reviewer checks description completeness and reviewer assignment | Deep |
