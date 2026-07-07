@@ -143,3 +143,93 @@ def test_dry_run_tier_file_roundtrips_as_unchanged(tmp_path: Path) -> None:
     _deploy_identically(src, target)
     files = {f["path"]: f["classification"] for f in deploy_core.dry_run(src, target)["files"]}
     assert files[".github/agents/planner.agent.md"] == "UNCHANGED"
+
+
+# ── Write path (Phase 1) ───────────────────────────────────────────────────
+
+
+def test_apply_writes_update_and_backs_up(tmp_path: Path) -> None:
+    src = _make_source(tmp_path / "src")
+    target = tmp_path / "proj"
+    _deploy_identically(src, target)
+    _write(src / ".github" / "MANIFEST.md", "# manifest doc CHANGED\n")
+
+    report = deploy_core.apply(src, target)
+
+    assert ".github/MANIFEST.md" in report["applied"]
+    assert (target / ".github" / "MANIFEST.md").read_text(encoding="utf-8") == "# manifest doc CHANGED\n"
+    assert report["backup_dir"] is not None
+    assert (Path(report["backup_dir"]) / ".github" / "MANIFEST.md").read_text(encoding="utf-8") == "# manifest doc\n"
+    # After apply, a fresh dry-run sees no pending updates.
+    assert "UPDATE" not in deploy_core.dry_run(src, target)["counts"]
+
+
+def test_apply_never_writes_customizable_conflict(tmp_path: Path) -> None:
+    src = _make_source(tmp_path / "src")
+    target = tmp_path / "proj"
+    _deploy_identically(src, target)
+    _write(src / ".github" / "af-env.conf", "SRC_DIR=src\nNEW=1\n")
+    _write(target / ".github" / "af-env.conf", "SRC_DIR=myproject\n")
+
+    report = deploy_core.apply(src, target)
+
+    assert ".github/af-env.conf" not in report["applied"]
+    assert any(s["path"] == ".github/af-env.conf" for s in report["skipped"])
+    # The project's customization is untouched.
+    assert (target / ".github" / "af-env.conf").read_text(encoding="utf-8") == "SRC_DIR=myproject\n"
+
+
+def test_write_resolved_refuses_traversal(tmp_path: Path) -> None:
+    target = tmp_path / "proj"
+    (target / ".github").mkdir(parents=True)
+    import pytest
+
+    with pytest.raises(ValueError):
+        deploy_core.write_resolved(target, "../../evil.txt", "x")
+
+
+def test_write_resolved_writes_under_github(tmp_path: Path) -> None:
+    target = tmp_path / "proj"
+    (target / ".github").mkdir(parents=True)
+    deploy_core.write_resolved(target, "instructions/merged.md", "# merged\n")
+    assert (target / ".github" / "instructions" / "merged.md").read_text(encoding="utf-8") == "# merged\n"
+
+
+def test_conflict_diff_reports_changes(tmp_path: Path) -> None:
+    src = _make_source(tmp_path / "src")
+    target = tmp_path / "proj"
+    _deploy_identically(src, target)
+    _write(src / ".github" / "MANIFEST.md", "# manifest doc CHANGED\n")
+    diff = deploy_core.conflict_diff(src, target, "MANIFEST.md")
+    assert "-# manifest doc" in diff
+    assert "+# manifest doc CHANGED" in diff
+
+
+def test_update_hashes_rebaselines(tmp_path: Path) -> None:
+    src = _make_source(tmp_path / "src")
+    target = tmp_path / "proj"
+    # Deploy files but with NO baseline, then rebaseline.
+    _deploy_identically(src, target)
+    (target / ".github" / ".af-hashes").unlink()
+    result = deploy_core.update_hashes(src, target)
+    assert result["entries"] == len(deploy_core.collect_source_files(src / ".github", deploy_core.parse_manifest(src / ".github" / ".af-manifest")))
+    assert "UPDATE" not in deploy_core.dry_run(src, target)["counts"]
+
+
+def test_prune_backups_removes_old_dirs(tmp_path: Path) -> None:
+    import os
+    import time
+
+    target = tmp_path / "proj"
+    old = target / ".af-backup-20200101000000"
+    old.mkdir(parents=True)
+    old_time = time.time() - 30 * 86400
+    os.utime(old, (old_time, old_time))
+    fresh = target / ".af-backup-fresh"
+    fresh.mkdir()
+
+    removed = deploy_core.prune_backups(target, days=14)["removed"]
+    assert ".af-backup-20200101000000" in removed
+    assert not old.exists()
+    assert fresh.exists()  # recent backup kept
+

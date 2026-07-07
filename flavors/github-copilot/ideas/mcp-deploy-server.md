@@ -149,7 +149,7 @@ Moving the deploy to MCP **shifts the trust boundary**:
 | Phase | Scope |
 |---|---|
 | **0 — PoC (done)** | Read-only `af_status`, `af_dry_run`, `af://source/{path}`; parity with the script; unit tests. |
-| **1 — Write path** | `af_apply`, `af_write_resolved`, `af_update_hashes`, `af_prune_backups`, `[vscode]` files, conflict diffs, elicitation confirmations, backups. |
+| **1 — Write path (implemented; `[vscode]` + real elicitation remaining)** | `af_apply`, `af_write_resolved`, `af_update_hashes`, `af_prune_backups`, `af_conflict_diff`; workspace-scoped writes; backups; `[customizable]`/CONFLICT never written; `confirm` guard. Remaining: `[vscode]` files and MCP *elicitation* (the PoC gates on a `confirm` flag). |
 | **2 — UX** | `/af.deploy` + `/af.resolve-conflicts` prompts; packaged distribution (npm/PyPI/OCI); payload bundling + integrity. |
 | **3 — Adoption** | Documented install; deprecate `deploy.ps1`/`deploy.sh` (keep for air-gapped/no-runtime) once parity is proven. |
 
@@ -157,12 +157,17 @@ Moving the deploy to MCP **shifts the trust boundary**:
 
 Implemented in [`../mcp-deploy/`](../mcp-deploy/):
 
-- `aaig_deploy_mcp/deploy_core.py` — dependency-free read-only logic (version
-  status, manifest parse, tier resolution, 3-way classification).
-- `aaig_deploy_mcp/server.py` — `FastMCP` server (`af_status`, `af_dry_run`,
-  `af://source/{path}`), read-only.
-- `tests/test_deploy_core.py` — **10 unit tests, all passing** (tier array /
-  inline / CRLF, status states, and each classification path).
+- `aaig_deploy_mcp/deploy_core.py` — dependency-free logic: version status,
+  manifest parse, tier resolution, 3-way classification, **and the guarded write
+  path** (`apply` with backups, `update_hashes`, `write_resolved`,
+  `conflict_diff`, `prune_backups`).
+- `aaig_deploy_mcp/server.py` — `FastMCP` server: read tools (`af_status`,
+  `af_dry_run`, `af_conflict_diff`) + write tools (`af_apply`,
+  `af_write_resolved`, `af_update_hashes`, `af_prune_backups`, each guarded by
+  `confirm`) + `af://source/{path}`.
+- `tests/test_deploy_core.py` — **17 unit tests, all passing** (tier array /
+  inline / CRLF, status states, every classification path, apply + backup,
+  customizable-skip, path-traversal refusal, conflict diff, rebaseline, prune).
 
 **Validation against the real reference deploy** (MP target, v1.19.9): the PoC
 `af_dry_run` matched `deploy.ps1` on the version status and the 14 EOL-driven

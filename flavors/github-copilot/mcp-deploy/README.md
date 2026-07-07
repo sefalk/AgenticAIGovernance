@@ -1,25 +1,33 @@
 # AAIG Deploy MCP Server — Proof of Concept
 
-A **read-only** Model Context Protocol (MCP) server that exposes the AAIG
-framework deploy as MCP tools, so an agent can inspect and preview a rollout
-**without cloning the AAIG repository next to the target project**.
+A Model Context Protocol (MCP) server that exposes the AAIG framework deploy as
+MCP tools, so an agent can inspect, preview **and apply** a rollout **without
+cloning the AAIG repository next to the target project**.
 
-> This is a PoC for the design in
-> [`../ideas/mcp-deploy-server.md`](../ideas/mcp-deploy-server.md). It implements
-> the two read-only tools (`af_status`, `af_dry_run`) and a source resource.
-> The write path (`af_apply`, `af_write_resolved`, `af_update_hashes`) is
-> **specified but intentionally not implemented here**.
+> PoC for the design in
+> [`../ideas/mcp-deploy-server.md`](../ideas/mcp-deploy-server.md).
+> **Phase 0** (read-only status/dry-run) and **Phase 1** (guarded write path)
+> are implemented. Write tools require `confirm=true` (a production server would
+> use MCP *elicitation*); all writes stay under the target `.github/`, back up
+> before overwrite, and never touch CONFLICT / PROTECT / PRESERVE /
+> `[customizable]` files.
 
 ## What it does
 
 | Primitive | Name | Purpose |
 |---|---|---|
-| Tool | `af_status(workspace_root)` | Bundled framework version vs. the version deployed in the target repo (`up-to-date` / `stale` / `not-deployed`). |
-| Tool | `af_dry_run(workspace_root)` | Classify every deployable file (`UPDATE` / `CONFLICT` / `PRESERVE` / `PROTECT` / `UNCHANGED` / `CREATE`) — the same 3-way decisions as `deploy.ps1`, computed read-only. |
+| Tool (R) | `af_status(workspace_root)` | Bundled framework version vs. the version deployed in the target repo. |
+| Tool (R) | `af_dry_run(workspace_root)` | Classify every deployable file (3-way), read-only. |
+| Tool (R) | `af_conflict_diff(workspace_root, path)` | Unified diff between a deployed file and the resolved source. |
+| Tool (W) | `af_apply(workspace_root, confirm)` | Apply CREATE/UPDATE files; back up first; skip conflicts/customizable. |
+| Tool (W) | `af_write_resolved(workspace_root, path, content, confirm)` | Write an agent-merged file (conflict resolution). |
+| Tool (W) | `af_update_hashes(workspace_root, confirm)` | Re-baseline `.af-hashes` after resolving conflicts. |
+| Tool (W) | `af_prune_backups(workspace_root, days, confirm)` | Remove stale `.af-backup-*` dirs. |
 | Resource | `af://source/{path}` | Read a bundled source file, e.g. `af://source/agents/planner.agent.md`. |
 
-The classification and hashing (SHA-256 uppercase; agent **model-tier
-resolution**) mirror `deploy.ps1`, so `af_dry_run` agrees with the script.
+Write tools (**W**) do nothing unless `confirm=true`; otherwise they return a
+preview. Classification and hashing (SHA-256 uppercase; agent **model-tier
+resolution**) mirror `deploy.ps1`, so `af_dry_run`/`af_apply` agree with it.
 
 ## Run it
 
@@ -59,11 +67,14 @@ pytest            # unit tests for the read-only deploy logic (no MCP needed)
 
 ## Scope & safety (PoC)
 
-- **Read-only.** No writes to the target — ever.
-- **`.github/` only.** `[vscode]` files are skipped (Phase-1 item).
+- **Guarded writes.** Write tools require `confirm=true`; all writes stay under
+  the target `.github/`; existing files are backed up before overwrite;
+  CONFLICT / PROTECT / PRESERVE / `[customizable]` files are never written by
+  `af_apply`. The terminal `block-dangerous` hook does **not** see MCP tool
+  calls, so these guards *are* the safety boundary (see the spec).
+- **`.github/` only.** `[vscode]` files are skipped (a remaining item).
 - **Payload parity.** Tier resolution and hashing match `deploy.ps1`; keys are
   normalized to forward slashes so a baseline written by `.ps1` or `.sh`
   compares consistently.
-- The full trust/security model (why the deploy's safety must live *in the
-  server* once writes are added, and the Windows no-sandbox caveat) is in the
+- The full trust/security model (and the Windows no-sandbox caveat) is in the
   [specification](../ideas/mcp-deploy-server.md).
