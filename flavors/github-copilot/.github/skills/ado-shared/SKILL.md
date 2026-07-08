@@ -34,9 +34,25 @@ When degraded mode is used, always emit:
 
 ## Reference Hygiene
 
-- Prefer clickable, verifiable URLs.
-- Never fabricate links you cannot validate.
-- Use `pending-sync` when remote references are not yet available.
+Whenever you mention an ADO artifact (work item, pull request, wiki page,
+build/pipeline run, repository, or branch) in your output, render it as a
+clickable Markdown link -- `[<label>](<web-url>)` -- never a bare id or a raw
+API URL. This applies to the worker's returned summary so the coordinator
+surfaces the clickable reference to the user in chat.
+
+- **URL source:** use the web URL from the MCP response
+  (`webUrl` / `remoteUrl` / `_links.html.href`). Only if the response carries
+  no web URL, construct it from the canonical pattern using the resolved
+  organization + `ADO_PROJECT`:
+  - Work item:    `https://dev.azure.com/{org}/{project}/_workitems/edit/{id}`
+  - Pull request: `https://dev.azure.com/{org}/{project}/_git/{repo}/pullrequest/{prId}`
+  - Wiki page:    the page's `remoteUrl` from the wiki MCP response
+  - Build run:    the run's `_links.web.href` from the pipeline response
+- **Labels** are human-readable: `[#1234 -- <title>](url)`,
+  `[PR !78 -- <title>](url)`, `[Wiki: <page path>](url)`.
+- Never fabricate an id or link you cannot validate against a real MCP response.
+- Use `pending-sync` (no link) only when the artifact does not exist remotely
+  yet (e.g., a PR before its branch is pushed).
 
 ## Gate Reminder
 
