@@ -1,6 +1,7 @@
-"""AAIG deploy MCP server — read-only proof of concept.
+"""AAIG deploy MCP server — proof of concept.
 
-Exposes the deploy over stdio MCP:
+Exposes the deploy over stdio MCP, covering both the ``.github/`` payload and
+manifest ``[vscode]`` files (deployed to ``.vscode/``):
 
 * ``af_status``        — compare the bundled framework version against a target.
 * ``af_dry_run``       — classify every deployable file (read-only).
@@ -118,7 +119,8 @@ def af_conflict_diff(workspace_root: str, path: str) -> dict:
 
     Args:
         workspace_root: Absolute path to the target project.
-        path: ``.github``-relative path, e.g. ``instructions/git-workflow.instructions.md``.
+        path: ``.github``-relative path (e.g. ``instructions/git-workflow.instructions.md``),
+            or a ``.vscode/``-prefixed path for a VS Code file (e.g. ``.vscode/settings.json``).
     """
     src, target, err = _prep(workspace_root)
     if err:
@@ -149,9 +151,10 @@ def af_apply(workspace_root: str, confirm: bool = False) -> dict:
 
 @mcp.tool()
 def af_write_resolved(workspace_root: str, path: str, content: str, confirm: bool = False) -> dict:
-    """Write agent-merged content to a ``.github/`` file (conflict resolution).
+    """Write agent-merged content to a ``.github/`` (or ``.vscode/``) file.
 
-    Guarded by ``confirm``; refuses paths outside the workspace ``.github/``.
+    Guarded by ``confirm``; refuses paths outside the workspace. A ``.vscode/``
+    prefix targets the VS Code tree; a bare path is ``.github``-relative.
     """
     _src, target, err = _prep(workspace_root)
     if err:

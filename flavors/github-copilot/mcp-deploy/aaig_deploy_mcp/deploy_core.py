@@ -1,9 +1,9 @@
-"""Read-only AAIG deploy logic for the MCP PoC.
+"""AAIG deploy logic for the MCP PoC — a parity port of ``deploy.ps1`` / ``deploy.sh``.
 
-Mirrors the read-only half of ``deploy.ps1`` / ``deploy.sh`` (version status and
-the 3-way dry-run classification, including agent model-tier resolution) so an
-MCP server can expose ``af_status`` and ``af_dry_run`` *without* touching the
-target repository. No writes happen here — this module only reads and compares.
+Provides version status, the 3-way dry-run classification (including agent
+model-tier resolution), and the guarded write path (apply with backups,
+re-baseline, resolved-write, conflict diff, backup pruning). Covers both the
+``.github/`` payload and manifest ``[vscode]`` files (deployed to ``.vscode/``).
 
 Hash format matches the PowerShell deploy: SHA-256, uppercase hex. Tier files
 are hashed over their resolved UTF-8 (no BOM) bytes, exactly like
@@ -111,13 +111,15 @@ class Manifest:
     root_files: list[str] = field(default_factory=list)
     customizable: set[str] = field(default_factory=set)
     optional: set[str] = field(default_factory=set)
+    vscode_files: list[str] = field(default_factory=list)
 
 
 def parse_manifest(manifest_path: Path) -> Manifest:
     """Parse ``.af-manifest`` (path [ann1, ann2]) into a Manifest.
 
-    Only ``.github/`` entries are handled by this PoC; ``[vscode]`` files are
-    skipped (a Phase-1 item).
+    Handles ``.github/`` dirs/files and ``[vscode]`` files (deployed to
+    ``.vscode/``). Customizable vscode files are keyed ``vscode/<name>`` to match
+    the ``.af-hashes`` key scheme used by ``deploy.ps1``.
     """
     m = Manifest()
     dirs: list[str] = []
@@ -132,17 +134,18 @@ def parse_manifest(manifest_path: Path) -> Manifest:
         if am:
             entry = am.group(1).strip()
             annotations = [a.strip().lower() for a in am.group(2).split(",")]
-        if "vscode" in annotations:
-            continue  # PoC scope: .github only
+        is_vscode = "vscode" in annotations
         entry = _norm(entry)
         if entry.endswith("/"):
             dirs.append(entry.rstrip("/"))
+        elif is_vscode:
+            m.vscode_files.append(entry)
         else:
             files.append(entry)
-        if "customizable" in annotations:
-            m.customizable.add(entry)
         if "optional" in annotations:
             m.optional.add(entry)
+        if "customizable" in annotations:
+            m.customizable.add(f"vscode/{entry}" if is_vscode else entry)
     m.dirs = dirs
     # Root files = manifest files not inside any manifest directory.
     m.root_files = [f for f in files if not any(f.startswith(d + "/") for d in dirs)]
@@ -162,6 +165,53 @@ def collect_source_files(source_github: Path, manifest: Manifest) -> list[str]:
         if (source_github / f).is_file():
             rels.append(f)
     return rels
+
+
+@dataclass
+class Unit:
+    """One deployable file: its source, target, ``.af-hashes`` key and display path."""
+
+    source: Path
+    target: Path
+    hash_key: str
+    display: str
+    is_custom: bool
+
+
+def collect_units(source_root: Path, target_dir: Path, manifest: Manifest) -> list[Unit]:
+    """All deployable units across ``.github/`` and manifest ``[vscode]`` files.
+
+    Missing ``[vscode]`` source files (e.g. ``[optional]``) are silently skipped,
+    mirroring ``deploy.ps1``.
+    """
+    source_github = source_root / ".github"
+    target_github = target_dir / ".github"
+    units: list[Unit] = [
+        Unit(
+            source=source_github / rel,
+            target=target_github / rel,
+            hash_key=rel,
+            display=f".github/{rel}",
+            is_custom=rel in manifest.customizable,
+        )
+        for rel in collect_source_files(source_github, manifest)
+    ]
+    source_vscode = source_root / ".vscode"
+    target_vscode = target_dir / ".vscode"
+    for f in manifest.vscode_files:
+        src = source_vscode / f
+        if not src.is_file():
+            continue
+        units.append(
+            Unit(
+                source=src,
+                target=target_vscode / f,
+                hash_key=f"vscode/{f}",
+                display=f".vscode/{f}",
+                is_custom=f"vscode/{f}" in manifest.customizable,
+            )
+        )
+    return units
 
 
 def read_baseline_hashes(target_github: Path) -> dict[str, str]:
@@ -230,30 +280,26 @@ def _classify(is_custom: bool, src_h: str, tgt_h: str | None, baseline: str | No
 
 def dry_run(source_root: Path, target_dir: Path) -> dict:
     """Classify every deployable file (read-only). Mirrors the deploy dry-run."""
-    source_github = source_root / ".github"
     target_github = target_dir / ".github"
     target_af_env = target_github / "af-env.conf"
-    manifest = parse_manifest(source_github / ".af-manifest")
+    manifest = parse_manifest(source_root / ".github" / ".af-manifest")
     baseline = read_baseline_hashes(target_github)
     has_baseline = len(baseline) > 0
-    rels = collect_source_files(source_github, manifest)
+    units = collect_units(source_root, target_dir, manifest)
 
     results: list[dict] = []
     counts: dict[str, int] = {}
-    for rel in rels:
-        src = source_github / rel
-        tgt = target_github / rel
-        is_custom = rel in manifest.customizable
-        src_h = source_hash_resolved(src, target_af_env)
-        tgt_h = file_hash(tgt) if tgt.is_file() else None
-        cls = _classify(is_custom, src_h, tgt_h, baseline.get(rel), has_baseline)
+    for u in units:
+        src_h = source_hash_resolved(u.source, target_af_env)
+        tgt_h = file_hash(u.target) if u.target.is_file() else None
+        cls = _classify(u.is_custom, src_h, tgt_h, baseline.get(u.hash_key), has_baseline)
         counts[cls] = counts.get(cls, 0) + 1
-        results.append({"path": f".github/{rel}", "classification": cls, "customizable": is_custom})
+        results.append({"path": u.display, "classification": cls, "customizable": u.is_custom})
 
     return {
         "source_version": read_version(source_root),
         "deployed_version": read_deployed_version(target_dir),
-        "total_files": len(rels),
+        "total_files": len(units),
         "counts": counts,
         "files": results,
     }
@@ -318,27 +364,24 @@ def apply(source_root: Path, target_dir: Path) -> dict:
     skipped: list[dict] = []
     made_backup = False
 
-    for rel in collect_source_files(source_github, manifest):
-        src = source_github / rel
-        tgt = target_github / rel
-        is_custom = rel in manifest.customizable
-        data = resolved_source_bytes(src, target_af_env)
+    for u in collect_units(source_root, target_dir, manifest):
+        data = resolved_source_bytes(u.source, target_af_env)
         src_h = _sha256_upper_bytes(data)
-        tgt_h = file_hash(tgt) if tgt.is_file() else None
-        cls = _classify(is_custom, src_h, tgt_h, baseline.get(rel), has_baseline)
+        tgt_h = file_hash(u.target) if u.target.is_file() else None
+        cls = _classify(u.is_custom, src_h, tgt_h, baseline.get(u.hash_key), has_baseline)
         if cls in ("CREATE", "UPDATE"):
-            if tgt.is_file():
-                bpath = backup_dir / ".github" / rel
+            if u.target.is_file():
+                bpath = backup_dir / u.display
                 bpath.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(tgt, bpath)
+                shutil.copy2(u.target, bpath)
                 made_backup = True
-            _write_bytes(tgt, data)
-            deployed[rel] = src_h
-            applied.append(f".github/{rel}")
+            _write_bytes(u.target, data)
+            deployed[u.hash_key] = src_h
+            applied.append(u.display)
         elif cls == "UNCHANGED":
-            deployed[rel] = src_h
+            deployed[u.hash_key] = src_h
         else:
-            skipped.append({"path": f".github/{rel}", "classification": cls})
+            skipped.append({"path": u.display, "classification": cls})
 
     _write_hashes(target_github, deployed, version)
     _write_version(target_dir, version)
@@ -353,41 +396,67 @@ def apply(source_root: Path, target_dir: Path) -> dict:
 
 def update_hashes(source_root: Path, target_dir: Path) -> dict:
     """Re-baseline ``.af-hashes`` to the current resolved source (mirror -UpdateHashes)."""
-    source_github = source_root / ".github"
     target_github = target_dir / ".github"
     target_af_env = target_github / "af-env.conf"
-    manifest = parse_manifest(source_github / ".af-manifest")
+    manifest = parse_manifest(source_root / ".github" / ".af-manifest")
     version = read_version(source_root)
     hashes = {
-        rel: source_hash_resolved(source_github / rel, target_af_env)
-        for rel in collect_source_files(source_github, manifest)
+        u.hash_key: source_hash_resolved(u.source, target_af_env)
+        for u in collect_units(source_root, target_dir, manifest)
     }
     _write_hashes(target_github, hashes, version)
     return {"entries": len(hashes), "version": version}
 
 
 def write_resolved(target_dir: Path, rel: str, content: str) -> dict:
-    """Write agent-merged content to a ``.github/`` file (workspace-scoped)."""
-    path = _safe_join(target_dir / ".github", rel)
+    """Write agent-merged content to a ``.github/`` (or ``.vscode/``) file.
+
+    Workspace-scoped: paths escaping the target tree are refused. A bare path is
+    ``.github``-relative; a ``.vscode/`` prefix targets the ``.vscode/`` tree.
+    """
+    p = _norm(rel)
+    if p.startswith(".vscode/"):
+        base, sub, prefix = target_dir / ".vscode", p[len(".vscode/") :], ".vscode"
+    else:
+        sub = p[len(".github/") :] if p.startswith(".github/") else p
+        base, prefix = target_dir / ".github", ".github"
+    path = _safe_join(base, sub)
     data = content.encode("utf-8")
     _write_bytes(path, data)
-    return {"path": f".github/{rel}", "bytes": len(data)}
+    return {"path": f"{prefix}/{sub}", "bytes": len(data)}
 
 
-def conflict_diff(source_root: Path, target_dir: Path, rel: str) -> str:
-    """Unified diff between the deployed file (project) and the resolved source."""
-    source_github = source_root / ".github"
-    target_github = target_dir / ".github"
-    target_af_env = target_github / "af-env.conf"
-    src_text = resolved_source_bytes(source_github / rel, target_af_env).decode("utf-8", "replace")
-    tgt_path = target_github / rel
+def _resolve_pair(source_root: Path, target_dir: Path, path: str) -> tuple[Path, Path, str]:
+    """Map a deploy path to (source_file, target_file, display).
+
+    ``.vscode/``-prefixed paths map to the ``.vscode/`` trees; everything else is
+    ``.github``-relative (an optional ``.github/`` prefix is accepted).
+    """
+    p = _norm(path)
+    if p.startswith(".vscode/"):
+        rel = p[len(".vscode/") :]
+        return source_root / ".vscode" / rel, target_dir / ".vscode" / rel, f".vscode/{rel}"
+    rel = p[len(".github/") :] if p.startswith(".github/") else p
+    return source_root / ".github" / rel, target_dir / ".github" / rel, f".github/{rel}"
+
+
+def conflict_diff(source_root: Path, target_dir: Path, path: str) -> str:
+    """Unified diff between the deployed file (project) and the resolved source.
+
+    ``path`` may be ``.github``-relative (default) or carry a ``.vscode/`` prefix.
+    """
+    src_path, tgt_path, display = _resolve_pair(source_root, target_dir, path)
+    target_af_env = target_dir / ".github" / "af-env.conf"
+    src_text = (
+        resolved_source_bytes(src_path, target_af_env).decode("utf-8", "replace") if src_path.is_file() else ""
+    )
     tgt_text = tgt_path.read_text(encoding="utf-8", errors="replace") if tgt_path.is_file() else ""
     return "".join(
         difflib.unified_diff(
             tgt_text.splitlines(keepends=True),
             src_text.splitlines(keepends=True),
-            fromfile=f"project/.github/{rel}",
-            tofile=f"framework/.github/{rel}",
+            fromfile=f"project/{display}",
+            tofile=f"framework/{display}",
         )
     )
 

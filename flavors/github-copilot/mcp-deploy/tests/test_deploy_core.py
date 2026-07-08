@@ -16,6 +16,9 @@ af-env.conf   [customizable]
 MANIFEST.md
 .af-version   [optional]
 instructions/architecture.instructions.md   [customizable]
+tasks.json   [customizable, vscode]
+settings.json   [vscode]
+missing.jsonc   [optional, vscode]
 """
 
 PLANNER = "---\nname: planner\nmodel: __AF_TIER_BALANCED__\ndescription: 'x'\n---\n\n# Planner\n"
@@ -34,6 +37,8 @@ def _make_source(root: Path, version: str = "1.0.0") -> Path:
     _write(gh / "instructions" / "architecture.instructions.md", "# arch\n")
     _write(gh / "af-env.conf", "SRC_DIR=src\n")
     _write(gh / "MANIFEST.md", "# manifest doc\n")
+    _write(root / ".vscode" / "tasks.json", '{"version":"2.0.0"}\n')
+    _write(root / ".vscode" / "settings.json", '{"editor.tabSize":4}\n')
     return root
 
 
@@ -82,17 +87,16 @@ def test_status_up_to_date_and_stale(tmp_path: Path) -> None:
 
 
 def _deploy_identically(src: Path, target: Path) -> None:
-    """Copy source .github into target and write a matching baseline (resolved)."""
-    src_gh = src / ".github"
+    """Copy source payload into target and write a matching baseline (resolved)."""
     tgt_gh = target / ".github"
-    manifest = deploy_core.parse_manifest(src_gh / ".af-manifest")
     af_env = tgt_gh / "af-env.conf"
+    manifest = deploy_core.parse_manifest(src / ".github" / ".af-manifest")
     lines = ["# AF deployment baseline hashes"]
-    for rel in deploy_core.collect_source_files(src_gh, manifest):
-        text = (src_gh / rel).read_text(encoding="utf-8")
-        resolved = deploy_core.resolve_tier_tokens(text, af_env) if "__AF_TIER_" in text else text
-        _write(tgt_gh / rel, resolved)
-        lines.append(f"{rel}={deploy_core.source_hash_resolved(src_gh / rel, af_env)}")
+    for u in deploy_core.collect_units(src, target, manifest):
+        data = deploy_core.resolved_source_bytes(u.source, af_env)
+        u.target.parent.mkdir(parents=True, exist_ok=True)
+        u.target.write_bytes(data)
+        lines.append(f"{u.hash_key}={deploy_core.source_hash_resolved(u.source, af_env)}")
     _write(tgt_gh / ".af-hashes", "\n".join(lines) + "\n")
 
 
@@ -212,7 +216,8 @@ def test_update_hashes_rebaselines(tmp_path: Path) -> None:
     _deploy_identically(src, target)
     (target / ".github" / ".af-hashes").unlink()
     result = deploy_core.update_hashes(src, target)
-    assert result["entries"] == len(deploy_core.collect_source_files(src / ".github", deploy_core.parse_manifest(src / ".github" / ".af-manifest")))
+    manifest = deploy_core.parse_manifest(src / ".github" / ".af-manifest")
+    assert result["entries"] == len(deploy_core.collect_units(src, target, manifest))
     assert "UPDATE" not in deploy_core.dry_run(src, target)["counts"]
 
 
@@ -232,4 +237,56 @@ def test_prune_backups_removes_old_dirs(tmp_path: Path) -> None:
     assert ".af-backup-20200101000000" in removed
     assert not old.exists()
     assert fresh.exists()  # recent backup kept
+
+
+# ── VS Code files ([vscode]) ────────────────────────────────────────
+
+
+def test_dry_run_includes_vscode_files(tmp_path: Path) -> None:
+    src = _make_source(tmp_path / "src")
+    target = tmp_path / "proj"
+    _deploy_identically(src, target)
+    paths = {f["path"] for f in deploy_core.dry_run(src, target)["files"]}
+    assert ".vscode/tasks.json" in paths
+    assert ".vscode/settings.json" in paths
+    assert ".vscode/missing.jsonc" not in paths  # optional + absent → skipped
+
+
+def test_dry_run_vscode_customizable_preserved(tmp_path: Path) -> None:
+    src = _make_source(tmp_path / "src")
+    target = tmp_path / "proj"
+    _deploy_identically(src, target)
+    # Project edits a [customizable, vscode] file; AF unchanged → PRESERVE.
+    _write(target / ".vscode" / "tasks.json", '{"version":"2.0.0","custom":true}\n')
+    files = {f["path"]: f["classification"] for f in deploy_core.dry_run(src, target)["files"]}
+    assert files[".vscode/tasks.json"] == "PRESERVE"
+
+
+def test_apply_writes_vscode_update(tmp_path: Path) -> None:
+    src = _make_source(tmp_path / "src")
+    target = tmp_path / "proj"
+    _deploy_identically(src, target)
+    # AF changes a non-customizable vscode file → apply writes it under .vscode/.
+    _write(src / ".vscode" / "settings.json", '{"editor.tabSize":2}\n')
+    report = deploy_core.apply(src, target)
+    assert ".vscode/settings.json" in report["applied"]
+    assert (target / ".vscode" / "settings.json").read_text(encoding="utf-8") == '{"editor.tabSize":2}\n'
+
+
+def test_write_resolved_vscode_prefix(tmp_path: Path) -> None:
+    target = tmp_path / "proj"
+    (target / ".vscode").mkdir(parents=True)
+    out = deploy_core.write_resolved(target, ".vscode/settings.json", "{}\n")
+    assert out["path"] == ".vscode/settings.json"
+    assert (target / ".vscode" / "settings.json").read_text(encoding="utf-8") == "{}\n"
+
+
+def test_conflict_diff_vscode(tmp_path: Path) -> None:
+    src = _make_source(tmp_path / "src")
+    target = tmp_path / "proj"
+    _deploy_identically(src, target)
+    _write(src / ".vscode" / "settings.json", '{"editor.tabSize":2}\n')
+    diff = deploy_core.conflict_diff(src, target, ".vscode/settings.json")
+    assert "editor.tabSize" in diff
+    assert "+" in diff and "-" in diff
 

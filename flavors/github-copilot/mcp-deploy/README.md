@@ -68,11 +68,12 @@ pytest            # unit tests for the read-only deploy logic (no MCP needed)
 ## Scope & safety (PoC)
 
 - **Guarded writes.** Write tools require `confirm=true`; all writes stay under
-  the target `.github/`; existing files are backed up before overwrite;
-  CONFLICT / PROTECT / PRESERVE / `[customizable]` files are never written by
-  `af_apply`. The terminal `block-dangerous` hook does **not** see MCP tool
-  calls, so these guards *are* the safety boundary (see the spec).
-- **`.github/` only.** `[vscode]` files are skipped (a remaining item).
+  the target `.github/` (or `.vscode/`); existing files are backed up before
+  overwrite; CONFLICT / PROTECT / PRESERVE / `[customizable]` files are never
+  written by `af_apply`. The terminal `block-dangerous` hook does **not** see MCP
+  tool calls, so these guards *are* the safety boundary (see the spec).
+- **Full payload.** Both the `.github/` tree and manifest `[vscode]` files
+  (deployed to `.vscode/`) are covered.
 - **Payload parity.** Tier resolution and hashing match `deploy.ps1`; keys are
   normalized to forward slashes so a baseline written by `.ps1` or `.sh`
   compares consistently.
