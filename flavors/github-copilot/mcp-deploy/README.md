@@ -62,10 +62,29 @@ aaig-deploy-mcp                # stdio server
 The framework **payload** is resolved in this order:
 
 1. `AF_SOURCE_ROOT` env var, if set (dev / tests / explicit override);
-2. a `payload/` directory **bundled inside the installed wheel** (see
+2. a hash-pinned **remote payload** (`AF_PAYLOAD_URL` + `AF_PAYLOAD_SHA256`) —
+   governance mode, see below;
+3. a `payload/` directory **bundled inside the installed wheel** (see
    `force-include` in `pyproject.toml`) — this is what lets an installed server
    run **without an AAIG clone** next to the target project;
-3. the in-repo flavor directory, when running from a source checkout (dev mode).
+4. the in-repo flavor directory, when running from a source checkout (dev mode).
+
+### Governance mode (remote payload)
+
+An operator can pin every install to a centrally published payload without a
+hosted compute server (no project data leaves the machine — the fetch is a
+one-way, outbound download of the framework payload only):
+
+| Env var | Meaning |
+|---|---|
+| `AF_PAYLOAD_URL` | `https://` (or `file://`) URL of a `.zip` / `.tar.gz` payload archive |
+| `AF_PAYLOAD_SHA256` | expected SHA-256 (hex) of the archive — **mandatory** (unpinned URL is refused) |
+| `AF_PAYLOAD_CACHE` | optional cache dir (default `~/.cache/aaig-deploy-mcp`) |
+
+The archive is verified **before** extraction, extraction is path-traversal-safe
+(zip-slip / tar-escape / links refused), and results are cached by hash so
+integrity is inherent and re-fetch is skipped. Only `https`/`file` schemes are
+allowed (no plain `http`).
 
 Build a self-contained wheel (payload bundled, nothing extra committed to git):
 

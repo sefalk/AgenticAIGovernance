@@ -151,7 +151,7 @@ Moving the deploy to MCP **shifts the trust boundary**:
 | **0 — PoC (done)** | Read-only `af_status`, `af_dry_run`, `af://source/{path}`; parity with the script; unit tests. |
 | **1 — Write path (implemented; real elicitation remaining)** | `af_apply`, `af_write_resolved`, `af_update_hashes`, `af_prune_backups`, `af_conflict_diff`; workspace-scoped writes; backups; `[customizable]`/CONFLICT never written; `[vscode]` files covered; `confirm` guard. Remaining: MCP *elicitation* (the PoC gates on a `confirm` flag). |
 | **2 — UX (prompts done; packaging remaining)** | `af_deploy` + `af_resolve_conflicts` prompts implemented (surface as `/mcp.aaig-deploy.*`, dependency-free text builders in `prompts.py`). Remaining: packaged distribution (npm/PyPI/OCI); payload bundling + integrity. |
-| **3 — Adoption (aspirational)** | Documented opt-in install. The server stays **parallel to and experimental beside** `deploy.ps1`/`deploy.sh` — the scripts remain the supported, CI-integrated path. Retiring the scripts is **not** planned for this PoC and would only be *considered* once cross-platform parity (incl. the Windows no-sandbox caveat) is proven and file-based customizations are covered. |
+| **3 — Adoption (aspirational)** | Documented opt-in install. The server stays **parallel to and experimental beside** `deploy.ps1`/`deploy.sh` — the scripts remain the supported, CI-integrated path. A hash-pinned **remote payload** (`AF_PAYLOAD_URL` + `AF_PAYLOAD_SHA256`) is implemented for central governance **without** a hosted compute server (no project data leaves the machine). Retiring the scripts is **not** planned for this PoC and would only be *considered* once cross-platform parity (incl. the Windows no-sandbox caveat) is proven and file-based customizations are covered. |
 
 ## 10. PoC results
 
@@ -168,10 +168,13 @@ Implemented in [`../mcp-deploy/`](../mcp-deploy/):
   `af_resolve_conflicts`).
 - `aaig_deploy_mcp/prompts.py` — dependency-free prompt-text builders (so the
   workflow guidance is unit-testable without the `mcp` framework).
-- `tests/` — **25 unit tests, all passing** (tier array / inline / CRLF, status
+- `aaig_deploy_mcp/remote_payload.py` — dependency-free, hash-pinned remote
+  payload fetch (verify-before-extract, traversal-safe, hash-cached).
+- `tests/` — **36 unit tests, all passing** (tier array / inline / CRLF, status
   states, every classification path, apply + backup, customizable-skip,
   path-traversal refusal, conflict diff, rebaseline, prune, `[vscode]`
-  deploy/preserve/apply/diff, and the two prompt workflows).
+  deploy/preserve/apply/diff, the two prompt workflows, the 3-tier payload
+  resolver, and remote payload verify/cache/zip-slip).
 
 **Validation against the real reference deploy** (MP target, v1.19.9): the PoC
 `af_dry_run` matched `deploy.ps1` on the version status and the 14 EOL-driven

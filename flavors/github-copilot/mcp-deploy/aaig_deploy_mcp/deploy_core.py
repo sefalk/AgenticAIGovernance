@@ -231,8 +231,9 @@ def resolve_source_root(package_dir: Path | None = None) -> Path:
     """Resolve the framework payload root.
 
     Resolution order: the ``AF_SOURCE_ROOT`` env override (dev / tests), then a
-    ``payload/`` directory bundled next to the package (installed wheel), then the
-    in-repo flavor directory (running from a source checkout).
+    hash-pinned remote payload (``AF_PAYLOAD_URL`` + ``AF_PAYLOAD_SHA256``,
+    governance mode), then a ``payload/`` directory bundled next to the package
+    (installed wheel), then the in-repo flavor directory (source checkout).
 
     Parameters
     ----------
@@ -244,10 +245,26 @@ def resolve_source_root(package_dir: Path | None = None) -> Path:
     -------
     Path
         The resolved payload root (contains ``VERSION`` and ``.github/``).
+
+    Raises
+    ------
+    ValueError
+        If ``AF_PAYLOAD_URL`` is set without a mandatory ``AF_PAYLOAD_SHA256`` pin.
     """
     env = os.environ.get("AF_SOURCE_ROOT")
     if env:
         return Path(env).resolve()
+    url = os.environ.get("AF_PAYLOAD_URL")
+    if url:
+        sha = os.environ.get("AF_PAYLOAD_SHA256")
+        if not sha:
+            raise ValueError(
+                "AF_PAYLOAD_URL is set but AF_PAYLOAD_SHA256 is missing — refusing to fetch an unpinned payload."
+            )
+        from . import remote_payload
+
+        cache = Path(os.environ.get("AF_PAYLOAD_CACHE") or (Path.home() / ".cache" / "aaig-deploy-mcp"))
+        return remote_payload.fetch_payload(url, sha, cache)
     pkg = (package_dir or Path(__file__).resolve().parent).resolve()
     bundled = pkg / "payload"
     if (bundled / "VERSION").is_file():
