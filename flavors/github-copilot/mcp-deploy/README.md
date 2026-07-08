@@ -12,11 +12,20 @@ cloning the AAIG repository next to the target project**.
 > stay under the target `.github/` or `.vscode/`, back up before overwrite, and
 > never touch CONFLICT / PROTECT / PRESERVE / `[customizable]` files.
 
-> **Status: experimental — runs in parallel to `deploy.ps1` / `deploy.sh`, not a
-> replacement.** The scripts remain the supported, CI-integrated delivery path.
-> This server is opt-in for evaluation; it does not deprecate the scripts. File-
-> based custom agents/prompts are still delivered by the scripts — MCP only
-> inspects and writes the payload, it cannot replace file-based customizations.
+> **Status: experimental — runs in parallel to `deploy.ps1` / `deploy.sh` for
+> now, not yet a replacement.** The scripts remain the supported, CI-integrated
+> path while this path matures; the server is opt-in and does not deprecate them.
+>
+> The MCP path is *designed to eventually supersede* the script-based deploy: it
+> delivers the full payload by writing the `.github/` / `.vscode/` files to disk,
+> exactly like the scripts, so the AAIG repo need not sit next to the target.
+> What MCP does **not** change: VS Code still consumes agents / instructions /
+> prompts / skills as files on disk — MCP *delivers* those files, it does not turn
+> them into MCP-native primitives (and it need not). Remaining blockers before it
+> can retire the scripts: cross-platform hardening (Windows has no MCP filesystem
+> sandbox), packaged payload distribution, and the fact that a *remote-hosted*
+> server still needs a local component to write to disk (run stdio locally, pull
+> the payload from a bundled/remote source).
 
 ## What it does
 
