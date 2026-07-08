@@ -39,10 +39,18 @@ cloning the AAIG repository next to the target project**.
 | Tool (W) | `af_update_hashes(workspace_root, confirm)` | Re-baseline `.af-hashes` after resolving conflicts. |
 | Tool (W) | `af_prune_backups(workspace_root, days, confirm)` | Remove stale `.af-backup-*` dirs. |
 | Resource | `af://source/{path}` | Read a bundled source file, e.g. `af://source/agents/planner.agent.md`. |
+| Prompt | `af_deploy(workspace_root)` | Slash-command workflow: status → dry-run → conflict routing → guarded apply. |
+| Prompt | `af_resolve_conflicts(workspace_root)` | Slash-command workflow: diff → merge → write → re-baseline for CONFLICT files. |
 
 Write tools (**W**) do nothing unless `confirm=true`; otherwise they return a
 preview. Classification and hashing (SHA-256 uppercase; agent **model-tier
 resolution**) mirror `deploy.ps1`, so `af_dry_run`/`af_apply` agree with it.
+
+The two **prompts** surface as `/mcp.aaig-deploy.af-deploy` and
+`/mcp.aaig-deploy.af-resolve-conflicts` slash commands. They inject a step-by-step
+instruction that drives the tools in the right order and pauses for a human
+confirmation before any write — this is the “agent handles the non-programmatic
+aspects” entry point (tier choice, conflict merges, skill activation).
 
 ## Run it
 

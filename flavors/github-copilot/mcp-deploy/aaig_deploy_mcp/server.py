@@ -11,7 +11,9 @@ manifest ``[vscode]`` files (deployed to ``.vscode/``):
 * ``af_update_hashes`` — re-baseline ``.af-hashes`` (guarded by ``confirm``).
 * ``af_prune_backups`` — housekeeping (guarded by ``confirm``).
 
-And a resource template ``af://source/{path}`` for bundled source files.
+And a resource template ``af://source/{path}`` for bundled source files, plus
+two workflow prompts (``af_deploy``, ``af_resolve_conflicts``) that surface as
+``/mcp.aaig-deploy.*`` slash commands and drive the tools in the right order.
 
 **Safety (this is where the deploy's guards now live — the terminal hook does
 not see MCP tool calls):** write tools require ``confirm=True`` (a production
@@ -33,7 +35,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from . import deploy_core
+from . import deploy_core, prompts
 
 mcp = FastMCP("aaig-deploy")
 
@@ -207,6 +209,26 @@ def source_file(path: str) -> str:
     if not target.is_file():
         return f"Not found: .github/{path}"
     return target.read_text(encoding="utf-8", errors="replace")
+
+
+@mcp.prompt()
+def af_deploy(workspace_root: str = "${workspaceFolder}") -> str:
+    """Guide a full AAIG framework deploy into a target workspace.
+
+    Drives status -> dry-run -> (conflict routing) -> guarded apply, with a human
+    confirmation before any write.
+    """
+    return prompts.deploy_prompt(workspace_root)
+
+
+@mcp.prompt()
+def af_resolve_conflicts(workspace_root: str = "${workspaceFolder}") -> str:
+    """Guide the agent to merge CONFLICT files and re-baseline the hashes.
+
+    Drives dry-run -> per-file diff -> merged write -> update-hashes, with a human
+    approval on each merge.
+    """
+    return prompts.resolve_conflicts_prompt(workspace_root)
 
 
 def main() -> None:
