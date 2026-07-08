@@ -151,7 +151,7 @@ Moving the deploy to MCP **shifts the trust boundary**:
 | **0 — PoC (done)** | Read-only `af_status`, `af_dry_run`, `af://source/{path}`; parity with the script; unit tests. |
 | **1 — Write path (implemented; real elicitation remaining)** | `af_apply`, `af_write_resolved`, `af_update_hashes`, `af_prune_backups`, `af_conflict_diff`; workspace-scoped writes; backups; `[customizable]`/CONFLICT never written; `[vscode]` files covered; `confirm` guard. Remaining: MCP *elicitation* (the PoC gates on a `confirm` flag). |
 | **2 — UX** | `/af.deploy` + `/af.resolve-conflicts` prompts; packaged distribution (npm/PyPI/OCI); payload bundling + integrity. |
-| **3 — Adoption** | Documented install; deprecate `deploy.ps1`/`deploy.sh` (keep for air-gapped/no-runtime) once parity is proven. |
+| **3 — Adoption (aspirational)** | Documented opt-in install. The server stays **parallel to and experimental beside** `deploy.ps1`/`deploy.sh` — the scripts remain the supported, CI-integrated path. Retiring the scripts is **not** planned for this PoC and would only be *considered* once cross-platform parity (incl. the Windows no-sandbox caveat) is proven and file-based customizations are covered. |
 
 ## 10. PoC results
 

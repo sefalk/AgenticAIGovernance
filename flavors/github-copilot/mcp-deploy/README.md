@@ -6,11 +6,17 @@ cloning the AAIG repository next to the target project**.
 
 > PoC for the design in
 > [`../ideas/mcp-deploy-server.md`](../ideas/mcp-deploy-server.md).
-> **Phase 0** (read-only status/dry-run) and **Phase 1** (guarded write path)
-> are implemented. Write tools require `confirm=true` (a production server would
-> use MCP *elicitation*); all writes stay under the target `.github/`, back up
-> before overwrite, and never touch CONFLICT / PROTECT / PRESERVE /
-> `[customizable]` files.
+> **Phase 0** (read-only status/dry-run), **Phase 1** (guarded write path) and
+> **Phase 2** (`[vscode]` file coverage) are implemented. Write tools require
+> `confirm=true` (a production server would use MCP *elicitation*); all writes
+> stay under the target `.github/` or `.vscode/`, back up before overwrite, and
+> never touch CONFLICT / PROTECT / PRESERVE / `[customizable]` files.
+
+> **Status: experimental — runs in parallel to `deploy.ps1` / `deploy.sh`, not a
+> replacement.** The scripts remain the supported, CI-integrated delivery path.
+> This server is opt-in for evaluation; it does not deprecate the scripts. File-
+> based custom agents/prompts are still delivered by the scripts — MCP only
+> inspects and writes the payload, it cannot replace file-based customizations.
 
 ## What it does
 
