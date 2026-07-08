@@ -30,7 +30,6 @@ as package data.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -41,19 +40,12 @@ mcp = FastMCP("aaig-deploy")
 
 
 def _source_root() -> Path:
-    env = os.environ.get("AF_SOURCE_ROOT")
-    if env:
-        return Path(env).resolve()
-    # Dev mode: flavors/github-copilot (two parents above this package).
-    return Path(__file__).resolve().parents[2]
+    """Resolve the bundled framework payload (env → packaged payload → dev tree)."""
+    return deploy_core.resolve_source_root()
 
 
 def _validate_source(root: Path) -> str | None:
-    if not (root / "VERSION").is_file():
-        return f"Bundled payload invalid: VERSION not found under {root}"
-    if not (root / ".github" / ".af-manifest").is_file():
-        return f"Bundled payload invalid: .github/.af-manifest not found under {root}"
-    return None
+    return deploy_core.validate_payload(root)
 
 
 def _validate_target(target: Path) -> str | None:

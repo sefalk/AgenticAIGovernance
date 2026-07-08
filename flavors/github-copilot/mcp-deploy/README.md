@@ -59,9 +59,19 @@ pip install -e ".[dev]"        # or: uv pip install -e ".[dev]"
 aaig-deploy-mcp                # stdio server
 ```
 
-The framework payload is resolved from `AF_SOURCE_ROOT` if set, else the in-repo
-flavor directory (dev mode). A packaged build bundles the payload as package
-data (see the spec).
+The framework **payload** is resolved in this order:
+
+1. `AF_SOURCE_ROOT` env var, if set (dev / tests / explicit override);
+2. a `payload/` directory **bundled inside the installed wheel** (see
+   `force-include` in `pyproject.toml`) — this is what lets an installed server
+   run **without an AAIG clone** next to the target project;
+3. the in-repo flavor directory, when running from a source checkout (dev mode).
+
+Build a self-contained wheel (payload bundled, nothing extra committed to git):
+
+```bash
+python -m build --wheel        # produces dist/aaig_deploy_mcp-*.whl
+```
 
 ## Use in VS Code (`.vscode/mcp.json`)
 
@@ -77,6 +87,18 @@ data (see the spec).
   }
 }
 ```
+
+No AAIG clone is required — VS Code launches the packaged server locally (stdio)
+and the payload is read from the bundled wheel. For a zero-install run straight
+from a published/registry build, point `command`/`args` at a runner, e.g.:
+
+```jsonc
+{ "servers": { "aaig-deploy": { "type": "stdio", "command": "uvx", "args": ["aaig-deploy-mcp"] } } }
+```
+
+(`uvx` / `pipx run` fetch and run the package on demand — the same local-process
+model as other VS Code MCP servers; “remote” only ever refers to *where the
+package/payload is published*, never to where files are written.)
 
 Then in chat: *"Use af_status for `${workspaceFolder}`"* and *"Run af_dry_run for
 `${workspaceFolder}` and summarize the conflicts."* The agent passes the

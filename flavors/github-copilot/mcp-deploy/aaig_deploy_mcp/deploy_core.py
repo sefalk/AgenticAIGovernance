@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import os
 import re
 import shutil
 import time
@@ -224,6 +225,44 @@ def read_baseline_hashes(target_github: Path) -> dict[str, str]:
             if m:
                 hashes[_norm(m.group(1).strip())] = m.group(2).strip()
     return hashes
+
+
+def resolve_source_root(package_dir: Path | None = None) -> Path:
+    """Resolve the framework payload root.
+
+    Resolution order: the ``AF_SOURCE_ROOT`` env override (dev / tests), then a
+    ``payload/`` directory bundled next to the package (installed wheel), then the
+    in-repo flavor directory (running from a source checkout).
+
+    Parameters
+    ----------
+    package_dir:
+        Directory of the installed package; defaults to this module's directory.
+        Injectable for testing.
+
+    Returns
+    -------
+    Path
+        The resolved payload root (contains ``VERSION`` and ``.github/``).
+    """
+    env = os.environ.get("AF_SOURCE_ROOT")
+    if env:
+        return Path(env).resolve()
+    pkg = (package_dir or Path(__file__).resolve().parent).resolve()
+    bundled = pkg / "payload"
+    if (bundled / "VERSION").is_file():
+        return bundled
+    # Dev mode: the flavor directory two levels above the package (…/mcp-deploy/pkg).
+    return pkg.parents[1]
+
+
+def validate_payload(root: Path) -> str | None:
+    """Return an error message if ``root`` is not a valid payload, else ``None``."""
+    if not (root / "VERSION").is_file():
+        return f"Payload invalid: VERSION not found under {root}"
+    if not (root / ".github" / ".af-manifest").is_file():
+        return f"Payload invalid: .github/.af-manifest not found under {root}"
+    return None
 
 
 def read_version(source_root: Path) -> str:

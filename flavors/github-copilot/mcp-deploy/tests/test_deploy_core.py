@@ -290,3 +290,37 @@ def test_conflict_diff_vscode(tmp_path: Path) -> None:
     assert "editor.tabSize" in diff
     assert "+" in diff and "-" in diff
 
+
+# ── Payload resolution (packaging) ─────────────────────────────────────────
+
+
+def test_resolve_source_root_env_override(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AF_SOURCE_ROOT", str(tmp_path))
+    assert deploy_core.resolve_source_root() == tmp_path.resolve()
+
+
+def test_resolve_source_root_prefers_bundled_payload(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("AF_SOURCE_ROOT", raising=False)
+    pkg = tmp_path / "aaig_deploy_mcp"
+    payload = pkg / "payload"
+    payload.mkdir(parents=True)
+    (payload / "VERSION").write_text("1.0.0\n", encoding="utf-8")
+    assert deploy_core.resolve_source_root(package_dir=pkg) == payload.resolve()
+
+
+def test_resolve_source_root_dev_fallback(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("AF_SOURCE_ROOT", raising=False)
+    # No bundled payload → the flavor dir two levels above the package.
+    pkg = tmp_path / "flavor" / "mcp-deploy" / "aaig_deploy_mcp"
+    pkg.mkdir(parents=True)
+    assert deploy_core.resolve_source_root(package_dir=pkg) == (tmp_path / "flavor").resolve()
+
+
+def test_validate_payload_flags_missing_pieces(tmp_path: Path) -> None:
+    assert deploy_core.validate_payload(tmp_path) is not None  # no VERSION
+    (tmp_path / "VERSION").write_text("1.0.0\n", encoding="utf-8")
+    assert deploy_core.validate_payload(tmp_path) is not None  # no .af-manifest
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / ".af-manifest").write_text("# manifest\n", encoding="utf-8")
+    assert deploy_core.validate_payload(tmp_path) is None
+
