@@ -40,6 +40,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while still asking/blocking the critical ones, complementing the existing
   read-only vs durable distinction.
 
+### Changed
+
+- **`ado-shared` reference hygiene now requires clickable links.** Every ADO
+  artifact an `ado-*` worker mentions (work item, pull request, wiki page,
+  build/pipeline run, repository, branch) must be rendered as a clickable
+  Markdown link `[<label>](<web-url>)` in its returned summary -- using the web
+  URL from the MCP response (`webUrl`/`remoteUrl`/`_links.html.href`), or the
+  canonical `https://dev.azure.com/{org}/{project}/...` pattern only as a
+  fallback -- so the coordinator surfaces clickable references in chat instead
+  of bare ids.
+
 ### Fixed
 
 - **Deploy: customizable-file detection for files inside directories (Windows).**
