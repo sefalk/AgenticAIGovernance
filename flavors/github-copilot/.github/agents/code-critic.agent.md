@@ -45,6 +45,7 @@ Consult these skills when relevant to the task:
 - **secure-coding** (`skills/secure-coding/SKILL.md`) — OWASP, injection prevention, secrets detection
 - **hexagonal-architecture** (`skills/hexagonal-architecture/SKILL.md`) — layer boundaries, dependency rule
 - **dependency-management** (`skills/dependency-management/SKILL.md`) — when new deps are added
+- **notebook-execution** (`skills/notebook-execution/SKILL.md`) — run `.ipynb` cells via the notebook tools to verify, never terminal scripts
 
 ## Review Process
 

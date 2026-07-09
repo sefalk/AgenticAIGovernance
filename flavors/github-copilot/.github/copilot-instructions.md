@@ -111,6 +111,7 @@ skills when their task falls within the skill's scope.
 | **task-decomposition** | `skills/task-decomposition/` | planner |
 | **unit-testing** | `skills/unit-testing/` | test-writer, test-critic |
 | **git-worktrees** | `skills/git-worktrees/` | coordinator |
+| **notebook-execution** | `skills/notebook-execution/` | coordinator, implementer, refactorer, code-critic, test-writer |
 
 ## Pre-Delivery Checklist (Mandatory)
 

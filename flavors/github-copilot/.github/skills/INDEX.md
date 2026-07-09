@@ -31,18 +31,19 @@
 | 19 | `task-decomposition` | Break complex objectives into manageable, estimable, and assignable units of work using WBS, INVEST criteria, and vertical slicing. | planner |
 | 20 | `unit-testing` | Verify correctness of individual units of code in isolation. AAA pattern, test doubles, language-specific guidance, edge cases, and coverage quality gates. | test-writer, test-critic |
 | 21 | `git-worktrees` | Create, manage, and remove git worktrees for parallel agent task execution. Lifecycle commands, context verification, troubleshooting, and recovery procedures. | coordinator |
+| 22 | `notebook-execution` | Interact with local Jupyter / `.ipynb` notebooks via the VS Code notebook tools (run/edit cells, kernel selection, read outputs) instead of terminal scripts. | coordinator, implementer, refactorer, code-critic, test-writer |
 
 ## Agent Skill Matrix
 
 | Agent | Skills |
 |-------|--------|
 | **planner** | task-decomposition, risk-management, design-patterns |
-| **coordinator** | git-worktrees, databricks-execution-patterns |
-| **test-writer** | unit-testing, property-testing, error-handling, human-escalation |
+| **coordinator** | git-worktrees, databricks-execution-patterns, notebook-execution |
+| **test-writer** | unit-testing, property-testing, error-handling, human-escalation, notebook-execution |
 | **test-critic** | unit-testing, code-review, property-testing |
-| **implementer** | hexagonal-architecture, pydantic, error-handling, design-patterns, static-analysis, dependency-management, human-escalation, databricks-execution-patterns |
-| **code-critic** | code-review, static-analysis, metrics, secure-coding, hexagonal-architecture, dependency-management |
-| **refactorer** | refactoring, design-patterns, hexagonal-architecture, pydantic, human-escalation |
+| **implementer** | hexagonal-architecture, pydantic, error-handling, design-patterns, static-analysis, dependency-management, human-escalation, databricks-execution-patterns, notebook-execution |
+| **code-critic** | code-review, static-analysis, metrics, secure-coding, hexagonal-architecture, dependency-management, notebook-execution |
+| **refactorer** | refactoring, design-patterns, hexagonal-architecture, pydantic, human-escalation, notebook-execution |
 | **documenter** | documentation |
 | **arbiter** | human-escalation, design-patterns, hexagonal-architecture |
 | **researcher** | data-pipeline-design, data-modeling, data-quality |
