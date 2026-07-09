@@ -12,26 +12,26 @@
 | 1 | `ado-shared` | Shared Azure DevOps integration patterns — defaults, required/optional probe handling, and fallback traceability. | ado-work-item-manager, ado-wiki-manager, ado-pr-manager |
 | 2 | `ado-workitem` | Azure DevOps work item lifecycle guidance — confidence matching, clarifications, and non-destructive updates. | ado-work-item-manager |
 | 3 | `ado-wiki` | Azure DevOps wiki lifecycle guidance — target resolution, non-destructive updates, and change summaries. | ado-wiki-manager |
-| 3a | `ado-pr` | Azure DevOps pull request lifecycle — branch publication precondition, PR create/update, work-item/plan linking, and branch-scoped autocomplete policy (integration branch autonomous, protected branch human-only). | ado-pr-manager |
-| 4 | `code-review` | Structured code review guidance. Diff analysis, blast radius, automation-first review, anti-pattern detection, and review artifact templates. | test-critic, code-critic |
-| 5 | `databricks-execution-patterns` | Deterministic Databricks workflow orchestration — metastore detection, run-type selection, output retrieval, evidence gating, cluster management. | coordinator, implementer, ado-work-item-manager |
-| 6 | `dependency-management` | Dependency selection, version pinning, lockfiles, vulnerability scanning, and license compliance. | implementer, code-critic |
-| 7 | `design-patterns` | Proven design patterns — creational, structural, behavioural, DDD, architecture. When to use, when NOT to use, and Python-idiomatic examples. | planner, implementer, refactorer, arbiter |
-| 8 | `documentation` | Documentation standards — code comments, docstrings, READMEs, ADRs, changelogs. | documenter |
-| 9 | `error-handling` | Error hierarchies, retry strategies, resilience patterns, and structured error responses. | test-writer, implementer |
-| 10 | `hexagonal-architecture` | Ports and Adapters to isolate core business logic from frameworks and infrastructure. Domain isolation, dependency inversion, and testability by design. | implementer, refactorer, code-critic, arbiter |
-| 11 | `human-escalation` | Protocol for agents to gracefully halt execution and transfer context to a human when progress is blocked, ambiguous, or exceeding retry limits. | test-writer, implementer, refactorer, arbiter |
-| 12 | `metrics` | Collect and report code quality metrics — coverage, complexity, mutation score, lint violations. | code-critic |
-| 13 | `property-testing` | Write property-based tests with hypothesis. Invariant templates, strategy patterns, and best practices for functions with wide input spaces. | test-writer, test-critic |
-| 14 | `pydantic` | Pydantic for Python domain models, configuration, and data validation — BaseModel, field validators, serialization, settings, and hexagonal architecture integration. | implementer, refactorer |
-| 15 | `refactoring` | Disciplined code restructuring without behaviour change. Code smells, refactoring catalog, safe workflow, and IDE-assisted moves. | refactorer |
-| 16 | `risk-management` | Systematically identify, assess, and mitigate project risks — risk registers, scoring matrices, response strategies, contingency planning, and review cadence. | planner |
-| 17 | `secure-coding` | Prevent vulnerabilities during development — input validation, injection prevention, authentication, authorization, cryptography, and error handling. | code-critic |
-| 18 | `static-analysis` | Run and interpret static analysis tools — Ruff, mypy, Bandit, Radon. Covers configuration, complexity thresholds, editor integration, and failure handling. | implementer, code-critic |
-| 19 | `task-decomposition` | Break complex objectives into manageable, estimable, and assignable units of work using WBS, INVEST criteria, and vertical slicing. | planner |
-| 20 | `unit-testing` | Verify correctness of individual units of code in isolation. AAA pattern, test doubles, language-specific guidance, edge cases, and coverage quality gates. | test-writer, test-critic |
-| 21 | `git-worktrees` | Create, manage, and remove git worktrees for parallel agent task execution. Lifecycle commands, context verification, troubleshooting, and recovery procedures. | coordinator |
-| 22 | `notebook-execution` | Interact with local Jupyter / `.ipynb` notebooks via the VS Code notebook tools (run/edit cells, kernel selection, read outputs) instead of terminal scripts. | coordinator, implementer, refactorer, code-critic, test-writer |
+| 4 | `ado-pr` | Azure DevOps pull request lifecycle — branch publication precondition, PR create/update, work-item/plan linking, and branch-scoped autocomplete policy (integration branch autonomous, protected branch human-only). | ado-pr-manager |
+| 5 | `code-review` | Structured code review guidance. Diff analysis, blast radius, automation-first review, anti-pattern detection, and review artifact templates. | test-critic, code-critic |
+| 6 | `databricks-execution-patterns` | Deterministic Databricks workflow orchestration — metastore detection, run-type selection, output retrieval, evidence gating, cluster management. | coordinator, implementer, ado-work-item-manager |
+| 7 | `dependency-management` | Dependency selection, version pinning, lockfiles, vulnerability scanning, and license compliance. | implementer, code-critic |
+| 8 | `design-patterns` | Proven design patterns — creational, structural, behavioural, DDD, architecture. When to use, when NOT to use, and Python-idiomatic examples. | planner, implementer, refactorer, arbiter |
+| 9 | `documentation` | Documentation standards — code comments, docstrings, READMEs, ADRs, changelogs. | documenter |
+| 10 | `error-handling` | Error hierarchies, retry strategies, resilience patterns, and structured error responses. | test-writer, implementer |
+| 11 | `hexagonal-architecture` | Ports and Adapters to isolate core business logic from frameworks and infrastructure. Domain isolation, dependency inversion, and testability by design. | implementer, refactorer, code-critic, arbiter |
+| 12 | `human-escalation` | Protocol for agents to gracefully halt execution and transfer context to a human when progress is blocked, ambiguous, or exceeding retry limits. | test-writer, implementer, refactorer, arbiter |
+| 13 | `metrics` | Collect and report code quality metrics — coverage, complexity, mutation score, lint violations. | code-critic |
+| 14 | `property-testing` | Write property-based tests with hypothesis. Invariant templates, strategy patterns, and best practices for functions with wide input spaces. | test-writer, test-critic |
+| 15 | `pydantic` | Pydantic for Python domain models, configuration, and data validation — BaseModel, field validators, serialization, settings, and hexagonal architecture integration. | implementer, refactorer |
+| 16 | `refactoring` | Disciplined code restructuring without behaviour change. Code smells, refactoring catalog, safe workflow, and IDE-assisted moves. | refactorer |
+| 17 | `risk-management` | Systematically identify, assess, and mitigate project risks — risk registers, scoring matrices, response strategies, contingency planning, and review cadence. | planner |
+| 18 | `secure-coding` | Prevent vulnerabilities during development — input validation, injection prevention, authentication, authorization, cryptography, and error handling. | code-critic |
+| 19 | `static-analysis` | Run and interpret static analysis tools — Ruff, mypy, Bandit, Radon. Covers configuration, complexity thresholds, editor integration, and failure handling. | implementer, code-critic |
+| 20 | `task-decomposition` | Break complex objectives into manageable, estimable, and assignable units of work using WBS, INVEST criteria, and vertical slicing. | planner |
+| 21 | `unit-testing` | Verify correctness of individual units of code in isolation. AAA pattern, test doubles, language-specific guidance, edge cases, and coverage quality gates. | test-writer, test-critic |
+| 22 | `git-worktrees` | Create, manage, and remove git worktrees for parallel agent task execution. Lifecycle commands, context verification, troubleshooting, and recovery procedures. | coordinator |
+| 23 | `notebook-execution` | Interact with local Jupyter / `.ipynb` notebooks via the VS Code notebook tools (run/edit cells, kernel selection, read outputs) instead of terminal scripts. | coordinator, implementer, refactorer, code-critic, test-writer |
 
 ## Agent Skill Matrix
 
