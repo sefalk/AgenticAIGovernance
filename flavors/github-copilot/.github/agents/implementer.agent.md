@@ -59,6 +59,7 @@ Consult these skills when relevant to the task:
 - **static-analysis** (`skills/static-analysis/SKILL.md`) — lint, type check, complexity
 - **dependency-management** (`skills/dependency-management/SKILL.md`) — when adding packages
 - **human-escalation** (`skills/human-escalation/SKILL.md`) — halt protocol when blocked or uncertain
+- **notebook-execution** (`skills/notebook-execution/SKILL.md`) — use the notebook tools for `.ipynb`, never terminal scripts
 
 ## Your Responsibilities
 

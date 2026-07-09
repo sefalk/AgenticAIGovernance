@@ -58,6 +58,7 @@ Consult these skills when relevant to the task:
 - **hexagonal-architecture** (`skills/hexagonal-architecture/SKILL.md`) — layer boundaries for move-function decisions
 - **pydantic** (`skills/pydantic/SKILL.md`) — when converting dataclasses/dicts to Pydantic models
 - **human-escalation** (`skills/human-escalation/SKILL.md`) — halt protocol when blocked or uncertain
+- **notebook-execution** (`skills/notebook-execution/SKILL.md`) — use the notebook tools for `.ipynb`, never terminal scripts
 
 ## Critical Constraint
 
