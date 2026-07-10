@@ -119,7 +119,7 @@ function Assert-GitListAbsent {
 
 $guid     = [System.Guid]::NewGuid().ToString('N').Substring(0,8)
 $tempRoot = Join-Path $env:TEMP "af-wt-test-$guid"
-$srcDir   = $PSScriptRoot   # AAIG .github/scripts/
+$srcDir   = $PSScriptRoot   # AF .github/scripts/
 
 Write-Output "=== Worktree Script Tests ==="
 Write-Output "  Temp repo: $tempRoot"

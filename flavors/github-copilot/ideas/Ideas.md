@@ -97,16 +97,16 @@ matching rules, edge cases, and phased implementation.
 
 ---
 
-## 1) ✅ DONE — AF should not reference AAIG (2026-03-09)
+## 1) ✅ DONE — AF should not reference AF (2026-03-09)
 
-AF should not reference to AAIG. The content must be integrated into AF fully. Can AF integrate any additional information into agents/skills/hooks. Note that core principles should be considered.
+AF should not reference to AF. The content must be integrated into AF fully. Can AF integrate any additional information into agents/skills/hooks. Note that core principles should be considered.
 
 **What was done:**
-- GOVERNANCE.md fully rewritten — inlined all L1 Core Principles, Meta-Rules, Framework Architecture, all 27 R-SD Domain Rules. Zero external AAIG references.
-- MANIFEST.md updated to reference GOVERNANCE.md instead of AAIG.
-- workflow-lifecycle.instructions.md — 2 AAIG mentions removed.
-- 28 AAIG skills extracted as AF-native SKILL.md files (37 total skills now).
-- Verified: zero "AAIG" references in any AF operational file.
+- GOVERNANCE.md fully rewritten — inlined all L1 Core Principles, Meta-Rules, Framework Architecture, all 27 R-SD Domain Rules. Zero external AF references.
+- MANIFEST.md updated to reference GOVERNANCE.md instead of AF.
+- workflow-lifecycle.instructions.md — 2 AF mentions removed.
+- 28 AF skills extracted as AF-native SKILL.md files (37 total skills now).
+- Verified: zero "AF" references in any AF operational file.
 
 ---
 
@@ -653,7 +653,7 @@ Creates a trust-building ramp: simulate → supervised → autonomous.
 **Source:** Code-Critic
 **Impact:** MEDIUM | **Effort:** LOW
 
-**Problem:** 20 of 38 skills (53%) are unassigned to any agent. They were bulk-extracted from AAIG during Idea 1 without evaluating per-project relevance. Examples: `ml-pipeline-design`, `model-evaluation`, `feature-engineering` — ML/MLOps skills in a data engineering project. They add scanning overhead, inflate INDEX.md, create cognitive load, and accumulate staleness.
+**Problem:** 20 of 38 skills (53%) are unassigned to any agent. They were bulk-extracted from AF during Idea 1 without evaluating per-project relevance. Examples: `ml-pipeline-design`, `model-evaluation`, `feature-engineering` — ML/MLOps skills in a data engineering project. They add scanning overhead, inflate INDEX.md, create cognitive load, and accumulate staleness.
 
 **Proposed solution:**
 1. Move unassigned skills to `skills/_available/` (library)

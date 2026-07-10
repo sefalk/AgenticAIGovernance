@@ -953,7 +953,7 @@ Write-Host "  WRITE   .github/.af-version" -ForegroundColor Cyan
 
 # ── Stale activation check ─────────────────────────────────────────────────
 # Warn when a project has activated a skill (skills/{name}/) but the
-# _available/{name}/SKILL.md copy is newer. This happens when AAIG updates
+# _available/{name}/SKILL.md copy is newer. This happens when AF updates
 # a skill and deploy syncs _available/ but can't know about activated copies.
 $staleSkills = @()
 $targetAvailable = Join-Path $TargetGitHub 'skills\_available'

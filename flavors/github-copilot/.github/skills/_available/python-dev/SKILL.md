@@ -37,7 +37,7 @@ General Python development guidance. Projects may override conventions
 |-----------|---------|-------|
 | **Naming** | `snake_case` (functions/vars), `PascalCase` (classes), `UPPER_CASE` (constants) | Universal |
 | **Type hints** | Required on all function signatures | Python 3.10+ union syntax: `X \| None` |
-| **Docstrings** | NumPy-style (AAIG default) or Google-style | Check project `copilot-instructions.md` |
+| **Docstrings** | NumPy-style (AF default) or Google-style | Check project `copilot-instructions.md` |
 | **Imports** | No wildcard imports; `from __future__ import annotations` for forward refs | |
 | **Private** | Prefix with `_` | |
 

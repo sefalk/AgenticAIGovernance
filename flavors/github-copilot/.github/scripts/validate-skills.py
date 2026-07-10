@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate AAIG skill structure, frontmatter, and INDEX.md consistency.
+"""Validate AF skill structure, frontmatter, and INDEX.md consistency.
 
 Checks:
 1. Every skill directory has a SKILL.md file
@@ -21,7 +21,7 @@ Exit codes:
     1 — validation errors found
     2 — fatal error (missing directories, bad arguments)
 
-Adapted from ai-dev-kit validate_skills.py for AAIG conventions.
+Adapted from ai-dev-kit validate_skills.py for AF conventions.
 """
 
 from __future__ import annotations
@@ -429,7 +429,7 @@ def discover_agent_names(github_dir: Path) -> set[str]:
 def main(argv: list[str] | None = None) -> int:
     """Run validation and return exit code."""
     parser = argparse.ArgumentParser(
-        description="Validate AAIG skill structure and INDEX.md consistency.",
+        description="Validate AF skill structure and INDEX.md consistency.",
     )
     parser.add_argument(
         "--root",

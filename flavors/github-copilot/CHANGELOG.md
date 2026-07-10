@@ -949,7 +949,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **deploy.ps1 skill INDEX.md protection** — Marked `skills/INDEX.md` as
   `[customizable]` in `.af-manifest`. Previously, deploy would overwrite
-  project-specific skill activations with the AAIG template index.
+  project-specific skill activations with the AF template index.
 - **deploy.ps1 stale activation warning** — Post-deploy check now warns
   when activated skills have a newer version in `_available/`.
 - **validate-framework.prompt.md** — Step 7 now references the automated
@@ -1740,7 +1740,7 @@ internally consistent, and ready for adoption.
 
 | Idea | Summary |
 |---|---|
-| 1 | AF self-contained — zero AAIG references |
+| 1 | AF self-contained — zero AF references |
 | 2a | Git workflow with atomic commits |
 | 2b | Persisted planning documents (PLAN.md) |
 | 3 | Structural peer review — all file types validated |

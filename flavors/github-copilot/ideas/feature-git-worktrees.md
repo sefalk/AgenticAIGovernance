@@ -406,7 +406,7 @@ WORKTREE_VENV_MODE=shared
 ```
 
 - Document is **living** — update as implementation progresses.
-- Each phase should result in a commit to AAIG main with ticket ref.
+- Each phase should result in a commit to AF main with ticket ref.
 - Testing should cover at least 3 parallel task scenarios before merge.
 
 ---
@@ -561,7 +561,7 @@ no worktree is active.
 
 ---
 
-## 13. Architecture Decision: Where Should AAIG Live During Worktree Tasks? (2026-04-16)
+## 13. Architecture Decision: Where Should AF Live During Worktree Tasks? (2026-04-16)
 
 **Status:** 🔴 OPEN — decision pending
 
@@ -572,7 +572,7 @@ scripts aware of the active worktree. A sentinel works for a single active
 worktree but breaks for parallel execution (only one sentinel path at a time).
 This section evaluates the deeper architectural question:
 
-> **Should AAIG be auto-deployed into each worktree at creation, so hooks
+> **Should AF be auto-deployed into each worktree at creation, so hooks
 > run natively in the correct context?**
 
 ### How Hooks Currently Fire
@@ -584,7 +584,7 @@ invoked by the VS Code process. They always run with CWD set to the
 active or the first root. Critically:
 
 - Hooks are loaded from the **main checkout's** `.github/hooks/` (the
-  deployed AAIG location).
+  deployed AF location).
 - Worktrees do not have a `.github/` directory — `.github` is gitignored
   in the target project, so it is not part of the tracked working tree.
   Each worktree is a fresh checkout of tracked files only.
@@ -607,11 +607,11 @@ hooks: read sentinel → redirect all path lookups to worktree
   but hooks would need a way to know *which* task is currently executing —
   there is no reliable per-invocation identity available.
 
-### Option B: Auto-Deploy AAIG into Each Worktree
+### Option B: Auto-Deploy AF into Each Worktree
 
 **Idea:** When the coordinator creates a worktree (`git worktree add …`),
 it immediately runs `deploy.ps1 -TargetDir {worktree_path}` to install a
-full AAIG copy into `{worktree}/.github/`. Hooks then run natively in the
+full AF copy into `{worktree}/.github/`. Hooks then run natively in the
 worktree context because VS Code (if opened to the worktree root) uses
 that `.github/`.
 
@@ -636,12 +636,12 @@ possible.
 
 | Risk | Description | Severity |
 |---|---|---|
-| **Deployment drift (config)** | `deploy.ps1` reads `af-env.conf` from the main checkout and merges it with the AAIG template. In v1.18.x, `UpdateConfig` only adds missing keys — but if a key was intentionally customised in the main checkout, it copies correctly. If `deploy.ps1` has a bug or the template changed, the worktree config may differ silently. | Medium |
+| **Deployment drift (config)** | `deploy.ps1` reads `af-env.conf` from the main checkout and merges it with the AF template. In v1.18.x, `UpdateConfig` only adds missing keys — but if a key was intentionally customised in the main checkout, it copies correctly. If `deploy.ps1` has a bug or the template changed, the worktree config may differ silently. | Medium |
 | **Deployment drift (intentional)** | If the user manually edits main checkout's `af-env.conf` between WT creation and task completion (e.g., changes `SRC_DIR`), the WT has the old value. This is actually **correct** (WT should be stable during its task) but feels surprising. | Low |
-| **Version drift** | If AAIG is updated in the AAIG repo and re-deployed to the main checkout mid-task, the worktree runs on the old deployed version. The main checkout and worktrees diverge on hook behaviour. | Low–Medium |
+| **Version drift** | If AF is updated in the AF repo and re-deployed to the main checkout mid-task, the worktree runs on the old deployed version. The main checkout and worktrees diverge on hook behaviour. | Low–Medium |
 | **Hook invocation uncertainty** | VS Code's per-root hook selection in multi-root workspaces is not officially documented for multi-root. If VS Code uses the *first* workspace root's hooks regardless of active file, auto-deploy gains nothing — hooks still run from the main checkout. This is the **critical unknown** and must be empirically verified. | High (if unknown) |
 | **Deploy time** | `deploy.ps1` copies ~50 files. On a fast SSD this is <1s. On OneDrive-synced paths (as in the MP project) it may be slower and trigger sync contention. | Low |
-| **Nested gitignore complexity** | The worktree's `.github/` is gitignored by the shared `.gitignore`. This is correct — we don't want AAIG committed. But the gitignore applies to the shared index, so attempts to `git status` inside the worktree still ignore `.github/`. No issue, just worth confirming. | Low |
+| **Nested gitignore complexity** | The worktree's `.github/` is gitignored by the shared `.gitignore`. This is correct — we don't want AF committed. But the gitignore applies to the shared index, so attempts to `git status` inside the worktree still ignore `.github/`. No issue, just worth confirming. | Low |
 
 #### The Critical Unknown: VS Code Hook Routing in Multi-Root
 
@@ -661,7 +661,7 @@ for agent scripts that reference relative paths).
 
 ### Option C: Hybrid (Deploy Minimal Config Only)
 
-**Idea:** Do not deploy full AAIG into worktrees. Only copy `af-env.conf`
+**Idea:** Do not deploy full AF into worktrees. Only copy `af-env.conf`
 (and optionally `test-log.json`) from the main checkout into
 `{worktree}/.github/`. Hook scripts continue to run from the main checkout
 but resolve config via the sentinel pointing to the worktree.
@@ -685,10 +685,10 @@ correctly, Option B is the right long-term answer and Option A is a stopgap.
 
 ### Deployment Drift Mitigation (if Option B adopted)
 
-1. Use `deploy.ps1 -SkipConfig` flag (to be implemented): copy all AAIG
+1. Use `deploy.ps1 -SkipConfig` flag (to be implemented): copy all AF
    files except `af-env.conf`. Inherit the main checkout's `af-env.conf`
    by symlinking or copying once at creation time.
-2. Record the AAIG `VERSION` in a `{worktree}/.github/.deploy-version` file
+2. Record the AF `VERSION` in a `{worktree}/.github/.deploy-version` file
    at deploy time. Session-context hook can warn if main checkout's deployed
    version differs from the worktree's — surfacing version drift explicitly.
 3. At Step 8 cleanup: `git worktree remove` deletes the entire worktree

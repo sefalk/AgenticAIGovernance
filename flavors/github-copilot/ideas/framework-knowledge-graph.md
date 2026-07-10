@@ -9,7 +9,7 @@
 
 ## 1. Problem Statement
 
-The AAIG GitHub Copilot flavor has grown to **~130 files** across 10+
+The AF GitHub Copilot flavor has grown to **~130 files** across 10+
 directories. Relationships between files are implicit — encoded as
 markdown links, YAML references, shell script paths, frontmatter fields,
 and human knowledge. Today's pain points:
