@@ -1,4 +1,4 @@
-"""Optional remote framework payload fetch for the AAIG deploy MCP server.
+"""Optional remote framework payload fetch for the AF deploy MCP server.
 
 Governance mode: instead of the payload bundled in the wheel, an operator can
 point the server at a published, hash-pinned payload archive via env vars

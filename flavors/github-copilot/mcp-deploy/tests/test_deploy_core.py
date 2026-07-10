@@ -1,4 +1,4 @@
-"""Tests for deploy_core — the read-only AAIG deploy logic behind the MCP PoC."""
+"""Tests for deploy_core — the read-only AF deploy logic behind the MCP PoC."""
 
 # copilot:generated | test-writer | 2026-07-07
 
@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from aaig_deploy_mcp import deploy_core
+from af_deploy_mcp import deploy_core
 
 MANIFEST = """\
 # manifest
@@ -301,7 +301,7 @@ def test_resolve_source_root_env_override(tmp_path: Path, monkeypatch) -> None:
 
 def test_resolve_source_root_prefers_bundled_payload(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("AF_SOURCE_ROOT", raising=False)
-    pkg = tmp_path / "aaig_deploy_mcp"
+    pkg = tmp_path / "af_deploy_mcp"
     payload = pkg / "payload"
     payload.mkdir(parents=True)
     (payload / "VERSION").write_text("1.0.0\n", encoding="utf-8")
@@ -311,7 +311,7 @@ def test_resolve_source_root_prefers_bundled_payload(tmp_path: Path, monkeypatch
 def test_resolve_source_root_dev_fallback(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("AF_SOURCE_ROOT", raising=False)
     # No bundled payload → the flavor dir two levels above the package.
-    pkg = tmp_path / "flavor" / "mcp-deploy" / "aaig_deploy_mcp"
+    pkg = tmp_path / "flavor" / "mcp-deploy" / "af_deploy_mcp"
     pkg.mkdir(parents=True)
     assert deploy_core.resolve_source_root(package_dir=pkg) == (tmp_path / "flavor").resolve()
 

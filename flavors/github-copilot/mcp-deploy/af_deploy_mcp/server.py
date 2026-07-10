@@ -1,25 +1,25 @@
-"""AAIG deploy MCP server — proof of concept.
+"""AF deploy MCP server — proof of concept.
 
 Exposes the deploy over stdio MCP, covering both the ``.github/`` payload and
 manifest ``[vscode]`` files (deployed to ``.vscode/``):
 
-* ``af_status``        — compare the bundled framework version against a target.
-* ``af_dry_run``       — classify every deployable file (read-only).
-* ``af_conflict_diff`` — unified diff for a single file (read-only).
-* ``af_apply``         — apply CREATE/UPDATE files (guarded by ``confirm``).
-* ``af_write_resolved``— write an agent-merged file (guarded by ``confirm``).
-* ``af_update_hashes`` — re-baseline ``.af-hashes`` (guarded by ``confirm``).
-* ``af_prune_backups`` — housekeeping (guarded by ``confirm``).
+* ``status``        — compare the bundled framework version against a target.
+* ``dry_run``       — classify every deployable file (read-only).
+* ``conflict_diff`` — unified diff for a single file (read-only).
+* ``apply``         — apply CREATE/UPDATE files (guarded by ``confirm``).
+* ``write_resolved``— write an agent-merged file (guarded by ``confirm``).
+* ``update_hashes`` — re-baseline ``.af-hashes`` (guarded by ``confirm``).
+* ``prune_backups`` — housekeeping (guarded by ``confirm``).
 
 And a resource template ``af://source/{path}`` for bundled source files, plus
-two workflow prompts (``af_deploy``, ``af_resolve_conflicts``) that surface as
-``/mcp.aaig-deploy.*`` slash commands and drive the tools in the right order.
+two workflow prompts (``deploy``, ``resolve_conflicts``) that surface as
+``/mcp.af.*`` slash commands and drive the tools in the right order.
 
 **Safety (this is where the deploy's guards now live — the terminal hook does
 not see MCP tool calls):** write tools require ``confirm=True`` (a production
 server would use MCP *elicitation* instead), all writes stay under the target's
 ``.github/``, existing files are backed up before overwrite, and CONFLICT /
-PROTECT / PRESERVE / ``[customizable]`` files are never written by ``af_apply``.
+PROTECT / PRESERVE / ``[customizable]`` files are never written by ``apply``.
 
 The framework payload is resolved from ``AF_SOURCE_ROOT`` if set, else from the
 in-repo flavor directory (dev mode). A packaged build would bundle the payload
@@ -36,7 +36,7 @@ from mcp.server.fastmcp import FastMCP
 
 from . import deploy_core, prompts
 
-mcp = FastMCP("aaig-deploy")
+mcp = FastMCP("af")
 
 
 def _source_root() -> Path:
@@ -66,7 +66,7 @@ def _prep(workspace_root: str) -> tuple[Path | None, Path | None, str | None]:
 
 
 @mcp.tool()
-def af_status(workspace_root: str) -> dict:
+def status(workspace_root: str) -> dict:
     """Report the bundled framework version vs. the version deployed in a repo.
 
     Args:
@@ -85,7 +85,7 @@ def af_status(workspace_root: str) -> dict:
 
 
 @mcp.tool()
-def af_dry_run(workspace_root: str) -> dict:
+def dry_run(workspace_root: str) -> dict:
     """Preview a deploy: classify every deployable file without writing anything.
 
     Args:
@@ -108,7 +108,7 @@ def af_dry_run(workspace_root: str) -> dict:
 
 
 @mcp.tool()
-def af_conflict_diff(workspace_root: str, path: str) -> dict:
+def conflict_diff(workspace_root: str, path: str) -> dict:
     """Unified diff between a deployed file and the resolved framework source.
 
     Args:
@@ -123,7 +123,7 @@ def af_conflict_diff(workspace_root: str, path: str) -> dict:
 
 
 @mcp.tool()
-def af_apply(workspace_root: str, confirm: bool = False) -> dict:
+def apply(workspace_root: str, confirm: bool = False) -> dict:
     """Apply the pending CREATE/UPDATE files (backs up first).
 
     With ``confirm=False`` (default) this returns the dry-run preview and writes
@@ -137,14 +137,14 @@ def af_apply(workspace_root: str, confirm: bool = False) -> dict:
         preview = deploy_core.dry_run(src, target)
         return {
             "confirmation_required": True,
-            "message": "Re-call af_apply with confirm=true to write these changes.",
+            "message": "Re-call apply with confirm=true to write these changes.",
             "counts": preview["counts"],
         }
     return {"workspace_root": str(target), **deploy_core.apply(src, target)}
 
 
 @mcp.tool()
-def af_write_resolved(workspace_root: str, path: str, content: str, confirm: bool = False) -> dict:
+def write_resolved(workspace_root: str, path: str, content: str, confirm: bool = False) -> dict:
     """Write agent-merged content to a ``.github/`` (or ``.vscode/``) file.
 
     Guarded by ``confirm``; refuses paths outside the workspace. A ``.vscode/``
@@ -165,7 +165,7 @@ def af_write_resolved(workspace_root: str, path: str, content: str, confirm: boo
 
 
 @mcp.tool()
-def af_update_hashes(workspace_root: str, confirm: bool = False) -> dict:
+def update_hashes(workspace_root: str, confirm: bool = False) -> dict:
     """Re-baseline ``.af-hashes`` after resolving conflicts. Guarded by ``confirm``."""
     src, target, err = _prep(workspace_root)
     if err:
@@ -176,7 +176,7 @@ def af_update_hashes(workspace_root: str, confirm: bool = False) -> dict:
 
 
 @mcp.tool()
-def af_prune_backups(workspace_root: str, days: int = 14, confirm: bool = False) -> dict:
+def prune_backups(workspace_root: str, days: int = 14, confirm: bool = False) -> dict:
     """Remove ``.af-backup-*`` directories older than ``days``. Guarded by ``confirm``."""
     _src, target, err = _prep(workspace_root)
     if err:
@@ -204,8 +204,8 @@ def source_file(path: str) -> str:
 
 
 @mcp.prompt()
-def af_deploy(workspace_root: str = "${workspaceFolder}") -> str:
-    """Guide a full AAIG framework deploy into a target workspace.
+def deploy(workspace_root: str = "${workspaceFolder}") -> str:
+    """Guide a full AF framework deploy into a target workspace.
 
     Drives status -> dry-run -> (conflict routing) -> guarded apply, with a human
     confirmation before any write.
@@ -214,7 +214,7 @@ def af_deploy(workspace_root: str = "${workspaceFolder}") -> str:
 
 
 @mcp.prompt()
-def af_resolve_conflicts(workspace_root: str = "${workspaceFolder}") -> str:
+def resolve_conflicts(workspace_root: str = "${workspaceFolder}") -> str:
     """Guide the agent to merge CONFLICT files and re-baseline the hashes.
 
     Drives dry-run -> per-file diff -> merged write -> update-hashes, with a human

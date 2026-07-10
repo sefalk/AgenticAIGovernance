@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from aaig_deploy_mcp import deploy_core, remote_payload
+from af_deploy_mcp import deploy_core, remote_payload
 
 
 def _make_payload_zip(tmp_path: Path, version: str = "9.9.9") -> tuple[Path, str]:

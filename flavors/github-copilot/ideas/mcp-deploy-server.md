@@ -1,4 +1,4 @@
-# Idea / Spec: AAIG Deploy as an MCP Server
+# Idea / Spec: AF Deploy as an MCP Server
 
 > copilot:generated | implementer | 2026-07-07
 
@@ -7,13 +7,13 @@
 
 ## 1. Summary
 
-Today, deploying/updating the AAIG framework into a project requires **cloning
-the AAIG repo locally**, placing it beside the target, and running
+Today, deploying/updating the AF framework into a project requires **cloning
+the AF repo locally**, placing it beside the target, and running
 `deploy.ps1` / `deploy.sh`. This spec proposes packaging the deploy as an
 **MCP server** that a user installs once; the agent then drives the deploy
 through MCP tools — **no sibling clone**.
 
-A read-only proof of concept (`af_status`, `af_dry_run`, `af://source/{path}`)
+A read-only proof of concept (`status`, `dry_run`, `af://source/{path}`)
 is implemented in [`../mcp-deploy/`](../mcp-deploy/) and validated against the
 real reference deploy.
 
@@ -21,7 +21,7 @@ real reference deploy.
 
 | Goal | Why |
 |---|---|
-| **No local AAIG clone** | The payload ships *inside* the server package, versioned — install once, update by bumping the package. |
+| **No local AF clone** | The payload ships *inside* the server package, versioned — install once, update by bumping the package. |
 | **One codebase, cross-platform** | Retires the `deploy.ps1` **+** `deploy.sh` parity burden (a recurring maintenance cost). |
 | **Structured I/O** | Today the agent parses `.ps1` stdout text; MCP tools return JSON (conflicts, hashes, counts) → more reliable decisions. |
 | **Discoverable, trusted install** | VS Code MCP gallery, trust prompt, per-tool confirmation, enterprise policy, Settings-Sync. |
@@ -52,7 +52,7 @@ the framework's on-disk structure.
 
 ```mermaid
 flowchart LR
-    A["Agent (VS Code host)"] -->|tools/call| S["aaig-deploy MCP server (stdio)"]
+    A["Agent (VS Code host)"] -->|tools/call| S["af MCP server (stdio)"]
     S -->|reads| P["Bundled payload (.github + manifest + VERSION)"]
     S -->|read / write| T["Target repo .github/"]
     S -->|elicitation| U["User confirm"]
@@ -64,15 +64,15 @@ flowchart LR
 
 | Tool | R/W | Purpose |
 |---|---|---|
-| `af_status(workspace_root)` | R | Bundled vs deployed version (`up-to-date` / `stale` / `not-deployed`). |
-| `af_dry_run(workspace_root)` | R | Per-file 3-way classification + counts. |
+| `status(workspace_root)` | R | Bundled vs deployed version (`up-to-date` / `stale` / `not-deployed`). |
+| `dry_run(workspace_root)` | R | Per-file 3-way classification + counts. |
 | `af_list_conflicts(workspace_root)` | R | Just the CONFLICT set with diffs. |
 | `af_get_source_file(path)` | R | Bundled source content (also a resource). |
 | `af_get_target_file(workspace_root, path)` | R | Deployed content, for the agent to merge. |
-| `af_apply(workspace_root, confirm)` | **W** | Apply non-conflict updates; back up first; never touch `[customizable]`/CONFLICT. |
-| `af_write_resolved(workspace_root, path, content)` | **W** | Write an agent-merged file (conflict resolution). |
-| `af_update_hashes(workspace_root)` | **W** | Re-baseline `.af-hashes` after resolution. |
-| `af_prune_backups(workspace_root, days)` | **W** | Housekeeping. |
+| `apply(workspace_root, confirm)` | **W** | Apply non-conflict updates; back up first; never touch `[customizable]`/CONFLICT. |
+| `write_resolved(workspace_root, path, content)` | **W** | Write an agent-merged file (conflict resolution). |
+| `update_hashes(workspace_root)` | **W** | Re-baseline `.af-hashes` after resolution. |
+| `prune_backups(workspace_root, days)` | **W** | Housekeeping. |
 
 The PoC implements only the **R** tools + `af_get_source_file` (as a resource).
 
@@ -96,7 +96,7 @@ The PoC implements only the **R** tools + `af_get_source_file` (as a resource).
 
 ## 6. Determinism & parity
 
-The classification and hashing must match the reference deploy so `af_dry_run`
+The classification and hashing must match the reference deploy so `dry_run`
 and the script agree:
 
 - **Hash:** SHA-256, **uppercase** hex (matches PowerShell `Get-FileHash`).
@@ -134,41 +134,41 @@ Moving the deploy to MCP **shifts the trust boundary**:
 
 1. Build embeds the current `flavors/github-copilot/.github` payload + `VERSION`
    + `.af-manifest` as package data; record an integrity hash.
-2. Publish (npm `@aaig/deploy-mcp` and/or PyPI `aaig-deploy-mcp` via `uvx`,
+2. Publish (npm `@AF/deploy-mcp` and/or PyPI `af-deploy-mcp` via `uvx`,
    optionally an OCI image).
 3. The existing `VERSION` + auto-version pre-commit hook drive payload
    versioning; a release tag cuts a package version.
 4. `.vscode/mcp.json` (workspace, shareable) or user config points at the server.
 
 ```jsonc
-{ "servers": { "aaig-deploy": { "type": "stdio", "command": "aaig-deploy-mcp" } } }
+{ "servers": { "af": { "type": "stdio", "command": "af-deploy-mcp" } } }
 ```
 
 ## 9. Phased roadmap
 
 | Phase | Scope |
 |---|---|
-| **0 — PoC (done)** | Read-only `af_status`, `af_dry_run`, `af://source/{path}`; parity with the script; unit tests. |
-| **1 — Write path (implemented; real elicitation remaining)** | `af_apply`, `af_write_resolved`, `af_update_hashes`, `af_prune_backups`, `af_conflict_diff`; workspace-scoped writes; backups; `[customizable]`/CONFLICT never written; `[vscode]` files covered; `confirm` guard. Remaining: MCP *elicitation* (the PoC gates on a `confirm` flag). |
-| **2 — UX (prompts done; packaging remaining)** | `af_deploy` + `af_resolve_conflicts` prompts implemented (surface as `/mcp.aaig-deploy.*`, dependency-free text builders in `prompts.py`). Remaining: packaged distribution (npm/PyPI/OCI); payload bundling + integrity. |
+| **0 — PoC (done)** | Read-only `status`, `dry_run`, `af://source/{path}`; parity with the script; unit tests. |
+| **1 — Write path (implemented; real elicitation remaining)** | `apply`, `write_resolved`, `update_hashes`, `prune_backups`, `conflict_diff`; workspace-scoped writes; backups; `[customizable]`/CONFLICT never written; `[vscode]` files covered; `confirm` guard. Remaining: MCP *elicitation* (the PoC gates on a `confirm` flag). |
+| **2 — UX (prompts done; packaging remaining)** | `deploy` + `resolve_conflicts` prompts implemented (surface as `/mcp.af.*`, dependency-free text builders in `prompts.py`). Remaining: packaged distribution (npm/PyPI/OCI); payload bundling + integrity. |
 | **3 — Adoption (aspirational)** | Documented opt-in install. The server stays **parallel to and experimental beside** `deploy.ps1`/`deploy.sh` — the scripts remain the supported, CI-integrated path. A hash-pinned **remote payload** (`AF_PAYLOAD_URL` + `AF_PAYLOAD_SHA256`) is implemented for central governance **without** a hosted compute server (no project data leaves the machine). Retiring the scripts is **not** planned for this PoC and would only be *considered* once cross-platform parity (incl. the Windows no-sandbox caveat) is proven and file-based customizations are covered. |
 
 ## 10. PoC results
 
 Implemented in [`../mcp-deploy/`](../mcp-deploy/):
 
-- `aaig_deploy_mcp/deploy_core.py` — dependency-free logic: version status,
+- `af_deploy_mcp/deploy_core.py` — dependency-free logic: version status,
   manifest parse, tier resolution, 3-way classification, **and the guarded write
   path** (`apply` with backups, `update_hashes`, `write_resolved`,
   `conflict_diff`, `prune_backups`). Covers `.github/` and `[vscode]` files.
-- `aaig_deploy_mcp/server.py` — `FastMCP` server: read tools (`af_status`,
-  `af_dry_run`, `af_conflict_diff`) + write tools (`af_apply`,
-  `af_write_resolved`, `af_update_hashes`, `af_prune_backups`, each guarded by
-  `confirm`) + `af://source/{path}` + workflow prompts (`af_deploy`,
-  `af_resolve_conflicts`).
-- `aaig_deploy_mcp/prompts.py` — dependency-free prompt-text builders (so the
+- `af_deploy_mcp/server.py` — `FastMCP` server: read tools (`status`,
+  `dry_run`, `conflict_diff`) + write tools (`apply`,
+  `write_resolved`, `update_hashes`, `prune_backups`, each guarded by
+  `confirm`) + `af://source/{path}` + workflow prompts (`deploy`,
+  `resolve_conflicts`).
+- `af_deploy_mcp/prompts.py` — dependency-free prompt-text builders (so the
   workflow guidance is unit-testable without the `mcp` framework).
-- `aaig_deploy_mcp/remote_payload.py` — dependency-free, hash-pinned remote
+- `af_deploy_mcp/remote_payload.py` — dependency-free, hash-pinned remote
   payload fetch (verify-before-extract, traversal-safe, hash-cached).
 - `tests/` — **36 unit tests, all passing** (tier array / inline / CRLF, status
   states, every classification path, apply + backup, customizable-skip,
@@ -177,7 +177,7 @@ Implemented in [`../mcp-deploy/`](../mcp-deploy/):
   resolver, and remote payload verify/cache/zip-slip).
 
 **Validation against the real reference deploy** (MP target, v1.19.9): the PoC
-`af_dry_run` matched `deploy.ps1` on the version status and the 14 EOL-driven
+`dry_run` matched `deploy.ps1` on the version status and the 14 EOL-driven
 `.sh` `UPDATE`s, and **correctly** classified the within-directory customizable
 `scripts/run-tests.sh` as `PROTECT` where `deploy.ps1` wrongly reports `UPDATE`
 (the §6 key-normalization bug).
@@ -187,7 +187,7 @@ Implemented in [`../mcp-deploy/`](../mcp-deploy/):
 - Language for the shipped server: **TypeScript** (npm/`npx` is the MCP norm)
   vs **Python** (`uvx`; PoC language). Recommend TS for distribution, keeping
   the Python PoC as the executable spec.
-- Should `af_apply` ever run non-interactively (CI), or always require
+- Should `apply` ever run non-interactively (CI), or always require
   elicitation? (Lean: CI uses the script; interactive uses MCP.)
 - Patch the `deploy.ps1`/`deploy.sh` customizable-key bug now, independently of
   this effort.

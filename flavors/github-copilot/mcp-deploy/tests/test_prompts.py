@@ -4,18 +4,18 @@
 
 from __future__ import annotations
 
-from aaig_deploy_mcp import prompts
+from af_deploy_mcp import prompts
 
 
 def test_deploy_prompt_orders_the_tool_workflow() -> None:
     text = prompts.deploy_prompt("/proj")
     assert "/proj" in text
     # The deploy prompt must reference the read-then-guarded-write sequence.
-    for tool in ("af_status", "af_dry_run", "af_apply"):
+    for tool in ("status", "dry_run", "apply"):
         assert tool in text
     assert "confirm=true" in text
     # Conflicts must be routed to the resolution prompt, never overwritten.
-    assert "af_resolve_conflicts" in text
+    assert "resolve_conflicts" in text
     assert "CONFLICT" in text
 
 
@@ -31,13 +31,13 @@ def test_deploy_prompt_chains_post_deploy_steps() -> None:
     assert "curated-assignments.json" in text
     assert "--reapply" in text
     # Conflict resolution must route to the resolve prompt as a post-deploy step.
-    assert "af_resolve_conflicts" in text
+    assert "resolve_conflicts" in text
 
 
 def test_resolve_conflicts_prompt_orders_the_merge_workflow() -> None:
     text = prompts.resolve_conflicts_prompt("/proj")
     assert "/proj" in text
-    for tool in ("af_dry_run", "af_conflict_diff", "af_write_resolved", "af_update_hashes"):
+    for tool in ("dry_run", "conflict_diff", "write_resolved", "update_hashes"):
         assert tool in text
     assert "confirm=true" in text
     # Must mention VS Code path handling so conflicts there are resolvable too.

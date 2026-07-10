@@ -1,4 +1,4 @@
-"""AAIG deploy logic for the MCP PoC — a parity port of ``deploy.ps1`` / ``deploy.sh``.
+"""AF deploy logic for the MCP PoC — a parity port of ``deploy.ps1`` / ``deploy.sh``.
 
 Provides version status, the 3-way dry-run classification (including agent
 model-tier resolution), and the guarded write path (apply with backups,
@@ -263,7 +263,7 @@ def resolve_source_root(package_dir: Path | None = None) -> Path:
             )
         from . import remote_payload
 
-        cache = Path(os.environ.get("AF_PAYLOAD_CACHE") or (Path.home() / ".cache" / "aaig-deploy-mcp"))
+        cache = Path(os.environ.get("AF_PAYLOAD_CACHE") or (Path.home() / ".cache" / "af-deploy-mcp"))
         return remote_payload.fetch_payload(url, sha, cache)
     pkg = (package_dir or Path(__file__).resolve().parent).resolve()
     bundled = pkg / "payload"
@@ -386,7 +386,7 @@ def _write_version(target_dir: Path, version: str) -> None:
     content = (
         f"version: {version}\n"
         f"deployed: {datetime.now().isoformat(timespec='seconds')}\n"
-        f"source: mcp:aaig-deploy\n"
+        f"source: mcp:af-deploy\n"
     )
     _write_bytes(target_dir / ".github" / ".af-version", content.encode("utf-8"))
 

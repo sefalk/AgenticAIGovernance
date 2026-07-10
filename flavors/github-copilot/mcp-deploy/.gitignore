@@ -7,4 +7,4 @@ dist/
 .venv/
 # Framework payload is bundled into the wheel at build time (force-include),
 # never committed here — avoids a duplicate copy of the framework.
-aaig_deploy_mcp/payload/
+af_deploy_mcp/payload/

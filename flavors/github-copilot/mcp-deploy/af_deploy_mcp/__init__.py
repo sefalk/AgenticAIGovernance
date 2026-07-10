@@ -1,4 +1,4 @@
-"""AAIG deploy MCP server (proof of concept)."""
+"""AF deploy MCP server (proof of concept)."""
 
 # copilot:generated | implementer | 2026-07-07
 
