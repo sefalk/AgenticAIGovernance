@@ -126,3 +126,24 @@ def test_prompt_wrappers_return_guidance(payload: Path) -> None:
     assert "curated-assignments.json" in deploy_text
     resolve_text = server.resolve_conflicts("/proj")
     assert "conflict_diff" in resolve_text and "update_hashes" in resolve_text
+
+
+def test_orphan_wrappers(payload: Path, tmp_path: Path) -> None:
+    target = tmp_path / "proj"
+    target.mkdir()
+    server.apply(str(target), confirm=True)
+    orphan = target / ".github" / "instructions" / "old.instructions.md"
+    orphan.parent.mkdir(parents=True, exist_ok=True)
+    orphan.write_text("# old\n", encoding="utf-8")
+    hf = target / ".github" / ".af-hashes"
+    hf.write_text(hf.read_text(encoding="utf-8") + "instructions/old.instructions.md=DEADBEEF\n", encoding="utf-8")
+
+    listed = server.list_orphans(str(target))
+    assert listed["count"] >= 1
+
+    guard = server.prune_orphans(str(target), confirm=False)
+    assert guard["confirmation_required"] is True
+
+    done = server.prune_orphans(str(target), confirm=True)
+    assert ".github/instructions/old.instructions.md" in done["removed"]
+    assert not orphan.exists()

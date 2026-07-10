@@ -521,3 +521,56 @@ def prune_backups(target_dir: Path, days: int) -> dict:
                 shutil.rmtree(p, ignore_errors=True)
                 removed.append(p.name)
     return {"removed": removed}
+
+
+# ── Orphan detection (framework files left behind by a manifest change) ──────
+# An orphan is a path recorded in the target ``.af-hashes`` baseline (so it was
+# delivered by a previous deploy) that is no longer a current deployable unit
+# — e.g. after a rename or a manifest removal — and still exists on disk.
+# Project-created files are never orphans: they are not in the baseline. The
+# deploy scripts never remove these; this closes that gap safely.
+
+
+def _orphan_paths(target_dir: Path, key: str) -> tuple[Path, str]:
+    """Map a baseline key to its on-disk path and display path."""
+    if key.startswith("vscode/"):
+        rel = key[len("vscode/") :]
+        return target_dir / ".vscode" / rel, f".vscode/{rel}"
+    return target_dir / ".github" / key, f".github/{key}"
+
+
+def list_orphans(source_root: Path, target_dir: Path) -> list[dict]:
+    """List baselined framework files that are no longer deployable and still on disk."""
+    target_github = target_dir / ".github"
+    manifest = parse_manifest(source_root / ".github" / ".af-manifest")
+    current = {u.hash_key for u in collect_units(source_root, target_dir, manifest)}
+    baseline = read_baseline_hashes(target_github)
+    orphans: list[dict] = []
+    for key in sorted(baseline):
+        if key in current:
+            continue
+        disk, display = _orphan_paths(target_dir, key)
+        if disk.is_file():
+            orphans.append({"path": display, "key": key})
+    return orphans
+
+
+def prune_orphans(source_root: Path, target_dir: Path) -> dict:
+    """Back up and delete orphaned framework files, then drop them from ``.af-hashes``."""
+    orphans = list_orphans(source_root, target_dir)
+    if not orphans:
+        return {"removed": [], "backup_dir": None}
+    target_github = target_dir / ".github"
+    backup_dir = target_dir / f".af-backup-{datetime.now():%Y%m%d%H%M%S}"
+    removed: list[str] = []
+    for orphan in orphans:
+        disk, _ = _orphan_paths(target_dir, orphan["key"])
+        bpath = backup_dir / orphan["path"]
+        bpath.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(disk, bpath)
+        disk.unlink()
+        removed.append(orphan["path"])
+    orphan_keys = {orphan["key"] for orphan in orphans}
+    remaining = {k: v for k, v in read_baseline_hashes(target_github).items() if k not in orphan_keys}
+    _write_hashes(target_github, remaining, read_version(source_root))
+    return {"removed": removed, "backup_dir": str(backup_dir)}

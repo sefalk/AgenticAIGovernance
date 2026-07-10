@@ -37,6 +37,8 @@ cloning the AF repository next to the target project**.
 | Tool (W) | `apply(workspace_root, confirm)` | Apply CREATE/UPDATE files; back up first; skip conflicts/customizable. |
 | Tool (W) | `write_resolved(workspace_root, path, content, confirm)` | Write an agent-merged file (conflict resolution). |
 | Tool (W) | `update_hashes(workspace_root, confirm)` | Re-baseline `.af-hashes` after resolving conflicts. |
+| Tool (R) | `list_orphans(workspace_root)` | List baselined framework files a rename/manifest change left behind, read-only. |
+| Tool (W) | `prune_orphans(workspace_root, confirm)` | Back up + delete orphaned framework files; drop them from `.af-hashes`. |
 | Tool (W) | `prune_backups(workspace_root, days, confirm)` | Remove stale `.af-backup-*` dirs. |
 | Resource | `af://source/{path}` | Read a bundled source file, e.g. `af://source/agents/planner.agent.md`. |
 | Prompt | `deploy(workspace_root)` | Slash-command workflow: status → dry-run → guarded apply → **post-deploy steps** (curated-skill `--reapply` + conflict resolution). |
@@ -68,6 +70,21 @@ The framework **payload** is resolved in this order:
    `force-include` in `pyproject.toml`) — this is what lets an installed server
    run **without an AF clone** next to the target project;
 4. the in-repo flavor directory, when running from a source checkout (dev mode).
+
+### Freshness (important)
+
+The payload's freshness depends on **how the server is installed**:
+
+- **Editable install** (`pip install -e`, dev) → resolves the **live** flavor
+  directory, so it is always current.
+- **Wheel install** (`uv tool install af-deploy-mcp`, packaged) → uses the
+  payload **bundled at build time** — it is only as fresh as the wheel. The
+  wheel **version equals the AF payload version** (sourced from `../VERSION`),
+  so `af-deploy-mcp@1.19.27` bundles AF payload `1.19.27`. **Rebuild + reinstall
+  (`uv tool upgrade`) on every AF release** to refresh the payload; `af_status`
+  reports the bundled `source_version` so staleness is visible.
+- **Remote payload** (`AF_PAYLOAD_URL`, below) → fetched fresh (hash-pinned) on
+  each run, independent of the installed wheel.
 
 ### Governance mode (remote payload)
 

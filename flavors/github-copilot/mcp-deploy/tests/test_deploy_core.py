@@ -323,3 +323,60 @@ def test_validate_payload_flags_missing_pieces(tmp_path: Path) -> None:
     (tmp_path / ".github").mkdir()
     (tmp_path / ".github" / ".af-manifest").write_text("# manifest\n", encoding="utf-8")
     assert deploy_core.validate_payload(tmp_path) is None
+
+
+# ── Orphan detection & pruning ─────────────────────────────────────────────
+
+
+def _add_baseline_entry(target: Path, key: str) -> None:
+    hf = target / ".github" / ".af-hashes"
+    hf.write_text(hf.read_text(encoding="utf-8") + f"{key}=DEADBEEF\n", encoding="utf-8")
+
+
+def test_list_and_prune_orphans(tmp_path: Path) -> None:
+    src = _make_source(tmp_path / "src")
+    target = tmp_path / "proj"
+    _deploy_identically(src, target)
+    # Simulate a framework file removed from source but still baselined + on disk.
+    orphan = target / ".github" / "agents" / "old.agent.md"
+    _write(orphan, "# old agent\n")
+    _add_baseline_entry(target, "agents/old.agent.md")
+
+    found = deploy_core.list_orphans(src, target)
+    assert any(o["path"] == ".github/agents/old.agent.md" for o in found)
+
+    report = deploy_core.prune_orphans(src, target)
+    assert ".github/agents/old.agent.md" in report["removed"]
+    assert not orphan.exists()
+    assert (Path(report["backup_dir"]) / ".github" / "agents" / "old.agent.md").is_file()
+    assert "agents/old.agent.md" not in deploy_core.read_baseline_hashes(target / ".github")
+    # Idempotent: nothing left to prune.
+    assert deploy_core.list_orphans(src, target) == []
+
+
+def test_list_orphans_ignores_project_files(tmp_path: Path) -> None:
+    src = _make_source(tmp_path / "src")
+    target = tmp_path / "proj"
+    _deploy_identically(src, target)
+    # A project-created file (not in the baseline) is never an orphan.
+    _write(target / ".github" / "agents" / "my-custom.agent.md", "# mine\n")
+    assert deploy_core.list_orphans(src, target) == []
+
+
+def test_prune_orphans_no_op_when_none(tmp_path: Path) -> None:
+    src = _make_source(tmp_path / "src")
+    target = tmp_path / "proj"
+    _deploy_identically(src, target)
+    report = deploy_core.prune_orphans(src, target)
+    assert report["removed"] == [] and report["backup_dir"] is None
+
+
+def test_list_orphans_handles_vscode(tmp_path: Path) -> None:
+    src = _make_source(tmp_path / "src")
+    target = tmp_path / "proj"
+    _deploy_identically(src, target)
+    orphan = target / ".vscode" / "old-launch.json"
+    _write(orphan, "{}\n")
+    _add_baseline_entry(target, "vscode/old-launch.json")
+    found = deploy_core.list_orphans(src, target)
+    assert any(o["path"] == ".vscode/old-launch.json" for o in found)

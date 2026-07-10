@@ -20,11 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `af`) that exposes the framework deploy as MCP tools/prompts, so an agent can
   deploy AF into a target workspace **without cloning the AF repo next to it** —
   the `.github/` + `.vscode/` payload is bundled into the wheel (hatchling
-  `force-include`). Read tools (`status`, `dry_run`, `conflict_diff`) and
-  guarded write tools (`apply`, `write_resolved`, `update_hashes`,
-  `prune_backups`; `confirm`-gated, workspace-scoped, backed up) mirror
-  `deploy.ps1` classification and hashing (SHA-256, agent model-tier resolution)
-  with verified parity. Prompts `/mcp.af.deploy` and `/mcp.af.resolve_conflicts`
+  `force-include`), and the package **version tracks the AF `VERSION` file**
+  (hatchling dynamic version) so a built wheel advertises the framework release
+  it froze. Read tools (`status`, `dry_run`, `conflict_diff`, `list_orphans`)
+  and guarded write tools (`apply`, `write_resolved`, `update_hashes`,
+  `prune_orphans`, `prune_backups`; `confirm`-gated, workspace-scoped, backed
+  up) mirror `deploy.ps1` classification and hashing (SHA-256, agent model-tier
+  resolution) with verified parity. `list_orphans`/`prune_orphans` clean up
+  framework files a rename or manifest change left behind (baselined in
+  `.af-hashes`, no longer deployable) — project-created files are never touched.
+  Prompts `/mcp.af.deploy` and `/mcp.af.resolve_conflicts`
   chain the deploy → curated-skill `--reapply` → conflict-resolution steps.
   Optional hash-pinned **remote payload** (`AF_PAYLOAD_URL` + `AF_PAYLOAD_SHA256`)
   for central governance without a hosted compute server. Runs **parallel to**

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "af-deploy-mcp"
-version = "0.1.0"
+dynamic = ["version"]
 description = "AF deploy MCP server (PoC) — framework status, dry-run, guarded apply, conflict resolution and [vscode] coverage over MCP."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,6 +16,13 @@ dev = ["pytest>=8"]
 
 [project.scripts]
 af-deploy-mcp = "af_deploy_mcp.server:main"
+
+# Package version tracks the AF framework VERSION, so a wheel's version equals the
+# bundled payload version (af-deploy-mcp@X == AF payload X). Rebuild + reinstall
+# per AF release to refresh the bundled payload.
+[tool.hatch.version]
+path = "../VERSION"
+pattern = "(?P<version>[^\\s]+)"
 
 [tool.hatch.build.targets.wheel]
 packages = ["af_deploy_mcp"]

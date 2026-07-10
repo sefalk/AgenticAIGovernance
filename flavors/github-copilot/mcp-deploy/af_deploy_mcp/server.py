@@ -10,6 +10,8 @@ manifest ``[vscode]`` files (deployed to ``.vscode/``):
 * ``write_resolved``— write an agent-merged file (guarded by ``confirm``).
 * ``update_hashes`` — re-baseline ``.af-hashes`` (guarded by ``confirm``).
 * ``prune_backups`` — housekeeping (guarded by ``confirm``).
+* ``list_orphans``  — find baselined framework files a manifest change left behind (read-only).
+* ``prune_orphans`` — back up + delete those orphans (guarded by ``confirm``).
 
 And a resource template ``af://source/{path}`` for bundled source files, plus
 two workflow prompts (``deploy``, ``resolve_conflicts``) that surface as
@@ -187,6 +189,43 @@ def prune_backups(workspace_root: str, days: int = 14, confirm: bool = False) ->
             "message": f"Re-call with confirm=true to prune backups older than {days}d.",
         }
     return deploy_core.prune_backups(target, days)
+
+
+@mcp.tool()
+def list_orphans(workspace_root: str) -> dict:
+    """List framework files left behind by a manifest change (read-only).
+
+    An orphan is a file recorded in the target's ``.af-hashes`` baseline (so a
+    previous deploy delivered it) that is no longer deployable — e.g. after a
+    rename or manifest removal — and still exists on disk. Project-created files
+    are never orphans.
+    """
+    src, target, err = _prep(workspace_root)
+    if err:
+        return {"error": err}
+    orphans = deploy_core.list_orphans(src, target)
+    return {"count": len(orphans), "orphans": orphans}
+
+
+@mcp.tool()
+def prune_orphans(workspace_root: str, confirm: bool = False) -> dict:
+    """Back up and delete orphaned framework files, then drop them from ``.af-hashes``.
+
+    Guarded by ``confirm``. Only removes baselined framework files (never
+    project-created ones); everything removed is backed up to ``.af-backup-*``.
+    """
+    src, target, err = _prep(workspace_root)
+    if err:
+        return {"error": err}
+    orphans = deploy_core.list_orphans(src, target)
+    if not confirm:
+        return {
+            "confirmation_required": True,
+            "message": f"Re-call with confirm=true to remove {len(orphans)} orphan(s) (backed up first).",
+            "count": len(orphans),
+            "orphans": orphans,
+        }
+    return deploy_core.prune_orphans(src, target)
 
 
 @mcp.resource("af://source/{path}")
