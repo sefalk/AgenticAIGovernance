@@ -1,5 +1,5 @@
 ---
-name: smoke-test
+name: af-smoke-test
 description: 'Run a canned task through the full TDD pipeline to verify framework plumbing. No user input needed — just run it.'
 agent: coordinator
 tools:

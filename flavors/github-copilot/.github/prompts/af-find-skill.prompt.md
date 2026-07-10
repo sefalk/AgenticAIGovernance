@@ -1,21 +1,21 @@
 ---
-name: find-skill
+name: af-find-skill
 description: 'Search the AF skill library by topic keyword and return matching skills with usage guidance.'
 tools:
   - search
   - read
 ---
 
-# /find-skill — Skill Discovery
+# /af-find-skill — Skill Discovery
 
 Find relevant AF skills for a given topic, task, or question.
 
 ## Input
 
 The user provides a topic keyword or phrase, e.g.:
-- `/find-skill testing`
-- `/find-skill how to validate data quality`
-- `/find-skill security`
+- `/af-find-skill testing`
+- `/af-find-skill how to validate data quality`
+- `/af-find-skill security`
 
 ## Steps
 

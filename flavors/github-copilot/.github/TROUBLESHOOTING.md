@@ -65,7 +65,7 @@ Vague descriptions lead to wrong classification.
 
 **Fix:**
 - Be explicit: "fix this typo in `helper.py`" → Trivial Fix.
-- Or use a specific slash command: `/trivial-fix`, `/quick-fix`, `/tdd-feature`, `/review-code`.
+- Or use a specific slash command: `/af-trivial-fix`, `/af-quick-fix`, `/af-tdd-feature`, `/af-review-code`.
 - You can also override: "Use Quick Fix workflow for this."
 
 ### Coordinator asks for approval on a small task
@@ -92,7 +92,7 @@ an error, or the prompt was too large.
 
 **Fix:**
 1. Check context budget — if the narration line shows YELLOW/RED, context
-   pressure may be the cause. Try `/resume` in a fresh session.
+   pressure may be the cause. Try `/af-resume` in a fresh session.
 2. Reduce the task scope — break it into smaller pieces.
 3. Check the model availability — the agent's preferred model may be
    unavailable. The next model in the priority list will be tried
@@ -113,7 +113,7 @@ model deviated from the return format.
 2. If it happens consistently for a specific critic, check that its
    `.agent.md` file includes the Return Format section with the verdict
    template.
-3. Run `/validate-framework` to check for formatting issues in agent files.
+3. Run `/af-validate-framework` to check for formatting issues in agent files.
 
 ### Subagent timeout / very slow response
 
@@ -123,7 +123,7 @@ model deviated from the return format.
 
 **Fix:**
 1. Wait — large tasks legitimately take time.
-2. If it's stuck, cancel the chat and use `/resume` to pick up from the
+2. If it's stuck, cancel the chat and use `/af-resume` to pick up from the
    last completed step.
 
 ---
@@ -141,7 +141,7 @@ is unavailable.
 **Fix:**
 1. Read the BLOCKED reason — it tells you which tool is missing.
 2. Install or enable the tool.
-3. Re-run the workflow (or `/resume` if a WIP checkpoint was saved).
+3. Re-run the workflow (or `/af-resume` if a WIP checkpoint was saved).
 
 ### HARD gate FAILED after retries
 
@@ -156,7 +156,7 @@ complexity too high, tests still failing).
    metric values vs. thresholds.
 2. Fix the underlying issue manually or adjust thresholds in MANIFEST.md
    § 5 if they're too strict for your project.
-3. Re-run with `/resume`.
+3. Re-run with `/af-resume`.
 
 ---
 
@@ -198,9 +198,9 @@ complex for the current approach.
 
 ## Resume Issues
 
-### `/resume` finds no WIP
+### `/af-resume` finds no WIP
 
-**Symptom:** `/resume` reports no paused workflows.
+**Symptom:** `/af-resume` reports no paused workflows.
 
 **Cause:** No `WIP.md` file exists in the plan directory (default:
 `docs/plans/WIP.md`). Either the previous session completed normally,
@@ -213,7 +213,7 @@ or it ended without checkpointing.
 
 ### Stale WIP.md
 
-**Symptom:** `/resume` finds a WIP.md but it references files or tests
+**Symptom:** `/af-resume` finds a WIP.md but it references files or tests
 that no longer exist.
 
 **Cause:** Manual changes were made after the WIP checkpoint.
@@ -221,7 +221,7 @@ that no longer exist.
 **Fix:**
 1. Delete the stale `WIP.md` (in `docs/plans/` or wherever located)
    and start a fresh workflow.
-2. Or update `WIP.md` manually to reflect the current state, then `/resume`.
+2. Or update `WIP.md` manually to reflect the current state, then `/af-resume`.
 
 ---
 
@@ -252,7 +252,7 @@ is not being picked up.
 **Fix:**
 1. Verify `.github/hooks/agent-hooks.json` exists and is valid JSON.
 2. Check VS Code settings — agent hooks must be enabled.
-3. Run `/validate-framework` — it checks for hook configuration issues.
+3. Run `/af-validate-framework` — it checks for hook configuration issues.
 
 ---
 
@@ -261,8 +261,8 @@ is not being picked up.
 | Problem | First Thing to Try |
 |---|---|
 | Hook error on start | Run the hook script manually in terminal |
-| Wrong workflow | Use explicit `/tdd-feature`, `/quick-fix`, or `/trivial-fix` |
-| Empty subagent response | Check context budget, try `/resume` in new session |
+| Wrong workflow | Use explicit `/af-tdd-feature`, `/af-quick-fix`, or `/af-trivial-fix` |
+| Empty subagent response | Check context budget, try `/af-resume` in new session |
 | Unparseable verdict | Usually transient — re-run the step |
 | BLOCKED gate | Install the missing tool |
 | Escalation surprise | Read the trigger reason in the escalation |

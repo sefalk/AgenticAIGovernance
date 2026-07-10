@@ -1,5 +1,5 @@
 ---
-name: audit-config
+name: af-audit-config
 description: 'Detect drift between Agent Framework config files and the actual project state — find stale module classifications, outdated architecture maps, and threshold mismatches.'
 argument-hint: 'Optional: focus area (e.g., "architecture only", "thresholds")'
 tools:
@@ -9,7 +9,7 @@ tools:
 
 # Configuration Drift Audit
 
-Re-run the discovery logic from `/onboard-project` but instead of writing
+Re-run the discovery logic from `/af-onboard-project` but instead of writing
 files, **diff** the current AF config against the discovered state. This is
 **advisory only** — report drift, never auto-fix (the human may have
 intentionally customised values).
@@ -26,7 +26,7 @@ Read these AF config files and extract current settings:
 
 ## Step 2: Discover Actual Project State
 
-Scan the project using the same logic as `/onboard-project`:
+Scan the project using the same logic as `/af-onboard-project`:
 
 1. **Metadata:** Read `pyproject.toml`, `setup.py`, `package.json`, `README.md`
    for project name, version, dependencies

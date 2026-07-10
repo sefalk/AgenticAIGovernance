@@ -1010,7 +1010,7 @@ if (Test-Path $curatedJsonPath) {
     Write-Host ""
     Write-Host "  Post-deploy step: curated skills detected." -ForegroundColor Cyan
     Write-Host "  A deploy overwrites AF-owned files (agents) and resets curated skill assignments." -ForegroundColor Cyan
-    Write-Host "  -> Run /curate-skills --reapply to restore them (the MCP af_deploy prompt does this automatically)." -ForegroundColor Cyan
+    Write-Host "  -> Run /af-curate-skills --reapply to restore them (the MCP af_deploy prompt does this automatically)." -ForegroundColor Cyan
 }
 
 # ── Version-stale detection ────────────────────────────────────────────────

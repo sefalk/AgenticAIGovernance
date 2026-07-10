@@ -1,5 +1,5 @@
 ---
-name: setup-project
+name: af-setup-project
 description: >-
   End-to-end project setup: deploy the Agent Framework, run onboarding
   to configure project files, then curate skills for the tech stack —
@@ -66,7 +66,7 @@ Do NOT stop for confirmation here — proceed directly to Phase 2.
 ## Phase 2: Onboard
 
 Perform the full onboarding analysis inline (same logic as
-`/onboard-project`). Do NOT delegate to another prompt — execute all
+`/af-onboard-project`). Do NOT delegate to another prompt — execute all
 steps here.
 
 ### 2a: Discover Project Metadata
@@ -129,7 +129,7 @@ Look for existing conventions:
 
 ## Phase 3: Curate Skills
 
-Perform skill curation inline (same logic as `/curate-skills`).
+Perform skill curation inline (same logic as `/af-curate-skills`).
 This runs immediately after onboarding — reuse the tech stack data
 already discovered in Phase 2.
 
@@ -247,7 +247,7 @@ Execute all writes in one batch:
     - Configuration files updated
 
     Next: open a new chat and try @coordinator with a task,
-    or use /tdd-feature for a full TDD workflow.
+    or use /af-tdd-feature for a full TDD workflow.
     ```
 
 **Important:**

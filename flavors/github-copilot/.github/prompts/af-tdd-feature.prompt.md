@@ -1,5 +1,5 @@
 ---
-name: tdd-feature
+name: af-tdd-feature
 description: 'Run the full TDD workflow (Plan → Red → Green → Refactor → Review → Document) via the coordinator agent.'
 argument-hint: 'Describe the feature to implement'
 agent: coordinator

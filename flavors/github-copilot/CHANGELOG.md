@@ -1325,7 +1325,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Coordinator determines filename** (knows date + branch name).
   - **Archival eliminated:** plans live in their final location from creation.
     Removed unimplemented "archives to `.github/logs/`" step.
-  - **WIP template:** added `Plan File` reference field so `/resume` can
+  - **WIP template:** added `Plan File` reference field so `/af-resume` can
     locate the associated plan.
   - **Convention discovery:** coordinator Step 0 checks for existing `docs/`
     structure before defaulting.
@@ -1464,17 +1464,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Idea 29 — Skill Pruning** — 22 unassigned skills moved to
   `skills/_available/`. INDEX.md split into "Active Skills (16)" and
-  "Available for Activation (22)". `/validate-framework` deep-scans only
-  active skills (light scan for `_available/`). `/onboard-project` evaluates
+  "Available for Activation (22)". `/af-validate-framework` deep-scans only
+  active skills (light scan for `_available/`). `/af-onboard-project` evaluates
   available skills against project tech stack and recommends activation.
 - **Idea 30 — Non-Destructive Install** — `.af-manifest` created listing
   AF-owned paths. README Quick Setup documents file ownership boundary (AF
-  does NOT overwrite workflows, CODEOWNERS, dependabot.yml). `/onboard-project`
+  does NOT overwrite workflows, CODEOWNERS, dependabot.yml). `/af-onboard-project`
   gains conflict detection (Steps 7-8): enumerates existing `.github/` files,
   offers to merge `copilot-instructions.md`, respects ownership boundary.
 - **Idea 31 — Token Budget Feasibility** — Context budget heuristics
   recalibrated: ≥7 calls → YELLOW, ≥10 → RED (was ≥5/≥7, which triggered
-  RED on every normal Full TDD workflow). `/simulate` gains Context
+  RED on every normal Full TDD workflow). `/af-simulate` gains Context
   Feasibility section (SINGLE-SESSION / MULTI-SESSION / AT-RISK). Advisory
   (SOFT) — does not block execution.
 - **Idea 33 — Gate Audit Trail** — Coordinator cross-references gate claims
@@ -1509,7 +1509,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Idea 22 — Smoke Test Playbook** — New `/smoke-test` slash command runs a
+- **Idea 22 — Smoke Test Playbook** — New `/af-smoke-test` slash command runs a
   canned `clamp(value, lo, hi)` task through the full TDD pipeline. Per-step
   health report (PASS/FAIL/SKIPPED) with raw output on failures. Disposable
   `agent/smoke-test` branch. References TROUBLESHOOTING.md on failure.
@@ -1586,10 +1586,10 @@ skills, thresholds, or retro context into prompts.
 
 - **GOVERNANCE.md NOT auto-injected** — 300+ lines would waste context budget.
   Relevant rules are embedded in agent prompts and critic checklists. Drift
-  risk mitigated by `/validate-framework`.
-- **Standalone utility prompts kept standalone** — `/audit-config`,
-  `/validate-framework`, `/find-skill`, `/simulate`, `/onboard-project`,
-  `/retro-summary` are legitimately user-triggered maintenance operations
+  risk mitigated by `/af-validate-framework`.
+- **Standalone utility prompts kept standalone** — `/af-audit-config`,
+  `/af-validate-framework`, `/af-find-skill`, `/af-simulate`, `/af-onboard-project`,
+  `/af-retro-summary` are legitimately user-triggered maintenance operations
   that don't need coordinator orchestration.
 - **Git stays human-controlled** — L1 §7 (Least Privilege). No change.
 
@@ -1667,15 +1667,15 @@ skill discoverability, and versioning infrastructure.
 
 ### Added
 
-- **`/draft-pr-description`** prompt — generate PR text from PLAN.md + YAML log
+- **`/af-draft-pr-description`** prompt — generate PR text from PLAN.md + YAML log
   + gate summary (Idea 13)
-- **`/find-skill`** prompt — semantic search across the skill library (Idea 17)
+- **`/af-find-skill`** prompt — semantic search across the skill library (Idea 17)
 - **`skills/INDEX.md`** — auto-generated index of all 38 skills with agent
   matrix and unassigned skills list (Idea 17)
-- **`/retro-summary`** prompt — pull-model aggregator for workflow lessons (Idea 11)
-- **`/resume`** prompt — discover paused workflows from WIP.md files (Idea 16)
-- **`/audit-config`** prompt — detect drift between AF config and project state (Idea 12)
-- **`/simulate`** prompt — dry-run workflow prediction without execution (Idea 19)
+- **`/af-retro-summary`** prompt — pull-model aggregator for workflow lessons (Idea 11)
+- **`/af-resume`** prompt — discover paused workflows from WIP.md files (Idea 16)
+- **`/af-audit-config`** prompt — detect drift between AF config and project state (Idea 12)
+- **`/af-simulate`** prompt — dry-run workflow prediction without execution (Idea 19)
 - **`VERSION`** file and **`CHANGELOG.md`** — semver tracking (Idea 18)
 - **Context Budget Awareness** — GREEN/YELLOW/RED self-assessment protocol in
   coordinator with HARD gate on RED (Idea 15)
@@ -1698,14 +1698,14 @@ skill discoverability, and versioning infrastructure.
 | Idea | Summary |
 |---|---|
 | 11 | Workflow Memory & Auto-Retro (pull model) |
-| 12 | Config Drift Detection (`/audit-config`) |
-| 13 | CI/PR Integration (`/draft-pr-description`) |
+| 12 | Config Drift Detection (`/af-audit-config`) |
+| 13 | CI/PR Integration (`/af-draft-pr-description`) |
 | 14 | Custom Workflows — DEFERRED |
 | 15 | Context Budget Awareness |
-| 16 | Workflow Resume (`/resume`) |
-| 17 | Skill Discovery Index (`/find-skill`) |
+| 16 | Workflow Resume (`/af-resume`) |
+| 17 | Skill Discovery Index (`/af-find-skill`) |
 | 18 | Framework Versioning & Changelog |
-| 19 | Dry-Run / Simulation (`/simulate`) |
+| 19 | Dry-Run / Simulation (`/af-simulate`) |
 
 ---
 
@@ -1744,12 +1744,12 @@ internally consistent, and ready for adoption.
 | 2a | Git workflow with atomic commits |
 | 2b | Persisted planning documents (PLAN.md) |
 | 3 | Structural peer review — all file types validated |
-| 4 | Automated project onboarding (`/onboard-project`) |
+| 4 | Automated project onboarding (`/af-onboard-project`) |
 | 5 | Pydantic skill for Python domain models |
 | 6 | Dynamic agent creation → WONTFIX |
 | 7 | Agents generic — shells + skill references |
 | 8 | Documentation/logging streamlining + inter-agent contracts |
 | 9 | Quality gate system — taxonomy, tiers, per-agent exit gates |
-| 10 | AF self-validation (`/validate-framework`) |
+| 10 | AF self-validation (`/af-validate-framework`) |
 
 > copilot:generated | implementer | 2026-03-09

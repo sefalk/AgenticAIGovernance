@@ -1,5 +1,5 @@
 ---
-name: onboard-project
+name: af-onboard-project
 description: 'Analyse the current project and auto-fill the Agent Framework configuration files (copilot-instructions, architecture map, hooks).'
 argument-hint: 'Optional: any special notes about your project'
 tools:
@@ -162,13 +162,13 @@ has already been performed:
 2. If it does NOT exist → tell the user:
 
    > "Onboarding complete. Your skills can be optimised for this tech stack.
-   > Run `/curate-skills` to activate matching skills and deactivate
+   > Run `/af-curate-skills` to activate matching skills and deactivate
    > irrelevant ones."
    >
-   > **Tip:** Use `/setup-project` next time to run deploy + onboard +
+   > **Tip:** Use `/af-setup-project` next time to run deploy + onboard +
    > curate in one step.
 
 This is informational only — do NOT auto-run skill curation from here.
-The `/setup-project` prompt handles the integrated flow.
+The `/af-setup-project` prompt handles the integrated flow.
 
 ${input:notes:Any special notes about your project (optional)}

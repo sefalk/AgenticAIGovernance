@@ -1,5 +1,5 @@
 ---
-name: resume
+name: af-resume
 agent: coordinator
 description: 'Discover paused workflows and resume via coordinator Step 0.'
 tools:
@@ -12,7 +12,7 @@ tools:
   - read/terminalSelection
 ---
 
-# /resume — Workflow Resume Discovery
+# /af-resume — Workflow Resume Discovery
 
 Find all paused or in-progress workflows and present them so the human
 can choose which one to resume. **Discovery only** — branch switching

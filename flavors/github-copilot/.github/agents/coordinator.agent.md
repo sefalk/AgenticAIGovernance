@@ -1,6 +1,6 @@
 ---
 name: coordinator
-description: 'Autonomous TDD workflow orchestrator. The primary entry point — give me any task and I will select the right workflow (Full TDD, Quick Fix, Trivial Fix, Review, Plan Only) and run the full pipeline via subagents. Also available via /tdd-feature, /quick-fix, /trivial-fix, /review-code, /resume.'
+description: 'Autonomous TDD workflow orchestrator. The primary entry point — give me any task and I will select the right workflow (Full TDD, Quick Fix, Trivial Fix, Review, Plan Only) and run the full pipeline via subagents. Also available via /af-tdd-feature, /af-quick-fix, /af-trivial-fix, /af-review-code, /af-resume.'
 argument-hint: 'Describe the feature, bug fix, or refactoring task to implement'
 tools:
   - agent
@@ -821,7 +821,7 @@ user departure, blocking issue), commit a `WIP.md` checkpoint:
 1. Commit all in-progress code changes (even if tests are failing)
 2. Create or update `WIP.md` in the plan directory discovered in Step 0
    (e.g., `docs/plans/WIP.md`) using the template from `.github/templates/WIP.md`.
-   Include the plan filename in WIP.md so `/resume` can locate it.
+   Include the plan filename in WIP.md so `/af-resume` can locate it.
 3. Include **step history** in WIP.md: current state, retry count per step,
    failed attempt reasons, and skipped steps with rationale
 4. Commit with: `git add docs/plans/WIP.md` then
@@ -839,7 +839,7 @@ coordinator writes a minimal log entry so steps 1–6 are not lost:
    - `steps_completed`: list of steps with agent, verdict, outcome
    - `failure_reason`: why the workflow stopped
 2. This partial log ensures traceability even when the documenter never runs.
-3. The documenter, if later invoked via `/resume`, appends to this log
+3. The documenter, if later invoked via `/af-resume`, appends to this log
    rather than creating a new one.
 
 ### Task Cancellation
@@ -853,7 +853,7 @@ If the human User cancels a task mid-workflow:
    titled `[ABANDONED] {branch-name}` and closing it without merging
 4. Clean up: the human decides on branch deletion (local and remote)
 5. The `CANCELLED` status prevents future agents from accidentally
-   picking up this branch via `/resume`
+   picking up this branch via `/af-resume`
 
 ## Progress Tracking
 

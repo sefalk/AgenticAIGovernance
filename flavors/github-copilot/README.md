@@ -31,11 +31,11 @@ suggestions. You stay in control through mandatory escalation points.
 
 1. **Place** the `_agent-framework/` directory in your project root
    (or clone it as a subdirectory).
-2. **Run `/setup-project`** in Copilot Chat — this runs the full pipeline
+2. **Run `/af-setup-project`** in Copilot Chat — this runs the full pipeline
    (deploy → onboard → curate skills) in one step. Review the combined
    summary and confirm once.
 3. **Start using** — open Copilot Chat and type `@coordinator <your task>`,
-   or use `/tdd-feature`, `/quick-fix`, or `/review-code` slash commands.
+   or use `/af-tdd-feature`, `/af-quick-fix`, or `/af-review-code` slash commands.
 
 <details>
 <summary><strong>Manual setup</strong> (step-by-step alternative)</summary>
@@ -53,9 +53,9 @@ If you prefer running each phase separately:
    ./_agent-framework/deploy.sh --dry-run
    ./_agent-framework/deploy.sh
    ```
-2. **Onboard:** Run `/onboard-project` in Copilot Chat — analyses your
+2. **Onboard:** Run `/af-onboard-project` in Copilot Chat — analyses your
    codebase and auto-fills configuration.
-3. **Curate skills:** Run `/curate-skills` — matches skills to your tech
+3. **Curate skills:** Run `/af-curate-skills` — matches skills to your tech
    stack and activates/deactivates them.
 
 </details>
@@ -128,8 +128,8 @@ Use two deployment modes to balance speed and safety:
    `copilot-instructions.md`. See `.github/.af-manifest` for the full list.
    **Do NOT overwrite** existing non-AF files.
 2. **Copy** `.vscode/toolsets.jsonc` into your `.vscode/` folder.
-3. **Run `/onboard-project`** to auto-fill configuration, then
-   `/curate-skills` to match skills to your tech stack.
+3. **Run `/af-onboard-project`** to auto-fill configuration, then
+   `/af-curate-skills` to match skills to your tech stack.
 
 </details>
 
@@ -139,8 +139,8 @@ Use two deployment modes to balance speed and safety:
 
 | Week | What to Do |
 |---|---|
-| **1** | Use `@coordinator` for small tasks — try `/quick-fix` or `/trivial-fix` |
-| **2** | Run a feature with `/tdd-feature`. Watch the subagent calls in the chat |
+| **1** | Use `@coordinator` for small tasks — try `/af-quick-fix` or `/af-trivial-fix` |
+| **2** | Run a feature with `/af-tdd-feature`. Watch the subagent calls in the chat |
 | **3** | Customise `copilot-instructions.md` and `architecture.instructions.md` for your project |
 | **4** | Review workflow logs in `.github/logs/` and retro snippets in `retros/auto/` |
 
@@ -194,10 +194,10 @@ The coordinator picks the right workflow for the task:
 
 | Task Type | Workflow | Agents Used | Slash Command |
 |---|---|---|---|
-| New feature | Full TDD | All 10 workers | `/tdd-feature` |
-| Small bug fix | Quick Fix | planner → implementer → code-critic → documenter | `/quick-fix` |
-| Mechanical fix | Trivial Fix | implementer → code-critic → documenter | `/trivial-fix` |
-| Code review | Review Only | code-critic | `/review-code` |
+| New feature | Full TDD | All 10 workers | `/af-tdd-feature` |
+| Small bug fix | Quick Fix | planner → implementer → code-critic → documenter | `/af-quick-fix` |
+| Mechanical fix | Trivial Fix | implementer → code-critic → documenter | `/af-trivial-fix` |
+| Code review | Review Only | code-critic | `/af-review-code` |
 | Planning | Plan Only | planner | — |
 
 <details>
@@ -303,22 +303,22 @@ CHANGELOG.md                               # Release history (Keep a Changelog f
 │   ├── INDEX.md                           # Auto-generated skill index with agent matrix
 │   └── ... (35 more)                      # See skills/ directory for full list
 ├── prompts/                               # Reusable slash commands
-│   ├── setup-project.prompt.md            # /setup-project → deploy + onboard + curate (all-in-one)
-│   ├── onboard-project.prompt.md          # /onboard-project → auto-fill config
-│   ├── curate-skills.prompt.md            # /curate-skills → match skills to tech stack
-│   ├── find-skill.prompt.md               # /find-skill → search skill library by topic
-│   ├── audit-config.prompt.md             # /audit-config → detect config drift
-│   ├── validate-framework.prompt.md       # /validate-framework → AF integrity scan
-│   ├── simulate.prompt.md                 # /simulate → dry-run workflow prediction
-│   ├── draft-pr-description.prompt.md     # /draft-pr-description → PR text from artifacts
-│   ├── retro-summary.prompt.md            # /retro-summary → pull recent workflow lessons
-│   ├── resume.prompt.md                   # /resume → discover paused workflows
-│   ├── tdd-feature.prompt.md              # /tdd-feature → full TDD pipeline
-│   ├── quick-fix.prompt.md                # /quick-fix → implement + review
-│   ├── trivial-fix.prompt.md              # /trivial-fix → mechanical fix
-│   ├── review-code.prompt.md              # /review-code → code review only
-│   ├── smoke-test.prompt.md               # /smoke-test → verify framework health
-│   └── workflow-summary.prompt.md         # /workflow-summary → log summary
+│   ├── setup-project.prompt.md            # /af-setup-project → deploy + onboard + curate (all-in-one)
+│   ├── onboard-project.prompt.md          # /af-onboard-project → auto-fill config
+│   ├── curate-skills.prompt.md            # /af-curate-skills → match skills to tech stack
+│   ├── find-skill.prompt.md               # /af-find-skill → search skill library by topic
+│   ├── audit-config.prompt.md             # /af-audit-config → detect config drift
+│   ├── validate-framework.prompt.md       # /af-validate-framework → AF integrity scan
+│   ├── simulate.prompt.md                 # /af-simulate → dry-run workflow prediction
+│   ├── draft-pr-description.prompt.md     # /af-draft-pr-description → PR text from artifacts
+│   ├── retro-summary.prompt.md            # /af-retro-summary → pull recent workflow lessons
+│   ├── resume.prompt.md                   # /af-resume → discover paused workflows
+│   ├── tdd-feature.prompt.md              # /af-tdd-feature → full TDD pipeline
+│   ├── quick-fix.prompt.md                # /af-quick-fix → implement + review
+│   ├── trivial-fix.prompt.md              # /af-trivial-fix → mechanical fix
+│   ├── review-code.prompt.md              # /af-review-code → code review only
+│   ├── smoke-test.prompt.md               # /af-smoke-test → verify framework health
+│   └── workflow-summary.prompt.md         # /af-workflow-summary → log summary
 ├── logs/                                  # Workflow handoff logs (gitignored)
 │   └── README.md
 └── retros/                                # Retrospective documents
@@ -396,12 +396,12 @@ Type `/` in chat to access workflow shortcuts:
 
 | Command | What It Does |
 |---|---|
-| `/tdd-feature` | Full TDD pipeline via coordinator |
-| `/quick-fix` | Implement + review for small fixes |
-| `/trivial-fix` | Mechanical fix (typo, rename, config) — no planning |
-| `/review-code` | Code review only (no changes) |
-| `/resume` | Find paused workflows and resume via coordinator |
-| `/smoke-test` | Run canned task through full pipeline to verify framework health |
+| `/af-tdd-feature` | Full TDD pipeline via coordinator |
+| `/af-quick-fix` | Implement + review for small fixes |
+| `/af-trivial-fix` | Mechanical fix (typo, rename, config) — no planning |
+| `/af-review-code` | Code review only (no changes) |
+| `/af-resume` | Find paused workflows and resume via coordinator |
+| `/af-smoke-test` | Run canned task through full pipeline to verify framework health |
 
 These pre-select a workflow and delegate to the coordinator. You can
 also talk to `@coordinator` directly — it selects the right workflow
@@ -411,21 +411,21 @@ from your description.
 
 | Command | What It Does |
 |---|---|
-| `/workflow-summary` | Generate summary from workflow log |
-| `/draft-pr-description` | Generate PR text from PLAN.md + log |
+| `/af-workflow-summary` | Generate summary from workflow log |
+| `/af-draft-pr-description` | Generate PR text from PLAN.md + log |
 
 ### Standalone Utilities (no coordinator needed)
 
 | Command | What It Does |
 |---|---|
-| `/setup-project` | **Full setup** — deploy + onboard + curate skills in one step |
-| `/onboard-project` | Analyse project and auto-fill AF config (onboarding only) |
-| `/curate-skills` | Match skills to tech stack, activate/deactivate |
-| `/audit-config` | Detect drift between AF config and project |
-| `/validate-framework` | Scan AF files for internal consistency |
-| `/find-skill` | Search the skill library by topic |
-| `/simulate` | Dry-run a task without executing |
-| `/retro-summary` | Aggregate past workflow lessons |
+| `/af-setup-project` | **Full setup** — deploy + onboard + curate skills in one step |
+| `/af-onboard-project` | Analyse project and auto-fill AF config (onboarding only) |
+| `/af-curate-skills` | Match skills to tech stack, activate/deactivate |
+| `/af-audit-config` | Detect drift between AF config and project |
+| `/af-validate-framework` | Scan AF files for internal consistency |
+| `/af-find-skill` | Search the skill library by topic |
+| `/af-simulate` | Dry-run a task without executing |
+| `/af-retro-summary` | Aggregate past workflow lessons |
 
 Standalone utilities run independently — the coordinator doesn't invoke
 them. Use them for framework maintenance and discovery.

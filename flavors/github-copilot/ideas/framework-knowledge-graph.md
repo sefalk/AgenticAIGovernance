@@ -59,7 +59,7 @@ and visualizable — at both file level and content level.
 | `REFERENCES` | Doc → Doc | MANIFEST → GOVERNANCE |
 | `REFERENCES_SECTION` | Doc → Section | quality-gates.instructions → MANIFEST §5 |
 | `USES_TEMPLATE` | Agent → Template | planner → PLAN.md |
-| `TRIGGERS` | Prompt → Workflow | /tdd-feature → Full TDD |
+| `TRIGGERS` | Prompt → Workflow | /af-tdd-feature → Full TDD |
 | `CALLS_SCRIPT` | Hook/Task → Script | implementer-stop → run-tests.ps1 |
 | `DEFINES_THRESHOLD` | Section → Metric | MANIFEST §5 → "Domain ≥ 90%" |
 | `VALIDATES` | Script → Config | audit-tools → TOOLS.md |

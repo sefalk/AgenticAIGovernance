@@ -28,7 +28,7 @@ No automation exists for any of these. The result:
 - **Projects carry irrelevant skills.** A project with `WORKTREE_ENABLED=false`
   still has `git-worktrees` active. Agents read irrelevant skill content,
   wasting context tokens and potentially producing confusing guidance.
-- **Onboarding recommends but doesn't execute.** `/onboard-project` Step 8
+- **Onboarding recommends but doesn't execute.** `/af-onboard-project` Step 8
   scans for tech-stack matches and presents recommendations, but Step 9
   explicitly says "Do NOT modify agent files." The user must perform the
   4-step process manually or not at all.
@@ -38,7 +38,7 @@ No automation exists for any of these. The result:
 
 ### Contradiction in Onboarding
 
-`/onboard-project` Step 8 says:
+`/af-onboard-project` Step 8 says:
 > "Based on your tech stack, consider activating these skills: {list}.
 > Move from `skills/_available/` to `skills/` and **assign to the relevant
 > agent.**"
@@ -51,17 +51,17 @@ These instructions conflict. An agent following Step 9 cannot fulfil the
 
 ---
 
-## 2. Proposed Solution: `/curate-skills` Prompt + Automation
+## 2. Proposed Solution: `/af-curate-skills` Prompt + Automation
 
 ### 2.1 Architecture Overview
 
-Introduce a **standalone `/curate-skills` slash command** that can be
+Introduce a **standalone `/af-curate-skills` slash command** that can be
 invoked at any time — during onboarding, after dependency changes, or
 manually when the developer decides to re-evaluate.
 
 ```
                     ┌────────────────────────┐
-                    │    /curate-skills       │
+                    │    /af-curate-skills       │
                     │  (standalone command)   │
                     └───────────┬────────────┘
                                 │
@@ -143,9 +143,9 @@ per entry:
 | `medium` | Auto-activate | Suggest with strong recommendation | Suggest, user opts in |
 | `low` | Suggest with strong recommendation | Suggest | List only (no prompt) |
 
-**Auto-filled `copilot-instructions.md`:** If `/onboard-project` auto-fills
+**Auto-filled `copilot-instructions.md`:** If `/af-onboard-project` auto-fills
 the tech stack section from planning docs, it must insert an origin marker:
-`<!-- af:auto-filled-from-docs -->`. When `/curate-skills` encounters this
+`<!-- af:auto-filled-from-docs -->`. When `/af-curate-skills` encounters this
 marker, it downgrades affected entries from `medium` to `low`. Without the
 marker, `copilot-instructions.md` content is treated as `medium` (assumed
 human-authored or human-reviewed).
@@ -304,7 +304,7 @@ Consult these skills when relevant to the task:
 - **error-handling** (`skills/error-handling/SKILL.md`)
 <!-- AF:DEFAULT-SKILLS:END -->
 
-<!-- AF:CURATED-SKILLS:START — DO NOT EDIT MANUALLY (managed by /curate-skills) -->
+<!-- AF:CURATED-SKILLS:START — DO NOT EDIT MANUALLY (managed by /af-curate-skills) -->
 - **integration-testing** (`skills/integration-testing/SKILL.md`) — integration test patterns
 - **python-dev** (`skills/python-dev/SKILL.md`) — Python 3.10+ idioms
 <!-- AF:CURATED-SKILLS:END -->
@@ -334,11 +334,11 @@ but involves HIGH effort (parsing, edge cases, dual PS1/sh implementation).
 To avoid blocking the curation value, the implementation is split:
 
 - **Phase A+B (interim):** Store curated skill assignments in
-  `skills/curated-assignments.json`. `/curate-skills` writes this file.
-  After each deploy, the user re-runs `/curate-skills --reapply` which
+  `skills/curated-assignments.json`. `/af-curate-skills` writes this file.
+  After each deploy, the user re-runs `/af-curate-skills --reapply` which
   reads the JSON and regenerates agent `## Skills` sections. The deploy
   script emits a post-deploy reminder: "Curated skills detected — run
-  `/curate-skills --reapply` to restore agent skill references."
+  `/af-curate-skills --reapply` to restore agent skill references."
 
   ```json
   {
@@ -386,7 +386,7 @@ To avoid blocking the curation value, the implementation is split:
 
 ### 4.1 Onboarding Integration
 
-Update `/onboard-project` Step 8 to:
+Update `/af-onboard-project` Step 8 to:
 
 ```markdown
 ## Step 8: Skill Curation (optional)
@@ -394,17 +394,17 @@ Update `/onboard-project` Step 8 to:
 If the project has enough metadata to determine the tech stack (at least
 one of: pyproject.toml, package.json, populated copilot-instructions.md,
 or planning/documentation files with structured tech-stack sections),
-invoke `/curate-skills` as a sub-step.
+invoke `/af-curate-skills` as a sub-step.
 
 If insufficient metadata exists (truly blank project — no dependency files,
 no documentation, no README with tech stack info), skip with:
 "⚠️ Skipping skill curation — no tech stack metadata found. Run
-`/curate-skills` later when the project has dependency files or
+`/af-curate-skills` later when the project has dependency files or
 documentation describing the intended tech stack."
 ```
 
 Remove the contradiction with Step 9 by **delegating activation to
-`/curate-skills`** rather than doing it inline.
+`/af-curate-skills`** rather than doing it inline.
 
 ### 4.2 Deploy Integration
 
@@ -412,12 +412,12 @@ Add a `--curate-skills` flag to `deploy.ps1` / `deploy.sh`:
 
 ```powershell
 # deploy.ps1
-[switch]$CurateSkills   # Run /curate-skills after deployment
+[switch]$CurateSkills   # Run /af-curate-skills after deployment
 ```
 
 When set, the deploy script outputs:
 ```
-  Post-deploy: Run /curate-skills in Copilot Chat to adapt skills.
+  Post-deploy: Run /af-curate-skills in Copilot Chat to adapt skills.
 ```
 
 The deploy script itself does NOT modify skills (deterministic file copy
@@ -430,24 +430,24 @@ should be extended to also warn about:
 - **Missing activations:** skills that match the tech stack but aren't active
 - **Unnecessary activations:** active skills that don't match any signal
 
-This makes the passive warning actionable: "Run `/curate-skills` to
+This makes the passive warning actionable: "Run `/af-curate-skills` to
 resolve X skill mismatches."
 
 ### 4.4 Coordinator Awareness
 
-The coordinator's workflow selection (Step 0) can check if `/curate-skills`
+The coordinator's workflow selection (Step 0) can check if `/af-curate-skills`
 has ever been run (presence of a `.af-skills-curated` sentinel file with
 a timestamp). If not, and the project has metadata, the coordinator emits
 a one-time reminder:
 
 ```
 ℹ️ Skill library has not been curated for this project.
-  Consider running /curate-skills to optimise agent skill access.
+  Consider running /af-curate-skills to optimise agent skill access.
 ```
 
 ---
 
-## 5. Standalone `/curate-skills` Prompt Specification
+## 5. Standalone `/af-curate-skills` Prompt Specification
 
 ```yaml
 ---
@@ -508,7 +508,7 @@ activation/deactivation (steps 2–3); agent section regeneration (step 4)
 becomes a no-op because deploy preserves `CURATED-SKILLS` zones directly.
 
 **Why re-delete matters:** Deploy never deletes target files. When
-`/curate-skills` deactivates a template default (e.g., `skills/git-worktrees/`),
+`/af-curate-skills` deactivates a template default (e.g., `skills/git-worktrees/`),
 the next deploy sees the template has that folder but the target doesn't,
 and re-creates it. Without re-deletion, INDEX and instructions regeneration
 would list the zombie skill as active again.
@@ -537,7 +537,7 @@ The `.af-skills-curated` file stores curation state for rollback and
 re-run intelligence:
 
 ```yaml
-# Auto-generated by /curate-skills — do not edit manually
+# Auto-generated by /af-curate-skills — do not edit manually
 version: 1
 last_curated: 2026-04-29T14:30:00Z
 tech_stack_profile:
@@ -597,7 +597,7 @@ The plan introduces **two** persistence files. Their purposes are distinct:
 source for *which skills are activated/deactivated and assigned to which
 agents*. `.af-skills-curated` is the
 authoritative source for *how that assignment was decided* (confidence,
-overrides, previous state). `/curate-skills` writes both files
+overrides, previous state). `/af-curate-skills` writes both files
 atomically. `--reapply` reads only the JSON. `--rollback` reads only the
 sentinel (but updates both on restore).
 
@@ -623,7 +623,7 @@ Output: regenerated `INDEX.md` with:
 - Available Skills table (name, description, activation signals)
 - Agent-Skill Matrix (cross-reference grid)
 
-This script is called by `/curate-skills` after every activation change,
+This script is called by `/af-curate-skills` after every activation change,
 and can be run standalone (`python .github/scripts/generate-skill-index.py`).
 
 ---
@@ -648,9 +648,9 @@ and can be run standalone (`python .github/scripts/generate-skill-index.py`).
 | Deploy ran after curation (Phase A+B) | Deploy overwrites agent files. Run `--reapply` to restore skill folders and agent skill sections. |
 | Deploy ran after curation (Phase C.5+) | `DEFAULT-SKILLS` zone updated; `CURATED-SKILLS` zone preserved (§3.3). Run `--reapply` for deactivated skill folder re-deletion only. |
 | Rollback requested but no sentinel exists | Error message: "No previous curation found" |
-| `--reapply` with no `curated-assignments.json` | Error message: "No curated assignments found. Run `/curate-skills` first." |
+| `--reapply` with no `curated-assignments.json` | Error message: "No curated assignments found. Run `/af-curate-skills` first." |
 | Deploy re-creates a deactivated template-default skill folder | `--reapply` re-deletes it using the JSON `deactivated` list (see §5 Reapply Mode) |
-| Agent file has no `## Skills` section (e.g. coordinator) | `/curate-skills` inserts a minimal `## Skills` section with sentinel markers before adding curated entries. `--reapply` skips agents not listed in JSON. |
+| Agent file has no `## Skills` section (e.g. coordinator) | `/af-curate-skills` inserts a minimal `## Skills` section with sentinel markers before adding curated entries. `--reapply` skips agents not listed in JSON. |
 
 ---
 
@@ -658,7 +658,7 @@ and can be run standalone (`python .github/scripts/generate-skill-index.py`).
 
 | Phase | Scope | Effort | Impact |
 |---|---|---|---|
-| **Phase A+B** | `/curate-skills` prompt (including `--reapply`, `--dry-run`, `--rollback` modes) + `curated-assignments.json` mechanism + deploy post-deploy reminder + activation metadata in 10 high-priority SKILL.md files (see list below) + extend `validate-skills.py` for activation schema | MEDIUM | HIGH — delivers the full curation loop from discovery to deploy-safe persistence |
+| **Phase A+B** | `/af-curate-skills` prompt (including `--reapply`, `--dry-run`, `--rollback` modes) + `curated-assignments.json` mechanism + deploy post-deploy reminder + activation metadata in 10 high-priority SKILL.md files (see list below) + extend `validate-skills.py` for activation schema | MEDIUM | HIGH — delivers the full curation loop from discovery to deploy-safe persistence |
 | **Phase B.5** | Activation metadata on all 17 default-active skills (enables deactivation of irrelevant defaults like `git-worktrees`) | LOW | HIGH — completes the deactivation path |
 | **Phase C** | Activation metadata in remaining `_available/` SKILL.md files | LOW | MEDIUM — completes the signal coverage |
 | **Phase C.5** | Section-aware deploy merge (§3.3 target: sentinel markers, `[section-customizable]` annotation, dual PS1/sh implementation) — replaces JSON-based reapply | HIGH | MEDIUM — eliminates manual reapply after deploy |
@@ -685,7 +685,7 @@ invariants:
 | 10 | `git-worktrees` | `recommended` | Signals: `af_config: {WORKTREE_ENABLED: true}` |
 
 **Why A+B as a single phase:** The JSON mechanism (`--reapply`, deploy
-reminder) depends on the `/curate-skills` prompt to produce the JSON file
+reminder) depends on the `/af-curate-skills` prompt to produce the JSON file
 and on SKILL.md activation metadata to match against. Shipping the JSON
 format without its producer or consumers has no standalone value. Merging
 them into one deliverable eliminates a dead interim and ships the full
@@ -712,12 +712,12 @@ Extend the existing validation script to verify activation metadata
 
 | Feature | Relationship |
 |---|---|
-| `/find-skill` | **Complementary.** Discovery (read-only) vs curation (read-write). `/find-skill` stays as-is for ad-hoc queries. |
-| `/onboard-project` Step 8 | **Replaced by** delegation to `/curate-skills`. Step 8 becomes: "if metadata exists, run `/curate-skills`." |
-| `/validate-framework` | **Extended.** Add a check: "skills active but no activation signal matches tech stack." |
+| `/af-find-skill` | **Complementary.** Discovery (read-only) vs curation (read-write). `/af-find-skill` stays as-is for ad-hoc queries. |
+| `/af-onboard-project` Step 8 | **Replaced by** delegation to `/af-curate-skills`. Step 8 becomes: "if metadata exists, run `/af-curate-skills`." |
+| `/af-validate-framework` | **Extended.** Add a check: "skills active but no activation signal matches tech stack." |
 | Deploy stale-skill warning | **Extended.** Add tech-stack mismatch warnings alongside staleness warnings. |
 | Knowledge graph idea | **Feeds into.** Skill activation metadata becomes edges in the knowledge graph (`ACTIVATES_FOR` relationship). |
-| `/audit-config` | **Extended.** Include skill-stack alignment in the config audit report. |
+| `/af-audit-config` | **Extended.** Include skill-stack alignment in the config audit report. |
 
 ---
 
@@ -725,16 +725,16 @@ Extend the existing validation script to verify activation metadata
 
 | # | Question | Decision | Rationale |
 |---|---|---|---|
-| 1 | Should core skills be un-deactivatable? | **Yes — mark as `priority: required`.** Skills like `unit-testing`, `error-handling`, `human-escalation` get `required` priority in their activation metadata. `/curate-skills` auto-activates them regardless of tech stack and warns if the user tries to deactivate. | These skills are framework-level requirements, not project-specific. |
+| 1 | Should core skills be un-deactivatable? | **Yes — mark as `priority: required`.** Skills like `unit-testing`, `error-handling`, `human-escalation` get `required` priority in their activation metadata. `/af-curate-skills` auto-activates them regardless of tech stack and warns if the user tries to deactivate. | These skills are framework-level requirements, not project-specific. |
 | 2 | Modify `## Skills` directly or use YAML frontmatter? | **Markdown section with sentinel markers** (§3.3). | Follows existing `.agent.md` structure. Agents already parse `## Skills` as Markdown. No YAML schema change needed. |
 | 3 | How to survive deploy overwrites? | **Phase A+B:** `skills/curated-assignments.json` (marked `[customizable]`) + `--reapply` mode for skill folders and agent sections. **Phase C.5:** Section-level customizable zones with sentinel markers (§3.3) for agent sections only; `--reapply` still needed for deactivated skill folder re-deletion (see §3.3 Phase C.5 limitation). | JSON + reapply ships with the prompt in a single deliverable. Sentinel merge is the target for agent sections but HIGH effort — deferred to avoid blocking value delivery. |
-| 4 | Skill versioning: symlink or snapshot? | **Snapshot (copy).** Activated skills are copies, not symlinks. Deploy's stale-skill warning already detects when `_available/` has a newer version. User re-runs `/curate-skills` or manually re-copies to update. | Symlinks are fragile on Windows. Copies are deterministic and work with the existing stale-skill detection. |
+| 4 | Skill versioning: symlink or snapshot? | **Snapshot (copy).** Activated skills are copies, not symlinks. Deploy's stale-skill warning already detects when `_available/` has a newer version. User re-runs `/af-curate-skills` or manually re-copies to update. | Symlinks are fragile on Windows. Copies are deterministic and work with the existing stale-skill detection. |
 
 ## 11. Remaining Open Questions
 
 1. **Inter-skill dependencies:** Some skills assume knowledge from others
    (e.g., `security-testing` assumes `secure-coding` concepts). Should
-   SKILL.md declare `depends_on: [secure-coding]`? If so, `/curate-skills`
+   SKILL.md declare `depends_on: [secure-coding]`? If so, `/af-curate-skills`
    would auto-activate dependencies when activating a skill. Deferred to
    a future iteration — noted here as a known gap. For now, the agent-skill
    affinity matrix implicitly handles this (agents that need

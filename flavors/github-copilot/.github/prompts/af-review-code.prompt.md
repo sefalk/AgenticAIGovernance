@@ -1,5 +1,5 @@
 ---
-name: review-code
+name: af-review-code
 description: 'Run a code review on specified files via the code-critic subagent.'
 argument-hint: 'Which files or changes to review'
 agent: coordinator

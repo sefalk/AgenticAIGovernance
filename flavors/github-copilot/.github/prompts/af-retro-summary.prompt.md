@@ -1,12 +1,12 @@
 ---
-name: retro-summary
+name: af-retro-summary
 description: 'Summarise recent auto-generated retro snippets to surface patterns and lessons for the current task.'
 tools:
   - search
   - read
 ---
 
-# /retro-summary — Pull Workflow History
+# /af-retro-summary — Pull Workflow History
 
 Aggregate and summarise recent retro snippets from `retros/auto/` to inform
 the current workflow. This is a **pull model** — only invoked on demand, not

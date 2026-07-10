@@ -34,7 +34,7 @@ def deploy_prompt(workspace_root: str) -> str:
         "Then ALWAYS run these post-deploy steps — they are part of the deploy, not "
         "optional afterthoughts:\n"
         "4. **Restore curated skills.** If `.github/skills/curated-assignments.json` "
-        "exists in the target, run the target's `/curate-skills --reapply` prompt. A "
+        "exists in the target, run the target's `/af-curate-skills --reapply` prompt. A "
         "deploy overwrites AF-owned files (agent definitions) and thereby RESETS curated "
         "skill assignments; reapply restores them from the recorded state. Skipping this "
         "silently loses the project's skill curation.\n"

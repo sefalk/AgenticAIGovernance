@@ -1,7 +1,7 @@
 # Skill Index
 
-> Auto-generated index of all AF skills. Use `/find-skill <topic>` to search.
-> Regenerate with `/validate-framework` (step 7 — skill directory structure).
+> Auto-generated index of all AF skills. Use `/af-find-skill <topic>` to search.
+> Regenerate with `/af-validate-framework` (step 7 — skill directory structure).
 
 | # | Skill | Description | Referenced by |
 |---|-------|-------------|---------------|
@@ -58,8 +58,8 @@ Skills in the library — not assigned to any agent. To activate one, move
 it from `skills/_available/{name}/` to `skills/{name}/`, add it to the
 relevant agent's Skills section, and update this index.
 
-Use `/onboard-project` to evaluate which available skills match your tech
-stack, or `/find-skill <topic>` to search.
+Use `/af-onboard-project` to evaluate which available skills match your tech
+stack, or `/af-find-skill <topic>` to search.
 
 ci-cd, configuration-management, containerization, context-curation,
 contract-testing, databricks-agent-bricks, databricks-apps,
@@ -74,4 +74,4 @@ performance-testing, python-dev, secrets-management, security-testing,
 threat-modeling, version-control
 
 Each contains a `SKILL.md` in `skills/_available/{name}/SKILL.md`.
-`/validate-framework` only deeply scans active skills (step 7).
+`/af-validate-framework` only deeply scans active skills (step 7).

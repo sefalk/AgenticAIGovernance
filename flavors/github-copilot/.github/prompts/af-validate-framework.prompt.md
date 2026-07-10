@@ -1,5 +1,5 @@
 ---
-name: validate-framework
+name: af-validate-framework
 description: 'Scan all Agent Framework files for internal consistency — broken references, invalid frontmatter, threshold divergence, missing files.'
 argument-hint: 'Optional: specific area to focus on (e.g., "skills only", "thresholds")'
 tools:

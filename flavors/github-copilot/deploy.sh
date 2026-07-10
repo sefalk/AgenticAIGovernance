@@ -930,7 +930,7 @@ if [[ -f "$curated_json" ]]; then
     echo ""
     echo "  Post-deploy step: curated skills detected."
     echo "  A deploy overwrites AF-owned files (agents) and resets curated skill assignments."
-    echo "  -> Run /curate-skills --reapply to restore them (the MCP af_deploy prompt does this automatically)."
+    echo "  -> Run /af-curate-skills --reapply to restore them (the MCP af_deploy prompt does this automatically)."
 fi
 
 # Prune stale backups from previous deploy runs

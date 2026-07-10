@@ -70,7 +70,7 @@
 ## 🆕 **Automated Skill Curation** (2026-04-29)
 
 **Status:** ⬜ TODO
-**Scope:** New `/curate-skills` prompt + SKILL.md frontmatter extension + deploy/onboard integration
+**Scope:** New `/af-curate-skills` prompt + SKILL.md frontmatter extension + deploy/onboard integration
 **Effort:** MEDIUM (phased delivery — Phase A alone is LOW effort, HIGH impact)
 **Impact:** HIGH (eliminates silent skill gaps, resolves onboarding contradiction)
 
@@ -78,17 +78,17 @@
 skills (e.g., `integration-testing` for FastAPI projects) and carry irrelevant
 ones (e.g., `git-worktrees` when disabled). Activation is a manual 4-step
 process (move folder, edit agents, update INDEX, update instructions).
-`/onboard-project` Step 8 recommends skills but Step 9 forbids modifying
+`/af-onboard-project` Step 8 recommends skills but Step 9 forbids modifying
 agent files — a contradiction that ensures recommendations are never applied.
 
-**Proposed solution:** Standalone `/curate-skills` slash command that:
+**Proposed solution:** Standalone `/af-curate-skills` slash command that:
 1. Discovers tech stack from project metadata (pyproject.toml, package.json, af-env.conf)
 2. Matches against activation signals declared in SKILL.md frontmatter
 3. Presents activate/deactivate diff; on confirmation, moves folders, edits agent
    `## Skills` sections, regenerates INDEX.md and copilot-instructions.md
 4. Can be invoked any time — during onboarding, after dependency changes, or on demand
 
-**Integration:** `/onboard-project` Step 8 delegates to `/curate-skills` when
+**Integration:** `/af-onboard-project` Step 8 delegates to `/af-curate-skills` when
 metadata exists, solving the Step 8/9 contradiction. Deploy gains a
 `--curate-skills` post-deploy reminder.
 
@@ -166,7 +166,7 @@ Review AF in a thorough peer review. Are all files necessary, especially on a hi
 The README states the user has to do customization manually. Can we automate that. If there is an existing project, those customizations can be derived automatically.
 
 **What was done:**
-- Created `/onboard-project` slash command (`prompts/onboard-project.prompt.md`) that:
+- Created `/af-onboard-project` slash command (`prompts/onboard-project.prompt.md`) that:
   1. Discovers project metadata (name, tech stack, repo URL) from `pyproject.toml`, `setup.py`, `README.md`, `.git/config`
   2. Scans directory tree and builds annotated structure
   3. Analyses imports to classify modules into architecture layers (domain, ports, adapters, orchestrators, mixed)
@@ -174,7 +174,7 @@ The README states the user has to do customization manually. Can we automate tha
   5. Discovers project-specific conventions and anti-patterns
   6. Presents findings for human confirmation before writing changes
   7. Auto-fills `copilot-instructions.md`, `architecture.instructions.md`, and `quality-gates.json`
-- Updated README Quick Setup: `/onboard-project` is now step 3 (replacing 3 manual customization steps). Manual setup preserved in a collapsible `<details>` section.
+- Updated README Quick Setup: `/af-onboard-project` is now step 3 (replacing 3 manual customization steps). Manual setup preserved in a collapsible `<details>` section.
 - Added prompt to the README file map.
 
 ---
@@ -314,7 +314,7 @@ Peer discussion between planner and code-critic produced consensus on the design
 
 ---
 
-## 10) ✅ DONE — AF Self-Validation (`/validate-framework`) (2026-03-09)
+## 10) ✅ DONE — AF Self-Validation (`/af-validate-framework`) (2026-03-09)
 
 Scan all AF files for internal consistency: broken skill references in agent files, invalid YAML frontmatter, threshold divergence between MANIFEST §5 and instruction files, cross-references pointing to non-existent sections. Output a structured PASS/WARN/FAIL report. Scope: structure and references only, not semantic correctness.
 
@@ -335,7 +335,7 @@ Scan all AF files for internal consistency: broken skill references in agent fil
 
 ## 11) ✅ DONE — Workflow Memory & Auto-Retro (pull model) (2025-07-16)
 
-After each workflow, the documenter auto-generates a retro snippet from the YAML log + gate summaries. Snippets accumulate in `retros/auto/`. A `/retro-summary` prompt lets the human or coordinator pull recent history on-demand (pull model — no auto-injection into SessionStart to avoid context budget pressure).
+After each workflow, the documenter auto-generates a retro snippet from the YAML log + gate summaries. Snippets accumulate in `retros/auto/`. A `/af-retro-summary` prompt lets the human or coordinator pull recent history on-demand (pull model — no auto-injection into SessionStart to avoid context budget pressure).
 
 **What was done:**
 - Updated `documenter.agent.md` — added responsibility #5: "Generate retro snippet", added Retro Snippet Generation section with format template, updated write permissions to include `retros/auto/`, added retro snippet line to return format
@@ -344,9 +344,9 @@ After each workflow, the documenter auto-generates a retro snippet from the YAML
 
 ---
 
-## 12) ✅ DONE — Config Drift Detection (`/audit-config`) (2026-03-09)
+## 12) ✅ DONE — Config Drift Detection (`/af-audit-config`) (2026-03-09)
 
-Re-run the `/onboard-project` discovery logic but diff against current config instead of writing. Report: new unclassified modules, modules that changed layers, thresholds not matching actual metrics, stale README sections. Advisory only — no auto-fix.
+Re-run the `/af-onboard-project` discovery logic but diff against current config instead of writing. Report: new unclassified modules, modules that changed layers, thresholds not matching actual metrics, stale README sections. Advisory only — no auto-fix.
 
 **What was done:**
 - Created `prompts/audit-config.prompt.md` — 4-step drift detection:
@@ -360,7 +360,7 @@ Re-run the `/onboard-project` discovery logic but diff against current config in
 
 ---
 
-## 13) ✅ DONE — CI/PR Integration (`/draft-pr-description`) (2026-03-09)
+## 13) ✅ DONE — CI/PR Integration (`/af-draft-pr-description`) (2026-03-09)
 
 Generate a PR title, description, and gate checklist from PLAN.md + YAML workflow log + gate summary. Output text only — never create or push a PR. Name explicitly signals it doesn't interact with the remote.
 
@@ -394,7 +394,7 @@ Coordinator self-assesses context health (GREEN/YELLOW/RED) after each subagent 
 
 ---
 
-## 16) ✅ DONE — Workflow Resume (`/resume`) (2025-07-16)
+## 16) ✅ DONE — Workflow Resume (`/af-resume`) (2025-07-16)
 
 List all branches with WIP.md files and their status/phase. Let the human pick which workflow to resume. Discovery only — branch switching stays human-controlled.
 
@@ -405,9 +405,9 @@ List all branches with WIP.md files and their status/phase. Let the human pick w
 
 ---
 
-## 17) ✅ DONE — Skill Discovery Index (`/find-skill`) (2025-07-16)
+## 17) ✅ DONE — Skill Discovery Index (`/af-find-skill`) (2025-07-16)
 
-Auto-generate `skills/INDEX.md` listing each skill's name, one-line description, and which agents reference it. Add a `/find-skill <topic>` prompt for semantic search. Index generation can be a side-effect of `/validate-framework` (Idea 10).
+Auto-generate `skills/INDEX.md` listing each skill's name, one-line description, and which agents reference it. Add a `/af-find-skill <topic>` prompt for semantic search. Index generation can be a side-effect of `/af-validate-framework` (Idea 10).
 
 **What was done:**
 - Created `skills/INDEX.md` — 38-row table with skill name, description, and referencing agents + Agent Skill Matrix + Unassigned Skills list
@@ -418,7 +418,7 @@ Auto-generate `skills/INDEX.md` listing each skill's name, one-line description,
 
 ## 18) ✅ DONE — Framework Versioning & Changelog (2026-03-09)
 
-Add `VERSION` (semver) and `CHANGELOG.md` at the AF root. Breaking changes bump major, new skills/instructions bump minor, fixes bump patch. Prerequisite for multi-project adoption and safe upgrades. `/audit-config` (Idea 12) should compare project AF version against source.
+Add `VERSION` (semver) and `CHANGELOG.md` at the AF root. Breaking changes bump major, new skills/instructions bump minor, fixes bump patch. Prerequisite for multi-project adoption and safe upgrades. `/af-audit-config` (Idea 12) should compare project AF version against source.
 
 **What was done:**
 - Created `VERSION` file — initial version `1.0.0`
@@ -427,7 +427,7 @@ Add `VERSION` (semver) and `CHANGELOG.md` at the AF root. Breaking changes bump 
 
 ---
 
-## 19) ✅ DONE — Dry-Run / Simulation (`/simulate`) (2026-03-09)
+## 19) ✅ DONE — Dry-Run / Simulation (`/af-simulate`) (2026-03-09)
 
 Run only the planner, then coordinator walks through its decision tree (workflow selection, tier, plan approval gate, parallelisation, escalation triggers) without invoking subagents. Outputs: predicted workflow steps, files to touch, agents to invoke, potential escalation points. De-risks first real workflow runs.
 
@@ -461,7 +461,7 @@ coordinator didn't inject sufficient context.
 1. "Single entry point" claim vs 8 standalone prompts bypassing coordinator
 2. Skills "assigned" to agents but never delivered (no injection mechanism)
 3. Coordinator claims "pass all needed context" but passed ~30%
-4. Retro consultation implemented twice (coordinator inline + `/retro-summary`)
+4. Retro consultation implemented twice (coordinator inline + `/af-retro-summary`)
 
 **Correctly human-controlled (no change):** Git operations, plan approval for
 non-trivial tasks, 3rd-rejection escalation chain, governance document changes.
@@ -474,13 +474,13 @@ non-trivial tasks, 3rd-rejection escalation chain, governance document changes.
 | A2 | Coordinator injects context block (tier, thresholds, layers, retro lessons) | ✅ `{context_block}` prepended |
 | A3 | Document prompt taxonomy in README (entry points vs utilities) | ✅ 3-tier table |
 | A4 | Retro consultation unconditional (all workflows, not just Full TDD) | ✅ Step 0 updated |
-| A5 | `/resume` routes through coordinator (`agent: coordinator`) | ✅ Frontmatter updated |
-| A6 | `/validate-framework` flags uncustomized `applyTo` defaults | ✅ Step 2 updated |
+| A5 | `/af-resume` routes through coordinator (`agent: coordinator`) | ✅ Frontmatter updated |
+| A6 | `/af-validate-framework` flags uncustomized `applyTo` defaults | ✅ Step 2 updated |
 
 **Not implemented (by design):**
 - A7: Do NOT auto-inject GOVERNANCE.md — 300+ lines, too expensive in context.
   Current approach (embedding relevant rules in agent prompts + critic checklists)
-  is correct. Risk is drift, which `/validate-framework` detects.
+  is correct. Risk is drift, which `/af-validate-framework` detects.
 
 **Files modified (4):**
 - `agents/coordinator.agent.md` — context block, skill reminders in all prompts,
@@ -532,16 +532,16 @@ implemented:
 
 ---
 
-## 22) ✅ DONE — Smoke Test Playbook (`/smoke-test`)
+## 22) ✅ DONE — Smoke Test Playbook (`/af-smoke-test`)
 
 **Source:** All 3 agents (unanimous #1 priority)
 **Impact:** CRITICAL | **Effort:** MEDIUM
 
 Run a trivially simple, pre-defined canned task (e.g., "add a `clamp(value, lo, hi)` function with tests") through the full TDD pipeline. The task is intentionally minimal so any failure is attributable to framework plumbing, not task complexity.
 
-**Problem:** The AF has never been exercised end-to-end on a real task (retro #2, open since 2026-02-18). 21 ideas implemented on an unvalidated foundation. `/validate-framework` checks structural integrity. `/simulate` predicts the workflow path. Neither proves the coordinator can actually invoke a subagent, receive a verdict, handle a rejection, or produce a YAML log.
+**Problem:** The AF has never been exercised end-to-end on a real task (retro #2, open since 2026-02-18). 21 ideas implemented on an unvalidated foundation. `/af-validate-framework` checks structural integrity. `/af-simulate` predicts the workflow path. Neither proves the coordinator can actually invoke a subagent, receive a verdict, handle a rejection, or produce a YAML log.
 
-**Proposed solution:** Create a `/smoke-test` slash command that:
+**Proposed solution:** Create a `/af-smoke-test` slash command that:
 1. Defines a canned task (no user input needed beyond "run it")
 2. Instruments each coordinator step to report: subagent invoked, response received (Y/N), verdict parsed (Y/N), gate summary received (Y/N)
 3. Produces a per-step **PASS / FAIL / SKIPPED** health report
@@ -576,7 +576,7 @@ On verdicts: show APPROVED / REJECTED (reason) / ESCALATE. On retries: show atte
 **Source:** Planner
 **Impact:** HIGH | **Effort:** MEDIUM
 
-**Problem:** The gap between `/simulate` (read-only prediction) and `@coordinator` (full autonomous execution) is too large for a framework that has never run end-to-end. A wrong decision at Step 2 cascades through Steps 3-7.
+**Problem:** The gap between `/af-simulate` (read-only prediction) and `@coordinator` (full autonomous execution) is too large for a framework that has never run end-to-end. A wrong decision at Step 2 cascades through Steps 3-7.
 
 **Proposed solution:** Add a supervised mode activated via keyword (e.g., `@coordinator --supervised <task>`). In supervised mode:
 1. Each step executes normally (real subagent calls, real file changes)
@@ -658,9 +658,9 @@ Creates a trust-building ramp: simulate → supervised → autonomous.
 **Proposed solution:**
 1. Move unassigned skills to `skills/_available/` (library)
 2. Active skills (referenced by ≥1 agent) stay in `skills/`
-3. `/onboard-project` evaluates `_available/` against the project tech stack and recommends activating relevant ones
+3. `/af-onboard-project` evaluates `_available/` against the project tech stack and recommends activating relevant ones
 4. INDEX.md splits into "Active Skills" and "Available for Activation"
-5. `/validate-framework` only deeply scans active skills
+5. `/af-validate-framework` only deeply scans active skills
 
 ---
 
@@ -673,7 +673,7 @@ Creates a trust-building ramp: simulate → supervised → autonomous.
 
 **Proposed solution:**
 1. Document clear file ownership boundary: AF owns agents/, hooks/, instructions/, prompts/, skills/, templates/, logs/, retros/, MANIFEST.md, GOVERNANCE.md. AF does NOT own workflows/, CODEOWNERS, dependabot.yml, etc.
-2. `/onboard-project` checks for existing `.github/` — enumerates files, shows what AF will add, shows conflicts, offers to merge copilot-instructions.md
+2. `/af-onboard-project` checks for existing `.github/` — enumerates files, shows what AF will add, shows conflicts, offers to merge copilot-instructions.md
 3. Add `.github/.af-manifest` listing AF-owned files for safe future updates
 
 ---
@@ -687,7 +687,7 @@ Creates a trust-building ramp: simulate → supervised → autonomous.
 
 **Proposed solution:**
 1. Recalibrate heuristics after smoke test (Idea 22) provides real data
-2. `/simulate` gains a "Context Feasibility" section: SINGLE-SESSION / MULTI-SESSION / AT-RISK
+2. `/af-simulate` gains a "Context Feasibility" section: SINGLE-SESSION / MULTI-SESSION / AT-RISK
 3. Coordinator Step 0 assesses feasibility: if plan has 5+ subtasks AND retries likely → suggest phased approach
 4. Make feasibility advisory (SOFT), not blocking (HARD)
 
@@ -706,7 +706,7 @@ Creates a trust-building ramp: simulate → supervised → autonomous.
 - Subagent failures (empty response, timeout, unparseable verdict)
 - Gate failures (HARD gate BLOCKED, pytest not found)
 - Escalation (coordinator escalates on first attempt)
-- Resume issues (`/resume` finds no WIP, stale WIP.md)
+- Resume issues (`/af-resume` finds no WIP, stale WIP.md)
 - Hook issues (secret scan false positives)
 
 Written for the human project owner — no agent jargon.

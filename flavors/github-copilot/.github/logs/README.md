@@ -18,7 +18,7 @@ See the [documenter agent](../agents/documenter.agent.md) for the full YAML sche
 Use the workflow-summary prompt:
 
 ```
-/workflow-summary <workflow-id>
+/af-workflow-summary <workflow-id>
 ```
 
 Or ask the documenter agent directly.

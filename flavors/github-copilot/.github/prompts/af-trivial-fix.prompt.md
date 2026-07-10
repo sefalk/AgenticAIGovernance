@@ -1,5 +1,5 @@
 ---
-name: trivial-fix
+name: af-trivial-fix
 description: 'Run the trivial fix workflow (Implement → Review) for mechanical fixes with no domain insight.'
 argument-hint: 'Describe the trivial change (typo, rename, config edit)'
 agent: coordinator
@@ -25,7 +25,7 @@ config edit, typo fix, doc correction).
 
 Boundary heuristic: if you could explain the fix in a commit message and lose
 nothing, it's a Trivial Fix. If the commit message would need a paragraph,
-use `/quick-fix` instead.
+use `/af-quick-fix` instead.
 
 Use the **Trivial Fix Workflow**:
 

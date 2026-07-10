@@ -1,5 +1,5 @@
 ---
-name: quick-fix
+name: af-quick-fix
 description: 'Run the quick fix workflow (Investigate → Implement → Review → Document) for bug fixes where root-cause insight matters, via the coordinator agent.'
 argument-hint: 'Describe the bug or small change to fix'
 agent: coordinator
@@ -21,7 +21,7 @@ Run the **Quick Fix pipeline** for this change. This workflow includes a
 lightweight root-cause investigation via the planner before implementation.
 Scope: ≤ 5 files, simple code change, but the *why* matters.
 
-For purely mechanical fixes (≤ 2 files, no domain insight), use `/trivial-fix`
+For purely mechanical fixes (≤ 2 files, no domain insight), use `/af-trivial-fix`
 instead.
 
 **Proof of Failure (R-SD-24):** For bug fixes, the implementer must write a

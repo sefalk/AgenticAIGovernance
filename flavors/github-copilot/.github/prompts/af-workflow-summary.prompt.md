@@ -1,5 +1,5 @@
 ---
-name: workflow-summary
+name: af-workflow-summary
 description: 'Generate a human-readable summary from a workflow handoff log YAML file.'
 argument-hint: 'Optionally provide the workflow log filename (without path or extension)'
 agent: coordinator

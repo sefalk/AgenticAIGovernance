@@ -138,7 +138,7 @@ architecture instructions file:
 
 After writing the workflow log, generate a retro snippet in `retros/auto/`.
 This captures lessons learned so they can be pulled on demand via
-`/retro-summary`.
+`/af-retro-summary`.
 
 **Filename:** `retros/auto/{workflow-id}.md`
 

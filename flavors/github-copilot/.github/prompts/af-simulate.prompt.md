@@ -1,5 +1,5 @@
 ---
-name: simulate
+name: af-simulate
 description: 'Dry-run a task through the coordinator decision tree — predict workflow steps, agents, gates, and escalation risks without executing anything.'
 argument-hint: 'Describe the task to simulate (e.g., "add bucketing for AQC telegrams")'
 tools:

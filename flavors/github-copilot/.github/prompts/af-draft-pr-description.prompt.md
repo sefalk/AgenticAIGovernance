@@ -1,5 +1,5 @@
 ---
-name: draft-pr-description
+name: af-draft-pr-description
 description: 'Generate a PR title, description, and quality gate checklist from the current branch workflow artifacts (plan file, YAML log, gate summaries).'
 argument-hint: 'Optional: target branch (default: main), PR template style'
 tools:
