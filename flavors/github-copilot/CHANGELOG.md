@@ -29,8 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolution) with verified parity. `list_orphans`/`prune_orphans` clean up
   framework files a rename or manifest change left behind (baselined in
   `.af-hashes`, no longer deployable) — project-created files are never touched.
-  Prompts `/mcp.af.deploy` and `/mcp.af.resolve_conflicts`
-  chain the deploy → curated-skill `--reapply` → conflict-resolution steps.
+  Prompts `/mcp.af.deploy` and `/mcp.af.resolve_conflicts` are **lifecycle-
+  aware**: on first-time setup (no `.af-manifest` yet) the deploy prompt chains
+  `/af-onboard-project` + an initial `/af-curate-skills`; on redeploy it restores
+  curated skills via `--reapply` (falling back to a full curate when a project
+  was never curated) and routes CONFLICT files to conflict resolution.
   Optional hash-pinned **remote payload** (`AF_PAYLOAD_URL` + `AF_PAYLOAD_SHA256`)
   for central governance without a hosted compute server. Runs **parallel to**
   `deploy.ps1`/`deploy.sh`; it does not deprecate them.

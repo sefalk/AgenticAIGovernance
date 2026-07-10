@@ -34,6 +34,30 @@ def test_deploy_prompt_chains_post_deploy_steps() -> None:
     assert "resolve_conflicts" in text
 
 
+def test_deploy_prompt_is_lifecycle_aware() -> None:
+    text = prompts.deploy_prompt("/proj")
+    # Must distinguish first-time setup from redeploy and detect via the manifest.
+    assert "FIRST-TIME SETUP" in text
+    assert "REDEPLOY" in text
+    assert ".af-manifest" in text
+
+
+def test_deploy_prompt_first_time_chains_onboard_then_curate() -> None:
+    text = prompts.deploy_prompt("/proj")
+    # First-time setup must trigger onboarding and INITIAL curation (not just reapply).
+    assert "/af-onboard-project" in text
+    assert "/af-curate-skills" in text
+    # Onboarding must come before curation (curate reads af-env.conf that onboard writes).
+    assert text.index("/af-onboard-project") < text.index("/af-curate-skills")
+
+
+def test_deploy_prompt_redeploy_falls_back_to_full_curate_when_uncurated() -> None:
+    text = prompts.deploy_prompt("/proj")
+    # A redeploy of a never-curated project must not silently skip curation.
+    assert "MISSING" in text
+    assert "fall back" in text.lower()
+
+
 def test_resolve_conflicts_prompt_orders_the_merge_workflow() -> None:
     text = prompts.resolve_conflicts_prompt("/proj")
     assert "/proj" in text

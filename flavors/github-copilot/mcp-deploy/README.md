@@ -41,7 +41,7 @@ cloning the AF repository next to the target project**.
 | Tool (W) | `prune_orphans(workspace_root, confirm)` | Back up + delete orphaned framework files; drop them from `.af-hashes`. |
 | Tool (W) | `prune_backups(workspace_root, days, confirm)` | Remove stale `.af-backup-*` dirs. |
 | Resource | `af://source/{path}` | Read a bundled source file, e.g. `af://source/agents/planner.agent.md`. |
-| Prompt | `deploy(workspace_root)` | Slash-command workflow: status → dry-run → guarded apply → **post-deploy steps** (curated-skill `--reapply` + conflict resolution). |
+| Prompt | `deploy(workspace_root)` | Lifecycle-aware slash-command workflow: status → dry-run → guarded apply → **branch on first-time vs. redeploy** (first-time: `/af-onboard-project` + initial `/af-curate-skills`; redeploy: curated-skill `--reapply`) → conflict resolution. |
 | Prompt | `resolve_conflicts(workspace_root)` | Slash-command workflow: diff → merge → write → re-baseline for CONFLICT files. |
 
 Write tools (**W**) do nothing unless `confirm=true`; otherwise they return a
