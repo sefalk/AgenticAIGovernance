@@ -46,8 +46,8 @@ Write tools (**W**) do nothing unless `confirm=true`; otherwise they return a
 preview. Classification and hashing (SHA-256 uppercase; agent **model-tier
 resolution**) mirror `deploy.ps1`, so `dry_run`/`apply` agree with it.
 
-The two **prompts** surface as `/mcp.af.af-deploy` and
-`/mcp.af.af-resolve-conflicts` slash commands. They inject a step-by-step
+The two **prompts** surface as `/mcp.af.deploy` and
+`/mcp.af.resolve_conflicts` slash commands. They inject a step-by-step
 instruction that drives the tools in the right order and pauses for a human
 confirmation before any write — this is the “agent handles the non-programmatic
 aspects” entry point (tier choice, conflict merges, skill activation).
