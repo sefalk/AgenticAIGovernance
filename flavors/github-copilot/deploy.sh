@@ -915,7 +915,7 @@ fi
 if [[ "$STAT_CONFLICT" -gt 0 ]]; then
     echo "  Conflict:  $STAT_CONFLICT -- both sides changed, use agent to merge"
     echo ""
-    echo "  To resolve conflicts: ask the agent to merge, then run --update-hashes"
+    echo "  To resolve conflicts: ask the agent to merge, then run --update-hashes (the MCP af_resolve_conflicts prompt automates this)."
 fi
 if [[ "$DRY_RUN" == "true" ]]; then
     echo ""
@@ -928,7 +928,9 @@ fi
 curated_json="$TARGET_GITHUB/skills/curated-assignments.json"
 if [[ -f "$curated_json" ]]; then
     echo ""
-    echo "  Curated skills detected -- run /curate-skills --reapply to restore agent skill references."
+    echo "  Post-deploy step: curated skills detected."
+    echo "  A deploy overwrites AF-owned files (agents) and resets curated skill assignments."
+    echo "  -> Run /curate-skills --reapply to restore them (the MCP af_deploy prompt does this automatically)."
 fi
 
 # Prune stale backups from previous deploy runs

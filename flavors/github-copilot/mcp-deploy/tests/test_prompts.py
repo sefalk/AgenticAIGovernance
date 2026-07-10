@@ -25,6 +25,15 @@ def test_deploy_prompt_warns_about_customizable_preservation() -> None:
     assert "af-env.conf" in text
 
 
+def test_deploy_prompt_chains_post_deploy_steps() -> None:
+    text = prompts.deploy_prompt("/proj")
+    # Curated-skill reapply must be a wired post-deploy step (not lost on deploy reset).
+    assert "curated-assignments.json" in text
+    assert "--reapply" in text
+    # Conflict resolution must route to the resolve prompt as a post-deploy step.
+    assert "af_resolve_conflicts" in text
+
+
 def test_resolve_conflicts_prompt_orders_the_merge_workflow() -> None:
     text = prompts.resolve_conflicts_prompt("/proj")
     assert "/proj" in text

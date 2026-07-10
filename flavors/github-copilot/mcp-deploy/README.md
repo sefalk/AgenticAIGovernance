@@ -39,7 +39,7 @@ cloning the AAIG repository next to the target project**.
 | Tool (W) | `af_update_hashes(workspace_root, confirm)` | Re-baseline `.af-hashes` after resolving conflicts. |
 | Tool (W) | `af_prune_backups(workspace_root, days, confirm)` | Remove stale `.af-backup-*` dirs. |
 | Resource | `af://source/{path}` | Read a bundled source file, e.g. `af://source/agents/planner.agent.md`. |
-| Prompt | `af_deploy(workspace_root)` | Slash-command workflow: status → dry-run → conflict routing → guarded apply. |
+| Prompt | `af_deploy(workspace_root)` | Slash-command workflow: status → dry-run → guarded apply → **post-deploy steps** (curated-skill `--reapply` + conflict resolution). |
 | Prompt | `af_resolve_conflicts(workspace_root)` | Slash-command workflow: diff → merge → write → re-baseline for CONFLICT files. |
 
 Write tools (**W**) do nothing unless `confirm=true`; otherwise they return a

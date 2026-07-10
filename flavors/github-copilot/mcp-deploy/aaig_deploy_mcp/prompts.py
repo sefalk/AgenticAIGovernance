@@ -13,7 +13,11 @@ from __future__ import annotations
 
 
 def deploy_prompt(workspace_root: str) -> str:
-    """Guidance for a full AAIG framework deploy into ``workspace_root``."""
+    """Guidance for a full AAIG framework deploy into ``workspace_root``.
+
+    Chains the two post-deploy steps a deploy must always run: curated-skill
+    reapply (a deploy overwrites AF-owned agent files) and conflict resolution.
+    """
     return (
         f"Deploy the AAIG framework into `{workspace_root}` using ONLY the aaig-deploy "
         "MCP tools. Do not clone the AAIG repository and do not edit deployed files by "
@@ -23,15 +27,24 @@ def deploy_prompt(workspace_root: str) -> str:
         "2. Call `af_dry_run`. Summarise the counts (CREATE / UPDATE / CONFLICT / PROTECT "
         "/ PRESERVE / UNCHANGED) and list the files that would change. Call out any "
         "CONFLICT and PROTECT files explicitly.\n"
-        "3. If any file is CONFLICT, STOP: tell the user to run the `af_resolve_conflicts` "
-        "prompt first. Never overwrite a conflict.\n"
-        "4. Otherwise, present the pending CREATE/UPDATE changes and ask the user to "
-        "confirm. Only after explicit approval, call `af_apply` with `confirm=true`.\n"
-        "5. Report what was applied and the backup directory. Remind the user that "
-        "`[customizable]` files (e.g. `af-env.conf`) are PRESERVED, so a first-time "
-        "deploy may still need project-specific edits to `af-env.conf`.\n"
-        "6. If the project uses curated skill assignments, remind the user to run "
-        "`/curate-skills --reapply` afterwards."
+        "3. Present the pending CREATE/UPDATE changes and ask the user to confirm. Only "
+        "after explicit approval, call `af_apply` with `confirm=true`. `af_apply` never "
+        "overwrites CONFLICT / PROTECT / PRESERVE / `[customizable]` files and backs up "
+        "everything it replaces, so it is safe to run even with conflicts pending.\n\n"
+        "Then ALWAYS run these post-deploy steps — they are part of the deploy, not "
+        "optional afterthoughts:\n"
+        "4. **Restore curated skills.** If `.github/skills/curated-assignments.json` "
+        "exists in the target, run the target's `/curate-skills --reapply` prompt. A "
+        "deploy overwrites AF-owned files (agent definitions) and thereby RESETS curated "
+        "skill assignments; reapply restores them from the recorded state. Skipping this "
+        "silently loses the project's skill curation.\n"
+        "5. **Resolve conflicts.** If `af_apply` (or the dry-run) reported any CONFLICT "
+        "files, run the `af_resolve_conflicts` prompt to merge them and re-baseline. "
+        "Never leave a CONFLICT unresolved.\n"
+        "6. Report what was applied, the backup directory, whether reapply ran, and any "
+        "remaining conflicts. Remind the user that `[customizable]` files (e.g. "
+        "`af-env.conf`) are PRESERVED, so a first-time deploy may still need project-"
+        "specific edits."
     )
 
 

@@ -988,7 +988,7 @@ if ($script:Stats.Preserved -gt 0) {
 if ($script:Stats.Conflict -gt 0) {
     Write-Host "  Conflict:  $($script:Stats.Conflict) -- both sides changed, use agent to merge" -ForegroundColor Red
     Write-Host ""
-    Write-Host "  To resolve conflicts: ask the agent to merge, then run -UpdateHashes" -ForegroundColor Yellow
+    Write-Host "  To resolve conflicts: ask the agent to merge, then run -UpdateHashes (the MCP af_resolve_conflicts prompt automates this)." -ForegroundColor Yellow
 }
 if ($DryRun) {
     Write-Host ""
@@ -1008,7 +1008,9 @@ if ($staleSkills.Count -gt 0) {
 $curatedJsonPath = Join-Path $TargetGitHub 'skills\curated-assignments.json'
 if (Test-Path $curatedJsonPath) {
     Write-Host ""
-    Write-Host "  Curated skills detected -- run /curate-skills --reapply to restore agent skill references." -ForegroundColor Cyan
+    Write-Host "  Post-deploy step: curated skills detected." -ForegroundColor Cyan
+    Write-Host "  A deploy overwrites AF-owned files (agents) and resets curated skill assignments." -ForegroundColor Cyan
+    Write-Host "  -> Run /curate-skills --reapply to restore them (the MCP af_deploy prompt does this automatically)." -ForegroundColor Cyan
 }
 
 # ── Version-stale detection ────────────────────────────────────────────────
