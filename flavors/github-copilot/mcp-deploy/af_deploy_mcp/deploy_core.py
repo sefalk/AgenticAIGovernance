@@ -383,11 +383,7 @@ def _write_hashes(target_github: Path, hashes: dict[str, str], version: str) -> 
 
 
 def _write_version(target_dir: Path, version: str) -> None:
-    content = (
-        f"version: {version}\n"
-        f"deployed: {datetime.now().isoformat(timespec='seconds')}\n"
-        f"source: mcp:af-deploy\n"
-    )
+    content = f"version: {version}\ndeployed: {datetime.now().isoformat(timespec='seconds')}\nsource: mcp:af-deploy\n"
     _write_bytes(target_dir / ".github" / ".af-version", content.encode("utf-8"))
 
 
@@ -503,9 +499,7 @@ def conflict_diff(source_root: Path, target_dir: Path, path: str) -> str:
     """
     src_path, tgt_path, display = _resolve_pair(source_root, target_dir, path)
     target_af_env = target_dir / ".github" / "af-env.conf"
-    src_text = (
-        resolved_source_bytes(src_path, target_af_env).decode("utf-8", "replace") if src_path.is_file() else ""
-    )
+    src_text = resolved_source_bytes(src_path, target_af_env).decode("utf-8", "replace") if src_path.is_file() else ""
     tgt_text = tgt_path.read_text(encoding="utf-8", errors="replace") if tgt_path.is_file() else ""
     return "".join(
         difflib.unified_diff(

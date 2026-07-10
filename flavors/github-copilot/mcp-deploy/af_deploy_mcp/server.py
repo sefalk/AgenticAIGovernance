@@ -182,7 +182,10 @@ def prune_backups(workspace_root: str, days: int = 14, confirm: bool = False) ->
     if err:
         return {"error": err}
     if not confirm:
-        return {"confirmation_required": True, "message": f"Re-call with confirm=true to prune backups older than {days}d."}
+        return {
+            "confirmation_required": True,
+            "message": f"Re-call with confirm=true to prune backups older than {days}d.",
+        }
     return deploy_core.prune_backups(target, days)
 
 

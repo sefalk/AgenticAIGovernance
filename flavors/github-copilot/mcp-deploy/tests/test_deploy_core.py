@@ -323,4 +323,3 @@ def test_validate_payload_flags_missing_pieces(tmp_path: Path) -> None:
     (tmp_path / ".github").mkdir()
     (tmp_path / ".github" / ".af-manifest").write_text("# manifest\n", encoding="utf-8")
     assert deploy_core.validate_payload(tmp_path) is None
-

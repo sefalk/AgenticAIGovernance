@@ -9,10 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- copilot:modified | implementer | 2026-06-30 | added optional ado-pipeline-manager capability worker -->
 <!-- copilot:modified | implementer | 2026-07-01 | three-tier terminal autonomy classifier + web-fetch allowlist -->
 <!-- copilot:modified | implementer | 2026-07-02 | released 1.19.0 (rolled Unreleased); added auto-version pre-commit hook -->
+<!-- copilot:modified | implementer | 2026-07-10 | AF deploy MCP server (af_deploy_mcp) + af-prefix unification (prompts, mcp) -->
 
 ## [Unreleased]
 
 ### Added
+
+- **AF deploy MCP server (experimental, parallel to the scripts).** A Model
+  Context Protocol server (`af-deploy-mcp`, package `af_deploy_mcp`, server id
+  `af`) that exposes the framework deploy as MCP tools/prompts, so an agent can
+  deploy AF into a target workspace **without cloning the AF repo next to it** —
+  the `.github/` + `.vscode/` payload is bundled into the wheel (hatchling
+  `force-include`). Read tools (`status`, `dry_run`, `conflict_diff`) and
+  guarded write tools (`apply`, `write_resolved`, `update_hashes`,
+  `prune_backups`; `confirm`-gated, workspace-scoped, backed up) mirror
+  `deploy.ps1` classification and hashing (SHA-256, agent model-tier resolution)
+  with verified parity. Prompts `/mcp.af.deploy` and `/mcp.af.resolve_conflicts`
+  chain the deploy → curated-skill `--reapply` → conflict-resolution steps.
+  Optional hash-pinned **remote payload** (`AF_PAYLOAD_URL` + `AF_PAYLOAD_SHA256`)
+  for central governance without a hosted compute server. Runs **parallel to**
+  `deploy.ps1`/`deploy.sh`; it does not deprecate them.
 
 - **Per-agent model tiers (deploy-resolved).** Subagents now pin their model via
   a tier placeholder (`__AF_TIER_PREMIUM__` / `__AF_TIER_BALANCED__` /
