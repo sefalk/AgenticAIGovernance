@@ -10,10 +10,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- copilot:modified | implementer | 2026-07-01 | three-tier terminal autonomy classifier + web-fetch allowlist -->
 <!-- copilot:modified | implementer | 2026-07-02 | released 1.19.0 (rolled Unreleased); added auto-version pre-commit hook -->
 <!-- copilot:modified | implementer | 2026-07-10 | AF deploy MCP server (af_deploy_mcp) + af-prefix unification (prompts, mcp) -->
+<!-- copilot:modified | implementer | 2026-07-13 | large-file commit guard (real git pre-commit hook) -->
 
 ## [Unreleased]
 
 ### Added
+
+- **Large-file commit guard (real git pre-commit hook).** A `pre-commit` hook
+  at `.github/hooks/git/pre-commit` (a POSIX-sh shim) runs
+  `.github/hooks/scripts/check-large-files.py` on every `git commit` and blocks
+  staging any file whose **staged index blob** exceeds `LARGE_FILE_MAX_BYTES`
+  (`.github/af-env.conf`, default 1 MB / 1,048,576 bytes). Deliberate large
+  files are exempted via `LARGE_FILE_ALLOWLIST` (comma-separated fnmatch globs
+  against the repo-relative staged path); a one-off commit can override with
+  `ALLOW_LARGE_FILES=1`. It is a *real* git hook (not a VS Code agent hook), so
+  it enforces whether a human or an agent commits, and it measures the staged
+  blob (`git ls-files -s` → `git cat-file -s`), i.e. exactly what would be
+  committed. The checker is stdlib-only and **fail-closed** on git plumbing
+  errors (exit 2); the shim is **fail-open** when the checker or a Python
+  interpreter is missing. Wired per clone via
+  `git config core.hooksPath .github/hooks/git`, set automatically by
+  `bootstrap-python-env.ps1`/`.sh` (existing clones must re-run bootstrap once —
+  hook wiring is not retroactive).
+  **Design decision:** the shim lives under `.github/hooks/git/` rather than a
+  repo-root `.githooks/` so it deploys through the existing `.af-manifest`
+  `hooks/` entry — no change to the deploy payload scope (which covers only
+  `.github/` + `.vscode/`) was required. Follow-up idea (not yet implemented):
+  optional Git LFS guidance for legitimately large binary assets.
 
 - **AF deploy MCP server (experimental, parallel to the scripts).** A Model
   Context Protocol server (`af-deploy-mcp`, package `af_deploy_mcp`, server id
