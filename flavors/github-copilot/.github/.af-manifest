@@ -45,6 +45,7 @@ scripts/setup-worktree.sh
 scripts/cleanup-worktree.ps1
 scripts/cleanup-worktree.sh
 scripts/test-worktree-scripts.ps1
+scripts/test-large-file-guard.ps1
 
 # Instructions
 instructions/

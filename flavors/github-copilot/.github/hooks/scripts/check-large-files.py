@@ -109,6 +109,8 @@ def main() -> int:
     print("  - Reduce the file size (e.g. export Plotly HTML in CDN mode, not self-contained).")
     print("  - One-off override for this commit: ALLOW_LARGE_FILES=1 git commit ...")
     print("  - Deliberate large file: add a glob to LARGE_FILE_ALLOWLIST in .github/af-env.conf")
+    print("  - Large binary asset to version: track it with Git LFS so only a pointer is")
+    print('    committed -- `git lfs track "<pattern>"`, then commit .gitattributes + the file.')
     return 1
 
 

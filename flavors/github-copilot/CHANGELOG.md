@@ -35,8 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Design decision:** the shim lives under `.github/hooks/git/` rather than a
   repo-root `.githooks/` so it deploys through the existing `.af-manifest`
   `hooks/` entry — no change to the deploy payload scope (which covers only
-  `.github/` + `.vscode/`) was required. Follow-up idea (not yet implemented):
-  optional Git LFS guidance for legitimately large binary assets.
+  `.github/` + `.vscode/`) was required. Ships with a portable regression suite
+  (`.github/scripts/test-large-file-guard.ps1`, checker-direct) and documents
+  **Git LFS** as the right tool for legitimately large binary assets — the
+  `LARGE_FILE_ALLOWLIST` is for small, deliberate exceptions only.
 
 - **AF deploy MCP server (experimental, parallel to the scripts).** A Model
   Context Protocol server (`af-deploy-mcp`, package `af_deploy_mcp`, server id
