@@ -129,5 +129,25 @@ if [[ "$NOTEBOOKS_ENABLED" == true ]]; then
     fi
 fi
 
+# copilot:generated | implementer | 2026-07-13
+# 5) Register the large-file commit guard (real git pre-commit hook)
+if [[ -f "$WORKSPACE_ROOT/.github/hooks/git/pre-commit" ]]; then
+    chmod +x "$WORKSPACE_ROOT/.github/hooks/git/pre-commit" 2>/dev/null || true
+    cd "$WORKSPACE_ROOT"
+    current_hooks_path="$(git config --get core.hooksPath 2>/dev/null || true)"
+    if [[ -n "$current_hooks_path" && "$current_hooks_path" != ".github/hooks/git" ]]; then
+        echo "WARN: core.hooksPath is already '$current_hooks_path' -- not overwriting (large-file guard not wired)."
+        echo "  To enable the guard, invoke check-large-files.py from your existing hook, or run:"
+        echo "    git config core.hooksPath .github/hooks/git"
+    else
+        echo "Registering .github/hooks/git as core.hooksPath (large-file commit guard) ..."
+        if git config core.hooksPath .github/hooks/git; then
+            echo "core.hooksPath registered."
+        else
+            echo "WARN: git config core.hooksPath failed."
+        fi
+    fi
+fi
+
 echo "Environment ready."
 exit 0

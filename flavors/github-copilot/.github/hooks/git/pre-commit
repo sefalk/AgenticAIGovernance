@@ -1,0 +1,32 @@
+#!/usr/bin/env sh
+# copilot:generated | implementer | 2026-07-13
+# Large-file commit guard for the Agent Framework (real git pre-commit hook,
+# not a VS Code agent hook). Blocks `git commit` when a staged file exceeds
+# LARGE_FILE_MAX_BYTES (default 1 MB) from .github/af-env.conf, unless the path
+# is allowlisted or the commit runs with ALLOW_LARGE_FILES=1.
+# Enable once per clone (bootstrap does this):
+#   git config core.hooksPath .github/hooks/git
+set -eu
+
+repo_root="$(git rev-parse --show-toplevel)"
+checker="$repo_root/.github/hooks/scripts/check-large-files.py"
+[ -f "$checker" ] || exit 0  # fail-open if checker missing
+
+python_bin=""
+python_bin_extra_args=""
+if [ -x "$repo_root/.venv/Scripts/python.exe" ]; then
+    python_bin="$repo_root/.venv/Scripts/python.exe"
+elif [ -x "$repo_root/.venv/bin/python" ]; then
+    python_bin="$repo_root/.venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+    python_bin="python3"
+elif command -v python >/dev/null 2>&1; then
+    python_bin="python"
+elif command -v py >/dev/null 2>&1; then
+    python_bin="py"; python_bin_extra_args="-3"
+fi
+if [ -z "$python_bin" ]; then
+    echo "[large-file-guard] WARN: no python interpreter found -- skipping check." >&2
+    exit 0
+fi
+"$python_bin" $python_bin_extra_args "$checker"

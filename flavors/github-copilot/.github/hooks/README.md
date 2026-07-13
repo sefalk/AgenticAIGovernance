@@ -11,6 +11,33 @@
 > sessions. Unlike instructions that _guide_ behaviour, hooks _enforce_ it
 > with code.
 
+<!-- copilot:modified | implementer | 2026-07-13 | added real-git-hook section (large-file guard) -->
+## Real Git Hooks vs. Agent Hooks
+
+Everything below this section describes **agent hooks** — they only fire
+during an active VS Code Copilot agent session (preview, JSON loading not
+yet fully implemented; see status note above).
+
+For enforcement that must hold regardless of *who* runs `git commit` (agent
+via terminal, or a human), the framework also ships a **real git hook**,
+wired via `core.hooksPath`:
+
+- **`.github/hooks/git/pre-commit`** — a POSIX shell shim, invoked directly by
+  git on every commit (Git for Windows runs it via its bundled `sh`, so it
+  works on Windows without a `.ps1` equivalent). It calls
+  `.github/hooks/scripts/check-large-files.py` to reject staged files above
+  `LARGE_FILE_MAX_BYTES` (see `.github/af-env.conf` — the large-file commit
+  guard). See [git-workflow.instructions.md](../instructions/git-workflow.instructions.md)
+  for the threshold/override/allowlist design.
+- Enabled per clone by `git config core.hooksPath .github/hooks/git` — done
+  automatically by `scripts/bootstrap-python-env.ps1` / `.sh`. **Existing
+  clones must re-run bootstrap (or run the `git config` command manually)**
+  to pick up the guard.
+- The shim lives under `hooks/git/` (not `hooks/scripts/`) so it deploys with
+  the rest of `.github/` via the existing manifest `hooks/` entry, while
+  staying clearly separate from the agent-session hooks in this folder. Add
+  future real (commit-time) checks as scripts invoked from `hooks/git/pre-commit`.
+
 ## How Hooks Work
 
 Hooks are configured in `.json` files in this folder. VS Code loads all

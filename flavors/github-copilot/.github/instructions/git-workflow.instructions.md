@@ -405,6 +405,58 @@ Recommended `.gitignore` additions:
 /.worktrees/
 ```
 
+## Large File Commit Guard
+
+<!-- copilot:generated | implementer | 2026-07-13 -->
+
+A real git `pre-commit` hook (`.github/hooks/git/pre-commit`, enabled via
+`git config core.hooksPath .github/hooks/git` — done automatically by
+`bootstrap-python-env.ps1`/`.sh`) blocks commits that stage a file above
+**`LARGE_FILE_MAX_BYTES`** (`.github/af-env.conf`, default 1 MB /
+1,048,576 bytes). It measures the **staged index blob** (exactly what would be
+committed), not the working tree. This is a real git hook, not a VS Code agent
+hook, so it enforces regardless of whether a human or an agent runs
+`git commit`.
+
+**Rationale:** repo weight. Commit Plotly HTML exports in CDN mode
+(~16 KB), never self-contained mode (~4.8 MB per file) — the latter was the
+trigger for adding this guard.
+
+- **Override (one-off):** `ALLOW_LARGE_FILES=1 git commit -m "..."`
+  (accepts `1`/`true`/`yes`).
+- **Allowlist (deliberate large files):** add a comma-separated fnmatch glob
+  (repo-relative staged path) to `LARGE_FILE_ALLOWLIST` in
+  `.github/af-env.conf` (e.g. `LARGE_FILE_ALLOWLIST=docs/wiki/assets/**`).
+- **Existing clones** must re-run `bootstrap-python-env.ps1`/`.sh` (or run
+  `git config core.hooksPath .github/hooks/git` manually) to pick up the
+  guard — it is not retroactive for clones set up before this change.
+- **Design note:** the shim lives at `.github/hooks/git/pre-commit` (not a
+  repo-root `.githooks/`) so it deploys with the rest of `.github/` via the
+  existing `.af-manifest` `hooks/` entry — no change to the deploy payload
+  scope was needed. Checker logic: `.github/hooks/scripts/check-large-files.py`
+  (fail-closed on git errors → exit 2; the shim is fail-open if the checker or
+  a Python interpreter is missing). Regression suite:
+  `.github/scripts/test-large-file-guard.ps1`.
+
+### Handling Large Files with Git LFS
+
+The allowlist is for **small, deliberate** exceptions. For *legitimately large*
+binary assets that must be versioned (datasets, media, model weights, large
+report bundles), do not allowlist them into the main repo — use **Git LFS**.
+Git LFS stores the large file outside the main repository and commits a
+lightweight **pointer** instead, keeping the repo fast and small:
+
+```
+git lfs install                 # once per machine
+git lfs track "*.parquet"       # add patterns; updates .gitattributes
+git add .gitattributes <file>   # commit the tracking rule + the asset
+```
+
+LFS-tracked files are replaced by a small pointer in the commit, so the
+large-file guard does not trip on them. Prefer LFS over `LARGE_FILE_ALLOWLIST`
+whenever the asset is genuinely large rather than an accidental oversized
+export.
+
 ## Human Commit Format
 
 Human commits follow conventional commits:

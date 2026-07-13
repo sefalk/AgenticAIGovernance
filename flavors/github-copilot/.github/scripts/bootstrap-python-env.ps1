@@ -154,5 +154,30 @@ if ($notebooksEnabled) {
     }
 }
 
+# copilot:generated | implementer | 2026-07-13
+# 5) Register the large-file commit guard (real git pre-commit hook)
+$largeFileHook = Join-Path $workspaceRoot '.github/hooks/git/pre-commit'
+if (Test-Path $largeFileHook) {
+    Push-Location $workspaceRoot
+    try {
+        $currentHooksPath = (git config --get core.hooksPath 2>$null)
+        if ($currentHooksPath -and $currentHooksPath -ne '.github/hooks/git') {
+            Write-Output "WARN: core.hooksPath is already '$currentHooksPath' -- not overwriting (large-file guard not wired)."
+            Write-Output '  To enable the guard, invoke check-large-files.py from your existing hook, or run:'
+            Write-Output '    git config core.hooksPath .github/hooks/git'
+        } else {
+            Write-Output 'Registering .github/hooks/git as core.hooksPath (large-file commit guard) ...'
+            git config core.hooksPath .github/hooks/git
+            if ($LASTEXITCODE -eq 0) {
+                Write-Output 'core.hooksPath registered.'
+            } else {
+                Write-Output 'WARN: git config core.hooksPath failed.'
+            }
+        }
+    } finally {
+        Pop-Location
+    }
+}
+
 Write-Output 'Environment ready.'
 exit 0
