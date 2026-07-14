@@ -60,6 +60,26 @@ Goal: Launch User Authentication System
 
 **Rule:** If a task can't be completed in 5 days, it's an epic. Decompose further.
 
+### Executor-Agnostic Slicing
+
+<!-- copilot:modified | implementer | 2026-07-14 | added executor-agnostic slicing for variable-strength model delegation -->
+
+When subtasks are executed by agents on **variable-strength models** (a strong
+orchestrator delegating to cheaper workers), size each subtask for the
+*weakest* plausible executor, not the average one:
+
+- **Self-contained** — carries its own verbatim acceptance criteria, in-scope
+  files, and non-goals. A weak executor should not have to infer context.
+- **One coherent change** — a single subtask a worker can finish without
+  handing half-done state to another worker.
+- **Avoid over-decomposition** — stateless workers re-read context on every
+  hand-off, so fragments that are too small cost more coordination than they
+  save. Split for *clarity and layer boundaries*, not to reach the smallest
+  possible piece. If two subtasks must share in-progress state, merge them.
+
+The goal is *atomic-but-whole*: small enough that a weak model keeps the
+thread, large enough that it does not thrash across hand-offs.
+
 ### INVEST Criteria
 
 | Criterion | Meaning | Test |
