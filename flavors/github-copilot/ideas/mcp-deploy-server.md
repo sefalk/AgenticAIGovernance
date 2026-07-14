@@ -1,7 +1,5 @@
 # Idea / Spec: AF Deploy as an MCP Server
 
-> copilot:generated | implementer | 2026-07-07
-
 **Status:** Draft + working read-only PoC (`../mcp-deploy/`).
 **Author:** agent (implementer), reviewed by human.
 

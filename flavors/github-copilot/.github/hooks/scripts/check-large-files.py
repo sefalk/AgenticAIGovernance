@@ -7,7 +7,6 @@ in ``.github/af-env.conf`` or a one-off ``ALLOW_LARGE_FILES=1`` override.
 
 Exit codes: 0 pass, 1 blocked, 2 internal error.
 """
-# copilot:generated | implementer | 2026-07-13
 from __future__ import annotations
 
 import fnmatch

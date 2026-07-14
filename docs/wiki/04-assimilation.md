@@ -6,7 +6,6 @@ tags: [aaig, governance, assimilation, l0]
 updated: 2026-07-03
 sources: [core/L0_Assimilation_Protocol.md]
 ---
-<!-- copilot:generated | documenter | 2026-07-03 -->
 
 # Assimilation (L0)
 

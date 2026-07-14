@@ -10,7 +10,6 @@ metadata:
     agents: [coordinator]
     priority: recommended
 ---
-<!-- copilot:generated | implementer | 2026-04-14 -->
 
 **Domain:** Git workflow / Parallel task execution  
 **Primary consumers:** coordinator, researcher  

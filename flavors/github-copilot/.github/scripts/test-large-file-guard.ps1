@@ -1,5 +1,4 @@
 # Regression tests for the large-file commit guard (check-large-files.py).
-# copilot:generated | implementer | 2026-07-13
 #
 # Portable + deterministic: drives the checker directly (no shim/venv coupling)
 # inside throwaway git repos, asserting the exit-code contract (0 ok, 1 blocked,

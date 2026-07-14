@@ -6,7 +6,6 @@ tags: [aaig, governance, glossary, reference]
 updated: 2026-07-03
 sources: [core/L1_Framework_Architecture.md, core/L1_Core_Principles.md, flavors/github-copilot/.github/af-env.conf]
 ---
-<!-- copilot:generated | documenter | 2026-07-03 -->
 
 # Glossary
 

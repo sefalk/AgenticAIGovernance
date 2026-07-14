@@ -1,6 +1,4 @@
 # Agent-scoped Stop hook for the refactorer agent.
-# copilot:modified  | implementer | 2026-03-19 | test log freshness check in stop hooks
-# copilot:modified  | implementer | 2026-04-16 | worktree-aware path resolution via active-worktree sentinel
 #
 # REFACTOR PHASE GATES (HARD -- blocks refactorer if tests fail or new files created)
 #

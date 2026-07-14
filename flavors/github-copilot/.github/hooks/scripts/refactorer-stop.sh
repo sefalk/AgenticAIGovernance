@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Agent-scoped Stop hook for the refactorer agent.
-# copilot:modified  | implementer | 2026-03-19 | test log freshness check in stop hooks
 #
 # REFACTOR PHASE GATES (HARD — blocks refactorer if tests fail or new files created)
 #

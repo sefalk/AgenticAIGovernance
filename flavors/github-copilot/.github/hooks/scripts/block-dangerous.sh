@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # PreToolUse hook: three-tier terminal command classifier (allow / ask / deny).
-# copilot:modified | implementer | 2026-07-01 | 3-tier branch-aware autonomy classifier
 #
 # Tiers: deny (hard-block), allow (auto-approve safe), ask (confirm durable
 # change), {} (defer to user settings -- fail-safe default).

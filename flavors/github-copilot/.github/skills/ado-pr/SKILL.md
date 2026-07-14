@@ -6,10 +6,6 @@ disable-model-invocation: true
 
 # Azure DevOps Pull Request Skill
 
-<!-- copilot:generated | implementer | 2026-06-25 -->
-<!-- copilot:modified | implementer | 2026-07-06 | enforce noFastForward merge strategy -->
-<!-- copilot:modified | implementer | 2026-07-07 | set transitionWorkItems:false in the autocomplete call (MCP default is true) -->
-
 ## Purpose
 
 Provider-specific guidance for the Azure DevOps pull request lifecycle:

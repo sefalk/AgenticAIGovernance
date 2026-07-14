@@ -6,7 +6,6 @@ tags: [aaig, governance, workflow, l3]
 updated: 2026-07-03
 sources: [core/workflows/_index.md]
 ---
-<!-- copilot:generated | documenter | 2026-07-03 -->
 
 # Workflows (L3)
 

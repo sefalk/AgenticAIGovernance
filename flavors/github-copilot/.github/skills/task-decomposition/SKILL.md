@@ -62,8 +62,6 @@ Goal: Launch User Authentication System
 
 ### Executor-Agnostic Slicing
 
-<!-- copilot:modified | implementer | 2026-07-14 | added executor-agnostic slicing for variable-strength model delegation -->
-
 When subtasks are executed by agents on **variable-strength models** (a strong
 orchestrator delegating to cheaper workers), size each subtask for the
 *weakest* plausible executor, not the average one:

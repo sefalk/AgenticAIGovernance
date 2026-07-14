@@ -1,5 +1,4 @@
 # Agent Tool Audit Script
-# copilot:generated | implementer | 2026-03-31
 #
 # Compares agent tool assignments against the tools-reference.txt baseline
 # and TOOLS.md matrix. Reports:

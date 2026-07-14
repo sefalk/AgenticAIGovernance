@@ -6,7 +6,6 @@ tags: [aaig, governance, domains, l2]
 updated: 2026-07-03
 sources: [core/domains/_index.md]
 ---
-<!-- copilot:generated | documenter | 2026-07-03 -->
 
 # Domain Rules (L2)
 

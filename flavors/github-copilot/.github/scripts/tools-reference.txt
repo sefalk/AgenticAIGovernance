@@ -1,6 +1,4 @@
 # VS Code Tool Identifiers (Baseline)
-# copilot:generated | implementer | 2026-03-31
-# copilot:modified  | implementer | 2026-03-31 | added extension tools section
 #
 # Source: https://code.visualstudio.com/docs/copilot/reference/copilot-vscode-features#_chat-tools
 # Last verified: 2026-03-31

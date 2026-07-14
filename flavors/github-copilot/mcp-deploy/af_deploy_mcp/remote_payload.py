@@ -20,7 +20,6 @@ No project data ever leaves the machine — this is a one-way, outbound fetch of
 framework payload only. Dependency-free (stdlib: urllib, hashlib, zipfile, tarfile).
 """
 
-# copilot:generated | implementer | 2026-07-08
 
 from __future__ import annotations
 

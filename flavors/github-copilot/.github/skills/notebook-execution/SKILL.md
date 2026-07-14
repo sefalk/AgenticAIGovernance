@@ -9,8 +9,6 @@ metadata:
     priority: required
 ---
 
-<!-- copilot:generated | implementer | 2026-07-09 -->
-
 # Notebook Execution Skill
 
 Guidance for working with local Jupyter notebooks (`.ipynb`) in VS Code. The

@@ -6,7 +6,6 @@ tags: [aaig, flavor, architecture, agents]
 updated: 2026-07-03
 sources: [flavors/github-copilot/README.md, flavors/github-copilot/VERSION, flavors/github-copilot/.github/MANIFEST.md]
 ---
-<!-- copilot:generated | documenter | 2026-07-03 -->
 
 # Flavor: GitHub Copilot
 

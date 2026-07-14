@@ -14,7 +14,6 @@ Exit codes:
   1  BLOCKED — ruff not installed (hooks treat as advisory skip, not block)
   2  FAIL  — lint violations found
 """
-# copilot:generated | implementer | 2026-04-14
 
 from __future__ import annotations
 

@@ -1,9 +1,3 @@
-# copilot:generated | implementer | 2026-03-16
-# copilot:modified  | implementer | 2026-03-17 | fixed false-positive deny on read-only tools
-# copilot:modified  | implementer | 2026-04-02 | deny pytest via terminal, hint execute/runTests
-# copilot:modified  | implementer | 2026-04-14 | validate git commit message quality, reject generic phase-only messages
-# copilot:modified  | implementer | 2026-04-14 | add git worktree add precondition gate
-# copilot:modified  | implementer | 2026-04-14 | add python environment bootstrap interception (ask/always/off)
 # Agent-scoped PreToolUse hook for the coordinator agent.
 #
 # DELEGATION ENFORCEMENT (HARD -- blocks coordinator from editing/creating files)

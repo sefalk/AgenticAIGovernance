@@ -1,6 +1,5 @@
 """Tests for the optional remote payload fetch (governance mode)."""
 
-# copilot:generated | test-writer | 2026-07-08
 
 from __future__ import annotations
 

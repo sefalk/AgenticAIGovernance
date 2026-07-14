@@ -6,7 +6,6 @@ tags: [aaig, flavor, hooks, config]
 updated: 2026-07-03
 sources: [flavors/github-copilot/.github/hooks, flavors/github-copilot/.github/af-env.conf]
 ---
-<!-- copilot:generated | documenter | 2026-07-03 -->
 
 # Hooks & Autonomy
 

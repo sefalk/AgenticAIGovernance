@@ -1,4 +1,3 @@
-# copilot:generated | implementer | 2026-04-14
 # Safely remove a git worktree after task completion.
 #
 # Usage:

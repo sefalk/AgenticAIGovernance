@@ -28,7 +28,6 @@ in-repo flavor directory (dev mode). A packaged build would bundle the payload
 as package data.
 """
 
-# copilot:generated | implementer | 2026-07-07
 
 from __future__ import annotations
 

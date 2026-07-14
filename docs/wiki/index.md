@@ -6,7 +6,6 @@ tags: [aaig, governance, index, reference]
 updated: 2026-07-03
 sources: [README.md, core/L1_Framework_Architecture.md]
 ---
-<!-- copilot:generated | documenter | 2026-07-03 -->
 
 # AAIG Wiki — Index
 

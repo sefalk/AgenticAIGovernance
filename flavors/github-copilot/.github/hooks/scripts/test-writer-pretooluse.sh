@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# copilot:modified  | implementer | 2026-04-14 | add branch context proof gate
 # Agent-scoped PreToolUse hook for the test-writer agent.
 #
 # TDD PHASE ISOLATION (HARD — blocks test-writer from editing production code)

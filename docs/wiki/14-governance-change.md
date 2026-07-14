@@ -6,7 +6,6 @@ tags: [aaig, governance, ops, reference]
 updated: 2026-07-03
 sources: [core/L1_Framework_Architecture.md, README.md, core/GOVERNANCE_CHANGELOG.md]
 ---
-<!-- copilot:generated | documenter | 2026-07-03 -->
 
 # Governance Change
 

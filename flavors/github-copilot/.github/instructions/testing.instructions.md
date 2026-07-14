@@ -144,8 +144,6 @@ def test_compute_result_filters_nulls():
 
 ## Agent Test Execution
 
-<!-- copilot:modified | implementer | 2026-03-18 | added pre-defined tasks via run_task -->
-
 Agents execute tests via **pre-defined VS Code Tasks** (`run_task`) for common
 scenarios, falling back to `run_in_terminal` only for dynamic cases.
 

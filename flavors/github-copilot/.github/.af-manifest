@@ -23,7 +23,6 @@ hooks/scripts/researcher-pretooluse.ps1
 hooks/scripts/researcher-pretooluse.sh
 hooks/scripts/coordinator-postmerge.ps1
 hooks/scripts/coordinator-postmerge.sh
-# copilot:modified | implementer | 2026-07-13 | large-file guard: stdlib checker + real git pre-commit shim
 hooks/scripts/check-large-files.py
 hooks/git/pre-commit
 

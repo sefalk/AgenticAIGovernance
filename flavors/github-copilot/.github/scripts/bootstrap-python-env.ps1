@@ -1,4 +1,3 @@
-# copilot:generated | implementer | 2026-04-14
 # Bootstrap Python environment for AF workflows.
 #
 # Usage:
@@ -154,7 +153,6 @@ if ($notebooksEnabled) {
     }
 }
 
-# copilot:generated | implementer | 2026-07-13
 # 5) Register the large-file commit guard (real git pre-commit hook)
 $largeFileHook = Join-Path $workspaceRoot '.github/hooks/git/pre-commit'
 if (Test-Path $largeFileHook) {

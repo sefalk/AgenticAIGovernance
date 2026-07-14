@@ -6,7 +6,6 @@ tags: [aaig, flavor, deploy, ops]
 updated: 2026-07-03
 sources: [flavors/github-copilot/deploy.ps1, flavors/github-copilot/README.md, flavors/github-copilot/.githooks/pre-commit]
 ---
-<!-- copilot:generated | documenter | 2026-07-03 -->
 
 # Deployment & Versioning
 

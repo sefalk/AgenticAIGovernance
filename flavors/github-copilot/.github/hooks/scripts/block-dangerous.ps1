@@ -1,5 +1,4 @@
 # PreToolUse hook: three-tier terminal command classifier (allow / ask / deny).
-# copilot:modified | implementer | 2026-07-01 | 3-tier branch-aware autonomy classifier
 #
 # Tiers:
 #   deny  -> hard-block destructive/irreversible commands (+ agent notice)

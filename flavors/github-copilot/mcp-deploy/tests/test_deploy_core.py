@@ -1,6 +1,5 @@
 """Tests for deploy_core — the read-only AF deploy logic behind the MCP PoC."""
 
-# copilot:generated | test-writer | 2026-07-07
 
 from __future__ import annotations
 

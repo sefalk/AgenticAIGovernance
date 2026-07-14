@@ -6,7 +6,6 @@ tags: [aaig, flavor, agents, workflow]
 updated: 2026-07-03
 sources: [flavors/github-copilot/.github/agents, flavors/github-copilot/README.md]
 ---
-<!-- copilot:generated | documenter | 2026-07-03 -->
 
 # Agent Team
 

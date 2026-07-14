@@ -1,5 +1,4 @@
 #!/usr/bin/env sh
-# copilot:generated | implementer | 2026-07-13
 # Large-file commit guard for the Agent Framework (real git pre-commit hook,
 # not a VS Code agent hook). Blocks `git commit` when a staged file exceeds
 # LARGE_FILE_MAX_BYTES (default 1 MB) from .github/af-env.conf, unless the path

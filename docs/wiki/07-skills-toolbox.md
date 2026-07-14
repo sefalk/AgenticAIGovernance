@@ -6,7 +6,6 @@ tags: [aaig, governance, skills, reference]
 updated: 2026-07-03
 sources: [core/skills/_index.md]
 ---
-<!-- copilot:generated | documenter | 2026-07-03 -->
 
 # Skills Toolbox
 

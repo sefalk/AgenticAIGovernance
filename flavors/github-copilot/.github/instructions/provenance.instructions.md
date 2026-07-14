@@ -22,6 +22,33 @@ Traceability) and domain rule R-SD-23 (Agent commits attributed to Agent ID).
 
 This instruction governs **Layer 1: in-code markers**.
 
+## Scope: Project Deliverables, Not the Framework Itself
+
+These markers trace AI authorship of **project deliverables** — the source
+code, tests, and documents an agent produces *inside a target project*. They do
+**not** apply to the Agent Framework's own files.
+
+**Do NOT add in-code provenance markers to AF framework files.** This covers
+everything that ships as the framework payload or its tooling:
+
+- `.github/` framework files: `agents/*.md`, `instructions/*.md`, `skills/**`,
+  `prompts/*.md`, `chatmodes/*.md`, `MANIFEST.md`, `copilot-instructions.md`,
+  `.af-manifest`, `af-env.conf`, hooks, and scripts.
+- Framework tooling and meta files: `deploy.*`, `mcp-deploy/**`, `CHANGELOG.md`,
+  `docs/**`, `core/**`.
+
+Rationale: these files load into agent context on almost every request, so
+marker comments are pure noise that crowds the context window. Framework
+authorship is already traced by **git history** (commit author + message) and
+the **CHANGELOG** — the in-code layer adds nothing there.
+
+**Templates are the one exception:** `templates/*.md` keep their
+`copilot:generated | <agent> | YYYY-MM-DD` placeholder, because the plan and
+investigation documents they *generate* are project deliverables that should
+carry a marker.
+
+Everything below applies to **project deliverables inside a target repository**.
+
 ## When to Mark
 
 | Change Type | Marker Required | Rationale |
@@ -116,6 +143,7 @@ def compute_result(df):
 
 ## What NOT to Do
 
+- Do **not** mark AF framework files (see *Scope* above) — only project deliverables
 - Do **not** add markers for trivial changes (< 5 lines, formatting only)
 - Do **not** add multiple `copilot:generated` headers to the same file
 - Do **not** use free-form text — always use the parseable format

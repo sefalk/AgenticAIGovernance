@@ -1,5 +1,4 @@
 # Canonical test runner for agent workflows.
-# copilot:modified | implementer | 2026-03-19 | added test-log.json persistence
 # All agents MUST use this script instead of calling pytest directly.
 #
 # Usage:

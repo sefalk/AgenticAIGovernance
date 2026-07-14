@@ -1,4 +1,3 @@
-# copilot:generated | implementer | 2026-03-17
 # Agent-scoped PreToolUse hook for the researcher agent.
 #
 # CREDENTIAL-URL SCAN (SOFT -- warns when fetch URLs contain embedded credentials)

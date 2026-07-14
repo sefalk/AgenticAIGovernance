@@ -12,7 +12,6 @@ slashes so a baseline written by either the ``.ps1`` (Windows, backslashes) or
 ``.sh`` (POSIX, forward slashes) deploy compares consistently.
 """
 
-# copilot:generated | implementer | 2026-07-07
 
 from __future__ import annotations
 

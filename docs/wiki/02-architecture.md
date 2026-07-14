@@ -6,7 +6,6 @@ tags: [aaig, governance, architecture, core, flavor]
 updated: 2026-07-03
 sources: [core/L1_Framework_Architecture.md, README.md]
 ---
-<!-- copilot:generated | documenter | 2026-07-03 -->
 
 # Architecture
 

@@ -1,5 +1,4 @@
 # SessionStart hook: Injects git and environment context into the agent session.
-# copilot:modified | implementer | 2026-03-19 | added test log summary
 # Input:  JSON via stdin (common fields + source)
 # Output: JSON with additionalContext
 #

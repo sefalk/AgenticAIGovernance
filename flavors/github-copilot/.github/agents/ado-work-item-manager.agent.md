@@ -21,10 +21,6 @@ tools:
 
 # ADO Work Item Manager Agent
 
-<!-- copilot:generated | implementer | 2026-06-11 -->
-<!-- copilot:modified | implementer | 2026-06-22 | added Databricks profile traceability requirement for evidence comments -->
-<!-- copilot:modified | implementer | 2026-06-25 | added two-stage post-merge closure AC gate and multi-phase spec modeling -->
-
 You are the **ADO Work Item Manager**. You manage Azure DevOps work item
 lifecycle operations for the active workflow.
 

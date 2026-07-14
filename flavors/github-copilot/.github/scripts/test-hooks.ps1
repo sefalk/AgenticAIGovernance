@@ -1,5 +1,4 @@
 # Hook Integration Tests
-# copilot:generated | implementer | 2026-04-01
 #
 # Exercises each Copilot agent hook with crafted JSON inputs and verifies
 # the expected output (deny, ask, allow, or specific JSON fields).
@@ -390,7 +389,6 @@ $secretFile = Join-Path $tempDir "secret.py"
 Set-Content -Path $secretFile -Value 'password = "SuperSecret123!"'
 
 $cleanFile = Join-Path $tempDir "clean.py"
-Set-Content -Path $cleanFile -Value "# copilot:generated | implementer | 2026-04-01`ndef hello(): pass"
 
 $secretJson = @{ tool_name = "editFiles"; tool_input = @{ filePath = $secretFile } } | ConvertTo-Json -Compress
 Assert-ExitCode "secret pattern detected (exit 1)" `

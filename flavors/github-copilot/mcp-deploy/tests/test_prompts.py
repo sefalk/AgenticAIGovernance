@@ -1,6 +1,5 @@
 """Tests for the deploy MCP workflow prompt text."""
 
-# copilot:generated | test-writer | 2026-07-08
 
 from __future__ import annotations
 

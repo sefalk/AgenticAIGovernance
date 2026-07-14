@@ -5,14 +5,20 @@ All notable changes to the Agent Framework are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<!-- copilot:modified | implementer | 2026-06-11 | documented optional ADO capability workers and fallback governance -->
-<!-- copilot:modified | implementer | 2026-06-30 | added optional ado-pipeline-manager capability worker -->
-<!-- copilot:modified | implementer | 2026-07-01 | three-tier terminal autonomy classifier + web-fetch allowlist -->
-<!-- copilot:modified | implementer | 2026-07-02 | released 1.19.0 (rolled Unreleased); added auto-version pre-commit hook -->
-<!-- copilot:modified | implementer | 2026-07-10 | AF deploy MCP server (af_deploy_mcp) + af-prefix unification (prompts, mcp) -->
-<!-- copilot:modified | implementer | 2026-07-13 | large-file commit guard (real git pre-commit hook) -->
-
 ## [Unreleased]
+
+### Changed
+
+- **Provenance markers no longer clutter the framework's own files.** Removed
+  ~129 in-code `copilot:generated`/`copilot:modified` markers from AF-authored
+  files (agents, instructions, skills, hooks, scripts, `mcp-deploy/**`, docs,
+  this CHANGELOG). They loaded into agent context on nearly every request for no
+  benefit — framework authorship is already traced by git history + this
+  CHANGELOG. `instructions/provenance.instructions.md` now scopes the marker
+  rule to **project deliverables inside a target repository** and explicitly
+  exempts the framework's own files; `templates/*.md` keep their placeholder so
+  generated plan/investigation docs still carry a marker. Marker documentation,
+  the `.py` provenance-check hooks, and example snippets are unchanged.
 
 ### Added
 
@@ -824,7 +830,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   interception at all (pytest block existed only in the PS1 version). This
   release adds full terminal handling parity: pytest block + commit message
   validation.
-
 
 ### Added
 
@@ -1801,4 +1806,3 @@ internally consistent, and ready for adoption.
 | 9 | Quality gate system — taxonomy, tiers, per-agent exit gates |
 | 10 | AF self-validation (`/af-validate-framework`) |
 
-> copilot:generated | implementer | 2026-03-09

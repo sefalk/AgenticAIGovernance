@@ -1,6 +1,3 @@
-# copilot:generated | implementer | 2026-03-16
-# copilot:modified  | implementer | 2026-04-14 | add branch context proof gate
-# copilot:modified  | implementer | 2026-04-16 | worktree-aware path resolution via active-worktree sentinel
 # Agent-scoped PreToolUse hook for the test-writer agent.
 #
 # TDD PHASE ISOLATION (HARD -- blocks test-writer from editing production code)

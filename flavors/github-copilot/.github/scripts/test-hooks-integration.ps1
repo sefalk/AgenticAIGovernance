@@ -1,5 +1,4 @@
 # Hook Integration Verification -- VS Code Output Channel Analysis
-# copilot:generated | implementer | 2026-04-02
 #
 # Parses the "GitHub Copilot Chat Hooks" output channel log to verify
 # that VS Code is actually invoking hooks during agent sessions.

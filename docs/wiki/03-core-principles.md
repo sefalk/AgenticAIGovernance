@@ -6,7 +6,6 @@ tags: [aaig, governance, principles, l1]
 updated: 2026-07-03
 sources: [core/L1_Core_Principles.md]
 ---
-<!-- copilot:generated | documenter | 2026-07-03 -->
 
 # Core Principles (L1)
 

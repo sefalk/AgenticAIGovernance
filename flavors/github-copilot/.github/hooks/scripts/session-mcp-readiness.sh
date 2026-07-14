@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# copilot:generated | implementer | 2026-06-11
 # SessionStart hook: verifies Azure DevOps MCP readiness and optionality state.
 # Output: additionalContext with READY, DEGRADED, or BLOCKED readiness summary.
 

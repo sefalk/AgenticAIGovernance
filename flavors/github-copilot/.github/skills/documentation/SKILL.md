@@ -169,8 +169,6 @@ All AI-generated or AI-modified code must carry parseable provenance markers.
 See `provenance.instructions.md` for the full specification.
 
 ```python
-# copilot:generated | implementer | 2026-02-13
-# copilot:modified  | refactorer  | 2026-02-14 | extracted pure logic
 ```
 
 ## Quality Gates

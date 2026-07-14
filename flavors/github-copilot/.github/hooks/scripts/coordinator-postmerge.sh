@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# copilot:generated | implementer | 2026-04-14
 # Agent-scoped Stop hook for the coordinator agent -- post-merge worktree cleanup gate.
 #
 # WORKTREE CLEANUP GATE (HARD -- verifies worktree is clean before removal)

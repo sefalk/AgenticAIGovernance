@@ -6,7 +6,6 @@ tags: [aaig, governance, benchmark, reference]
 updated: 2026-07-03
 sources: [core/benchmark/README.md, core/benchmark/scoring_model.md]
 ---
-<!-- copilot:generated | documenter | 2026-07-03 -->
 
 # Benchmark
 

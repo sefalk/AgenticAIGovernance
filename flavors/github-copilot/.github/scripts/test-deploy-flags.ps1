@@ -1,4 +1,3 @@
-# copilot:generated | implementer | 2026-04-15
 # Regression smoke tests for deploy flag behavior.
 
 Set-StrictMode -Version Latest

@@ -1,6 +1,3 @@
-# copilot:generated | implementer | 2026-03-XX
-# copilot:modified  | implementer | 2026-04-14 | add branch context proof gate
-# copilot:modified  | implementer | 2026-04-16 | worktree-aware path resolution via active-worktree sentinel
 # Agent-scoped PreToolUse hook for the refactorer agent.
 #
 # NO NEW FILES GATE (HARD -- blocks refactorer from creating files/directories)

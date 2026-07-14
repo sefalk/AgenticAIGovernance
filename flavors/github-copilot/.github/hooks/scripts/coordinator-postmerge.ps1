@@ -1,5 +1,3 @@
-# copilot:generated | implementer | 2026-04-14
-# copilot:modified  | implementer | 2026-04-16 | worktree-aware path resolution via active-worktree sentinel
 # Agent-scoped Stop hook for the coordinator agent -- post-merge worktree cleanup gate.
 #
 # WORKTREE CLEANUP GATE (HARD -- verifies worktree is clean before removal)

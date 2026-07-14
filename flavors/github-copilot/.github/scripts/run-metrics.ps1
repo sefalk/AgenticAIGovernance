@@ -1,5 +1,4 @@
 # Metrics collection script for agent workflows.
-# copilot:generated | implementer | 2026-03-30
 # Agents invoke this via predefined tasks (run_task) or createAndRunTask.
 #
 # Usage:

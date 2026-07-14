@@ -1,4 +1,3 @@
-# copilot:generated | implementer | 2026-04-14
 # Bootstrap a new git worktree for an agent task.
 #
 # Usage:

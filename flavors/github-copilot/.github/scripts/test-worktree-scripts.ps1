@@ -1,4 +1,3 @@
-# copilot:generated | test-writer | 2026-04-14
 # Integration tests for setup-worktree.ps1 and cleanup-worktree.ps1.
 #
 # Creates a temporary git repository, copies the scripts into it (so that

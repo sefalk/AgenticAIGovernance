@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# copilot:generated | implementer | 2026-03-16
-# copilot:modified  | implementer | 2026-03-17 | fixed false-positive deny on read-only tools
-# copilot:modified  | implementer | 2026-04-14 | add terminal interception: pytest block + commit message quality gate
-# copilot:modified  | implementer | 2026-04-14 | add git worktree add precondition gate (bash parity)
-# copilot:modified  | implementer | 2026-04-14 | add python environment bootstrap interception (ask/always/off)
 # Agent-scoped PreToolUse hook for the coordinator agent.
 #
 # DELEGATION ENFORCEMENT (HARD -- blocks coordinator from editing/creating files)

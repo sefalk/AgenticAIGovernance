@@ -5,7 +5,6 @@ function), covering the ``confirm`` guards, error paths, and payload resolution
 via ``AF_SOURCE_ROOT``. Skipped cleanly if the ``mcp`` package is unavailable.
 """
 
-# copilot:generated | test-writer | 2026-07-10
 
 from __future__ import annotations
 

@@ -11,7 +11,6 @@
 > sessions. Unlike instructions that _guide_ behaviour, hooks _enforce_ it
 > with code.
 
-<!-- copilot:modified | implementer | 2026-07-13 | added real-git-hook section (large-file guard) -->
 ## Real Git Hooks vs. Agent Hooks
 
 Everything below this section describes **agent hooks** — they only fire

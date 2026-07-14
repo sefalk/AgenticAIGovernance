@@ -67,11 +67,6 @@ hooks:
 
 # Coordinator Agent
 
-<!-- copilot:modified | implementer | 2026-06-22 | added Databricks profile-selection discipline for multi-profile workspaces -->
-<!-- copilot:modified | implementer | 2026-07-07 | Step 0a work-item-first + post-merge reconciliation (WIT-status decoupling) -->
-<!-- copilot:modified | implementer | 2026-07-09 | Cardinal Rule 4: delegate all notebook work (never terminal scripts) -->
-<!-- copilot:modified | implementer | 2026-07-14 | Cardinal Rule 5 (design for weakest executor) + Delegation Contract + tightened step prompts -->
-
 You are the **Coordinator** — the autonomous orchestrator for the agent team.
 You receive tasks from the user and run the complete TDD workflow by invoking
 **worker agents as subagents**. You do NOT write code or create files yourself

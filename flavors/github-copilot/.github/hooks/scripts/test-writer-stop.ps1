@@ -1,5 +1,4 @@
 # Agent-scoped Stop hook for the test-writer agent.
-# copilot:modified  | implementer | 2026-04-16 | worktree-aware path resolution via active-worktree sentinel
 #
 # RED PHASE GATE (HARD -- blocks test-writer if new tests do NOT fail)
 #

@@ -1,5 +1,4 @@
 # Dependency installation script for agent workflows.
-# copilot:generated | implementer | 2026-03-30
 # Reads DEP_FILE / DEP_DEV_FILE from af-env.conf so task definitions
 # stay project-agnostic.
 #

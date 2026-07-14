@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# copilot:generated | implementer | 2026-03-16
 # Agent-scoped PostToolUse hook for the coordinator agent.
 #
 # TERMINAL FILE-WRITE DETECTOR (detective -- warns when terminal modifies source files)

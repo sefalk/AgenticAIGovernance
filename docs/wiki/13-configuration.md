@@ -6,7 +6,6 @@ tags: [aaig, flavor, config, reference]
 updated: 2026-07-03
 sources: [flavors/github-copilot/.github/af-env.conf]
 ---
-<!-- copilot:generated | documenter | 2026-07-03 -->
 
 # Configuration
 

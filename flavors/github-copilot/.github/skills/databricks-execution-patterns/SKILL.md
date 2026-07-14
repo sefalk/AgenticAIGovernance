@@ -5,9 +5,6 @@ description: 'Deterministic Databricks workflow orchestration — metastore dete
 
 # Databricks Execution Patterns
 
-<!-- copilot:generated | implementer | 2026-06-22 | AF generalized from MP Usage XP -->
-<!-- copilot:modified | implementer | 2026-06-22 | aligned with official Databricks skill conventions for CLI/version/profile safeguards -->
-
 ## Purpose
 
 Provide deterministic runbook patterns for Databricks job and notebook execution

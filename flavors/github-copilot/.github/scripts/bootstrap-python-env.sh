@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# copilot:generated | implementer | 2026-04-14
 # Bootstrap Python environment for AF workflows.
 #
 # Usage:
@@ -129,7 +128,6 @@ if [[ "$NOTEBOOKS_ENABLED" == true ]]; then
     fi
 fi
 
-# copilot:generated | implementer | 2026-07-13
 # 5) Register the large-file commit guard (real git pre-commit hook)
 if [[ -f "$WORKSPACE_ROOT/.github/hooks/git/pre-commit" ]]; then
     chmod +x "$WORKSPACE_ROOT/.github/hooks/git/pre-commit" 2>/dev/null || true

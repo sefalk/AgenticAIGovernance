@@ -71,8 +71,6 @@ tools: ['edit/editFiles', 'execute/runTests']
 
 ### Model Assignment (Tier Placeholders)
 
-<!-- copilot:modified | implementer | 2026-07-06 | model tier convention -->
-
 Subagents pin their model via a **tier placeholder** that the deploy resolves to
 a concrete model list. The **coordinator stays unpinned** (no `model:` field) so
 it inherits the user's model picker.

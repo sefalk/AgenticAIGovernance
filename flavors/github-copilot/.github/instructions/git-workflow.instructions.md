@@ -6,8 +6,6 @@ applyTo: '**'
 
 # Git Workflow
 
-<!-- copilot:modified | implementer | 2026-07-07 | WIT-status decoupling: work-item-first, one-WIT-per-unit, id-match, post-merge reconciliation -->
-
 These rules define how agents interact with git. They consolidate and extend
 the git conventions from the [Agent Team Manifest](../MANIFEST.md).
 
@@ -406,8 +404,6 @@ Recommended `.gitignore` additions:
 ```
 
 ## Large File Commit Guard
-
-<!-- copilot:generated | implementer | 2026-07-13 -->
 
 A real git `pre-commit` hook (`.github/hooks/git/pre-commit`, enabled via
 `git config core.hooksPath .github/hooks/git` — done automatically by
