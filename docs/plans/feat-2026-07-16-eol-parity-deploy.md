@@ -64,5 +64,18 @@ markers are added; git history + CHANGELOG trace the change.
 ## Tests
 
 - pytest (mcp-deploy): CRLF→LF, BOM strip, LF no-op, tier-from-CRLF,
-  apply-writes-LF-no-BOM, hash EOL-independence, binary passthrough.
-- `scripts/test-eol-parity.ps1`: deploy.ps1 → MCP dry_run = 0 changes.
+  apply-writes-LF-no-BOM, hash EOL-independence, binary passthrough,
+  write_resolved canonicalization, uppercase-hash contract.
+- `tests/test_cross_tool_parity.py`: deploy.ps1 → MCP dry_run = 0 changes (both
+  directions); deploy.sh → MCP dry_run = 0 changes (POSIX-CI gated).
+
+## Review
+
+- **code-critic:** REJECTED (attempt 1) → APPROVED (attempt 2). Blocking find:
+  `deploy.sh` emitted lowercase SHA-256 while ps1/MCP emit uppercase → a
+  bash-written `.af-hashes` misclassified as CONFLICT under the case-sensitive
+  MCP compare (masked by PowerShell's case-insensitive `-eq`). Fixed via
+  `tr 'a-f' 'A-F'`; `write_resolved` canonicalization added; lone-CR/binary
+  divergence scoped out (text-only payload) with an in-code note.
+- Final: 67 passed, 1 skipped (bash cross-tool, env-gated); ruff clean;
+  deploy.ps1 parses clean. VERSION 1.20.3 → 1.21.x (minor).
