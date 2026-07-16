@@ -19,6 +19,7 @@ from af_deploy_mcp import deploy_core
 
 AF_ROOT = Path(__file__).resolve().parents[2]  # flavors/github-copilot
 DEPLOY_PS1 = AF_ROOT / "deploy.ps1"
+DEPLOY_SH = AF_ROOT / "deploy.sh"
 
 
 def _pwsh() -> str | None:
@@ -70,3 +71,27 @@ def test_mcp_apply_then_ps1_dryrun_is_clean(tmp_path: Path) -> None:
     # Parity: after an MCP apply, deploy.ps1 must plan no UPDATE/CONFLICT writes.
     assert "UPDATE  " not in res.stdout, res.stdout
     assert "CONFLICT " not in res.stdout, res.stdout
+
+
+@pytest.mark.skipif(
+    shutil.which("bash") is None or not DEPLOY_SH.is_file(),
+    reason="bash or deploy.sh not available",
+)
+def test_sh_deploy_then_mcp_dryrun_is_clean(tmp_path: Path) -> None:
+    # Guards the hash-casing fix: deploy.sh writes uppercase .af-hashes so the
+    # case-sensitive MCP 3-way classifier reads a bash baseline without spurious
+    # CONFLICTs. (Skipped on Windows where bash is absent.)
+    target = tmp_path / "proj"
+    target.mkdir()
+    res = subprocess.run(
+        ["bash", str(DEPLOY_SH), "--target", str(target), "--force"],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    report = deploy_core.dry_run(AF_ROOT, target)
+    counts = report["counts"]
+    assert counts.get("UPDATE", 0) == 0, report["files"]
+    assert counts.get("CONFLICT", 0) == 0, report["files"]
+    assert counts.get("CREATE", 0) == 0, report["files"]

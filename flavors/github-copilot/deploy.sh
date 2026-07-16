@@ -277,12 +277,15 @@ is_customizable() {
 
 # ── Helper: file hash ─────────────────────────────────────────────────────
 file_hash() {
+    # Uppercase hex to match deploy.ps1 (ToString('X2')) and deploy_core.py
+    # (.hexdigest().upper()) so a .af-hashes baseline is byte-portable across all
+    # three tools (the MCP/bash 3-way compare is case-sensitive).
     if command -v sha256sum &>/dev/null; then
-        sha256sum "$1" | cut -d' ' -f1
+        sha256sum "$1" | cut -d' ' -f1 | tr 'a-f' 'A-F'
     elif command -v shasum &>/dev/null; then
-        shasum -a 256 "$1" | cut -d' ' -f1
+        shasum -a 256 "$1" | cut -d' ' -f1 | tr 'a-f' 'A-F'
     else
-        md5sum "$1" | cut -d' ' -f1
+        md5sum "$1" | cut -d' ' -f1 | tr 'a-f' 'A-F'
     fi
 }
 # ── Agent model tier resolution ────────────────────────────────────────
@@ -336,6 +339,8 @@ tier_resolve_file() {
 }
 _strip_bom_cr() {
     # $1 = file; emit contents with a leading UTF-8 BOM removed and all CR dropped.
+    # (Scope: the payload is text-only with LF/CRLF endings; classic lone-CR Mac
+    # endings and non-UTF-8 text are out of scope and handled verbatim upstream.)
     if [[ "$(head -c3 "$1")" == $'\xEF\xBB\xBF' ]]; then
         tail -c +4 "$1" | tr -d '\r'
     else

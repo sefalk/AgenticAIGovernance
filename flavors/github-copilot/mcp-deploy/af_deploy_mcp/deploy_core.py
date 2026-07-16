@@ -87,6 +87,13 @@ def file_hash(path: Path) -> str:
     return _sha256_upper_bytes(path.read_bytes())
 
 
+def _canonicalize_text(text: str) -> str:
+    """Strip a leading UTF-8 BOM and normalize all line endings to LF."""
+    if text.startswith("\ufeff"):
+        text = text[1:]
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def resolved_source_bytes(path: Path, af_env_path: Path) -> bytes:
     """The canonical bytes that would be deployed.
 
@@ -100,8 +107,8 @@ def resolved_source_bytes(path: Path, af_env_path: Path) -> bytes:
     try:
         text = raw.decode("utf-8-sig")  # strips a leading UTF-8 BOM if present
     except UnicodeDecodeError:
-        return raw  # binary — never touch
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
+        return raw  # binary -- never touch
+    text = _canonicalize_text(text)
     if _TIER_TOKEN_RE.search(text):
         text = resolve_tier_tokens(text, af_env_path)
     return text.encode("utf-8")
@@ -479,7 +486,7 @@ def write_resolved(target_dir: Path, rel: str, content: str) -> dict:
         sub = p[len(".github/") :] if p.startswith(".github/") else p
         base, prefix = target_dir / ".github", ".github"
     path = _safe_join(base, sub)
-    data = content.encode("utf-8")
+    data = _canonicalize_text(content).encode("utf-8")
     _write_bytes(path, data)
     return {"path": f"{prefix}/{sub}", "bytes": len(data)}
 

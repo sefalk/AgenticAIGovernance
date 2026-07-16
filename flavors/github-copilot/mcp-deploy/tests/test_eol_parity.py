@@ -7,6 +7,7 @@ to what deploy.ps1/.sh emit for the same logical content.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from af_deploy_mcp import deploy_core
@@ -91,3 +92,29 @@ def test_apply_writes_lf_and_no_bom(tmp_path: Path) -> None:
     assert written == b"# Planner\nbody\n"
     assert b"\r" not in written
     assert not written.startswith(b"\xef\xbb\xbf")
+
+
+def test_write_resolved_canonicalizes_crlf_and_bom(tmp_path: Path) -> None:
+    target = tmp_path / "proj"
+    (target / ".github").mkdir(parents=True)
+    deploy_core.write_resolved(target, "agents/x.agent.md", "\ufeffline\r\ntwo\r\n")
+    written = (target / ".github" / "agents" / "x.agent.md").read_bytes()
+    assert written == b"line\ntwo\n"
+
+
+def test_baseline_hashes_are_uppercase(tmp_path: Path) -> None:
+    # deploy.ps1 (ToString('X2')) and deploy.sh (tr a-f A-F) emit uppercase hex;
+    # the MCP baseline must match so .af-hashes is byte-portable across tools.
+    src = tmp_path / "src"
+    gh = src / ".github"
+    (gh / "agents").mkdir(parents=True)
+    (src / "VERSION").write_bytes(b"1.0.0\n")
+    (gh / ".af-manifest").write_bytes(b"# manifest\nagents/\n")
+    (gh / "agents" / "planner.agent.md").write_bytes(b"# Planner\n")
+    target = tmp_path / "proj"
+    deploy_core.update_hashes(src, target)
+    hashes_text = (target / ".github" / ".af-hashes").read_text(encoding="utf-8")
+    values = [ln.split("=", 1)[1] for ln in hashes_text.splitlines() if "=" in ln and not ln.startswith("#")]
+    assert values, "expected at least one hash entry"
+    for val in values:
+        assert re.fullmatch(r"[0-9A-F]+", val), val
