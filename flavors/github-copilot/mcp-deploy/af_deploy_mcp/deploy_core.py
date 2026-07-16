@@ -12,7 +12,6 @@ slashes so a baseline written by either the ``.ps1`` (Windows, backslashes) or
 ``.sh`` (POSIX, forward slashes) deploy compares consistently.
 """
 
-
 from __future__ import annotations
 
 import difflib
@@ -89,15 +88,23 @@ def file_hash(path: Path) -> str:
 
 
 def resolved_source_bytes(path: Path, af_env_path: Path) -> bytes:
-    """The exact bytes that would be deployed: resolved for tier files, raw otherwise."""
+    """The canonical bytes that would be deployed.
+
+    Canonical = UTF-8 without BOM, LF line endings, with agent model-tier tokens
+    resolved. Non-UTF-8 (binary) content is returned untouched. Canonicalizing
+    here (not just for tier files) makes the deployed bytes byte-identical
+    regardless of the source's EOL/BOM, so the two deploy paths (this and
+    ``deploy.ps1``/``deploy.sh``) never disagree on otherwise-equal files.
+    """
     raw = path.read_bytes()
     try:
-        text = raw.decode("utf-8")
+        text = raw.decode("utf-8-sig")  # strips a leading UTF-8 BOM if present
     except UnicodeDecodeError:
-        return raw
-    if not _TIER_TOKEN_RE.search(text):
-        return raw
-    return resolve_tier_tokens(text, af_env_path).encode("utf-8")
+        return raw  # binary — never touch
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    if _TIER_TOKEN_RE.search(text):
+        text = resolve_tier_tokens(text, af_env_path)
+    return text.encode("utf-8")
 
 
 def source_hash_resolved(path: Path, af_env_path: Path) -> str:

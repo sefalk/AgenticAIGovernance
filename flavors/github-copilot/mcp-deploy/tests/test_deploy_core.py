@@ -1,6 +1,5 @@
 """Tests for deploy_core — the read-only AF deploy logic behind the MCP PoC."""
 
-
 from __future__ import annotations
 
 from pathlib import Path

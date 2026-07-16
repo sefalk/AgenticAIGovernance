@@ -1,0 +1,38 @@
+# Canonical line endings for the whole repo.
+#
+# The two AF deploy paths (deploy.ps1 / deploy.sh and the af_deploy_mcp MCP
+# server) must read identical *source* bytes so they emit byte-identical
+# deployed files. Without this, core.autocrlf=true gives a CRLF working tree on
+# Windows while a wheel-bundled payload stays LF, producing spurious whole-file
+# diffs when users switch deploy paths. Force LF everywhere (the git blobs are
+# already LF); the deploy tools also defensively canonicalize to LF at write time.
+* text=auto eol=lf
+
+# Executable shims and scripts must never be CRLF.
+*.sh    text eol=lf
+*.ps1   text eol=lf
+*.py    text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.jsonc text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.conf  text eol=lf
+*.txt   text eol=lf
+*.html  text eol=lf
+
+# Extensionless / dotted framework files.
+.github/hooks/git/pre-commit text eol=lf
+**/.af-manifest text eol=lf
+**/.af-version  text eol=lf
+**/VERSION      text eol=lf
+
+# Binary safety (never normalize, should such assets ever be added).
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.whl  binary

@@ -334,17 +334,38 @@ tier_resolve_file() {
     done < "$src" > "$tmp"
     printf '%s' "$tmp"
 }
-source_hash_resolved() {
-    # Hash of the deployed content: resolved bytes for tier files, raw otherwise.
-    local src="$1" tmp h
-    if has_tier_token "$src"; then
-        tmp="$(tier_resolve_file "$src")"
-        h="$(file_hash "$tmp")"
-        rm -f "$tmp"
-        printf '%s' "$h"
+_strip_bom_cr() {
+    # $1 = file; emit contents with a leading UTF-8 BOM removed and all CR dropped.
+    if [[ "$(head -c3 "$1")" == $'\xEF\xBB\xBF' ]]; then
+        tail -c +4 "$1" | tr -d '\r'
     else
-        file_hash "$src"
+        tr -d '\r' < "$1"
     fi
+}
+# Write canonical deployed bytes of $1 to path $2: UTF-8 no BOM, LF line endings,
+# tier tokens resolved. Binary/empty files are copied verbatim. Keeps deploy.sh
+# byte-identical to deploy.ps1 and the MCP deploy so switching paths yields no
+# spurious EOL diffs. (The framework payload is text-only.)
+canonical_write() {
+    local src="$1" dest="$2" rtmp
+    if ! LC_ALL=C grep -Iq . "$src" 2>/dev/null; then
+        cp "$src" "$dest"; return   # binary or empty -- copy verbatim
+    fi
+    if has_tier_token "$src"; then
+        rtmp="$(tier_resolve_file "$src")"
+        _strip_bom_cr "$rtmp" > "$dest"; rm -f "$rtmp"
+    else
+        _strip_bom_cr "$src" > "$dest"
+    fi
+}
+source_hash_resolved() {
+    # Hash of the canonical deployed content (LF, no BOM, tier-resolved).
+    local src="$1" tmp h
+    tmp="$(mktemp)"
+    canonical_write "$src" "$tmp"
+    h="$(file_hash "$tmp")"
+    rm -f "$tmp"
+    printf '%s' "$h"
 }
 # ── Hash-based 3-way merge ────────────────────────────────────────────────
 HASH_FILE="$TARGET_GITHUB/.af-hashes"
@@ -598,7 +619,7 @@ if [[ "$UPDATE_HASHES" == "true" ]]; then
     for f in "${MANIFEST_VSCODE_FILES[@]}"; do
         src="$SOURCE_VSCODE/$f"
         if [[ -f "$src" ]]; then
-            DEPLOYED_HASHES["vscode/$f"]="$(file_hash "$src")"
+            DEPLOYED_HASHES["vscode/$f"]="$(source_hash_resolved "$src")"
         fi
     done
     if [[ "$DRY_RUN" != "true" ]]; then
@@ -708,12 +729,7 @@ deploy_file() {
     if [[ "$DRY_RUN" != "true" ]]; then
         backup_before_overwrite "$tgt" "$display"
         mkdir -p "$(dirname "$tgt")"
-        if has_tier_token "$src"; then
-            local rtmp; rtmp="$(tier_resolve_file "$src")"
-            cp "$rtmp" "$tgt"; rm -f "$rtmp"
-        else
-            cp "$src" "$tgt"
-        fi
+        canonical_write "$src" "$tgt"
     fi
 }
 
@@ -779,7 +795,7 @@ if [[ "$DIFF_MODE" == "true" ]]; then
             printf "  -> project   %-50s  New in AF\n" ".vscode/$f"
             ((DIFF_COUNT++)) || true
         elif [[ -f "$src" ]] && [[ -f "$tgt" ]]; then
-            sh="$(file_hash "$src")"
+            sh="$(source_hash_resolved "$src")"
             th="$(file_hash "$tgt")"
             if [[ "$sh" != "$th" ]]; then
                 bh="${BASELINE_HASHES[vscode/$f]:-}"

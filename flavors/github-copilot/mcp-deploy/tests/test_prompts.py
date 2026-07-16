@@ -1,6 +1,5 @@
 """Tests for the deploy MCP workflow prompt text."""
 
-
 from __future__ import annotations
 
 from af_deploy_mcp import prompts

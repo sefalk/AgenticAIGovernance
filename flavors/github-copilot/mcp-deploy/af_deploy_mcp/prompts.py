@@ -7,7 +7,6 @@ client. The text instructs the driving agent which tools to call, in what order,
 and where a human confirmation is required — the tools themselves stay guarded.
 """
 
-
 from __future__ import annotations
 
 

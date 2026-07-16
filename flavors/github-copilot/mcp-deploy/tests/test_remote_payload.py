@@ -1,6 +1,5 @@
 """Tests for the optional remote payload fetch (governance mode)."""
 
-
 from __future__ import annotations
 
 import hashlib

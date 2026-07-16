@@ -28,7 +28,6 @@ in-repo flavor directory (dev mode). A packaged build would bundle the payload
 as package data.
 """
 
-
 from __future__ import annotations
 
 from pathlib import Path

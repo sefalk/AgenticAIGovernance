@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **EOL/BOM parity between the two deploy paths.** Switching between
+  `deploy.ps1`/`deploy.sh` and the MCP deploy (`af_deploy_mcp`) no longer
+  produces spurious whole-file diffs from line-ending drift (CRLF↔LF) or a
+  UTF-8 BOM. All three tools now write one **canonical byte representation —
+  UTF-8 without BOM, LF line endings, agent model-tier tokens resolved —** and
+  hash over exactly those bytes, so a deploy via one tool leaves the other's
+  dry-run/diff at zero changes. A repo `.gitattributes` (`* text=auto eol=lf`)
+  makes the source blobs deterministic (and fixes CRLF `.sh`/hook shims); the
+  deploy tools additionally canonicalize at write time, so parity holds even
+  from a CRLF working tree or a stale bundled wheel. Binary files are never
+  normalized.
+  **Design decision:** canonical EOL = *preserve source as LF* (the git blobs
+  are already LF), enforced by `.gitattributes` and backed by defensive
+  write-time LF-canonicalization in both tools. Chosen over pure
+  `.gitattributes` (which leaves an existing Windows working tree CRLF on disk
+  until a destructive re-checkout) and over unconditional normalization
+  (identical bytes, but the hybrid keeps "source is truth" while staying robust).
+  **Migration:** existing targets with mixed EOL self-heal on the next deploy —
+  non-customizable files are rewritten to LF as a one-time UPDATE pass; then run
+  `-UpdateHashes` / `update_hashes` to re-baseline `.af-hashes`. Customizable
+  files keep their EOL until an intentional edit.
+
 ### Changed
 
 - **Provenance markers no longer clutter the framework's own files.** Removed

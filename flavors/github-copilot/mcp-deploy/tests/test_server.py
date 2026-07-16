@@ -5,7 +5,6 @@ function), covering the ``confirm`` guards, error paths, and payload resolution
 via ``AF_SOURCE_ROOT``. Skipped cleanly if the ``mcp`` package is unavailable.
 """
 
-
 from __future__ import annotations
 
 from pathlib import Path

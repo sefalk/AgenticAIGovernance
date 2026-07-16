@@ -20,7 +20,6 @@ No project data ever leaves the machine — this is a one-way, outbound fetch of
 framework payload only. Dependency-free (stdlib: urllib, hashlib, zipfile, tarfile).
 """
 
-
 from __future__ import annotations
 
 import hashlib

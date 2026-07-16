@@ -185,17 +185,33 @@ function Get-TierTransform([string]$Source) {
     if ($raw -notmatch '__AF_TIER_(PREMIUM|BALANCED|EFFICIENT)__') { return $null }
     return (Resolve-TierTokens $raw)
 }
-function Get-StringHashUpper([string]$Text) {
-    $enc = New-Object System.Text.UTF8Encoding($false)
+function Get-BytesHashUpper([byte[]]$Bytes) {
     $sha = [System.Security.Cryptography.SHA256]::Create()
-    try { $h = $sha.ComputeHash($enc.GetBytes($Text)) } finally { $sha.Dispose() }
+    try { $h = $sha.ComputeHash($Bytes) } finally { $sha.Dispose() }
     return (($h | ForEach-Object { $_.ToString('X2') }) -join '')
 }
+function Get-StringHashUpper([string]$Text) {
+    return (Get-BytesHashUpper ((New-Object System.Text.UTF8Encoding($false)).GetBytes($Text)))
+}
+# Canonical deployed bytes: UTF-8 without BOM, LF line endings, tier tokens
+# resolved. Returns $null for binary (non-UTF-8) content so the caller copies it
+# verbatim. Keeps deploy.ps1 byte-identical to the MCP deploy's
+# resolved_source_bytes, so switching deploy paths produces no spurious EOL diffs.
+function Get-CanonicalBytes([string]$Source) {
+    $bytes = [System.IO.File]::ReadAllBytes($Source)
+    $decoder = New-Object System.Text.UTF8Encoding($false, $true)  # throw on invalid bytes
+    try { $text = $decoder.GetString($bytes) } catch { return $null }  # binary -- copy verbatim
+    if ($text.Length -gt 0 -and $text[0] -eq [char]0xFEFF) { $text = $text.Substring(1) }  # strip BOM
+    $text = $text -replace "`r`n", "`n"
+    $text = $text -replace "`r", "`n"
+    if ($text -match '__AF_TIER_(PREMIUM|BALANCED|EFFICIENT)__') { $text = Resolve-TierTokens $text }
+    return (New-Object System.Text.UTF8Encoding($false)).GetBytes($text)
+}
 function Get-SourceHashResolved([string]$Source) {
-    # Hash of the deployed content: resolved bytes for tier files, raw otherwise.
-    $t = Get-TierTransform $Source
-    if ($null -ne $t) { return Get-StringHashUpper $t }
-    return (Get-FileHash $Source).Hash
+    # Hash of the canonical deployed content (LF, no BOM, tier-resolved).
+    $canon = Get-CanonicalBytes $Source
+    if ($null -eq $canon) { return (Get-FileHash $Source).Hash }
+    return (Get-BytesHashUpper $canon)
 }
 
 function Resolve-BackupPruneDays {
@@ -376,7 +392,7 @@ function Write-HashFile {
     $Hashes.GetEnumerator() | Sort-Object Key | ForEach-Object {
         $lines += "$($_.Key)=$($_.Value)"
     }
-    Set-Content -Path $path -Value ($lines -join "`n")
+    [System.IO.File]::WriteAllText($path, (($lines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
 }
 
 $script:BaselineHashes = Read-HashFile
@@ -637,7 +653,7 @@ if ($UpdateHashes) {
     foreach ($f in $ManifestVSCodeFiles) {
         $src = Join-Path $SourceVSCode $f
         if (Test-Path $src) {
-            $hashEntries["vscode/$f"] = (Get-FileHash $src).Hash
+            $hashEntries["vscode/$f"] = Get-SourceHashResolved $src
         }
     }
     if (-not $DryRun) {
@@ -665,8 +681,8 @@ function Publish-SingleFile {
     }
     $isCustom = $script:CustomizableFiles.Contains($HashKey)
     $exists = Test-Path $Target
-    $transform = Get-TierTransform $Source
-    $sourceHash = if ($null -ne $transform) { Get-StringHashUpper $transform } else { (Get-FileHash $Source).Hash }
+    $canon = Get-CanonicalBytes $Source
+    $sourceHash = if ($null -ne $canon) { Get-BytesHashUpper $canon } else { (Get-FileHash $Source).Hash }
 
     # ── New file: always deploy ──
     if (-not $exists) {
@@ -750,8 +766,8 @@ function Publish-SingleFile {
         Backup-BeforeOverwrite -TargetFile $Target -DisplayPath $DisplayPath
         $dir = Split-Path $Target -Parent
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        if ($null -ne $transform) {
-            [System.IO.File]::WriteAllText($Target, $transform, (New-Object System.Text.UTF8Encoding($false)))
+        if ($null -ne $canon) {
+            [System.IO.File]::WriteAllBytes($Target, $canon)
         } else {
             Copy-Item $Source $Target -Force
         }
@@ -782,7 +798,7 @@ if ($Diff) {
             } elseif ((Get-SourceHashResolved $src) -ne (Get-FileHash $tgt).Hash) {
                 $bh = $script:BaselineHashes[$rel]
                 if ($bh) {
-                    $sh = (Get-FileHash $src).Hash
+                    $sh = Get-SourceHashResolved $src
                     $th = (Get-FileHash $tgt).Hash
                     if (($sh -ne $bh) -and ($th -eq $bh)) {
                         $diffs += [PSCustomObject]@{ File = ".github/$rel"; Direction = '-> UPDATE'; Status = 'AF changed (safe to deploy)' }
@@ -818,7 +834,7 @@ if ($Diff) {
             if ((Test-Path $src) -and -not (Test-Path $tgt)) {
                 $diffs += [PSCustomObject]@{ File = ".vscode/$f"; Direction = '-> project'; Status = 'New in AF (not deployed)' }
             } elseif ((Test-Path $src) -and (Test-Path $tgt)) {
-                $sh = (Get-FileHash $src).Hash
+                $sh = Get-SourceHashResolved $src
                 $th = (Get-FileHash $tgt).Hash
                 if ($sh -ne $th) {
                     $bh = $script:BaselineHashes["vscode/$f"]
@@ -947,7 +963,9 @@ if (-not $DryRun) {
     if (-not (Test-Path $TargetGitHub)) {
         New-Item -ItemType Directory -Path $TargetGitHub -Force | Out-Null
     }
-    Set-Content -Path $DeployedVersionFile -Value $versionContent
+    $vc = ($versionContent -replace "`r`n", "`n" -replace "`r", "`n")
+    if (-not $vc.EndsWith("`n")) { $vc += "`n" }
+    [System.IO.File]::WriteAllText($DeployedVersionFile, $vc, (New-Object System.Text.UTF8Encoding($false)))
 }
 Write-Host "  WRITE   .github/.af-version" -ForegroundColor Cyan
 
