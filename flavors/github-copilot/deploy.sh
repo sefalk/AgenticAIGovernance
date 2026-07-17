@@ -541,12 +541,17 @@ test_notebook_git_filter_config() {
 }
 
 # ── Collect all source files ───────────────────────────────────────────────
+# Python bytecode caches regenerate whenever a hook/script test runs; they must
+# never enter the deploy payload. Emit only deployable files (null-delimited).
+find_deployable_files() {
+    find "$1" -type f -not -path '*/__pycache__/*' -not -name '*.pyc' -not -name '*.pyo' -print0
+}
 get_af_source_files() {
     # Outputs relative paths under .github/ (one per line)
     for dir in "${MANIFEST_DIRS[@]}"; do
         local src_dir="$SOURCE_GITHUB/$dir"
         [[ ! -d "$src_dir" ]] && continue
-        find "$src_dir" -type f -print0 | while IFS= read -r -d '' file; do
+        find_deployable_files "$src_dir" | while IFS= read -r -d '' file; do
             echo "${file#"$SOURCE_GITHUB"/}"
         done
     done
@@ -789,7 +794,7 @@ if [[ "$DIFF_MODE" == "true" ]]; then
                 printf "  <- project   %-50s  Added in project\n" ".github/$rel"
                 ((DIFF_COUNT++)) || true
             fi
-        done < <(find "$tgt_dir" -type f -print0)
+        done < <(find_deployable_files "$tgt_dir")
     done
 
     # Check vscode files from manifest
@@ -881,7 +886,7 @@ for dir in "${MANIFEST_DIRS[@]}"; do
     while IFS= read -r -d '' file; do
         rel="${file#"$SOURCE_GITHUB"/}"
         deploy_file "$file" "$TARGET_GITHUB/$rel" ".github/$rel" "$rel"
-    done < <(find "$src_dir" -type f -print0 | sort -z)
+    done < <(find_deployable_files "$src_dir" | sort -z)
 done
 
 echo ""

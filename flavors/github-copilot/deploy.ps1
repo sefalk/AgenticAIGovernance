@@ -347,13 +347,18 @@ $script:BackupDir = $null
 $script:BackupCount = 0
 
 # ── Collect all source files ───────────────────────────────────────────────
+# Python bytecode caches regenerate whenever a hook/script test runs; they must
+# never enter the deploy payload. Exclude them from every file enumeration.
+function Test-DeployIgnored([string]$FullPath) {
+    return ($FullPath -match '[\\/]__pycache__[\\/]') -or ($FullPath -match '\.py[co]$')
+}
 function Get-AFSourceFiles {
     # Returns relative paths under .github/ (excludes vscode files)
     $files = @()
     foreach ($dir in $ManifestDirs) {
         $srcDir = Join-Path $SourceGitHub $dir
         if (Test-Path $srcDir) {
-            Get-ChildItem $srcDir -Recurse -File | ForEach-Object {
+            Get-ChildItem $srcDir -Recurse -File | Where-Object { -not (Test-DeployIgnored $_.FullName) } | ForEach-Object {
                 $rel = ($_.FullName.Substring($SourceGitHub.Length).TrimStart('\', '/')) -replace '\\', '/'
                 $files += $rel
             }
@@ -817,7 +822,7 @@ if ($Diff) {
         foreach ($dir in $ManifestDirs) {
             $tgtDir = Join-Path $TargetGitHub $dir
             if (Test-Path $tgtDir) {
-                Get-ChildItem $tgtDir -Recurse -File | ForEach-Object {
+                Get-ChildItem $tgtDir -Recurse -File | Where-Object { -not (Test-DeployIgnored $_.FullName) } | ForEach-Object {
                     $rel = $_.FullName.Substring($TargetGitHub.Length).TrimStart('\', '/')
                     $src = Join-Path $SourceGitHub $rel
                     if (-not (Test-Path $src)) {
@@ -911,7 +916,7 @@ Write-Host "  .github/ directories:" -ForegroundColor White
 foreach ($dir in $ManifestDirs) {
     $srcDir = Join-Path $SourceGitHub $dir
     if (-not (Test-Path $srcDir)) { continue }
-    Get-ChildItem $srcDir -Recurse -File | ForEach-Object {
+    Get-ChildItem $srcDir -Recurse -File | Where-Object { -not (Test-DeployIgnored $_.FullName) } | ForEach-Object {
         $rel = ($_.FullName.Substring($SourceGitHub.Length).TrimStart('\', '/')) -replace '\\', '/'
         Publish-SingleFile -Source $_.FullName `
                           -Target (Join-Path $TargetGitHub $rel) `

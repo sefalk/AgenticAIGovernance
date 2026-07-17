@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Python bytecode caches no longer leak into the deploy payload.** A stray
+  `__pycache__/*.pyc` (created whenever a hook/script test runs against the AF
+  source) was picked up by the recursive payload enumeration and deployed as a
+  spurious `CREATE` (e.g.
+  `hooks/scripts/__pycache__/check-large-files.cpython-311.pyc`). Every
+  source/target file enumeration in `deploy.ps1`, `deploy.sh`, and the MCP
+  (`collect_source_files`) now excludes `__pycache__/` and `*.pyc`/`*.pyo`, and
+  a repo `.gitignore` entry prevents accidental tracking.
+
 - **EOL/BOM parity between the two deploy paths.** Switching between
   `deploy.ps1`/`deploy.sh` and the MCP deploy (`af_deploy_mcp`) no longer
   produces spurious whole-file diffs from line-ending drift (CRLF↔LF) or a

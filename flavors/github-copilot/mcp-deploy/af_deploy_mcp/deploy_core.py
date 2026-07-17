@@ -166,6 +166,12 @@ def parse_manifest(manifest_path: Path) -> Manifest:
     return m
 
 
+def _is_ignored_artifact(p: Path) -> bool:
+    """Python bytecode caches regenerate on any hook/script test run and must
+    never enter the deploy payload."""
+    return "__pycache__" in p.parts or p.suffix in (".pyc", ".pyo")
+
+
 def collect_source_files(source_github: Path, manifest: Manifest) -> list[str]:
     """All deployable .github-relative files (forward-slash keys)."""
     rels: list[str] = []
@@ -173,7 +179,7 @@ def collect_source_files(source_github: Path, manifest: Manifest) -> list[str]:
         src_dir = source_github / d
         if src_dir.is_dir():
             for p in sorted(src_dir.rglob("*")):
-                if p.is_file():
+                if p.is_file() and not _is_ignored_artifact(p):
                     rels.append(_norm(str(p.relative_to(source_github))))
     for f in manifest.root_files:
         if (source_github / f).is_file():

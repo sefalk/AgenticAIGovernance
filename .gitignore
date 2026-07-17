@@ -4,3 +4,8 @@
 .aaig/
 
 .databricks
+
+# Python bytecode caches (regenerate whenever a hook/script test runs)
+__pycache__/
+*.pyc
+*.pyo

@@ -314,6 +314,18 @@ def test_resolve_source_root_dev_fallback(tmp_path: Path, monkeypatch) -> None:
     assert deploy_core.resolve_source_root(package_dir=pkg) == (tmp_path / "flavor").resolve()
 
 
+def test_collect_source_files_excludes_pycache(tmp_path: Path) -> None:
+    root = _make_source(tmp_path / "src")
+    gh = root / ".github"
+    # Stray bytecode caches (regenerate when the guard test runs) must be ignored.
+    _write(gh / "agents" / "__pycache__" / "planner.cpython-311.pyc", "junk")
+    _write(gh / "agents" / "leftover.pyc", "junk")
+    manifest = deploy_core.parse_manifest(gh / ".af-manifest")
+    files = deploy_core.collect_source_files(gh, manifest)
+    assert not any("__pycache__" in f or f.endswith((".pyc", ".pyo")) for f in files)
+    assert "agents/planner.agent.md" in files
+
+
 def test_validate_payload_flags_missing_pieces(tmp_path: Path) -> None:
     assert deploy_core.validate_payload(tmp_path) is not None  # no VERSION
     (tmp_path / "VERSION").write_text("1.0.0\n", encoding="utf-8")
