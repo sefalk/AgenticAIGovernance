@@ -11,10 +11,10 @@
 | # | Measure | Size | Branch | Status |
 |---|---|---|---|---|
 | 1 | Deploy-prompt reapply ordering (reapply AFTER resolve_conflicts) | small | `agent/deploy-prompt-ordering-fix` | DONE (pending merge) |
-| 2 | Managed-block delimiter for curated agent skills | large | — | TODO (design first) |
+| 2 | Managed regions (general, sparing) + apply to curated agent skills | large | `agent/managed-regions` | DESIGN REFINED |
 | 3 | Skill-deactivation churn (deactivated framework skill = perpetual CREATE) | medium | — | TODO |
 | 4 | curate-skills: warn on assignment to an agent without `## Skills` | small | — | TODO |
-| 5 | curate-skills: separate framework-base skills from curation (researcher redundancy) | small | — | TODO |
+| 5 | curate-skills: separate framework-base skills from curation (researcher redundancy) | small | — | FOLDED into #2 (2c AC7) |
 | 6 | *(MP-local, not framework)* add 5 new `af-env.conf` keys (guard + ADO) | small | — | TODO (MP repo) |
 
 ---
@@ -57,16 +57,84 @@ curation loss; needs a second reapply. Validated manually in the MP redeploy.
 
 ---
 
-## Measure 2 — Managed-block delimiter for curated agent skills  *(to refine)*
+## Measure 2 — Managed regions (general, sparing)  *(REFINED)*
 
-**Root cause of the whole "curated-agent CONFLICT" class.** Curation appends bare
-`- **skill** (...)` lines into a non-customizable agent's `## Skills` section with
-no delimiter, so every framework change to that agent → CONFLICT, and reapply
-"regenerates" by appending (dup/drift risk). Idea: wrap curated skill lines in a
-managed block (e.g. `<!-- AF:CURATED-SKILLS:START -->…<!-- END -->`) so the deploy
-3-way merge and reapply treat base vs. curation independently. **Design decision
-needed before code** (how deploy diff ignores the block; reapply idempotency;
-migration of existing curated agents). Highest value.
+### Decisions (confirmed with human 2026-07-17)
+- **Concept approved.** A deployed file may contain **managed regions** whose
+  inner content is project-owned; the deploy ignores that content when deciding
+  UPDATE/CONFLICT and preserves it on write.
+- **General mechanism, used sparingly.** Allowed in any deployable file, but it
+  is a *last resort*. **Prefer `af-env.conf` for project-specification whenever
+  possible** — managed regions are only for per-project content that cannot be
+  expressed as config (e.g. curated skill lines injected into agent prose).
+- **First (only current) consumer:** the curated-skills block in agent
+  `## Skills` sections. This also resolves #5 (base vs. curation now delimited).
+
+### Marker syntax
+```
+<!-- AF:MANAGED:{region-name}:START -->
+   ...project-owned content...
+<!-- AF:MANAGED:{region-name}:END -->
+```
+Detection is comment-wrapper-agnostic (match a line containing
+`AF:MANAGED:{name}:START` / `:END`), so the same mechanism works for `#`, `//`,
+`<!-- -->` hosts later. Framework source ships the region **empty** (markers
+only) as the slot.
+
+### Deploy semantics (the core)
+- **Hash for classification** = the file with every managed region **normalized
+  to empty** (inner content stripped, markers kept). Applied to BOTH source and
+  target → content inside a region never causes UPDATE/CONFLICT.
+- **Write on UPDATE** = take the framework source, then **transplant the
+  target's current region content** into each same-named region (preserve
+  project content); framework changes outside regions still land.
+- **CREATE** = framework version (region empty/template).
+- Must be **byte-parity across deploy_core, deploy.ps1, deploy.sh** and coexist
+  with tier-token resolution + EOL/BOM canonicalization.
+
+### Sub-steps
+- **2a — Core mechanism (deploy_core, TDD) — ✅ DONE (7 tests, dormant until 2b/2c):**
+  region parse + `normalize_regions`
+  (empty for hashing) + `merge_regions` (transplant target content on write);
+  wire into `source_hash_resolved`/`resolved_source_bytes` classification and the
+  apply write path. Unit tests: region content change → UNCHANGED; base change →
+  UPDATE; update preserves target region; malformed/again-empty regions safe.
+- **2b — Parity (deploy.ps1 + deploy.sh):** same region-aware hash + write;
+  extend the cross-tool parity test with a region fixture.
+- **2c — Curated-skills consumer:** add the empty
+  `AF:MANAGED:curated-skills` region to framework agent `## Skills`; update
+  `/af-curate-skills` (curate + reapply) to write ONLY inside the region
+  (idempotent); migration wraps existing bare curated lines into the region.
+  **Region-vs-base dedup (promoted-curation guard):** when (re)building the
+  region, skip any assigned skill the agent already references in its **base**
+  Skills section (name-based, `skills/{name}/`). This prevents duplication when a
+  curated skill is abstracted into the framework base, and auto-drops it from the
+  region on the next reapply (optionally also from `curated-assignments.json`).
+  This is the researcher case seen live in the MP redeploy and **consolidates #5**.
+- **2d — Guidance:** short instruction/section documenting managed regions +
+  the **“sparing, prefer af-env.conf”** rule; note it supersedes the bare-line
+  curation approach (fixes #5).
+
+### Acceptance criteria
+- [ ] AC1: A file whose only diff is inside a managed region classifies
+      UNCHANGED (both tools).
+- [ ] AC2: A base (outside-region) change classifies UPDATE; applying it
+      preserves the target's region content.
+- [ ] AC3: deploy_core, deploy.ps1, deploy.sh produce byte-identical results on
+      a region fixture (cross-tool parity test).
+- [ ] AC4: curated-skills writes/reapplies only inside the region; repeated
+      reapply is idempotent (no duplication).
+- [ ] AC5: existing bare-curated agents migrate into the region once.
+- [ ] AC6: guidance documents sparing use + af-env.conf preference.
+- [ ] AC7: region-vs-base dedup — a curated skill that is now in the agent's
+      base Skills section is NOT written into the region (no duplication);
+      covered by a test. Consolidates #5.
+
+### Open micro-decisions (my defaults unless you object)
+- Migration lives in `/af-curate-skills --reapply` (detect bare curated lines →
+  wrap) rather than a separate script. *(default)*
+- One region per agent (`curated-skills`) for now; multiple regions per file
+  supported by the mechanism but unused. *(default)*
 
 ## Measure 3 — Skill-deactivation churn  *(to refine)*
 Deactivated framework skills (git-worktrees when `WORKTREE_ENABLED=false`) are

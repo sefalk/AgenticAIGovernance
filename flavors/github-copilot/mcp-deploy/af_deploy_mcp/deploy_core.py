@@ -114,9 +114,70 @@ def resolved_source_bytes(path: Path, af_env_path: Path) -> bytes:
     return text.encode("utf-8")
 
 
+_MANAGED_REGION_RE = re.compile(
+    r"(?P<start>^[^\n]*AF:MANAGED:(?P<name>[\w.\-]+):START[^\n]*\n)"
+    r"(?P<body>.*?)"
+    r"(?P<end>^[^\n]*AF:MANAGED:(?P=name):END[^\n]*$)",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def strip_managed_regions(text: str) -> str:
+    """Empty every ``AF:MANAGED`` region body (keep the marker lines).
+
+    Used for classification hashing so project-owned region content never counts
+    as a framework change.
+    """
+    return _MANAGED_REGION_RE.sub(lambda m: m.group("start") + m.group("end"), text)
+
+
+def _managed_region_bodies(text: str) -> dict[str, str]:
+    return {m.group("name"): m.group("body") for m in _MANAGED_REGION_RE.finditer(text)}
+
+
+def merge_managed_regions(base_text: str, overlay_text: str) -> str:
+    """Return ``base_text`` with each region body replaced by ``overlay_text``'s
+    same-named region body (transplant project content onto the framework base)."""
+    overlay = _managed_region_bodies(overlay_text)
+
+    def _repl(m: re.Match) -> str:
+        body = overlay.get(m.group("name"), m.group("body"))
+        return m.group("start") + body + m.group("end")
+
+    return _MANAGED_REGION_RE.sub(_repl, base_text)
+
+
+def _strip_bytes(data: bytes) -> bytes:
+    """UTF-8 text with managed regions emptied; binary/region-less bytes unchanged."""
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data
+    stripped = strip_managed_regions(text)
+    return stripped.encode("utf-8") if stripped != text else data
+
+
+def _merge_target_regions(data: bytes, target: Path) -> bytes:
+    """Transplant the existing target's managed-region content onto the framework
+    base so project-owned regions survive an UPDATE. No-op without regions."""
+    if not target.is_file():
+        return data
+    try:
+        merged = merge_managed_regions(data.decode("utf-8"), target.read_text(encoding="utf-8"))
+    except UnicodeDecodeError:
+        return data
+    return merged.encode("utf-8")
+
+
 def source_hash_resolved(path: Path, af_env_path: Path) -> str:
-    """Hash of the *deployed* content: resolved bytes for tier files, raw otherwise."""
-    return _sha256_upper_bytes(resolved_source_bytes(path, af_env_path))
+    """Classification hash of the deployed content: canonical + tier-resolved, with
+    managed-region bodies stripped (region content is project-owned, not framework)."""
+    return _sha256_upper_bytes(_strip_bytes(resolved_source_bytes(path, af_env_path)))
+
+
+def _target_classify_hash(path: Path) -> str:
+    """Classification hash of a deployed target file (managed regions stripped)."""
+    return _sha256_upper_bytes(_strip_bytes(path.read_bytes()))
 
 
 @dataclass
@@ -366,7 +427,7 @@ def dry_run(source_root: Path, target_dir: Path) -> dict:
     counts: dict[str, int] = {}
     for u in units:
         src_h = source_hash_resolved(u.source, target_af_env)
-        tgt_h = file_hash(u.target) if u.target.is_file() else None
+        tgt_h = _target_classify_hash(u.target) if u.target.is_file() else None
         cls = _classify(u.is_custom, src_h, tgt_h, baseline.get(u.hash_key), has_baseline)
         counts[cls] = counts.get(cls, 0) + 1
         results.append({"path": u.display, "classification": cls, "customizable": u.is_custom})
@@ -437,8 +498,8 @@ def apply(source_root: Path, target_dir: Path) -> dict:
 
     for u in collect_units(source_root, target_dir, manifest):
         data = resolved_source_bytes(u.source, target_af_env)
-        src_h = _sha256_upper_bytes(data)
-        tgt_h = file_hash(u.target) if u.target.is_file() else None
+        src_h = _sha256_upper_bytes(_strip_bytes(data))
+        tgt_h = _target_classify_hash(u.target) if u.target.is_file() else None
         cls = _classify(u.is_custom, src_h, tgt_h, baseline.get(u.hash_key), has_baseline)
         if cls in ("CREATE", "UPDATE"):
             if u.target.is_file():
@@ -446,7 +507,7 @@ def apply(source_root: Path, target_dir: Path) -> dict:
                 bpath.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(u.target, bpath)
                 made_backup = True
-            _write_bytes(u.target, data)
+            _write_bytes(u.target, _merge_target_regions(data, u.target))
             deployed[u.hash_key] = src_h
             applied.append(u.display)
         elif cls == "UNCHANGED":
