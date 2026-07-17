@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Deploy prompt: reapply curated skills AFTER conflict resolution.** The
+  `/mcp.af.deploy` redeploy flow ran `--reapply` *before* resolving conflicts, so
+  a curated agent that landed in CONFLICT got its curation re-applied to the
+  stale base and then discarded when the conflict was resolved by taking the
+  framework — silent curation loss on large version jumps. The `deploy_prompt`
+  now orders redeploy as **apply → resolve conflicts (curated-agent conflicts
+  take framework base) → reapply curated skills → single final `update_hashes`
+  re-baseline**, so curation lands on the final base and future dry-runs show
+  PRESERVE instead of CONFLICT.
+
 - **Python bytecode caches no longer leak into the deploy payload.** A stray
   `__pycache__/*.pyc` (created whenever a hook/script test runs against the AF
   source) was picked up by the recursive payload enumeration and deployed as a

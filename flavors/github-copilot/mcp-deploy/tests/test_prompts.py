@@ -56,6 +56,17 @@ def test_deploy_prompt_redeploy_falls_back_to_full_curate_when_uncurated() -> No
     assert "fall back" in text.lower()
 
 
+def test_deploy_prompt_reapplies_after_conflict_resolution() -> None:
+    text = prompts.deploy_prompt("/proj")
+    # The ordering gap fix: resolve conflicts BEFORE reapply, then re-baseline last.
+    resolve_i = text.index("Resolve conflicts")
+    reapply_i = text.index("Reapply curated skills")
+    rebaseline_i = text.index("Re-baseline")
+    assert resolve_i < reapply_i < rebaseline_i
+    # And the reason is stated explicitly.
+    assert "AFTER conflict resolution" in text
+
+
 def test_resolve_conflicts_prompt_orders_the_merge_workflow() -> None:
     text = prompts.resolve_conflicts_prompt("/proj")
     assert "/proj" in text
