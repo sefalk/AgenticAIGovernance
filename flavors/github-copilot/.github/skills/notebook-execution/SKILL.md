@@ -58,6 +58,34 @@ through the notebook tools instead.
 - `jupyter nbconvert --execute` / `papermill` as a substitute for `runNotebookCell`
   (only acceptable for an explicit headless-CI requirement, not for interactive work).
 - `Set-Content` / `echo >` to fabricate or overwrite a notebook instead of `editNotebook`.
+
+## Artifact Weight Hygiene
+
+Notebooks easily bloat a repository with heavyweight artifacts — embedded cell
+outputs and self-contained interactive HTML that inlines an entire JS library.
+Keep committed artifacts small **before** they are created; the large-file
+commit guard (`.github/hooks/scripts/check-large-files.py`) is only the reactive
+backstop, not the plan.
+
+- **Reference, don't embed.** Export interactive visualizations so they *point*
+  at their runtime library (a CDN/URL) instead of inlining it — a referenced
+  export is typically kilobytes, a self-contained one bundles megabytes of JS.
+  The principle is library-agnostic (Plotly, Bokeh, Altair/Vega, folium, …);
+  e.g. for Plotly `fig.write_html(path, include_plotlyjs="cdn")`. Go
+  self-contained only for a *deliberately* offline-portable artifact.
+- **Strip outputs before committing.** Rendered tables, base64 images, and
+  execution counts balloon `.ipynb` size and diffs. Where
+  `NOTEBOOKS_ENABLED=true`, the `nbstripout` git clean filter is wired to strip
+  them automatically — keep it active; never commit un-stripped outputs.
+- **Big binaries belong in Git LFS.** A genuinely large, necessary asset
+  (dataset sample, offline-portable export) is tracked with LFS so only a
+  pointer is committed — never the multi-MB blob in the tree.
+- **Place interactive exports deliberately.** Large/interactive HTML belongs in
+  a docs or code-wiki artifact store (e.g. a repo wiki path), exported in
+  reference mode — not dropped into the source tree where it inflates every clone.
+- **Fix the source of the weight, not the guard.** If the large-file guard
+  blocks a commit, switch to reference mode, strip outputs, or move the asset to
+  LFS — reach for the override only for a truly intentional large file.
 - Editing raw `.ipynb` JSON by hand.
 - Trying to "execute" markdown cells — markdown cells are not runnable.
 

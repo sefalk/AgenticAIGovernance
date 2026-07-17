@@ -46,6 +46,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Proactive notebook artifact-weight hygiene (guidance).** The
+  `notebook-execution` skill gains an *Artifact Weight Hygiene* section with
+  library-agnostic principles to stop notebook-driven repo bloat before it
+  happens: reference (CDN/URL) over self-contained embedding, strip outputs via
+  the wired `nbstripout` filter, big binaries to Git LFS, and place interactive
+  exports in a docs/wiki artifact store. The large-file commit guard's fix hint
+  was generalized (reference-mode, not Plotly-specific) and now points at the
+  skill.
+  **Design decision:** deliberately *guidance-only* — no dedicated bloat
+  detector hook. A format-specific detector (e.g. grepping HTML for embedded
+  `plotly.js`) would be a leaky, false-positive-prone abstraction that largely
+  duplicates the existing size guard for the real (multi-MB) pain; the size
+  guard remains the reactive backstop.
+
 - **Large-file commit guard (real git pre-commit hook).** A `pre-commit` hook
   at `.github/hooks/git/pre-commit` (a POSIX-sh shim) runs
   `.github/hooks/scripts/check-large-files.py` on every `git commit` and blocks
