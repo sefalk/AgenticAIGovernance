@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Deactivated skills no longer churn as a perpetual `CREATE`.** When a project
+  turned off an active-by-default skill (e.g. `git-worktrees` with
+  `WORKTREE_ENABLED=false`), `/af-curate-skills` used to *delete*
+  `skills/{name}/`. The framework still shipped it, so every subsequent deploy
+  re-`CREATE`d the folder (re-activating the skill), which the next
+  `--reapply` removed again — an endless deploy↔reapply churn that also lost the
+  skill content until the next deploy. Deactivation now **moves** the folder to
+  `skills/_available/{name}/` (preserving it), and all three deploy paths
+  (`deploy_core`, `deploy.ps1`, `deploy.sh`) classify a framework
+  `skills/{name}/` file as **DEACTIVATED** — not `CREATE` — whenever the target
+  has `skills/_available/{name}/`. DEACTIVATED files are never written or
+  baselined, so a deactivated skill stays off across deploys. Verified by
+  byte-parity dry-run tests against the real `deploy.ps1` and `deploy.sh`.
+
 - **Deploy prompt: reapply curated skills AFTER conflict resolution.** The
   `/mcp.af.deploy` redeploy flow ran `--reapply` *before* resolving conflicts, so
   a curated agent that landed in CONFLICT got its curation re-applied to the

@@ -414,6 +414,22 @@ def _classify(is_custom: bool, src_h: str, tgt_h: str | None, baseline: str | No
     return "PROTECT" if is_custom else "CONFLICT"
 
 
+def _is_deactivated_skill_unit(hash_key: str, target_github: Path) -> bool:
+    """True if ``hash_key`` is an active-by-default skill file the project has
+    deactivated by moving it to ``skills/_available/{name}/``.
+
+    Measure #3: ``/af-curate-skills`` deactivates a skill by *moving* its folder
+    into ``_available/`` rather than deleting it. When the framework still ships
+    ``skills/{name}/`` but the target has ``skills/_available/{name}/``, the deploy
+    treats the framework files as DEACTIVATED (suppressed) instead of re-CREATE-ing
+    them on every run.
+    """
+    parts = _norm(hash_key).split("/")
+    if len(parts) < 3 or parts[0] != "skills" or parts[1] == "_available":
+        return False
+    return (target_github / "skills" / "_available" / parts[1]).is_dir()
+
+
 def dry_run(source_root: Path, target_dir: Path) -> dict:
     """Classify every deployable file (read-only). Mirrors the deploy dry-run."""
     target_github = target_dir / ".github"
@@ -429,6 +445,8 @@ def dry_run(source_root: Path, target_dir: Path) -> dict:
         src_h = source_hash_resolved(u.source, target_af_env)
         tgt_h = _target_classify_hash(u.target) if u.target.is_file() else None
         cls = _classify(u.is_custom, src_h, tgt_h, baseline.get(u.hash_key), has_baseline)
+        if cls == "CREATE" and _is_deactivated_skill_unit(u.hash_key, target_github):
+            cls = "DEACTIVATED"
         counts[cls] = counts.get(cls, 0) + 1
         results.append({"path": u.display, "classification": cls, "customizable": u.is_custom})
 
@@ -501,6 +519,8 @@ def apply(source_root: Path, target_dir: Path) -> dict:
         src_h = _sha256_upper_bytes(_strip_bytes(data))
         tgt_h = _target_classify_hash(u.target) if u.target.is_file() else None
         cls = _classify(u.is_custom, src_h, tgt_h, baseline.get(u.hash_key), has_baseline)
+        if cls == "CREATE" and _is_deactivated_skill_unit(u.hash_key, target_github):
+            cls = "DEACTIVATED"
         if cls in ("CREATE", "UPDATE"):
             if u.target.is_file():
                 bpath = backup_dir / u.display

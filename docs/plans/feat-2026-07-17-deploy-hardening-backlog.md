@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | 1 | Deploy-prompt reapply ordering (reapply AFTER resolve_conflicts) | small | `agent/deploy-prompt-ordering-fix` | DONE (pending merge) |
 | 2 | Managed regions (general, sparing) + apply to curated agent skills | large | `agent/managed-regions` | DONE (2a–2d) — pending merge |
-| 3 | Skill-deactivation churn (deactivated framework skill = perpetual CREATE) | medium | — | TODO |
+| 3 | Skill-deactivation churn (deactivated framework skill = perpetual CREATE) | medium | `agent/skill-deactivation-churn` | DONE (Option B) — pending merge |
 | 4 | curate-skills: warn on assignment to an agent without `## Skills` | small | `agent/managed-regions` | DONE (folded into 2c-ii, Step 8 validation) |
 | 5 | curate-skills: separate framework-base skills from curation (researcher redundancy) | small | — | FOLDED into #2 (2c AC7) |
 | 6 | *(MP-local, not framework)* add 5 new `af-env.conf` keys (guard + ADO) | small | — | TODO (MP repo) |
@@ -184,11 +184,24 @@ only) as the slot.
 - One region per agent (`curated-skills`) for now; multiple regions per file
   supported by the mechanism but unused. *(default)*
 
-## Measure 3 — Skill-deactivation churn  *(to refine)*
-Deactivated framework skills (git-worktrees when `WORKTREE_ENABLED=false`) are
-removed from `skills/` but remain in the framework payload → deploy re-offers them
-as CREATE on every run. Need a way to record "intentionally deactivated" so the
-deploy suppresses the CREATE (e.g. a deactivated-skills list the deploy honors).
+## Measure 3 — Skill-deactivation churn  *(DONE — Option B, pending merge)*
+Deactivated framework skills (git-worktrees when `WORKTREE_ENABLED=false`) were
+*deleted* from `skills/` but remained in the framework payload → deploy re-offered
+them as CREATE every run (endless deploy↔reapply churn + content loss).
+
+**Fix (Option B, `agent/skill-deactivation-churn`):**
+- **3-i (deploy_core):** new `DEACTIVATED` classification — a framework
+  `skills/{name}/…` file whose target has `skills/_available/{name}/` is
+  suppressed (not CREATE, not written, not baselined). 5 TDD tests + deploy
+  prompt count surfaced.
+- **3-ii (deploy.ps1/.sh parity):** `Test-DeactivatedSkillUnit` /
+  `is_deactivated_skill_unit` + DEACTIVATED branch, stat, summary, diff-mode,
+  DRYRUN_JSON. Real ps1 + sh dry-run tests (sh uses a git-init target to dodge
+  GH #1) — verified locally.
+- **3-iii (curate-skills):** deactivation now **moves** `skills/{name}/` →
+  `skills/_available/{name}/` (preserves the skill; produces the deploy signal),
+  in Step 5/7 and Reapply Step 3.
+- **3-iv:** CHANGELOG `Fixed` entry.
 
 ## Measure 4 — curate-skills: warn on skill-less agent assignment  *(to refine)*
 `curated-assignments.json` mapped `coordinator → databricks-execution-efficiency`,
