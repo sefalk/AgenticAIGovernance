@@ -11,9 +11,9 @@
 | # | Measure | Size | Branch | Status |
 |---|---|---|---|---|
 | 1 | Deploy-prompt reapply ordering (reapply AFTER resolve_conflicts) | small | `agent/deploy-prompt-ordering-fix` | DONE (pending merge) |
-| 2 | Managed regions (general, sparing) + apply to curated agent skills | large | `agent/managed-regions` | DESIGN REFINED |
+| 2 | Managed regions (general, sparing) + apply to curated agent skills | large | `agent/managed-regions` | 2a/2b/2c DONE; 2d pending |
 | 3 | Skill-deactivation churn (deactivated framework skill = perpetual CREATE) | medium | — | TODO |
-| 4 | curate-skills: warn on assignment to an agent without `## Skills` | small | — | TODO |
+| 4 | curate-skills: warn on assignment to an agent without `## Skills` | small | `agent/managed-regions` | DONE (folded into 2c-ii, Step 8 validation) |
 | 5 | curate-skills: separate framework-base skills from curation (researcher redundancy) | small | — | FOLDED into #2 (2c AC7) |
 | 6 | *(MP-local, not framework)* add 5 new `af-env.conf` keys (guard + ADO) | small | — | TODO (MP repo) |
 
@@ -162,19 +162,20 @@ only) as the slot.
   curation approach (fixes #5).
 
 ### Acceptance criteria
-- [ ] AC1: A file whose only diff is inside a managed region classifies
-      UNCHANGED (both tools).
-- [ ] AC2: A base (outside-region) change classifies UPDATE; applying it
-      preserves the target's region content.
-- [ ] AC3: deploy_core, deploy.ps1, deploy.sh produce byte-identical results on
-      a region fixture (cross-tool parity test).
-- [ ] AC4: curated-skills writes/reapplies only inside the region; repeated
-      reapply is idempotent (no duplication).
-- [ ] AC5: existing bare-curated agents migrate into the region once.
-- [ ] AC6: guidance documents sparing use + af-env.conf preference.
-- [ ] AC7: region-vs-base dedup — a curated skill that is now in the agent's
-      base Skills section is NOT written into the region (no duplication);
-      covered by a test. Consolidates #5.
+- [x] AC1: A file whose only diff is inside a managed region classifies
+      UNCHANGED (both tools). *(deploy_core + ps1 + sh parity tests)*
+- [x] AC2: A base (outside-region) change classifies UPDATE; applying it
+      preserves the target's region content. *(region tests, all three tools)*
+- [x] AC3: deploy_core, deploy.ps1, deploy.sh produce byte-identical results on
+      a region fixture (cross-tool parity test). *(ps1 AST test + sh awk test, both green locally)*
+- [x] AC4: curated-skills writes/reapplies only inside the region; repeated
+      reapply is idempotent (no duplication). *(2c-ii: full region-body replace, never append)*
+- [x] AC5: existing bare-curated agents migrate into the region once.
+      *(deploy conflict→resolve→reapply + 2c-ii defensive bare-line strip)*
+- [ ] AC6: guidance documents sparing use + af-env.conf preference. *(2d, pending)*
+- [x] AC7: region-vs-base dedup — a curated skill that is now in the agent's
+      base Skills section is NOT written into the region (no duplication).
+      *(2c-ii Step 7 base dedup + drop from assignments)*. Consolidates #5.
 
 ### Open micro-decisions (my defaults unless you object)
 - Migration lives in `/af-curate-skills --reapply` (detect bare curated lines →

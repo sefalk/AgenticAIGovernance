@@ -148,12 +148,42 @@ For each skill to **deactivate**:
 1. Remove the folder `skills/{name}/`
    (the copy in `_available/` remains untouched)
 
-For each affected **agent** file (from the skill's `metadata.activation.agents`):
-1. Open `.github/agents/{agent}.agent.md`
-2. Find the `## Skills` section
-3. Add or remove the skill reference line:
+For each affected **agent** file (from the skill's `metadata.activation.agents`),
+update its curated-skills managed region — see **Managed region write protocol**
+below.
+
+### Managed region write protocol
+
+Curated skill references live **only** inside the agent's managed region so they
+never CONFLICT on redeploy: the deploy strips the region for classification and
+transplants its content on write. **Never** write curated skills as bare
+`## Skills` bullets.
+
+For each agent in the assignment map:
+
+1. Open `.github/agents/{agent}.agent.md` and locate the region delimited by
+   `<!-- AF:MANAGED:curated-skills:START -->` and
+   `<!-- AF:MANAGED:curated-skills:END -->` inside the `## Skills` section.
+   - If the markers are **absent** (un-migrated agent), insert an empty region at
+     the end of the base skill bullet list, then continue. (Normally the deploy
+     ships the empty markers; this is only a safety net.)
+   - If the agent has **no `## Skills` section** (e.g. `coordinator`,
+     `compliance-checker`), **skip it and warn** — a curated assignment to a
+     skill-less agent cannot be applied (see also the assignment-time warning
+     in Step 8).
+2. Build the curated line set for this agent from `assignments[{agent}]`:
    `- **{name}** (\`skills/{name}/SKILL.md\`) — {description}`
-   Place new entries after existing skill lines.
+3. **Base dedup (promoted-curation guard):** drop any skill already referenced in
+   the agent's **base** skills — a bullet OUTSIDE the region whose target is
+   `skills/{name}/`. Also remove it from `assignments[{agent}]` in
+   `curated-assignments.json` so it is not re-added next time. (This is the case
+   where a curated skill has since been promoted into the framework base.)
+4. **Replace the entire region body** with the deduped curated lines — an
+   idempotent full replace, never an append. A deduped-empty set leaves the
+   region empty (just the two marker lines).
+5. **Defensive migration:** remove any **bare** curated bullets OUTSIDE the region
+   that match an assigned skill name (leftovers from the pre-region flow); their
+   content now lives inside the region.
 
 Regenerate `skills/INDEX.md`:
 1. List all active skills (from `skills/*/SKILL.md` frontmatter)
@@ -178,6 +208,13 @@ Write `skills/curated-assignments.json`:
   }
 }
 ```
+
+**Validate assignments before writing:** every agent key in `assignments` must
+be an agent that has a `## Skills` section (i.e. carries a curated-skills managed
+region). If an assignment targets a skill-less agent (e.g. `coordinator`,
+`compliance-checker`), **warn and drop that key** — the reference cannot be
+applied and would be silently lost on reapply. List any dropped assignments in
+the Step 6 summary output.
 
 Write `.af-skills-curated` sentinel:
 
@@ -229,8 +266,11 @@ re-discovery, no user confirmation.
    Users who customise skill content should re-apply edits after reapply.
 3. For each skill in `deactivated`: remove folder `skills/{name}/`
    (deploy re-creates template defaults; reapply undoes this).
-4. For each agent in `assignments`: regenerate the `## Skills` section
-   in `.github/agents/{agent}.agent.md` to include the assigned curated skills.
+4. For each agent in `assignments`: write the assigned curated skills into the
+   agent's managed region per the **Managed region write protocol** (Step 7) —
+   full idempotent region-body replace, base dedup, and defensive removal of any
+   stale bare curated bullets. Never write curated skills as bare `## Skills`
+   bullets.
 5. Regenerate `skills/INDEX.md` from current active/available skill folders.
 6. Update `copilot-instructions.md` Available Skills table.
 7. Print summary: "Reapplied curated skills: {N} activated, {M} deactivated,
@@ -249,8 +289,9 @@ Restore skills to pre-curation state using the sentinel snapshot.
 3. For each skill currently in `skills/` that is NOT in
    `previous_state.active_skills` and IS in the `activated` list:
    remove it (it was added by curation).
-4. For each agent in `previous_state.agent_skill_assignments`:
-   regenerate the `## Skills` section to match the saved assignment.
+4. For each agent in `previous_state.agent_skill_assignments`: restore the saved
+   assignment into the agent's managed region per the **Managed region write
+   protocol** (Step 7). A pre-curation empty assignment leaves the region empty.
 5. Regenerate `skills/INDEX.md` and update `copilot-instructions.md`.
 6. Write updated `skills/curated-assignments.json` reflecting the restored state.
 7. Print summary: "Rolled back to pre-curation state: {details}."
