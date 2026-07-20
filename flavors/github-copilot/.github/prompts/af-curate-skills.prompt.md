@@ -102,7 +102,7 @@ Produce two lists:
 **Activate** (copy from `_available/` to `skills/`):
 - Skills matched by signal that are currently in `_available/` only
 
-**Deactivate** (remove from `skills/`):
+**Deactivate** (move from `skills/` to `skills/_available/`):
 - Currently active skills whose signals do NOT match the tech stack
   AND whose `priority` is NOT `required`
 - Only suggest deactivation for skills that have `metadata.activation`
@@ -145,8 +145,11 @@ For each skill to **activate**:
 1. Copy the entire folder from `skills/_available/{name}/` to `skills/{name}/`
 
 For each skill to **deactivate**:
-1. Remove the folder `skills/{name}/`
-   (the copy in `_available/` remains untouched)
+1. **Move** the folder `skills/{name}/` → `skills/_available/{name}/`
+   (do not delete it — the move preserves the skill for later reactivation and is
+   the signal the deploy honors: it classifies `skills/{name}/` as **DEACTIVATED**
+   instead of re-CREATE-ing it on every deploy). If a stale `_available/{name}/`
+   already exists, overwrite it with the active copy.
 
 For each affected **agent** file (from the skill's `metadata.activation.agents`),
 update its curated-skills managed region — see **Managed region write protocol**
@@ -264,8 +267,10 @@ re-discovery, no user confirmation.
    updated `_available/` contents).
    **Note:** This overwrites local modifications to curated skill copies.
    Users who customise skill content should re-apply edits after reapply.
-3. For each skill in `deactivated`: remove folder `skills/{name}/`
-   (deploy re-creates template defaults; reapply undoes this).
+3. For each skill in `deactivated`: **move** folder `skills/{name}/` →
+   `skills/_available/{name}/` (the deploy classifies it DEACTIVATED and does not
+   re-create it; reapply keeps it deactivated). Skip if already absent from
+   `skills/`.
 4. For each agent in `assignments`: write the assigned curated skills into the
    agent's managed region per the **Managed region write protocol** (Step 7) —
    full idempotent region-body replace, base dedup, and defensive removal of any
