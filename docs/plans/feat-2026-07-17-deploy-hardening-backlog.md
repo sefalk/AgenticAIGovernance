@@ -101,6 +101,22 @@ only) as the slot.
   UPDATE; update preserves target region; malformed/again-empty regions safe.
 - **2b — Parity (deploy.ps1 + deploy.sh):** same region-aware hash + write;
   extend the cross-tool parity test with a region fixture.
+  - **2b-ps1 — ✅ DONE (VERSION 1.21.6):** `Strip-ManagedRegions`/`Merge-ManagedRegions`
+    via `[regex]::Replace` + `Get-SourceHashResolved`/`Get-TargetClassifyHash` stripped +
+    `Publish-SingleFile` merges target region on write. AST-based byte-parity test
+    (`test_ps_managed_regions_parity.py`, 11 tests) vs `deploy_core` — green locally.
+  - **2b-sh — ✅ DONE (locally verified with Git-for-Windows gawk 5.0):** awk
+    state-machine `_AWK_STRIP`/`_AWK_MERGE` (join model + `od`-based trailing-newline
+    handling) + `source_hash_resolved`/`target_classify_hash` stripped + `write_deployed`
+    merges target region. `test_sh_managed_regions_parity.py` extracts the real awk
+    programs and asserts byte-parity vs `deploy_core` — 9/9 green under gawk; `bash -n`
+    clean. Skipped where awk is absent; runs in Linux CI. Engine contract: operates on
+    **canonical LF bytes only** (`canonical_write` strips CR/BOM first), so no CRLF case.
+  - **Option B (follow-up, not blocking):** full end-to-end `deploy.sh` run under a
+    local bash/WSL was not completed here — the existing `test_sh_deploy_then_mcp_dryrun_is_clean`
+    aborts under Git-bash-on-Windows because `get_current_git_branch` +
+    `set -euo pipefail` returns 128 when the **target is not a git repo** (pre-existing,
+    unrelated to regions; passes in Linux CI). Tracked as a GitHub issue (see below).
 - **2c — Curated-skills consumer:** add the empty
   `AF:MANAGED:curated-skills` region to framework agent `## Skills`; update
   `/af-curate-skills` (curate + reapply) to write ONLY inside the region
@@ -159,3 +175,34 @@ MP's `af-env.conf` lacks 5 framework keys it should adopt (values project-set):
 `LARGE_FILE_MAX_BYTES`, `LARGE_FILE_ALLOWLIST`, `ADO_REPOSITORY_NAME`,
 `ADO_DEFAULT_TEAM`, `ADO_PR_MERGE_STRATEGY`. Additive merge in the MP repo (not
 an AAIG framework change).
+
+## Discovered issues (to file as GitHub issues)
+
+### GH-ISSUE (Option B): Verify deploy.sh managed-region byte-parity under local bash/WSL + harden `get_current_git_branch`
+No GitHub issue tool is wired into this workspace (`gh` CLI absent, no GitHub MCP,
+tokens must not be handled by the agent), so this is captured here for manual
+filing. Ready-to-paste body:
+
+> **Title:** deploy.sh: local bash/WSL e2e verification + `get_current_git_branch` non-repo hardening
+>
+> **Context:** Measure 2b (managed regions) added an awk region engine to
+> `deploy.sh`. Its byte-parity vs `deploy_core` is verified by
+> `tests/test_sh_managed_regions_parity.py` (9 tests, green locally under
+> Git-for-Windows gawk 5.0; skipped where awk is absent; runs in Linux CI).
+>
+> **What is NOT yet verified:** a full end-to-end `deploy.sh` run on this dev
+> box. `tests/test_cross_tool_parity.py::test_sh_deploy_then_mcp_dryrun_is_clean`
+> aborts under Git-bash-on-Windows with exit 128 because
+> `get_current_git_branch()` runs `git -C "$target" branch --show-current` and,
+> under `set -euo pipefail`, the pipeline propagates git's 128 when the **target
+> is not a git repository** (the pytest tmp target). Pre-existing, unrelated to
+> managed regions; passes in Linux CI where the target sits inside a repo.
+>
+> **Tasks:**
+> 1. Harden `get_current_git_branch` to tolerate a non-repo target (e.g. guard
+>    with `git rev-parse --is-inside-work-tree` or `|| true`) so `deploy.sh`
+>    never aborts on branch detection.
+> 2. Run the full `deploy.sh` e2e + MCP dry-run parity locally (WSL/Ubuntu or a
+>    git-initialized target) and confirm 0 UPDATE/CONFLICT/CREATE on the
+>    region-less payload.
+> 3. Once green, this closes 2b Option B.
