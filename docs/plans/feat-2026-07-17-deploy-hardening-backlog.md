@@ -117,16 +117,46 @@ only) as the slot.
     aborts under Git-bash-on-Windows because `get_current_git_branch` +
     `set -euo pipefail` returns 128 when the **target is not a git repo** (pre-existing,
     unrelated to regions; passes in Linux CI). Tracked as a GitHub issue (see below).
-- **2c — Curated-skills consumer:** add the empty
-  `AF:MANAGED:curated-skills` region to framework agent `## Skills`; update
-  `/af-curate-skills` (curate + reapply) to write ONLY inside the region
-  (idempotent); migration wraps existing bare curated lines into the region.
-  **Region-vs-base dedup (promoted-curation guard):** when (re)building the
-  region, skip any assigned skill the agent already references in its **base**
-  Skills section (name-based, `skills/{name}/`). This prevents duplication when a
-  curated skill is abstracted into the framework base, and auto-drops it from the
-  region on the next reapply (optionally also from `curated-assignments.json`).
-  This is the researcher case seen live in the MP redeploy and **consolidates #5**.
+- **2c — Curated-skills consumer (REFINED, grounded in real agent format):**
+  - **Region placement:** HTML-comment markers (invisible in rendered md) at the
+    **end of the base bullet list** inside `## Skills`, before the trailing blank
+    line / next `## ` heading. Empty by default (START/END on adjacent lines):
+    ```
+    ## Skills
+
+    Consult these skills when relevant to the task:
+    - **base-a** (`skills/base-a/SKILL.md`) — …
+    <!-- AF:MANAGED:curated-skills:START -->
+    <!-- AF:MANAGED:curated-skills:END -->
+
+    ## Next Heading
+    ```
+  - **2c-i — payload markers:** add the empty region to the **13** framework
+    agents that have a `## Skills` section (all except `coordinator` and
+    `compliance-checker`). One-time framework UPDATE on next deploy; thereafter
+    region content is CONFLICT-free (stripped for classification). Never-curated
+    projects stay UNCHANGED (empty region strips to itself). HTML comments are
+    inert.
+  - **2c-ii — prompt logic (`af-curate-skills.prompt.md`):** rewrite Step 7
+    (agent update), **Reapply Step 4**, and **Rollback Step 4** to *replace the
+    region body* with the agent's curated skill lines (full idempotent replace,
+    not append). Defensive migration: also strip any **bare** curated lines
+    (those matching `assignments`) found OUTSIDE the region.
+  - **Migration is mostly free:** the bare→region transition is handled by the
+    **existing deploy workflow** (measure #1) — curated agents hit CONFLICT →
+    resolve-to-framework (yields the empty region) → reapply fills it. No
+    dedicated migration script; reapply’s defensive strip covers the rest.
+  - **Region-vs-base dedup (AC7, promoted-curation guard):** when building the
+    region, skip any assigned skill already referenced in the agent’s **base**
+    Skills lines (match on `skills/{name}/`). Prevents duplication when a curated
+    skill is promoted into the framework base; auto-drops it from the region on
+    the next reapply (and from `curated-assignments.json`). The live researcher
+    case from the MP redeploy. **Consolidates #5.**
+  - **2c-iii — tests:** structural test that every shipped agent’s region is
+    well-formed + empty; classification test that a region-filled agent is
+    UNCHANGED vs the empty-region framework source via `deploy_core` (the prompt
+    itself is agent-executed, not unit-testable — the mechanism + payload shape
+    are what we gate).
 - **2d — Guidance:** short instruction/section documenting managed regions +
   the **“sparing, prefer af-env.conf”** rule; note it supersedes the bare-line
   curation approach (fixes #5).

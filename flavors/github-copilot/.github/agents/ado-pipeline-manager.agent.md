@@ -52,6 +52,8 @@ complete or merge pull requests.
 
 Consult these skills when relevant to the task:
 - **ado-shared** (`../skills/ado-shared/SKILL.md`) — ADO defaults resolution, link policy, and fallback behavior
+<!-- AF:MANAGED:curated-skills:START -->
+<!-- AF:MANAGED:curated-skills:END -->
 
 ## Responsibilities
 

@@ -38,6 +38,8 @@ purely against the Azure DevOps API via MCP.
 Consult these skills when relevant to the task:
 - **ado-pr** (`../skills/ado-pr/SKILL.md`) — PR lifecycle, target-branch autocomplete policy, branch publication precondition, and reviewer/link strategy
 - **ado-shared** (`../skills/ado-shared/SKILL.md`) — ADO defaults resolution, link policy, and fallback behavior
+<!-- AF:MANAGED:curated-skills:START -->
+<!-- AF:MANAGED:curated-skills:END -->
 
 ## Responsibilities
 

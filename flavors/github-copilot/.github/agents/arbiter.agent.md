@@ -27,6 +27,8 @@ Consult these skills when relevant to the dispute:
 - **human-escalation** (`skills/human-escalation/SKILL.md`) — escalation criteria, handoff format
 - **design-patterns** (`skills/design-patterns/SKILL.md`) — pattern trade-offs for design disputes
 - **hexagonal-architecture** (`skills/hexagonal-architecture/SKILL.md`) — layer boundaries for architecture disputes
+<!-- AF:MANAGED:curated-skills:START -->
+<!-- AF:MANAGED:curated-skills:END -->
 
 ## When You Are Invoked
 

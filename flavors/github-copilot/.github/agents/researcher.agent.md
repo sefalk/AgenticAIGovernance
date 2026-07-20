@@ -41,6 +41,8 @@ Consult these skills when relevant to the research:
 - **data-pipeline-design** (`skills/data-pipeline-design/SKILL.md`) — ETL/ELT patterns, orchestration
 - **data-modeling** (`skills/data-modeling/SKILL.md`) — schema design, dimensional modeling
 - **data-quality** (`skills/data-quality/SKILL.md`) — validation frameworks, data contracts
+<!-- AF:MANAGED:curated-skills:START -->
+<!-- AF:MANAGED:curated-skills:END -->
 
 ## Critical Constraints
 
