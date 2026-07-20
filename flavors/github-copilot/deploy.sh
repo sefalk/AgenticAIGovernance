@@ -267,6 +267,7 @@ STAT_UNCHANGED=0
 STAT_PROTECTED=0
 STAT_CONFLICT=0
 STAT_PRESERVED=0
+STAT_DEACTIVATED=0
 BACKUP_DIR=""
 BACKUP_COUNT=0
 
@@ -363,14 +364,170 @@ canonical_write() {
         _strip_bom_cr "$src" > "$dest"
     fi
 }
+# ── Managed regions (measure #2) ──────────────────────────────────────────
+# Byte-parity with deploy_core.py strip_managed_regions/merge_managed_regions
+# and deploy.ps1. A deployed file may carry an AF:MANAGED:{name} region whose
+# body is project-owned: it is ignored for classification (hash over the
+# region-stripped content) and preserved on write (the target's region body is
+# transplanted onto the framework base). Region names are ASCII [A-Za-z0-9_.-].
+# Used sparingly -- prefer af-env.conf for project-specification whenever
+# possible.
+#
+# VERIFICATION NOTE (measure 2b): the awk region engine below is
+# byte-parity-critical and is exercised by tests/test_sh_managed_regions_parity.py,
+# which is SKIPPED on hosts without bash/awk (e.g. the Windows dev box where this
+# was authored) and runs in Linux CI. Until that CI run is green, no payload file
+# ships a real AF:MANAGED region (the mechanism stays dormant). Local bash/WSL
+# verification is tracked as a follow-up (measure 2b Option B).
+_has_region_marker() {
+    grep -Eq 'AF:MANAGED:[A-Za-z0-9_.-]+:START' "$1" 2>/dev/null
+}
+_ends_with_nl() {
+    # 0 (true) iff the file's last byte is LF.
+    [[ -s "$1" ]] && [[ "$(tail -c1 "$1" | od -An -tx1 | tr -d ' \n')" == "0a" ]]
+}
+
+# awk region-strip: empties every AF:MANAGED body (keeps marker lines). Output
+# byte-exact via a join model (lines joined by LF, trailing LF only when the
+# input had one, passed as -v endnl). Unterminated region => body kept verbatim
+# (matches the Python regex, which would not match an unclosed region).
+_AWK_STRIP='
+BEGIN { inr=0; started=0; out=""; nbuf=0 }
+function add(s){ if (started) out=out "\n" s; else { out=s; started=1 } }
+{
+  line=$0
+  if (inr) {
+    if (line ~ endre) { add(line); inr=0; nbuf=0 }
+    else { bbuf[++nbuf]=line }
+  } else if (match(line, /AF:MANAGED:[A-Za-z0-9_.-]+:START/)) {
+    nm=line; sub(/.*AF:MANAGED:/,"",nm); sub(/:START.*/,"",nm)
+    ename=nm; gsub(/\./,"\\.",ename); endre="AF:MANAGED:" ename ":END"
+    inr=1; nbuf=0; add(line)
+  } else { add(line) }
+}
+END {
+  if (inr) { for (i=1;i<=nbuf;i++) add(bbuf[i]) }
+  printf "%s", out
+  if (endnl) printf "\n"
+}'
+
+# awk region-merge: reconstruct the base (2nd file) with each region body
+# replaced by the overlay (1st file, read via FNR==NR) same-named region body.
+# Overlay bodies are committed only on a matching END (an unterminated overlay
+# region contributes nothing, matching Python finditer). endnl derives from the
+# base file.
+_AWK_MERGE='
+BEGIN { oinr=0; cur=0; cn=0; inr=0; bn=0; started=0; out="" }
+function add(s){ if (started) out=out "\n" s; else { out=s; started=1 } }
+FNR==NR {
+  line=$0
+  if (cur) {
+    if (line ~ cendre) {
+      ohas[cname]=1; obn[cname]=cn
+      for (i=1;i<=cn;i++) obl[cname SUBSEP i]=cbl[i]
+      cur=0
+    } else { cbl[++cn]=line }
+  } else if (match(line, /AF:MANAGED:[A-Za-z0-9_.-]+:START/)) {
+    nm=line; sub(/.*AF:MANAGED:/,"",nm); sub(/:START.*/,"",nm)
+    cname=nm; ename=nm; gsub(/\./,"\\.",ename); cendre="AF:MANAGED:" ename ":END"
+    cur=1; cn=0
+  }
+  next
+}
+{
+  line=$0
+  if (inr) {
+    if (line ~ endre) {
+      if (name in ohas) { for (i=1;i<=obn[name];i++) add(obl[name SUBSEP i]) }
+      else { for (i=1;i<=bn;i++) add(bbuf[i]) }
+      add(line); inr=0
+    } else { bbuf[++bn]=line }
+  } else if (match(line, /AF:MANAGED:[A-Za-z0-9_.-]+:START/)) {
+    nm=line; sub(/.*AF:MANAGED:/,"",nm); sub(/:START.*/,"",nm)
+    name=nm; ename=nm; gsub(/\./,"\\.",ename); endre="AF:MANAGED:" ename ":END"
+    inr=1; bn=0; add(line)
+  } else { add(line) }
+}
+END {
+  if (inr) { for (i=1;i<=bn;i++) add(bbuf[i]) }
+  printf "%s", out
+  if (endnl) printf "\n"
+}'
+
+strip_regions_to() {
+    # $1=infile (canonical LF text) $2=outfile ; byte-exact region-stripped copy.
+    local in="$1" out="$2" e=0
+    _ends_with_nl "$in" && e=1
+    awk -v endnl="$e" "$_AWK_STRIP" "$in" > "$out"
+}
+
 source_hash_resolved() {
-    # Hash of the canonical deployed content (LF, no BOM, tier-resolved).
-    local src="$1" tmp h
+    # Classification hash of the canonical deployed content (LF, no BOM,
+    # tier-resolved) with managed-region bodies stripped (region content is
+    # project-owned, not framework).
+    local src="$1" tmp strip h
     tmp="$(mktemp)"
     canonical_write "$src" "$tmp"
-    h="$(file_hash "$tmp")"
+    if _has_region_marker "$tmp"; then
+        strip="$(mktemp)"
+        strip_regions_to "$tmp" "$strip"
+        h="$(file_hash "$strip")"
+        rm -f "$strip"
+    else
+        h="$(file_hash "$tmp")"
+    fi
     rm -f "$tmp"
     printf '%s' "$h"
+}
+
+target_classify_hash() {
+    # Classification hash of a deployed target file (managed regions stripped).
+    local tgt="$1" strip h
+    if _has_region_marker "$tgt"; then
+        strip="$(mktemp)"
+        strip_regions_to "$tgt" "$strip"
+        h="$(file_hash "$strip")"
+        rm -f "$strip"
+    else
+        h="$(file_hash "$tgt")"
+    fi
+    printf '%s' "$h"
+}
+
+write_deployed() {
+    # Write the canonical deployed bytes of $1 to $2, transplanting the existing
+    # target's managed-region body onto the framework base so project-owned
+    # regions survive an UPDATE. No-op merge without regions on both sides.
+    local src="$1" tgt="$2" tmp e=0
+    tmp="$(mktemp)"
+    canonical_write "$src" "$tmp"
+    if [[ -f "$tgt" ]] && _has_region_marker "$tmp" && _has_region_marker "$tgt"; then
+        _ends_with_nl "$tmp" && e=1
+        if awk -v endnl="$e" "$_AWK_MERGE" "$tgt" "$tmp" > "$tgt.__afmrg"; then
+            mv "$tgt.__afmrg" "$tgt"
+        else
+            rm -f "$tgt.__afmrg"; mv "$tmp" "$tgt"; return
+        fi
+        rm -f "$tmp"
+    else
+        mv "$tmp" "$tgt"
+    fi
+}
+
+is_deactivated_skill_unit() {
+    # Measure #3: an active-by-default skill the project deactivated by *moving* it
+    # to skills/_available/{name}/. When the framework still ships skills/{name}/ but
+    # the target has skills/_available/{name}/, the deploy classifies it DEACTIVATED
+    # (suppressed) instead of re-CREATE-ing it. Parity with deploy_core
+    # _is_deactivated_skill_unit and deploy.ps1 Test-DeactivatedSkillUnit.
+    local key="${1//\\//}" name
+    case "$key" in
+        skills/_available/*) return 1 ;;
+        skills/*/*)
+            name="${key#skills/}"; name="${name%%/*}"
+            [[ -d "$TARGET_GITHUB/skills/_available/$name" ]] && return 0 || return 1 ;;
+        *) return 1 ;;
+    esac
 }
 # ── Hash-based 3-way merge ────────────────────────────────────────────────
 HASH_FILE="$TARGET_GITHUB/.af-hashes"
@@ -658,12 +815,17 @@ deploy_file() {
 
     # ── New file: always deploy ──
     if [[ ! -f "$tgt" ]]; then
+        if is_deactivated_skill_unit "$hash_key"; then
+            echo "  DEACTIVATED $display  (skill moved to _available/)"
+            ((STAT_DEACTIVATED++)) || true
+            return
+        fi
         echo "  CREATE  $display"
         ((STAT_CREATED++)) || true
         DEPLOYED_HASHES["$hash_key"]="$source_hash"
     else
         local target_hash
-        target_hash="$(file_hash "$tgt")"
+        target_hash="$(target_classify_hash "$tgt")"
 
         # ── Identical: nothing to do ──
         if [[ "$source_hash" == "$target_hash" ]]; then
@@ -739,7 +901,7 @@ deploy_file() {
     if [[ "$DRY_RUN" != "true" ]]; then
         backup_before_overwrite "$tgt" "$display"
         mkdir -p "$(dirname "$tgt")"
-        canonical_write "$src" "$tgt"
+        write_deployed "$src" "$tgt"
     fi
 }
 
@@ -760,11 +922,15 @@ if [[ "$DIFF_MODE" == "true" ]]; then
         src="$SOURCE_GITHUB/$rel"
         tgt="$TARGET_GITHUB/$rel"
         if [[ ! -f "$tgt" ]]; then
-            printf "  -> project   %-50s  New in AF\n" ".github/$rel"
-            ((DIFF_COUNT++)) || true
+            if is_deactivated_skill_unit "$rel"; then
+                printf "  -- skip      %-50s  DEACTIVATED (moved to _available/)\n" ".github/$rel"
+            else
+                printf "  -> project   %-50s  New in AF\n" ".github/$rel"
+                ((DIFF_COUNT++)) || true
+            fi
         else
             sh="$(source_hash_resolved "$src")"
-            th="$(file_hash "$tgt")"
+            th="$(target_classify_hash "$tgt")"
             if [[ "$sh" != "$th" ]]; then
                 bh="${BASELINE_HASHES[$rel]:-}"
                 if [[ -n "$bh" ]]; then
@@ -806,7 +972,7 @@ if [[ "$DIFF_MODE" == "true" ]]; then
             ((DIFF_COUNT++)) || true
         elif [[ -f "$src" ]] && [[ -f "$tgt" ]]; then
             sh="$(source_hash_resolved "$src")"
-            th="$(file_hash "$tgt")"
+            th="$(target_classify_hash "$tgt")"
             if [[ "$sh" != "$th" ]]; then
                 bh="${BASELINE_HASHES[vscode/$f]:-}"
                 if [[ -n "$bh" ]]; then
@@ -938,6 +1104,9 @@ fi
 if [[ "$STAT_PRESERVED" -gt 0 ]]; then
     echo "  Preserved: $STAT_PRESERVED -- project customizations kept"
 fi
+if [[ "$STAT_DEACTIVATED" -gt 0 ]]; then
+    echo "  Deactivated: $STAT_DEACTIVATED -- skills moved to _available/, not deployed"
+fi
 if [[ "$STAT_CONFLICT" -gt 0 ]]; then
     echo "  Conflict:  $STAT_CONFLICT -- both sides changed, use agent to merge"
     echo ""
@@ -964,7 +1133,7 @@ prune_old_backups "$TARGET_DIR" "$BACKUP_PRUNE_DAYS" "$BACKUP_DIR"
 
 if [[ "$DRY_RUN" == "true" ]]; then
     echo ""
-    echo "  DRYRUN_JSON {\"mode\":\"dry-run\",\"created\":$STAT_CREATED,\"updated\":$STAT_UPDATED,\"unchanged\":$STAT_UNCHANGED,\"protected\":$STAT_PROTECTED,\"preserved\":$STAT_PRESERVED,\"conflict\":$STAT_CONFLICT,\"backup_prune_days\":$BACKUP_PRUNE_DAYS}"
+    echo "  DRYRUN_JSON {\"mode\":\"dry-run\",\"created\":$STAT_CREATED,\"updated\":$STAT_UPDATED,\"unchanged\":$STAT_UNCHANGED,\"protected\":$STAT_PROTECTED,\"preserved\":$STAT_PRESERVED,\"deactivated\":$STAT_DEACTIVATED,\"conflict\":$STAT_CONFLICT,\"backup_prune_days\":$BACKUP_PRUNE_DAYS}"
 fi
 
 # Backup cleanup

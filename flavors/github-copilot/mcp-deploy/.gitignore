@@ -2,9 +2,12 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
 build/
 dist/
 .venv/
+# Stray lockfile — this project uses the pip editable-install workflow, not uv
+uv.lock
 # Framework payload is bundled into the wheel at build time (force-include),
 # never committed here — avoids a duplicate copy of the framework.
 af_deploy_mcp/payload/

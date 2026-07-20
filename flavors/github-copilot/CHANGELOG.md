@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Deactivated skills no longer churn as a perpetual `CREATE`.** When a project
+  turned off an active-by-default skill (e.g. `git-worktrees` with
+  `WORKTREE_ENABLED=false`), `/af-curate-skills` used to *delete*
+  `skills/{name}/`. The framework still shipped it, so every subsequent deploy
+  re-`CREATE`d the folder (re-activating the skill), which the next
+  `--reapply` removed again — an endless deploy↔reapply churn that also lost the
+  skill content until the next deploy. Deactivation now **moves** the folder to
+  `skills/_available/{name}/` (preserving it), and all three deploy paths
+  (`deploy_core`, `deploy.ps1`, `deploy.sh`) classify a framework
+  `skills/{name}/` file as **DEACTIVATED** — not `CREATE` — whenever the target
+  has `skills/_available/{name}/`. DEACTIVATED files are never written or
+  baselined, so a deactivated skill stays off across deploys. Verified by
+  byte-parity dry-run tests against the real `deploy.ps1` and `deploy.sh`.
+
+- **Deploy prompt: reapply curated skills AFTER conflict resolution.** The
+  `/mcp.af.deploy` redeploy flow ran `--reapply` *before* resolving conflicts, so
+  a curated agent that landed in CONFLICT got its curation re-applied to the
+  stale base and then discarded when the conflict was resolved by taking the
+  framework — silent curation loss on large version jumps. The `deploy_prompt`
+  now orders redeploy as **apply → resolve conflicts (curated-agent conflicts
+  take framework base) → reapply curated skills → single final `update_hashes`
+  re-baseline**, so curation lands on the final base and future dry-runs show
+  PRESERVE instead of CONFLICT.
+
 - **Python bytecode caches no longer leak into the deploy payload.** A stray
   `__pycache__/*.pyc` (created whenever a hook/script test runs against the AF
   source) was picked up by the recursive payload enumeration and deployed as a
@@ -54,6 +78,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the `.py` provenance-check hooks, and example snippets are unchanged.
 
 ### Added
+
+- **Managed regions — CONFLICT-free project-owned content inside framework
+  files.** A file may now carry an `AF:MANAGED:{name}:START/END` marker pair
+  whose body is project territory: the deploy hashes the region-*stripped* file
+  for classification and *transplants* the target's region body onto the incoming
+  framework base on write. So a project can populate the region locally without
+  ever tripping a CONFLICT on redeploy, while framework changes *outside* the
+  region still UPDATE normally; empty regions strip to themselves, so
+  never-populated projects stay UNCHANGED. Byte-identical strip/merge is
+  implemented across all three deploy paths — `deploy_core.py` (regex),
+  `deploy.ps1` (`[regex]::Replace`), and `deploy.sh` (an awk state-machine with a
+  join model + `od`-based trailing-newline handling) — and guarded by cross-tool
+  parity tests (PowerShell via AST extraction; bash via awk-program extraction,
+  verified locally under gawk 5.0). First consumer: **curated agent skills.**
+  `/af-curate-skills` now writes curated skill references *only* inside each
+  agent's `AF:MANAGED:curated-skills` region (idempotent full-body replace) with
+  **base dedup** (a skill promoted into an agent's base list is dropped from the
+  region) and **defensive migration** (stale bare curated bullets are stripped);
+  the bare→region transition is otherwise handled by the existing
+  conflict-resolution → reapply deploy flow. `/af-curate-skills` also now warns
+  and drops assignments that target a skill-less agent (`coordinator`,
+  `compliance-checker`). Authoring guidance (`copilot-authoring.instructions.md`)
+  documents the mechanism and the **use-sparingly, prefer `af-env.conf`** rule.
 
 - **Proactive notebook artifact-weight hygiene (guidance).** The
   `notebook-execution` skill gains an *Artifact Weight Hygiene* section with
