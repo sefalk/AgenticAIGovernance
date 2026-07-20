@@ -57,6 +57,8 @@ Consult these skills when relevant to the task:
 - **error-handling** (`skills/error-handling/SKILL.md`) — error classification for writing error-path tests
 - **human-escalation** (`skills/human-escalation/SKILL.md`) — halt protocol when blocked or uncertain
 - **notebook-execution** (`skills/notebook-execution/SKILL.md`) — inspect `.ipynb` via the notebook tools, never terminal scripts
+<!-- AF:MANAGED:curated-skills:START -->
+<!-- AF:MANAGED:curated-skills:END -->
 
 ## Your Responsibilities
 

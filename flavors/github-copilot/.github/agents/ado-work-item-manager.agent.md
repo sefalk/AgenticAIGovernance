@@ -29,6 +29,8 @@ lifecycle operations for the active workflow.
 Consult these skills when relevant to the task:
 - **ado-workitem** (`skills/ado-workitem/SKILL.md`)
 - **ado-shared** (`skills/ado-shared/SKILL.md`)
+<!-- AF:MANAGED:curated-skills:START -->
+<!-- AF:MANAGED:curated-skills:END -->
 
 ## Responsibilities
 

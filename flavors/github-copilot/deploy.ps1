@@ -207,11 +207,70 @@ function Get-CanonicalBytes([string]$Source) {
     if ($text -match '__AF_TIER_(PREMIUM|BALANCED|EFFICIENT)__') { $text = Resolve-TierTokens $text }
     return (New-Object System.Text.UTF8Encoding($false)).GetBytes($text)
 }
+# ── Managed regions (measure #2) ───────────────────────────────────────────
+# A deployed file may carry an `AF:MANAGED:{name}` region whose inner content is
+# project-owned. The deploy ignores that content for classification (hash over
+# the region-stripped file) and preserves it on write (transplant the target's
+# region into the framework base). Byte-parity with deploy_core.py
+# strip_managed_regions / merge_managed_regions and deploy.sh. Used sparingly --
+# prefer af-env.conf for project-specification whenever possible.
+$script:ManagedRegionRegex = [regex]::new(
+    '(?<start>^[^\n]*AF:MANAGED:(?<name>[\w.\-]+):START[^\n]*\n)(?<body>.*?)(?<end>^[^\n]*AF:MANAGED:\k<name>:END[^\n]*$)',
+    [System.Text.RegularExpressions.RegexOptions]::Multiline -bor [System.Text.RegularExpressions.RegexOptions]::Singleline
+)
+function Strip-ManagedRegions([string]$Text) {
+    # Empty every AF:MANAGED region body (keep the marker lines).
+    return $script:ManagedRegionRegex.Replace($Text, { param($m) $m.Groups['start'].Value + $m.Groups['end'].Value })
+}
+function Get-ManagedRegionBodies([string]$Text) {
+    $map = @{}
+    foreach ($m in $script:ManagedRegionRegex.Matches($Text)) {
+        $map[$m.Groups['name'].Value] = $m.Groups['body'].Value
+    }
+    return $map
+}
+function Merge-ManagedRegions([string]$BaseText, [string]$OverlayText) {
+    # Return BaseText with each region body replaced by OverlayText's same-named
+    # region body (transplant project content onto the framework base).
+    $overlay = Get-ManagedRegionBodies $OverlayText
+    return $script:ManagedRegionRegex.Replace($BaseText, {
+            param($m)
+            $name = $m.Groups['name'].Value
+            $body = if ($overlay.ContainsKey($name)) { $overlay[$name] } else { $m.Groups['body'].Value }
+            return $m.Groups['start'].Value + $body + $m.Groups['end'].Value
+        })
+}
+function Get-RegionStrippedBytes([byte[]]$Bytes) {
+    # UTF-8 text with managed regions emptied; binary/region-less bytes unchanged.
+    $decoder = New-Object System.Text.UTF8Encoding($false, $true)  # throw on invalid bytes
+    try { $text = $decoder.GetString($Bytes) } catch { return $Bytes }
+    $stripped = Strip-ManagedRegions $text
+    if ($stripped -eq $text) { return $Bytes }
+    return (New-Object System.Text.UTF8Encoding($false)).GetBytes($stripped)
+}
+function Get-RegionMergedBytes([byte[]]$Data, [string]$Target) {
+    # Transplant the existing target's managed-region content onto the framework
+    # base so project-owned regions survive an UPDATE. No-op without regions.
+    if (-not (Test-Path $Target)) { return $Data }
+    $decoder = New-Object System.Text.UTF8Encoding($false, $true)
+    try {
+        $baseText = $decoder.GetString($Data)
+        $overlayText = $decoder.GetString([System.IO.File]::ReadAllBytes($Target))
+    } catch { return $Data }
+    $merged = Merge-ManagedRegions $baseText $overlayText
+    return (New-Object System.Text.UTF8Encoding($false)).GetBytes($merged)
+}
 function Get-SourceHashResolved([string]$Source) {
-    # Hash of the canonical deployed content (LF, no BOM, tier-resolved).
+    # Classification hash of the canonical deployed content (LF, no BOM,
+    # tier-resolved) with managed-region bodies stripped (region content is
+    # project-owned, not framework).
     $canon = Get-CanonicalBytes $Source
     if ($null -eq $canon) { return (Get-FileHash $Source).Hash }
-    return (Get-BytesHashUpper $canon)
+    return (Get-BytesHashUpper (Get-RegionStrippedBytes $canon))
+}
+function Get-TargetClassifyHash([string]$Target) {
+    # Classification hash of a deployed target file (managed regions stripped).
+    return (Get-BytesHashUpper (Get-RegionStrippedBytes ([System.IO.File]::ReadAllBytes($Target))))
 }
 
 function Resolve-BackupPruneDays {
@@ -687,7 +746,8 @@ function Publish-SingleFile {
     $isCustom = $script:CustomizableFiles.Contains($HashKey)
     $exists = Test-Path $Target
     $canon = Get-CanonicalBytes $Source
-    $sourceHash = if ($null -ne $canon) { Get-BytesHashUpper $canon } else { (Get-FileHash $Source).Hash }
+    # Classification hash strips managed regions ($canon is kept intact for the write).
+    $sourceHash = if ($null -ne $canon) { Get-BytesHashUpper (Get-RegionStrippedBytes $canon) } else { (Get-FileHash $Source).Hash }
 
     # ── New file: always deploy ──
     if (-not $exists) {
@@ -695,7 +755,7 @@ function Publish-SingleFile {
         $script:Stats.Created++
         $script:DeployedHashes[$HashKey] = $sourceHash
     } else {
-        $targetHash = (Get-FileHash $Target).Hash
+        $targetHash = Get-TargetClassifyHash $Target
 
         # ── Identical: nothing to do ──
         if ($sourceHash -eq $targetHash) {
@@ -772,7 +832,8 @@ function Publish-SingleFile {
         $dir = Split-Path $Target -Parent
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
         if ($null -ne $canon) {
-            [System.IO.File]::WriteAllBytes($Target, $canon)
+            # Preserve the target's managed-region content on write.
+            [System.IO.File]::WriteAllBytes($Target, (Get-RegionMergedBytes $canon $Target))
         } else {
             Copy-Item $Source $Target -Force
         }
@@ -800,11 +861,11 @@ if ($Diff) {
             $tgt = Join-Path $TargetGitHub $rel
             if (-not (Test-Path $tgt)) {
                 $diffs += [PSCustomObject]@{ File = ".github/$rel"; Direction = '-> project'; Status = 'New in AF (not deployed)' }
-            } elseif ((Get-SourceHashResolved $src) -ne (Get-FileHash $tgt).Hash) {
+            } elseif ((Get-SourceHashResolved $src) -ne (Get-TargetClassifyHash $tgt)) {
                 $bh = $script:BaselineHashes[$rel]
                 if ($bh) {
                     $sh = Get-SourceHashResolved $src
-                    $th = (Get-FileHash $tgt).Hash
+                    $th = Get-TargetClassifyHash $tgt
                     if (($sh -ne $bh) -and ($th -eq $bh)) {
                         $diffs += [PSCustomObject]@{ File = ".github/$rel"; Direction = '-> UPDATE'; Status = 'AF changed (safe to deploy)' }
                     } elseif (($sh -eq $bh) -and ($th -ne $bh)) {
@@ -840,7 +901,7 @@ if ($Diff) {
                 $diffs += [PSCustomObject]@{ File = ".vscode/$f"; Direction = '-> project'; Status = 'New in AF (not deployed)' }
             } elseif ((Test-Path $src) -and (Test-Path $tgt)) {
                 $sh = Get-SourceHashResolved $src
-                $th = (Get-FileHash $tgt).Hash
+                $th = Get-TargetClassifyHash $tgt
                 if ($sh -ne $th) {
                     $bh = $script:BaselineHashes["vscode/$f"]
                     if ($bh) {

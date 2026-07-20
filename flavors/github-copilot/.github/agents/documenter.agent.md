@@ -41,6 +41,8 @@ as a **subagent** by the coordinator as the last step of every workflow.
 
 Consult these skills when relevant to the task:
 - **documentation** (`skills/documentation/SKILL.md`) — docstrings, ADRs, README, handoff logs
+<!-- AF:MANAGED:curated-skills:START -->
+<!-- AF:MANAGED:curated-skills:END -->
 
 ## Your Responsibilities
 

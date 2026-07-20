@@ -59,6 +59,8 @@ Consult these skills when relevant to the task:
 - **pydantic** (`skills/pydantic/SKILL.md`) — when converting dataclasses/dicts to Pydantic models
 - **human-escalation** (`skills/human-escalation/SKILL.md`) — halt protocol when blocked or uncertain
 - **notebook-execution** (`skills/notebook-execution/SKILL.md`) — use the notebook tools for `.ipynb`, never terminal scripts
+<!-- AF:MANAGED:curated-skills:START -->
+<!-- AF:MANAGED:curated-skills:END -->
 
 ## Critical Constraint
 

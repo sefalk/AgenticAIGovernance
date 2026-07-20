@@ -34,6 +34,8 @@ Consult these skills when relevant to the task:
 - **unit-testing** (`skills/unit-testing/SKILL.md`) — test structure, patterns, naming conventions
 - **code-review** (`skills/code-review/SKILL.md`) — anti-gaming detection, review checklist patterns
 - **property-testing** (`skills/property-testing/SKILL.md`) — property categories for validating test quality
+<!-- AF:MANAGED:curated-skills:START -->
+<!-- AF:MANAGED:curated-skills:END -->
 
 ## Your Responsibilities
 
