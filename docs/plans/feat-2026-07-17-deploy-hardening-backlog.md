@@ -176,33 +176,11 @@ MP's `af-env.conf` lacks 5 framework keys it should adopt (values project-set):
 `ADO_DEFAULT_TEAM`, `ADO_PR_MERGE_STRATEGY`. Additive merge in the MP repo (not
 an AAIG framework change).
 
-## Discovered issues (to file as GitHub issues)
+## Discovered issues (GitHub-tracked)
 
-### GH-ISSUE (Option B): Verify deploy.sh managed-region byte-parity under local bash/WSL + harden `get_current_git_branch`
-No GitHub issue tool is wired into this workspace (`gh` CLI absent, no GitHub MCP,
-tokens must not be handled by the agent), so this is captured here for manual
-filing. Ready-to-paste body:
-
-> **Title:** deploy.sh: local bash/WSL e2e verification + `get_current_git_branch` non-repo hardening
->
-> **Context:** Measure 2b (managed regions) added an awk region engine to
-> `deploy.sh`. Its byte-parity vs `deploy_core` is verified by
-> `tests/test_sh_managed_regions_parity.py` (9 tests, green locally under
-> Git-for-Windows gawk 5.0; skipped where awk is absent; runs in Linux CI).
->
-> **What is NOT yet verified:** a full end-to-end `deploy.sh` run on this dev
-> box. `tests/test_cross_tool_parity.py::test_sh_deploy_then_mcp_dryrun_is_clean`
-> aborts under Git-bash-on-Windows with exit 128 because
-> `get_current_git_branch()` runs `git -C "$target" branch --show-current` and,
-> under `set -euo pipefail`, the pipeline propagates git's 128 when the **target
-> is not a git repository** (the pytest tmp target). Pre-existing, unrelated to
-> managed regions; passes in Linux CI where the target sits inside a repo.
->
-> **Tasks:**
-> 1. Harden `get_current_git_branch` to tolerate a non-repo target (e.g. guard
->    with `git rev-parse --is-inside-work-tree` or `|| true`) so `deploy.sh`
->    never aborts on branch detection.
-> 2. Run the full `deploy.sh` e2e + MCP dry-run parity locally (WSL/Ubuntu or a
->    git-initialized target) and confirm 0 UPDATE/CONFLICT/CREATE on the
->    region-less payload.
-> 3. Once green, this closes 2b Option B.
+### [GH #1](https://github.com/sefalk/AgenticAIGovernance/issues/1) (Option B): deploy.sh local bash/WSL e2e verification + `get_current_git_branch` non-repo hardening
+Filed via GitHub MCP on 2026-07-20. Covers **Option B** (full local e2e
+verification of `deploy.sh`) plus the pre-existing bug discovered during 2b:
+`get_current_git_branch` aborts under `set -euo pipefail` when the target is not
+a git repo (exit 128; unrelated to regions; passes in Linux CI). Not blocking —
+the region engine itself is byte-parity-verified locally (gawk 5.0).
