@@ -11,7 +11,7 @@
 | # | Measure | Size | Branch | Status |
 |---|---|---|---|---|
 | 1 | Deploy-prompt reapply ordering (reapply AFTER resolve_conflicts) | small | `agent/deploy-prompt-ordering-fix` | DONE (pending merge) |
-| 2 | Managed regions (general, sparing) + apply to curated agent skills | large | `agent/managed-regions` | 2a/2b/2c DONE; 2d pending |
+| 2 | Managed regions (general, sparing) + apply to curated agent skills | large | `agent/managed-regions` | DONE (2a–2d) — pending merge |
 | 3 | Skill-deactivation churn (deactivated framework skill = perpetual CREATE) | medium | — | TODO |
 | 4 | curate-skills: warn on assignment to an agent without `## Skills` | small | `agent/managed-regions` | DONE (folded into 2c-ii, Step 8 validation) |
 | 5 | curate-skills: separate framework-base skills from curation (researcher redundancy) | small | — | FOLDED into #2 (2c AC7) |
@@ -157,9 +157,9 @@ only) as the slot.
     UNCHANGED vs the empty-region framework source via `deploy_core` (the prompt
     itself is agent-executed, not unit-testable — the mechanism + payload shape
     are what we gate).
-- **2d — Guidance:** short instruction/section documenting managed regions +
-  the **“sparing, prefer af-env.conf”** rule; note it supersedes the bare-line
-  curation approach (fixes #5).
+- **2d — Guidance — ✅ DONE:** `copilot-authoring.instructions.md` gains a
+  **Managed Regions** section (mechanism + syntax + the **“sparing, prefer
+  af-env.conf”** rule); CHANGELOG `Added` entry covers the whole feature.
 
 ### Acceptance criteria
 - [x] AC1: A file whose only diff is inside a managed region classifies
@@ -172,7 +172,8 @@ only) as the slot.
       reapply is idempotent (no duplication). *(2c-ii: full region-body replace, never append)*
 - [x] AC5: existing bare-curated agents migrate into the region once.
       *(deploy conflict→resolve→reapply + 2c-ii defensive bare-line strip)*
-- [ ] AC6: guidance documents sparing use + af-env.conf preference. *(2d, pending)*
+- [x] AC6: guidance documents sparing use + af-env.conf preference.
+      *(2d: `copilot-authoring.instructions.md` → Managed Regions section)*
 - [x] AC7: region-vs-base dedup — a curated skill that is now in the agent's
       base Skills section is NOT written into the region (no duplication).
       *(2c-ii Step 7 base dedup + drop from assignments)*. Consolidates #5.

@@ -65,6 +65,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Managed regions — CONFLICT-free project-owned content inside framework
+  files.** A file may now carry an `AF:MANAGED:{name}:START/END` marker pair
+  whose body is project territory: the deploy hashes the region-*stripped* file
+  for classification and *transplants* the target's region body onto the incoming
+  framework base on write. So a project can populate the region locally without
+  ever tripping a CONFLICT on redeploy, while framework changes *outside* the
+  region still UPDATE normally; empty regions strip to themselves, so
+  never-populated projects stay UNCHANGED. Byte-identical strip/merge is
+  implemented across all three deploy paths — `deploy_core.py` (regex),
+  `deploy.ps1` (`[regex]::Replace`), and `deploy.sh` (an awk state-machine with a
+  join model + `od`-based trailing-newline handling) — and guarded by cross-tool
+  parity tests (PowerShell via AST extraction; bash via awk-program extraction,
+  verified locally under gawk 5.0). First consumer: **curated agent skills.**
+  `/af-curate-skills` now writes curated skill references *only* inside each
+  agent's `AF:MANAGED:curated-skills` region (idempotent full-body replace) with
+  **base dedup** (a skill promoted into an agent's base list is dropped from the
+  region) and **defensive migration** (stale bare curated bullets are stripped);
+  the bare→region transition is otherwise handled by the existing
+  conflict-resolution → reapply deploy flow. `/af-curate-skills` also now warns
+  and drops assignments that target a skill-less agent (`coordinator`,
+  `compliance-checker`). Authoring guidance (`copilot-authoring.instructions.md`)
+  documents the mechanism and the **use-sparingly, prefer `af-env.conf`** rule.
+
 - **Proactive notebook artifact-weight hygiene (guidance).** The
   `notebook-execution` skill gains an *Artifact Weight Hygiene* section with
   library-agnostic principles to stop notebook-driven repo bloat before it

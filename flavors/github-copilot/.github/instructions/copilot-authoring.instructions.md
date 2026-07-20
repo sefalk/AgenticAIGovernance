@@ -93,6 +93,38 @@ model: __AF_TIER_BALANCED__
   implementer, test-critic; EFFICIENT = concrete tasks (test-writer, refactorer,
   documenter, researcher, compliance-checker, ado-* workers).
 
+### Managed Regions (Project-Owned Content)
+
+A **managed region** carves out a project-owned span inside a framework file that
+the deploy treats specially: its content is **ignored for change classification**
+(the deploy hashes the region-*stripped* file) and **preserved on write** (the
+target's region body is transplanted onto the incoming framework base). This lets
+a project fill the region locally without ever producing a CONFLICT on redeploy,
+while framework changes *outside* the region still update normally.
+
+Syntax — a matched marker pair, one region per name, name in `[A-Za-z0-9_.-]`:
+
+```markdown
+<!-- AF:MANAGED:curated-skills:START -->
+<!-- AF:MANAGED:curated-skills:END -->
+```
+
+- Markers ride on their own line; any comment wrapper works (`<!-- -->`, `#`,
+  `//`). The body between them is project territory; the deploy never overwrites
+  it once populated.
+- The framework ships regions **empty** (START/END on adjacent lines). Empty
+  regions strip to themselves, so never-populated projects stay UNCHANGED.
+- The only current consumer is agent `## Skills` (`AF:MANAGED:curated-skills`,
+  written by `/af-curate-skills`). Byte-identical strip/merge is implemented in
+  `deploy_core.py`, `deploy.ps1`, and `deploy.sh`.
+
+**Use sparingly.** A managed region is the tool of last resort for content that
+is *genuinely per-project and unpredictable*. For everything configurable, prefer
+`af-env.conf` + a deploy-resolved placeholder (see Tier Placeholders): config
+keys are visible, validated, and curated in one place, whereas regions hide
+divergence inside deployed files. Add a new region only when there is no sensible
+`af-env.conf` representation.
+
 ## 3. Known Gotchas
 
 ### 3.1 Handoff Prompts: No Block Scalars
