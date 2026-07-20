@@ -273,6 +273,17 @@ function Get-TargetClassifyHash([string]$Target) {
     return (Get-BytesHashUpper (Get-RegionStrippedBytes ([System.IO.File]::ReadAllBytes($Target))))
 }
 
+function Test-DeactivatedSkillUnit([string]$HashKey) {
+    # Measure #3: an active-by-default skill the project deactivated by *moving* it
+    # to skills/_available/{name}/. When the framework still ships skills/{name}/ but
+    # the target has skills/_available/{name}/, the deploy classifies it DEACTIVATED
+    # (suppressed) instead of re-CREATE-ing it on every run. Parity with deploy_core
+    # _is_deactivated_skill_unit and deploy.sh is_deactivated_skill_unit.
+    $parts = ($HashKey -replace '\\', '/') -split '/'
+    if ($parts.Count -lt 3 -or $parts[0] -ne 'skills' -or $parts[1] -eq '_available') { return $false }
+    return (Test-Path (Join-Path $TargetGitHub "skills/_available/$($parts[1])") -PathType Container)
+}
+
 function Resolve-BackupPruneDays {
     param([int]$CliValue)
 
@@ -401,7 +412,7 @@ foreach ($f in $ManifestVSCodeFiles) {
 }
 
 # ── Counters ───────────────────────────────────────────────────────────────
-$script:Stats = @{ Created = 0; Updated = 0; Unchanged = 0; Protected = 0; Conflict = 0; Preserved = 0 }
+$script:Stats = @{ Created = 0; Updated = 0; Unchanged = 0; Protected = 0; Conflict = 0; Preserved = 0; Deactivated = 0 }
 $script:BackupDir = $null
 $script:BackupCount = 0
 
@@ -751,6 +762,11 @@ function Publish-SingleFile {
 
     # ── New file: always deploy ──
     if (-not $exists) {
+        if (Test-DeactivatedSkillUnit $HashKey) {
+            Write-Host "  DEACTIVATED $DisplayPath  (skill moved to _available/)" -ForegroundColor DarkGray
+            $script:Stats.Deactivated++
+            return
+        }
         Write-Host "  CREATE  $DisplayPath" -ForegroundColor Green
         $script:Stats.Created++
         $script:DeployedHashes[$HashKey] = $sourceHash
@@ -1068,6 +1084,9 @@ if ($script:Stats.Protected -gt 0) {
 }
 if ($script:Stats.Preserved -gt 0) {
     Write-Host "  Preserved: $($script:Stats.Preserved) -- project customizations kept" -ForegroundColor Magenta
+}
+if ($script:Stats.Deactivated -gt 0) {
+    Write-Host "  Deactivated: $($script:Stats.Deactivated) -- skills moved to _available/, not deployed" -ForegroundColor DarkGray
 }
 if ($script:Stats.Conflict -gt 0) {
     Write-Host "  Conflict:  $($script:Stats.Conflict) -- both sides changed, use agent to merge" -ForegroundColor Red

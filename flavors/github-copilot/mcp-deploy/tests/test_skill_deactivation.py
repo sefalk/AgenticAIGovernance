@@ -8,11 +8,24 @@ CREATE — so a deactivated skill is not re-activated on every deploy.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from af_deploy_mcp import deploy_core
 
 AF_ROOT = Path(__file__).resolve().parents[2]  # flavors/github-copilot
+DEPLOY_PS1 = AF_ROOT / "deploy.ps1"
+DEPLOY_SH = AF_ROOT / "deploy.sh"
+
+
+def _pwsh() -> str | None:
+    for exe in ("pwsh", "powershell"):
+        if shutil.which(exe):
+            return exe
+    return None
 
 
 def _first_active_skill() -> str:
@@ -82,3 +95,56 @@ def test_apply_does_not_baseline_deactivated_skill(tmp_path: Path) -> None:
     deploy_core.apply(AF_ROOT, target)
     baseline = deploy_core.read_baseline_hashes(target / ".github")
     assert f"skills/{name}/SKILL.md" not in baseline
+
+
+def _pwsh() -> str | None:
+    for exe in ("pwsh", "powershell"):
+        if shutil.which(exe):
+            return exe
+    return None
+
+
+def test_ps1_dry_run_suppresses_deactivated_skill(tmp_path: Path) -> None:
+    exe = _pwsh()
+    if exe is None or not DEPLOY_PS1.is_file():
+        pytest.skip("PowerShell or deploy.ps1 not available")
+    name = _first_active_skill()
+    target = _target_with_available(tmp_path, name)
+    res = subprocess.run(
+        [
+            exe,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(DEPLOY_PS1),
+            "-TargetDir",
+            str(target),
+            "-DryRun",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert f"DEACTIVATED .github/skills/{name}/SKILL.md" in res.stdout, res.stdout
+    assert f"CREATE  .github/skills/{name}/SKILL.md" not in res.stdout, res.stdout
+
+
+def test_sh_dry_run_suppresses_deactivated_skill(tmp_path: Path) -> None:
+    if shutil.which("bash") is None or shutil.which("git") is None or not DEPLOY_SH.is_file():
+        pytest.skip("bash/git or deploy.sh not available")
+    name = _first_active_skill()
+    target = _target_with_available(tmp_path, name)
+    # deploy.sh detects the target's git branch under set -euo pipefail, so the
+    # target must be a git repo (see GH #1); git-init to isolate that concern.
+    subprocess.run(["git", "init", "-q", str(target)], check=True, timeout=60)
+    res = subprocess.run(
+        ["bash", str(DEPLOY_SH), "--target", str(target), "--dry-run"],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert f"DEACTIVATED .github/skills/{name}/SKILL.md" in res.stdout, res.stdout
+    assert f"CREATE  .github/skills/{name}/SKILL.md" not in res.stdout, res.stdout

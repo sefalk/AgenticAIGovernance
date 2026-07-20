@@ -267,6 +267,7 @@ STAT_UNCHANGED=0
 STAT_PROTECTED=0
 STAT_CONFLICT=0
 STAT_PRESERVED=0
+STAT_DEACTIVATED=0
 BACKUP_DIR=""
 BACKUP_COUNT=0
 
@@ -511,6 +512,22 @@ write_deployed() {
     else
         mv "$tmp" "$tgt"
     fi
+}
+
+is_deactivated_skill_unit() {
+    # Measure #3: an active-by-default skill the project deactivated by *moving* it
+    # to skills/_available/{name}/. When the framework still ships skills/{name}/ but
+    # the target has skills/_available/{name}/, the deploy classifies it DEACTIVATED
+    # (suppressed) instead of re-CREATE-ing it. Parity with deploy_core
+    # _is_deactivated_skill_unit and deploy.ps1 Test-DeactivatedSkillUnit.
+    local key="${1//\\//}" name
+    case "$key" in
+        skills/_available/*) return 1 ;;
+        skills/*/*)
+            name="${key#skills/}"; name="${name%%/*}"
+            [[ -d "$TARGET_GITHUB/skills/_available/$name" ]] && return 0 || return 1 ;;
+        *) return 1 ;;
+    esac
 }
 # ── Hash-based 3-way merge ────────────────────────────────────────────────
 HASH_FILE="$TARGET_GITHUB/.af-hashes"
@@ -798,6 +815,11 @@ deploy_file() {
 
     # ── New file: always deploy ──
     if [[ ! -f "$tgt" ]]; then
+        if is_deactivated_skill_unit "$hash_key"; then
+            echo "  DEACTIVATED $display  (skill moved to _available/)"
+            ((STAT_DEACTIVATED++)) || true
+            return
+        fi
         echo "  CREATE  $display"
         ((STAT_CREATED++)) || true
         DEPLOYED_HASHES["$hash_key"]="$source_hash"
@@ -900,8 +922,12 @@ if [[ "$DIFF_MODE" == "true" ]]; then
         src="$SOURCE_GITHUB/$rel"
         tgt="$TARGET_GITHUB/$rel"
         if [[ ! -f "$tgt" ]]; then
-            printf "  -> project   %-50s  New in AF\n" ".github/$rel"
-            ((DIFF_COUNT++)) || true
+            if is_deactivated_skill_unit "$rel"; then
+                printf "  -- skip      %-50s  DEACTIVATED (moved to _available/)\n" ".github/$rel"
+            else
+                printf "  -> project   %-50s  New in AF\n" ".github/$rel"
+                ((DIFF_COUNT++)) || true
+            fi
         else
             sh="$(source_hash_resolved "$src")"
             th="$(target_classify_hash "$tgt")"
@@ -1078,6 +1104,9 @@ fi
 if [[ "$STAT_PRESERVED" -gt 0 ]]; then
     echo "  Preserved: $STAT_PRESERVED -- project customizations kept"
 fi
+if [[ "$STAT_DEACTIVATED" -gt 0 ]]; then
+    echo "  Deactivated: $STAT_DEACTIVATED -- skills moved to _available/, not deployed"
+fi
 if [[ "$STAT_CONFLICT" -gt 0 ]]; then
     echo "  Conflict:  $STAT_CONFLICT -- both sides changed, use agent to merge"
     echo ""
@@ -1104,7 +1133,7 @@ prune_old_backups "$TARGET_DIR" "$BACKUP_PRUNE_DAYS" "$BACKUP_DIR"
 
 if [[ "$DRY_RUN" == "true" ]]; then
     echo ""
-    echo "  DRYRUN_JSON {\"mode\":\"dry-run\",\"created\":$STAT_CREATED,\"updated\":$STAT_UPDATED,\"unchanged\":$STAT_UNCHANGED,\"protected\":$STAT_PROTECTED,\"preserved\":$STAT_PRESERVED,\"conflict\":$STAT_CONFLICT,\"backup_prune_days\":$BACKUP_PRUNE_DAYS}"
+    echo "  DRYRUN_JSON {\"mode\":\"dry-run\",\"created\":$STAT_CREATED,\"updated\":$STAT_UPDATED,\"unchanged\":$STAT_UNCHANGED,\"protected\":$STAT_PROTECTED,\"preserved\":$STAT_PRESERVED,\"deactivated\":$STAT_DEACTIVATED,\"conflict\":$STAT_CONFLICT,\"backup_prune_days\":$BACKUP_PRUNE_DAYS}"
 fi
 
 # Backup cleanup
