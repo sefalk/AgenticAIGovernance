@@ -47,6 +47,9 @@ Consult these skills when relevant to the task:
    (two-stage, post-merge) — never close on acceptance-criteria assumptions.
 8. Model multi-phase specs as a Feature with child User Stories per phase
    (see **Multi-Phase Spec Modeling**); close only the delivered phase.
+9. Before writing a type-specific field (e.g. `AcceptanceCriteria`), run the
+   **Field-Applicability Guard** — never silently write a field the target
+   work-item type does not carry.
 
 ## Databricks Evidence Traceability (When Applicable)
 
@@ -64,6 +67,39 @@ Rules:
 - If project contract marks tracker capability as **required**, unavailable ADO
   access is a BLOCKED hard stop.
 - If marked **optional**, emit fallback traceability output and `pending-sync`.
+
+## Field-Applicability Guard (Write Operations, Mandatory)
+
+A field can be written via the API even when the target work-item **type does
+not carry it** — the value is stored but never rendered on the form, so the human
+cannot see it. The classic case: `Microsoft.VSTS.Common.AcceptanceCriteria`
+written to a **Task** (which has no such field) — accepted by the API, invisible
+in the UI. **Never write a type-specific field silently.**
+
+Before writing a type-specific field (e.g. `AcceptanceCriteria`,
+`Microsoft.VSTS.TCM.ReproSteps`, `Microsoft.VSTS.Common.Steps`):
+
+1. Call `wit_get_work_item_type` for the target type and confirm the field's
+   reference name is in the type's `fields`.
+2. If it **is** present → write normally.
+3. If it is **absent** (would be stored but invisible), take exactly one path
+   and **report which**:
+   - **On create:** choose a type that carries the field (User Story / PBI /
+     Bug for acceptance criteria) instead of the field-less type.
+   - **On an existing item:** recommend a type change; perform it only with
+     explicit human confirmation (a retype can drop type-specific data).
+   - **If the type must remain:** mirror the content into a rendered field
+     (`System.Description`) under a clearly labeled heading (e.g.
+     `## Acceptance Criteria`). You may additionally write the semantic field
+     for future retype/queries — but the visible mirror **and** the report are
+     mandatory.
+
+**Scope (be honest about it):** this verifies field *applicability to the type*
+(queryable via `wit_get_work_item_type`). It does **not** guarantee full
+form-layout visibility — the form layout is not exposed by the available MCP
+tools, so a field that is on the type yet hidden by a custom form layout is out
+of scope. Never claim “verified visible on the form”; claim “field applicable to
+the type”.
 
 ## Closure Acceptance-Criteria Gate (Mandatory)
 
