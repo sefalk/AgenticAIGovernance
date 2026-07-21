@@ -66,6 +66,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`ado-work-item-manager`: field-applicability guard for write operations.**
+  Azure DevOps accepts a write to a valid field even when the target work-item
+  *type does not carry it* — the value is stored but never rendered on the form,
+  so the human never sees it (classic case: `AcceptanceCriteria` written to a
+  **Task**). The agent now, before writing a type-specific field, confirms the
+  field is in the target type's `wit_get_work_item_type` fields; if absent it
+  chooses a type that carries the field, or mirrors the content into
+  `System.Description` under a labeled heading, and always reports which path it
+  took — never a silent invisible write. Scoped honestly to field *applicability*
+  (the form layout is not exposed by the MCP tools). Backed by a new HARD gate in
+  `quality-gates.instructions.md`.
+
 - **Provenance markers no longer clutter the framework's own files.** Removed
   ~129 in-code `copilot:generated`/`copilot:modified` markers from AF-authored
   files (agents, instructions, skills, hooks, scripts, `mcp-deploy/**`, docs,
