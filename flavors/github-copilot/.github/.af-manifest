@@ -24,6 +24,7 @@ hooks/scripts/researcher-pretooluse.sh
 hooks/scripts/coordinator-postmerge.ps1
 hooks/scripts/coordinator-postmerge.sh
 hooks/scripts/check-large-files.py
+hooks/scripts/check-strict-json.py
 hooks/git/pre-commit
 
 # Scripts (canonical test and lint runners)
