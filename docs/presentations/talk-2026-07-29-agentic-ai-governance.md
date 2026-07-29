@@ -24,6 +24,7 @@ sources: [docs/wiki/, core/L1_Core_Principles.md, core/L1_Framework_Architecture
 
 | Parameter | Decision |
 |---|---|
+| **Date** | **2026-08-10** — eight days after EU AI Act Article 50 became enforceable (see §4 E.4). |
 | **Duration** | **25 minutes** talk + ~5 minutes Q&A (30 min slot). 20 min is not a hard floor; 25 is the working budget. |
 | **Audience** | Mixed, cross-company, **heterogeneous prior knowledge**. Cannot assume familiarity with VS Code, Copilot, agent frameworks or the EU AI Act. |
 | **Pacing** | Gentle on-ramp so nobody is lost, then a **steep climb** into the substance of AAIG. |
@@ -308,11 +309,20 @@ Order:
 Walk a single task through the pipeline and stop at exactly **three** places to
 show an artefact. These three are the substance of the talk.
 
-| Stop | Mechanism | What is shown | What it proves |
+They are not chosen because they look impressive. Each one demonstrates a
+**different class of thing that CI structurally cannot do** — which pre-empts
+the most likely objection in the room by answering it three times before it is
+asked.
+
+| Stop | Moment | What CI cannot do | Why |
 |---|---|---|---|
-| **1** | **Hook denial** | The actual refusal message when an agent attempts a forbidden action (e.g. a force push or a push to a protected branch) | Enforcement happens **outside the model**, deterministically, **before** the action — not as a suggestion, not as a post-hoc finding |
-| **2** | **Maker-Checker verdict** | A critic agent's parseable `REJECTED` verdict with the concrete gate that failed, and the resulting retry | Handoffs between agents are **gated and auditable**; the reviewer is a *different* actor than the maker |
-| **3** | **Evidence artefacts** | Workflow log, gate summary, provenance marker in the produced file | The run leaves a **record**, not just a diff |
+| **1** | **Red-phase block.** The coordinator dispatches the test-writer. It returns a test that *passes*. The stop hook blocks the handoff: the Red phase requires the test to fail against existing code. | Assert an **inverted condition on a transient state** | A green suite is CI's *success* condition and this gate's *violation*. And without the harness the Red state never becomes an artefact at all — an unconstrained agent writes test and implementation in one motion, so there is no commit for CI to inspect. |
+| **2** | **Maker-checker rejection.** The implementer reports its own gate summary as fully passed. A *different* agent — the code-critic — issues a parseable `REJECTED` naming the gate that actually failed, and the work loops back. | Enforce **separation of actors** | CI checks *what* was produced. It has no concept of *who* checked it, and no way to reject "the maker approved itself". |
+| **3** | **Pre-action denial.** An agent attempts a forbidden operation (force push, push to a protected branch). The action is classified and refused *before execution*. | **Prevent** rather than **detect** | CI and branch protection are always downstream of the attempt. By the time they react, local history has already been rewritten. Prevention and detection are different controls. |
+
+> **The one-liner for this slide:**
+> CI verifies the **artefacts** of a process.
+> It cannot verify that the **process happened**.
 
 Supporting points, one line each — resist elaborating:
 
@@ -320,9 +330,9 @@ Supporting points, one line each — resist elaborating:
   blocks the handoff. SOFT is a judgement call and goes to a reviewer. ADVISORY
   is measured and never blocks. Deciding *which* is which is the actual
   engineering work.
-- **BLOCKED is a third outcome.** If the tool needed to verify a HARD gate is
-  unavailable, the gate is reported BLOCKED — never silently passed. Escalation,
-  not assumption.
+- **The gate blocks the handoff, not the commit.** Stop 1 fires between two
+  agents — the implementer never sees the bad test. That boundary is invisible
+  to every tool whose smallest unit is a commit.
 - **Complexity tiers.** Gates scale with the size and risk of the change.
   Governance that costs the same for a typo as for a new module gets switched
   off. This is not a footnote — it is the reason the framework survives contact
@@ -382,15 +392,58 @@ This section is not optional — without it, a governance talk reads as marketin
 
 **E.1 — Where the boundary genuinely is.**
 
-- Agent prompts are conventions. The **real** boundary is server-side: branch
-  policies, permission scoping, and hooks that execute regardless of what the
-  agent intended. Repeating the B.4 quote here closes the loop.
-- Some intended controls are **aspirational, not implemented** — and are
-  documented as such inside the framework rather than quietly listed as
-  features.
-- There are real operational limitations (for example, constraints on running
-  multiple governed workstreams in parallel). Naming one concrete limitation is
-  worth more than a generic "of course nothing is perfect".
+Two limitations, both **structural trade-offs rather than open to-dos**. That
+distinction matters: a to-do says "we are not finished yet", a trade-off says
+"we understood the problem and picked a side". Only the second builds
+credibility, and only the second is safe to say in front of a mixed room.
+
+**Limitation 1 — the gate is only as strong as the machine it runs on, and it is
+deliberately fail-open.**
+
+- The good part first: these hooks are executed by the **IDE runtime, not by the
+  agent**. The agent does not decide whether the gate runs, does not see it
+  coming, and cannot talk its way past it. That is genuine enforcement — which
+  is precisely why it belongs in the same category as a server-side policy and
+  not in the category of instruction files.
+- The honest part: it is nevertheless a **client-side** control. Correct
+  workstation provisioning is a precondition. And if the verifier itself is
+  missing — no test runner installed, say — the gate **skips with a warning
+  instead of blocking**.
+- That is a deliberate choice, not an oversight. A fail-closed gate would make
+  every governed repository a single point of failure on every developer
+  machine: the first tooling hiccup halts all work, and the framework gets
+  switched off within a week. At this ring, availability was chosen over
+  strictness.
+- The conclusion is architectural, and it is the actual point of the slide:
+
+| | Local hooks | Server-side policy |
+|---|---|---|
+| When | immediately, in-process | after the fact |
+| Scope | every agent handoff | the integration boundary |
+| Can the **agent** bypass it? | no | no |
+| Can the **human** bypass it? | yes — it is their machine | no |
+| Failure mode | fail-open | fail-closed |
+
+> Two rings, different jobs. Neither replaces the other — and anyone offering
+> you just one of them as a complete answer is selling something.
+
+**Limitation 2 — the harness proves the process, not the result.**
+
+Best delivered as a callback to stop 1 from section D:
+
+- The hook can mechanically verify **that** the new tests fail. It cannot verify
+  that they fail **for the right reason** — a test that fails on a typo'd import
+  produces the same exit code as one that fails because the behaviour genuinely
+  does not exist yet.
+- So that judgement is not automated away. It is classified **SOFT**, handed to
+  a critic, and ultimately to a human. HARD gates only ever cover the
+  *mechanically decidable* subset of what "correct" means.
+- Stated plainly: **evidence ≠ correctness.** The harness makes the run
+  reviewable, and makes review cheaper and better targeted. It does not remove
+  the reviewer.
+
+That is not a hole in the thesis — it *is* the thesis. The claim was never "the
+agent is now trustworthy". The claim is "the run is now inspectable".
 
 **E.2 — Own the cost.**
 
@@ -443,9 +496,11 @@ Tempting and easy to overclaim. What is actually defensible:
   Profile** expect traceability and documentation as management controls. Both
   are **voluntary**.
 - The **EU AI Act, Article 50** (transparency / marking of AI-generated content)
-  becomes enforceable on **2026-08-02**. Whether an *internal* coding agent falls
-  under it is genuinely contestable — present it as a direction of travel, not
-  as an obligation you are already under.
+  became enforceable on **2026-08-02** — **eight days before this talk**. Use the
+  timing, it is a gift: the subject is not hypothetical this week. But do not
+  overreach — whether an *internal* coding agent falls under Article 50 is
+  genuinely contestable. Present it as a direction of travel that has just
+  started moving, not as an obligation the audience is already in breach of.
 - **IEC 62304 does not require AI provenance.** Do not say it does.
 
 The safe and still-strong formulation:
@@ -575,21 +630,31 @@ the first question any practitioner in the room will have.
 All artefacts must be **sanitised or synthetic**: realistic in structure,
 neutral in content. No project names, no customer data, no real repository paths.
 
+The set maps 1:1 onto the three stops in D.1. Ready-to-use drafts are in
+[talk-2026-07-29-artefacts.md](talk-2026-07-29-artefacts.md).
+
 | # | Artefact | Section | Form | Status |
 |---|---|---|---|---|
-| 1 | Hook denial message for a forbidden git operation | D.1 | Terminal screenshot | to produce |
-| 2 | Critic `REJECTED` verdict incl. the failed gate | D.1 | Code/text block | to produce |
-| 3 | Gate summary block (HARD/SOFT/ADVISORY counts) | D.1 | Text block | to produce |
-| 4 | Workflow log excerpt (YAML) | D.1 | Code block | to produce |
-| 5 | Provenance marker in a generated file | D.1 | 2-line code snippet | to produce |
-| 6 | Conflict classification output of a re-deploy | D.2 | Text block | to produce |
-| 7 | **GIF / short video: one gated handoff running** | D.1 | 10–20 s loop, no audio | to produce |
+| 1 | **Red-phase block** — dispatch, a *passing* test comes back, the stop hook blocks the handoff | D.1 stop 1 | **GIF 15–20 s** + static fallback | text drafted |
+| 2 | Implementer's self-reported gate summary (all green) | D.1 stop 2 | Text block | text drafted |
+| 3 | Code-critic `REJECTED` verdict naming the gate that actually failed | D.1 stop 2 | Text block | text drafted |
+| 4 | Pre-action denial of a forbidden git operation | D.1 stop 3 | Terminal still | text drafted |
+| 5 | Workflow log excerpt (YAML) — the record the run leaves behind | D.1 wrap-up | Code block | text drafted |
+| 6 | Provenance marker in a generated file | D.1 wrap-up | 2-line snippet | text drafted |
+| 7 | Re-deploy conflict classification (customised file preserved) | D.2 | Text block | text drafted |
 | 8 | The two self-quotes (self-check is SOFT; prompts are not the security boundary) | B.4 / E.1 | Pull quote | ready — verbatim in the repo |
 
-> **On the GIF (item 7).** It is the only motion in the talk, so it should show
-> the single most convincing moment: an agent attempting something forbidden and
-> being stopped — or a critic rejecting and forcing a retry. Keep it under 20
-> seconds, no narration, and loop it while speaking.
+> **On the GIF (item 1).** It is the only motion in the talk, so it has to carry
+> the most convincing moment. The Red-phase block is that moment: the audience
+> watches a **green** test suite get **rejected**, which is counter-intuitive
+> and therefore memorable. Under 20 seconds, no narration, looped while
+> speaking. Always prepare the static fallback frame — embedded video is the
+> most reliable way to derail a conference talk.
+
+> **Sanitisation rule.** Realistic in structure, neutral in content: generic
+> module names (`payments`, `orders`), no project or customer names, no real
+> paths or identifiers. The *shape* follows the real hook output so that anyone
+> who later sees the framework recognises it.
 
 ---
 
@@ -606,7 +671,7 @@ Everything cited on a slide must appear in this table. Nothing else gets cited.
 | Organisations constraining AI use due to operating cost | **~1 in 5** | McKinsey, ibid. | 2026-07-13 |
 | Share of agentic task cost tied to refining answers | **~60 %** | McKinsey, ibid. | 2026-07-13 |
 | Variation between completions of the same task | **factor 30** | McKinsey, ibid. | 2026-07-13 |
-| EU AI Act Article 50 transparency obligations enforceable | date | EU AI Act, Art. 50 | from **2026-08-02** |
+| EU AI Act Article 50 transparency obligations enforceable | date | EU AI Act, Art. 50 | since **2026-08-02** (8 days before the talk) |
 | AI management system standard (voluntary) | — | ISO/IEC 42001:2023 | 2023-12 |
 | Generative AI risk profile (voluntary) | — | NIST AI RMF, NIST.AI.600-1 | 2024-07-26 |
 | Spec-driven development, large ecosystem | 240+ contributors, 35+ agent integrations | GitHub Spec Kit | 2026-07 |
@@ -632,7 +697,7 @@ Five minutes, so three or four questions at most. These are the likely ones.
 
 | Question | Answer in one breath |
 |---|---|
-| **"Why not just do this in CI?"** | CI gates the **result**; hooks gate the **process**, in flight, at the handoff points *between* agents — which CI cannot see, because no artefact exists yet. And a pre-action hook prevents what CI could only detect afterwards. Use both: CI is the outer ring, hooks are the inner one. |
+| **"Why not just do this in CI?"** | Three reasons, and the demo already showed all three. **(1)** Some conditions are *inverted* — the Red gate demands that tests **fail**; a green suite is CI's success criterion. **(2)** Some states are *transient* — without the harness the Red state never becomes a commit, so there is nothing for CI to inspect. **(3)** Some controls must *prevent*, not *detect* — CI reacts after the attempt. Short version: **CI verifies the artefacts of a process; it cannot verify that the process happened.** Use both — CI is the outer ring, hooks the inner one. |
 | **"GitHub says the harness is all you need — isn't this over-engineering?"** | Agreed, for productivity. The disagreement is about the question being asked: *good result faster* vs. *demonstrable process*. Only the first is solved by a better model. |
 | **"What does this cost in tokens and time?"** | It adds refinement loops on purpose. Published figures put ~60 % of agentic task cost in refinement anyway, with a factor-30 spread between runs. The gain is predictability, and the tiering keeps small changes cheap. |
 | **"Do the agents actually follow this?"** | The semantic layer — sometimes. That is precisely why the enforcement layer exists outside the model, and why self-checks are classified as non-binding by design. |
@@ -643,12 +708,17 @@ Five minutes, so three or four questions at most. These are the likely ones.
 
 ## 9. Open items before the deck is built
 
-- [ ] Produce artefacts 1–7 (sanitised / synthetic).
-- [ ] Decide which single limitation from E.1 is named concretely.
-- [ ] Confirm the talk date against the **2026-08-02** EU AI Act milestone —
-      before vs. after changes the tense of that statement.
+- [x] ~~Decide which single limitation from E.1 is named concretely.~~ Two are
+      named: fail-open client-side enforcement, and evidence ≠ correctness.
+- [x] ~~Confirm the talk date against the EU AI Act milestone.~~ 2026-08-10,
+      i.e. eight days *after* — tense updated to "since".
+- [x] ~~Draft the artefacts.~~ See
+      [talk-2026-07-29-artefacts.md](talk-2026-07-29-artefacts.md).
+- [ ] Record the GIF for artefact 1, plus a static fallback frame.
+- [ ] Typeset artefacts 2–7 for slide legibility — font size beats completeness;
+      trim any block that does not read at presentation size.
 - [ ] Verify each figure in §7 against its source once more immediately before
-      the talk (all are from July 2026 and none are load-bearing if dropped).
+      the talk (all are from July 2026; none is load-bearing if dropped).
 - [ ] Rehearse for time. Section D is the one that will overrun; section A is the
       one that must not.
 - [ ] Decide whether the closing slide shows contact/discussion pointers.
