@@ -3,8 +3,8 @@ title: Glossary
 type: concept
 description: Terms and acronyms used across the AAIG framework and this wiki.
 tags: [aaig, governance, glossary, reference]
-updated: 2026-07-03
-sources: [core/L1_Framework_Architecture.md, core/L1_Core_Principles.md, flavors/github-copilot/.github/af-env.conf]
+updated: 2026-07-29
+sources: [core/L1_Framework_Architecture.md, core/L1_Core_Principles.md, flavors/github-copilot/.github/af-env.conf, flavors/github-copilot/CHANGELOG.md]
 ---
 
 # Glossary
@@ -33,6 +33,13 @@ sources: [core/L1_Framework_Architecture.md, core/L1_Core_Principles.md, flavors
 | **Provenance Marker** | An in-code `copilot:generated` / `copilot:modified` comment marking AI-authored content. |
 | **Hook** | A deterministic script enforcing a gate. See [Hooks & Autonomy](11-hooks-and-autonomy.md). |
 | **Autonomy Tier** | `allow` / `ask` / `deny` classification of a terminal command. |
+| **Curation** | The post-deploy step (`/af-curate-skills`) that activates only the skills matching the project's stack and moves the rest to `_available/`. |
+| **DEACTIVATED** | Deploy classification for a skill the framework ships but the project deliberately turned off — never re-created. See [Deployment](12-deployment.md). |
+| **Managed Region** | An `AF:MANAGED:{name}` block inside a framework file whose body is project-owned; deploy transplants it instead of raising a CONFLICT. |
+| **Model Tier** | `PREMIUM` / `BALANCED` / `EFFICIENT` — the model list a subagent is deployed with (`AF_MODEL_TIER_*`). |
+| **Payload** | The set of deployable framework files; the MCP server can carry it bundled in a wheel or fetch it hash-pinned from a remote URL. |
+| **Orphan** | A baselined framework file left behind by a rename or manifest change; found via `list_orphans`. |
+| **AF** | Agent Framework — the abbreviation used inside the `github-copilot` flavor for its own deployable package. |
 | **R-SD- / R-DE- / …** | Rule prefixes per [L2 domain](05-domains.md) (Software Dev, Data Engineering, …). |
 | **Project wiki vs Code wiki** | ADO project-wide wiki (`ADO_WIKI_IDENTIFIER`) vs repo-versioned docs (`ADO_CODE_WIKI_PATH`, e.g. this wiki). |
 | **MCP** | Model Context Protocol — how capability workers reach external providers (e.g. Azure DevOps). |
