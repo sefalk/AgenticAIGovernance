@@ -6,6 +6,10 @@
 # This converts the Green phase from a self-asserted claim into a
 # machine-verified precondition.
 #
+# Further hard gates: provenance markers, python quality (SRC_DIR/), atomic
+# ignore commits, and ruff linting (SRC_DIR/ AND tests/). Linting is mirrored
+# here from refactorer-stop because the Refactor step is optional.
+#
 # Fires as SubagentStop when the implementer is invoked by the coordinator.
 # Requires chat.useCustomAgentHooks = true in .vscode/settings.json.
 
@@ -124,6 +128,23 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
         $_ -and ($_ -match '\.py$') -and (($_ -like "$SRC_DIR/*") -or ($_ -like "$SRC_DIR\\*"))
     })
 
+    # Linting scope is wider than the quality scope: type hints and NumPy
+    # docstrings do not apply to test functions, but ruff violations in tests/
+    # are real violations.
+    $changedLintPy = @($changedPy | Where-Object {
+        $_ -and ($_ -match '\.py$') -and (
+            ($_ -like "$SRC_DIR/*") -or ($_ -like "$SRC_DIR\\*") -or
+            ($_ -like 'tests/*') -or ($_ -like 'tests\\*')
+        )
+    })
+
+    # Resolve Python once -- the quality gate and the linting gate both need it.
+    $pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
+    if (-not (Test-Path $pythonExe)) {
+        $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+        $pythonExe = if ($pythonCmd) { $pythonCmd.Source } else { $null }
+    }
+
     if ($changedSrcPy.Count -gt 0) {
         $qualityScript = Join-Path $mainRoot '.github/scripts/check-python-quality.py'
         if (-not (Test-Path $qualityScript)) {
@@ -138,22 +159,16 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
             exit 0
         }
 
-        $pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
-        if (-not (Test-Path $pythonExe)) {
-            $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-            if ($pythonCmd) {
-                $pythonExe = $pythonCmd.Source
-            } else {
-                $output = @{
-                    hookSpecificOutput = @{
-                        hookEventName = "Stop"
-                        decision = "block"
-                        reason = "Python quality gate: no Python executable found to run check-python-quality.py"
-                    }
-                } | ConvertTo-Json -Compress -Depth 3
-                Write-Output $output
-                exit 0
-            }
+        if (-not $pythonExe) {
+            $output = @{
+                hookSpecificOutput = @{
+                    hookEventName = "Stop"
+                    decision = "block"
+                    reason = "Python quality gate: no Python executable found to run check-python-quality.py"
+                }
+            } | ConvertTo-Json -Compress -Depth 3
+            Write-Output $output
+            exit 0
         }
 
         Push-Location $codeRoot
@@ -171,6 +186,47 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
             } | ConvertTo-Json -Compress -Depth 3
             Write-Output $output
             exit 0
+        }
+    }
+
+    # ---------- Linting hard gate (source AND tests) ----------
+    # Mirrors refactorer-stop Gate 5. The Refactor step is optional, so binding
+    # linting to it alone meant "no refactorer => no lint at all" (issue #6).
+    $lintStatus = 'no python changes'
+    if ($changedLintPy.Count -gt 0) {
+        $lintStatus = 'skipped (script/python not available)'
+        $lintScript = Join-Path $mainRoot '.github/scripts/check-python-linting.py'
+        if ((Test-Path $lintScript) -and $pythonExe) {
+            # cwd must be the code root: check-python-linting.py resolves ruff
+            # from ./.venv and walks up from cwd to find .github/af-env.conf.
+            Push-Location $codeRoot
+            $lintResult = & $pythonExe $lintScript --files @($changedLintPy) 2>&1
+            $lintExit = $LASTEXITCODE
+            Pop-Location
+            if ($lintExit -eq 2) {
+                $lintSummary = ($lintResult | Select-Object -First 15 | Out-String).Trim()
+                $output = @{
+                    hookSpecificOutput = @{
+                        hookEventName = "Stop"
+                        decision = "block"
+                        reason = "Green phase violation: linting gate failed. Fix with: ruff check --fix <files>. Violations: $lintSummary"
+                    }
+                } | ConvertTo-Json -Compress -Depth 3
+                Write-Output $output
+                exit 0
+            } elseif ($lintExit -eq 1) {
+                $output = @{
+                    hookSpecificOutput = @{
+                        hookEventName = "Stop"
+                        decision = "block"
+                        reason = "Green phase blocked: linting gate unavailable because ruff is not installed. Install dev dependencies or run: pip install ruff"
+                    }
+                } | ConvertTo-Json -Compress -Depth 3
+                Write-Output $output
+                exit 0
+            } else {
+                $lintStatus = 'clean'
+            }
         }
     }
 
@@ -208,7 +264,7 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
 
     # All gates pass
     $output = @{
-        systemMessage = "implementer:Stop -- Green gate PASS: tests $(if ($fromLog) {'accepted from log'} else {'all pass'}), provenance + python quality verified"
+        systemMessage = "implementer:Stop -- Green gate PASS: tests $(if ($fromLog) {'accepted from log'} else {'all pass'}), provenance + python quality verified, linting: $lintStatus"
     } | ConvertTo-Json -Compress
     Write-Output $output
     exit 0
