@@ -188,6 +188,10 @@ checks, custom lint), use `createAndRunTask`.
 Only `code-critic` and `coordinator` have `run_in_terminal` — other agents
 must use `run_task`, `runTests`, or `createAndRunTask`.
 
+`createAndRunTask` requires `.vscode/tasks.json` to be strict JSON — it cannot
+parse JSONC. When adding or editing tasks, follow
+`instructions/tooling.instructions.md`; a pre-commit guard enforces it.
+
 ### Phase-Specific Test Strategy
 
 | Phase | Agent | Preferred Task | Fallback (when -Filter/-File needed) |

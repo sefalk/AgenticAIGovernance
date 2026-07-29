@@ -50,6 +50,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   quality gate is *not* applied to test files. 5/5 scenarios pass; the suite
   skips cleanly when ruff or Python is unavailable.
 
+- **`createAndRunTask` works again — `tasks.json` is strict JSON.**
+  The documented fallback for agents without terminal access (test-writer,
+  implementer, refactorer) was dead: `createAndRunTask` cannot parse JSONC, and
+  `.vscode/tasks.json` carried a 12-line `//` header. Combined with the broken
+  lint tasks above, those agents had no working lint path at all. The header is
+  removed; per-task explanation lives in the `detail` field (data, not
+  comments), and the cross-cutting rules move to a new
+  **`instructions/tooling.instructions.md`** scoped with
+  `applyTo: '**/.vscode/tasks.json'` — so it loads exactly when an agent edits
+  that file and costs nothing otherwise. It documents what the header said
+  (labels are a stable API; task shells do not activate the venv) plus rules
+  that were previously only implicit: fixed arguments only, no `${input:...}`
+  prompts, and the mandatory `presentation` / `runOptions.instanceLimit` block.
+
+  Enforcement instead of hope: the git `pre-commit` shim is generalised from a
+  single large-file check to a **guard set**, and gains
+  `check-strict-json.py`, which rejects a staged `.vscode/tasks.json` that is
+  not strict JSON (override: `ALLOW_JSONC=1`). Without it the next `//` line
+  would silently break the tool again.
+
 - **Framework documentation re-synced with the code (wiki + README + MANIFEST).**
   The `docs/wiki/` knowledge base had drifted since 2026-07-03 and described a
   framework that no longer exists in several places. Corrected: slash commands
