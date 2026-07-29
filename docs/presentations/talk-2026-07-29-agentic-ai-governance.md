@@ -17,6 +17,12 @@ sources: [docs/wiki/, core/L1_Core_Principles.md, core/L1_Framework_Architecture
 > **What this document is not.** It is not the slide deck. Building the deck is
 > a separate, dedicated step. Nothing here prescribes layout, styling or slide
 > counts beyond a rough budget.
+>
+> **Handover.** This document plus
+> [talk-2026-07-29-artefacts.md](talk-2026-07-29-artefacts.md) are
+> self-contained: every decision, its rationale, and the rejected alternatives
+> are recorded here. §11 maps each section to the wiki page that carries its
+> background, so the deck can be built without re-reading the codebase.
 
 ---
 
@@ -29,7 +35,7 @@ sources: [docs/wiki/, core/L1_Core_Principles.md, core/L1_Framework_Architecture
 | **Audience** | Mixed, cross-company, **heterogeneous prior knowledge**. Cannot assume familiarity with VS Code, Copilot, agent frameworks or the EU AI Act. |
 | **Pacing** | Gentle on-ramp so nobody is lost, then a **steep climb** into the substance of AAIG. |
 | **Language** | **English** (document and presentation). |
-| **Format** | Slides + **prepared artefacts** (screenshots, code snippets, log excerpts). **No live demo** — too time-expensive and too fragile. One short **GIF or video snippet** to add motion is desirable. |
+| **Format** | Slides + **prepared artefacts** (screenshots, code snippets, log excerpts). **No live demo** — too time-expensive and too fragile. Exactly **one animated GIF** provides the motion (artefact 1, see §6). |
 | **Project context** | **No concrete customer/project details.** It may be stated that the framework is *in productive use in real projects* — but no project names, no real data, no real repository content on screen. |
 | **Positioning** | AAIG is **not a product**. It is a tool that emerged *alongside* real work to increase efficiency. The talk is not a sales pitch for the framework. |
 | **Intent** | **Demonstrate competence.** The message is the advertisement: we have been working with generative AI since the LLM era, we understand agentic systems, and this is a current example of that. |
@@ -714,7 +720,8 @@ Five minutes, so three or four questions at most. These are the likely ones.
       i.e. eight days *after* — tense updated to "since".
 - [x] ~~Draft the artefacts.~~ See
       [talk-2026-07-29-artefacts.md](talk-2026-07-29-artefacts.md).
-- [ ] Record the GIF for artefact 1, plus a static fallback frame.
+- [x] ~~Record the GIF for artefact 1, plus a static fallback frame.~~ Rendered
+      into `assets/` by [render-red-phase-gif.py](render-red-phase-gif.py).
 - [ ] Typeset artefacts 2–7 for slide legibility — font size beats completeness;
       trim any block that does not read at presentation size.
 - [ ] Verify each figure in §7 against its source once more immediately before
@@ -735,3 +742,60 @@ Five minutes, so three or four questions at most. These are the likely ones.
 | Live demo | Too expensive in a 25-minute slot and too fragile. Replaced by artefacts + one GIF. |
 | Leading with regulation | Overclaims quickly, and the audience is mixed-industry. Regulation supports the argument; it does not carry it. |
 | Quoting instruction-adherence failure rates | No such published figures exist. The structural argument is stronger anyway. |
+| "Don't Build Multi-Agents" (Cognition) as a cited source | The post could not be located during research. Not cited anywhere. Do not reintroduce without verifying it exists. |
+
+### Limitation candidates that were considered and dropped
+
+The limitations section went through one full round. These three were proposed
+and rejected — recorded so they are not proposed again:
+
+| Candidate | Rejected because |
+|---|---|
+| "Agent prompts are only conventions, so enforcement is weak" | Misstates the architecture. The hooks are executed by the **IDE runtime, not by the agent** — the agent cannot decline them. Prompts being conventions is true of the *semantic* layer only, and that distinction is already the point of section B. Reframed into the *client-side / fail-open* trade-off in E.1. |
+| "Parts of the framework are aspirational, not implemented" | True but irrelevant, and actively misleading as a *limitation*. AAIG is built alongside production work; what is unimplemented reflects available time, not a design ceiling. The idea is the deliverable. Presenting a backlog as a structural weakness would understate the work. |
+| "Parallel governed workstreams are constrained" | Not a real limitation — git worktrees address it and the approach has already been prototyped. Would have invited a question with an unsatisfying answer for no gain. |
+
+What replaced them: two limitations derived from reading the hook
+implementations rather than from the backlog — **fail-open client-side
+enforcement** and **evidence ≠ correctness**. Both are trade-offs with a
+rationale, not gaps awaiting work.
+
+---
+
+## 11. Where the background knowledge lives
+
+The wiki was re-synchronised with the code on 2026-07-29 specifically so that
+building this talk does not require reading source. Use it as the knowledge
+base; go to source only for the two verbatim quotes and the hook behaviour.
+
+| Talk section | Background |
+|---|---|
+| B · Instruction ≠ Enforcement | [11-hooks-and-autonomy.md](../wiki/11-hooks-and-autonomy.md) — hook inventory, autonomy categories, real git hooks |
+| C · Thesis | [01-overview.md](../wiki/01-overview.md), [03-core-principles.md](../wiki/03-core-principles.md) |
+| D.1 · The governed run | [10-agents.md](../wiki/10-agents.md) (roster, delegation), [06-workflows.md](../wiki/06-workflows.md) (TDD phases and gates) |
+| D.2 · Abstraction and reuse | [02-architecture.md](../wiki/02-architecture.md) (L0–L4), [04-assimilation.md](../wiki/04-assimilation.md), [07-skills-toolbox.md](../wiki/07-skills-toolbox.md) (curation) |
+| D.2 · Lifecycle and updates | [12-deployment.md](../wiki/12-deployment.md) — deliver → onboard → curate, three-way merge, managed regions |
+| D.2 · Configuration seam | [13-configuration.md](../wiki/13-configuration.md) — `af-env.conf`, model tiers, autonomy switches |
+| E · Limitations | [11-hooks-and-autonomy.md](../wiki/11-hooks-and-autonomy.md) plus the two hook scripts named below |
+| Terminology | [15-glossary.md](../wiki/15-glossary.md) |
+
+### Verified against source (not the wiki)
+
+These few claims were checked directly in the code, because the talk asserts
+precise behaviour:
+
+| Claim | Verified in |
+|---|---|
+| The Red gate blocks the handoff when the suite passes | `flavors/github-copilot/.github/hooks/scripts/test-writer-stop.ps1` — exit code 0 → `decision: "block"` |
+| Hooks are **fail-open** when the verifier is missing | same file, and `implementer-stop.ps1` — both emit "gate skipped" when the test runner is absent |
+| The gate cannot judge *why* a test fails | same file — only the process exit code is evaluated |
+| "Self-check is always SOFT, never HARD" | `.github/instructions/quality-gates.instructions.md` |
+| "Agent prompts are conventions, not the security boundary" | `.github/instructions/git-workflow.instructions.md` |
+
+### Provenance of the external figures
+
+All figures in §7 come from a single research pass on **2026-07-29** against
+published sources (GitHub Engineering blog, McKinsey QuantumBlack, the EU AI Act
+reference site, ISO and NIST). Nothing was inferred or estimated. The
+do-not-claim table in §7 lists what that research explicitly could **not**
+substantiate — treat it as binding.
