@@ -1,15 +1,3 @@
-// VS Code Tasks for Agent Workflows.
-// These tasks wrap the canonical runner scripts (.github/scripts/run-tests.ps1,
-// run-lint.ps1, run-metrics.ps1) and provide common git operations that agents
-// invoke via execute/runTask.
-//
-// Task shells do NOT activate the project venv. Any task that needs a Python
-// tool must therefore either call a runner script (which resolves the venv
-// itself) or invoke .venv\Scripts\python.exe explicitly. A bare `ruff` /
-// `pip-audit` command fails with CommandNotFoundException.
-//
-// IMPORTANT: Task labels are a stable API. Do not rename without updating
-// all agent definitions and testing.instructions.md.
 {
   "version": "2.0.0",
   "tasks": [
