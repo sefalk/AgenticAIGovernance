@@ -1,9 +1,3 @@
-// VS Code Tasks for Agent Workflows.
-// These tasks wrap the canonical test runner script (.github/scripts/run-tests.ps1)
-// and provide common git/lint operations that agents invoke via execute/runTask.
-//
-// IMPORTANT: Task labels are a stable API. Do not rename without updating
-// all agent definitions and testing.instructions.md.
 {
   "version": "2.0.0",
   "tasks": [
@@ -175,27 +169,54 @@
     {
       "label": "lint: ruff check",
       "type": "shell",
-      "command": "ruff",
-      "args": ["check", "."],
-      "detail": "Run ruff linter on all Python files",
+      "command": ".github/scripts/run-lint.ps1",
+      "args": ["-Scope", "all"],
+      "detail": "Lint source + tests via run-lint.ps1 (venv ruff, LINTING_STRICTNESS rules)",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
+      "label": "lint: ruff check src",
+      "type": "shell",
+      "command": ".github/scripts/run-lint.ps1",
+      "args": ["-Scope", "src"],
+      "detail": "Lint production source only (SRC_DIR from af-env.conf)",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
+      "label": "lint: ruff check tests",
+      "type": "shell",
+      "command": ".github/scripts/run-lint.ps1",
+      "args": ["-Scope", "tests"],
+      "detail": "Lint tests/ only — the scope the hard gate used to miss",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
+      "label": "lint: ruff fix",
+      "type": "shell",
+      "command": ".github/scripts/run-lint.ps1",
+      "args": ["-Scope", "all", "-Fix"],
+      "detail": "Apply ruff's safe fixes to source + tests",
       "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
       "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "lint: ruff format check",
       "type": "shell",
-      "command": "ruff",
-      "args": ["format", "--check", "."],
-      "detail": "Check ruff formatting (no changes)",
+      "command": ".venv\\Scripts\\python.exe",
+      "args": ["-m", "ruff", "format", "--check", "."],
+      "detail": "Check ruff formatting (no changes) — venv interpreter, task shells do not activate it",
       "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
       "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "lint: ruff format",
       "type": "shell",
-      "command": "ruff",
-      "args": ["format", "."],
-      "detail": "Apply ruff formatting",
+      "command": ".venv\\Scripts\\python.exe",
+      "args": ["-m", "ruff", "format", "."],
+      "detail": "Apply ruff formatting — venv interpreter, task shells do not activate it",
       "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
       "runOptions": { "instanceLimit": 1 }
     },

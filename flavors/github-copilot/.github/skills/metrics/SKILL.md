@@ -20,7 +20,8 @@ Use `run_task` for these static metrics. No dynamic arguments needed.
 | `metrics: complexity` | Cyclomatic complexity (radon) | `run_task` |
 | `metrics: test-to-code ratio` | Test-to-code line ratio | `run_task` |
 | `metrics: pip-audit` | Dependency CVE audit | `run_task` |
-| `lint: ruff check` | Lint violations | `run_task` |
+| `lint: ruff check` | Lint violations (source + tests) | `run_task` |
+| `lint: ruff check tests` | Lint violations (tests only) | `run_task` |
 
 For per-module coverage, use `runTests(mode="coverage", coverageFiles=[...])`.
 For mutation testing (dynamic module), use `createAndRunTask`.

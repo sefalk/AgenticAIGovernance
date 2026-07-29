@@ -148,7 +148,10 @@ def main() -> int:
         return 1  # BLOCKED — hooks skip with advisory, not deny
 
     # --- Run ruff ---
-    cmd = [ruff_exe, "check", f"--select={rules}", "--output-format=text"] + files
+    # "concise" (not the legacy "text"): ruff removed --output-format=text in
+    # 0.9. Passing it makes ruff exit 2 on every run, which the gate would
+    # otherwise report as "violations found" on a clean tree.
+    cmd = [ruff_exe, "check", f"--select={rules}", "--output-format=concise"] + files
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
     except Exception as exc:
@@ -158,6 +161,17 @@ def main() -> int:
     if result.returncode == 0:
         print(f"LINTING_GATE_PASS (strictness={strictness}, rules={rules}, files={len(files)})")
         return 0
+
+    # ruff: 1 = lint violations, >=2 = ruff itself failed (bad args, bad config).
+    # Only the former is a gate FAIL; a broken invocation is BLOCKED, so it
+    # cannot masquerade as a code-quality problem.
+    if result.returncode != 1:
+        print(f"LINTING_GATE_ERROR: ruff exited {result.returncode}")
+        if result.stdout.strip():
+            print(result.stdout.strip())
+        if result.stderr.strip():
+            print(result.stderr.strip())
+        return 1
 
     print(f"LINTING_GATE_FAIL (strictness={strictness}, rules={rules})")
     if result.stdout.strip():

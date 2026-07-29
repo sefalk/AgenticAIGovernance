@@ -6,6 +6,9 @@
 # Gate 1: All tests must still pass after refactoring.
 # Gate 2: No new files created — refactoring modifies existing files only.
 #         Scoped to .py files under SRC_DIR/ and tests/ to avoid false positives.
+# Gate 3: Python quality (type hints, docstrings) on changed SRC_DIR/ files.
+# Gate 4: Each new type:ignore / pyright:ignore / noqa is its own commit.
+# Gate 5: ruff linting on changed files under SRC_DIR/ AND tests/.
 #
 # Fires as SubagentStop when the refactorer is invoked by the coordinator.
 # Requires chat.useCustomAgentHooks = true in .vscode/settings.json.
@@ -91,25 +94,41 @@ if [ -n "$new_files" ]; then
     exit 0
 fi
 
-# ---------- Gate 3: Python quality on changed source files ----------
+# ---------- Changed-file sets for Gates 3 and 5 ----------
+# Two distinct scopes on purpose:
+#   changed_src_py  -- production source only. Gate 3 enforces type hints and
+#                      NumPy docstrings, which do not apply to test functions.
+#   changed_lint_py -- source AND tests. Lint violations in tests/ are real
+#                      violations; scoping Gate 5 to SRC_DIR/ let them through.
 
 changed_src_py=$(git diff --name-only --cached --diff-filter=AM -- "${SRC_DIR}/" 2>/dev/null | grep -E '\.py$' || true)
 if [ -z "$changed_src_py" ]; then
     changed_src_py=$(git diff --name-only HEAD --diff-filter=AM -- "${SRC_DIR}/" 2>/dev/null | grep -E '\.py$' || true)
 fi
 
+changed_lint_py=$(git diff --name-only --cached --diff-filter=AM -- "${SRC_DIR}/" 'tests/' 2>/dev/null | grep -E '\.py$' || true)
+if [ -z "$changed_lint_py" ]; then
+    changed_lint_py=$(git diff --name-only HEAD --diff-filter=AM -- "${SRC_DIR}/" 'tests/' 2>/dev/null | grep -E '\.py$' || true)
+fi
+
+# Resolve Python once -- Gate 3 and Gate 5 both need it. Gate 5 must still run
+# when only tests/ changed, so this cannot live inside the Gate 3 branch.
+python_exe=""
+if [ -x ".venv/bin/python" ]; then
+    python_exe=".venv/bin/python"
+elif [ -x ".venv/Scripts/python.exe" ]; then
+    python_exe=".venv/Scripts/python.exe"
+elif command -v python &>/dev/null; then
+    python_exe="python"
+fi
+
+# ---------- Gate 3: Python quality on changed source files ----------
+
 if [ -n "$changed_src_py" ]; then
     quality_script=".github/scripts/check-python-quality.py"
     if [ ! -f "$quality_script" ]; then
         echo '{"hookSpecificOutput": {"hookEventName": "Stop", "decision": "block", "reason": "Refactor phase violation: python quality script missing (.github/scripts/check-python-quality.py)."}}'
         exit 0
-    fi
-
-    python_exe=""
-    if [ -x ".venv/Scripts/python.exe" ]; then
-        python_exe=".venv/Scripts/python.exe"
-    elif command -v python &>/dev/null; then
-        python_exe="python"
     fi
 
     if [ -z "$python_exe" ]; then
@@ -140,13 +159,13 @@ if [ "$new_ignores" -eq 1 ] && [ "$other_additions" -gt 0 ]; then
     exit 0
 fi
 
-# ---------- Gate 5: Python linting on changed source files ----------
-lint_status="no src changes"
-if [ -n "$changed_src_py" ]; then
+# ---------- Gate 5: Python linting on changed source AND test files ----------
+lint_status="no python changes"
+if [ -n "$changed_lint_py" ]; then
     lint_status="skipped (script/python not available)"
     lint_script=".github/scripts/check-python-linting.py"
     if [ -f "$lint_script" ] && [ -n "$python_exe" ]; then
-        lint_output=$(echo "$changed_src_py" | xargs "$python_exe" "$lint_script" --files 2>&1)
+        lint_output=$(echo "$changed_lint_py" | xargs "$python_exe" "$lint_script" --files 2>&1)
         lint_exit=$?
         if [ "$lint_exit" -eq 2 ]; then
             lint_summary=$(echo "$lint_output" | head -15 | tr '\n' ' ' | sed 's/"/\\"/g')
