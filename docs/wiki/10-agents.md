@@ -3,8 +3,8 @@ title: Agent Team
 type: concept
 description: The agent personas of the GitHub Copilot flavor, the maker-checker pattern, and the TDD phase pipeline.
 tags: [aaig, flavor, agents, workflow]
-updated: 2026-07-03
-sources: [flavors/github-copilot/.github/agents, flavors/github-copilot/README.md]
+updated: 2026-07-29
+sources: [flavors/github-copilot/.github/agents, flavors/github-copilot/README.md, flavors/github-copilot/.github/MANIFEST.md]
 ---
 
 # Agent Team
@@ -12,6 +12,9 @@ sources: [flavors/github-copilot/.github/agents, flavors/github-copilot/README.m
 The flavor decomposes AAIG into **scoped agent personas** (`.github/agents/*.agent.md`),
 each with an isolated context and a narrow tool set — the structural realization
 of [Separation of Concern](03-core-principles.md) and independent review.
+
+The roster is **15 personas**: 1 coordinator + 10 core workers + 4 optional ADO
+capability workers.
 
 ## The roster
 
@@ -84,6 +87,26 @@ programmatically.
 Gates scale with a **complexity tier** — *Trivial* (auto-check only, no critic),
 *Standard* (critics + skill gates), or *Deep* (all gates + arbiter available).
 Domain-core changes raise the minimum tier regardless of size.
+
+## Model tiers
+
+Each subagent carries an `__AF_TIER_*__` placeholder that
+[deploy resolves](12-deployment.md) into a prioritized model list from
+`AF_MODEL_TIER_PREMIUM` / `_BALANCED` / `_EFFICIENT`. Deep-reasoning roles
+(arbiter, code-critic) get the premium tier; mechanical roles (test-writer,
+refactorer, documenter) get the efficient tier. The coordinator stays unpinned.
+
+## Delegation discipline
+
+Because a subagent may run on a weaker model than the coordinator, the
+coordinator designs each delegation **for the weakest plausible executor**:
+
+- **Delegation contract** — the subagent prompt carries the verbatim acceptance
+  criteria, explicit non-goals, and an abort condition. No implicit context.
+- **No over-decomposition** — slices are executor-agnostic and vertical, not
+  split so finely that the coordinator becomes the only integrator.
+- **Notebook routing** — all `.ipynb` work goes to a subagent with the
+  notebook tooling, never to ad-hoc terminal scripts.
 
 ## See also
 

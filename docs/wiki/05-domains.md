@@ -3,7 +3,7 @@ title: Domain Rules (L2)
 type: concept
 description: The seven Level-2 domains, their rule prefixes, and how agents select and activate them.
 tags: [aaig, governance, domains, l2]
-updated: 2026-07-03
+updated: 2026-07-29
 sources: [core/domains/_index.md]
 ---
 
@@ -19,7 +19,7 @@ so rules are individually citable in commits, reviews, and
 
 | Domain | File | Rule prefix | Rules | Key themes |
 |---|---|---|---|---|
-| Software Development | `L2_Software_Development.md` | `R-SD-` | 27 | Code review, testing, identity, escalation, dependency pinning |
+| Software Development | `L2_Software_Development.md` | `R-SD-` | 28 | Code review, testing, identity, escalation, dependency pinning, GitFlow gates |
 | Data Engineering | `L2_Data_Engineering.md` | `R-DE-` | 15 | Idempotency, lineage, PII masking, freshness SLAs |
 | ML Operations | `L2_ML_Operations.md` | `R-ML-` | 15 | Reproducibility, bias/fairness, drift monitoring |
 | Infrastructure | `L2_Infrastructure.md` | `R-IF-` | 15 | IaC-only, plan-before-apply, drift detection |

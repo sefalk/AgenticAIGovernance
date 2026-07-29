@@ -1,6 +1,6 @@
 # Copilot Agent Team Framework
 
-**v1.17.0** · [Changelog](CHANGELOG.md) · [Troubleshooting](.github/TROUBLESHOOTING.md) · [Interactive Map](agent-framework-map.v2.html)
+See [`VERSION`](VERSION) for the current release · [Changelog](CHANGELOG.md) · [Troubleshooting](.github/TROUBLESHOOTING.md) · [Interactive Map](agent-framework-map.v2.html)
 
 > Drop `.github/` into any Python project to get an **autonomous**, multi-agent
 > TDD workflow with quality gates, traceability, and deterministic enforcement hooks.
@@ -12,7 +12,7 @@ tests, implementation, refactoring, code review, documentation — autonomously.
 Critics review every output; hooks enforce quality gates with real code, not
 suggestions. You stay in control through mandatory escalation points.
 
-- **14 specialised agents** (1 coordinator + 10 core workers + 3 optional ADO workers) with isolated contexts
+- **15 specialised agents** (1 coordinator + 10 core workers + 4 optional ADO workers) with isolated contexts
 - **Test-Driven Development** enforced as separate Red → Green → Refactor phases
 - **Deterministic hooks** run pytest, scan for secrets, block destructive commands
 - **Maker-Checker pattern** — every agent's output is reviewed by a critic
@@ -201,22 +201,29 @@ The coordinator picks the right workflow for the task:
 | Planning | Plan Only | planner | — |
 
 <details>
-<summary><strong>Model Selection (v1.18.6+)</strong> (click to expand)</summary>
+<summary><strong>Model Selection</strong> (click to expand)</summary>
 
-As of v1.18.6, agents no longer have hardcoded model lists. Instead:
+Agents are deployed with a **model tier**, configured once in
+`.github/af-env.conf` and resolved into each agent file at deploy time:
 
-- **All agents** use the model **selected by the user** in Copilot Chat
-- **Fallback:** If no model is explicitly selected, VS Code uses its default
-- **No maintenance burden:** Model updates require zero agent edits — they're
-  configured by the user or automatically by VS Code availability
+| Tier key | Agents |
+|---|---|
+| `AF_MODEL_TIER_PREMIUM` | arbiter, code-critic (deep reasoning) |
+| `AF_MODEL_TIER_BALANCED` | planner, implementer, test-critic |
+| `AF_MODEL_TIER_EFFICIENT` | test-writer, refactorer, documenter, researcher, compliance-checker, `ado-*` workers |
 
-**Legacy reference (pre-v1.18.6):** Prior versions had tiered model lists
-(Tier 1: Opus/Sonnet/GPT-5; Tier 2: Sonnet/GPT-5/GPT-4; Tier 3: Sonnet/GPT-4/Haiku).
-This design was replaced for simplicity and maintainability.
+- The **coordinator stays unpinned** — it inherits whatever you pick in the
+  Copilot Chat model selector.
+- Format is `Model Name (vendor)`; comma-separated entries become a
+  **prioritized array**, and VS Code falls back down the list when a model is
+  unavailable — so a model line-up change does not break the deployment.
+- Leave a tier **blank** to use the deploy's curated built-in default.
+- Re-deploy after editing the tiers to propagate them into the agent files.
 
-**Rationale:** Company model updates happen frequently. Hardcoding models
-in 13 agent files created maintenance overhead. Dynamic model selection via
-user preference is simpler and future-proof.
+**History:** v1.18.6 removed the hardcoded per-agent model lists in favour of
+pure user selection; tiers were reintroduced as *deploy-resolved configuration*
+so critics can be run on stronger models than mechanical workers without
+hardcoding anything in the agent files.
 
 </details>
 
@@ -246,7 +253,7 @@ CHANGELOG.md                               # Release history (Keep a Changelog f
 ├── GOVERNANCE.md                          # Governance model and AI provenance rules
 ├── TROUBLESHOOTING.md                     # Common issues and diagnostic steps
 ├── .af-manifest                           # AF-owned file registry (controls deploy)
-├── agents/                                # 14 agent definitions (includes optional ADO workers)
+├── agents/                                # 15 agent definitions (includes optional ADO workers)
 │   ├── coordinator.agent.md               # 🎯 Main entry point (user-facing)
 │   ├── planner.agent.md                   # Worker: task decomposer
 │   ├── test-writer.agent.md               # Worker: failing tests (Red phase)

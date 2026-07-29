@@ -29,7 +29,7 @@ This directory contains Level-2 Domain Rule documents derived from `L1_Core_Prin
 
 | Domain | File | Rules | Key Themes | Workflows |
 |--------|------|-------|------------|-----------|
-| Software Development | `L2_Software_Development.md` | 27 | Code review, testing, identity, escalation, dep pinning | Feature Dev, Bug Fix, Code Review |
+| Software Development | `L2_Software_Development.md` | 28 | Code review, testing, identity, escalation, dep pinning, GitFlow gates | Feature Dev, Bug Fix, Code Review |
 | Data Engineering | `L2_Data_Engineering.md` | 15 | Idempotency, lineage, PII masking, freshness SLAs | Data Pipeline |
 | ML Operations | `L2_ML_Operations.md` | 15 | Reproducibility, bias/fairness, drift monitoring | ML Model Dev |
 | Infrastructure | `L2_Infrastructure.md` | 15 | IaC-only, plan-before-apply, drift detection | Deployment |

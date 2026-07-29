@@ -3,7 +3,7 @@ title: Hooks & Autonomy
 type: concept
 description: The deterministic enforcement hooks and the three-tier terminal autonomy classifier.
 tags: [aaig, flavor, hooks, config]
-updated: 2026-07-03
+updated: 2026-07-29
 sources: [flavors/github-copilot/.github/hooks, flavors/github-copilot/.github/af-env.conf]
 ---
 
@@ -24,12 +24,28 @@ Hooks are the flavor's **deterministic enforcement layer**: real shell scripts
 | `session-context` | Injects project context at session start |
 | `session-mcp-readiness` | Probes optional MCP/ADO capability availability |
 | `stop-tests` | Runs the test suite at phase-stop gates |
-| `{agent}-pretooluse` / `{agent}-stop` | Per-agent phase gates (test-writer, implementer, refactorer, researcher, documenter, coordinator) |
-| `coordinator-postmerge` / `-posttooluse` | Post-action bookkeeping for the coordinator |
+| `test-writer-pretooluse` / `-stop` | Red-phase discipline — new tests must FAIL for the right reason before handoff |
+| `implementer-stop` | Green-phase exit gates (tests, types, ignore-justification) |
+| `refactorer-pretooluse` / `-stop` | No new files; linter as a HARD gate |
+| `researcher-pretooluse` | Web-fetch allowlist enforcement |
+| `documenter-stop` | Plan status, workflow log, retro snippet present |
+| `coordinator-pretooluse` / `-posttooluse` / `-postmerge` | Branch/commit-message validation and post-action bookkeeping |
 
-Per-agent hooks enforce phase discipline — e.g. the refactorer-stop hook runs
-the linter as a HARD gate; the test-writer hooks verify new tests **fail** for
-the right reason before handoff.
+Hooks ship as **PowerShell `.ps1` + bash `.sh` pairs** with cross-platform
+parity, wired via `hooks/agent-hooks.json`.
+
+### Real git hooks (not agent hooks)
+
+One guard is a *real git hook*, so it enforces whether a human or an agent runs
+the commit:
+
+| Path | Role |
+|---|---|
+| `hooks/git/pre-commit` + `hooks/scripts/check-large-files.py` | **Large-file commit guard** — blocks any staged blob over [`LARGE_FILE_MAX_BYTES`](13-configuration.md) (default 1 MB). Measures the staged index blob, not the working tree. Override per commit with `ALLOW_LARGE_FILES=1`; exempt paths via `LARGE_FILE_ALLOWLIST`; prefer **Git LFS** for genuinely large assets. |
+
+It is wired by `git config core.hooksPath .github/hooks/git`, done automatically
+by the bootstrap script. Existing clones must re-run bootstrap once —
+`core.hooksPath` is not retroactive.
 
 ## The three-tier autonomy classifier
 
@@ -58,7 +74,8 @@ Behavior is tuned in [`af-env.conf`](13-configuration.md):
 - **`AUTONOMY_LEVEL`** = `conservative` | `balanced` (default) | `autonomous`
   sets the per-category default tier.
 - **`AUTONOMY_CAT_*`** overrides a single category: `GIT_READ`, `GIT_FEATURE`,
-  `GIT_MERGE`, `TESTS`, `FS_READ`, `PKG_INSTALL`, `DATABRICKS`, `CLOUD_READ`.
+  `GIT_MERGE`, `TESTS`, `FS_READ`, `FS_WRITE`, `PKG_INSTALL`, `DATABRICKS`,
+  `CLOUD_READ`.
 - **`PROTECTED_BRANCHES`** (default `main,master,dev`) — never pushed/merged to
   directly.
 - **`WEB_FETCH_ALLOWLIST`** — domains the researcher may fetch without a prompt.
