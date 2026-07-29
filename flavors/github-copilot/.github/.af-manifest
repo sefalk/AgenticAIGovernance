@@ -26,10 +26,12 @@ hooks/scripts/coordinator-postmerge.sh
 hooks/scripts/check-large-files.py
 hooks/git/pre-commit
 
-# Scripts (canonical test runner)
+# Scripts (canonical test and lint runners)
 scripts/
 scripts/run-tests.ps1                                   [customizable]
 scripts/run-tests.sh                                     [customizable]
+scripts/run-lint.ps1                                     [customizable]
+scripts/run-lint.sh                                      [customizable]
 scripts/run-deps.ps1
 scripts/bootstrap-python-env.ps1
 scripts/bootstrap-python-env.sh
@@ -45,6 +47,7 @@ scripts/cleanup-worktree.ps1
 scripts/cleanup-worktree.sh
 scripts/test-worktree-scripts.ps1
 scripts/test-large-file-guard.ps1
+scripts/test-lint-gate.ps1
 
 # Instructions
 instructions/
