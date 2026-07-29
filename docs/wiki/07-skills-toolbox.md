@@ -3,8 +3,8 @@ title: Skills Toolbox
 type: concept
 description: The library of expert-knowledge skill templates agents invoke during L2–L4 derivation.
 tags: [aaig, governance, skills, reference]
-updated: 2026-07-03
-sources: [core/skills/_index.md]
+updated: 2026-07-29
+sources: [core/skills/_index.md, flavors/github-copilot/.github/skills/INDEX.md]
 ---
 
 # Skills Toolbox
@@ -75,6 +75,12 @@ The flavor ships its own activated skill set under `.github/skills/` (with an
 `INDEX.md` and an `_available/` staging area), including capability-worker
 skills such as `ado-wiki/`, `ado-pr/`, `ado-workitem/`, and `ado-shared/`. See
 [Flavor: GitHub Copilot](09-flavor-github-copilot.md).
+
+Activation is not manual guesswork: `/af-curate-skills` matches the toolbox
+against the stack detected during onboarding, keeps the matching skills in
+`skills/`, and **moves** the rest to `skills/_available/`. Deploy recognizes
+that move as [DEACTIVATED](12-deployment.md) and never re-creates them — so a
+project's curation survives every framework update.
 
 ## See also
 

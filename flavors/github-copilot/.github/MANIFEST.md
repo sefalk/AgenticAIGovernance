@@ -36,6 +36,7 @@ The agent team uses the **Coordinator-Worker pattern**:
 | `ado-work-item-manager` | Optional provider worker for Azure DevOps work item lifecycle | Optional integration |
 | `ado-wiki-manager` | Optional provider worker for Azure DevOps wiki lifecycle | Optional integration |
 | `ado-pr-manager` | Optional provider worker for Azure DevOps pull request integration (request-based merges) | Optional integration |
+| `ado-pipeline-manager` | Optional provider worker for Azure DevOps pipelines (PR build-validation gate) | Optional integration |
 
 ### Subagent Execution
 

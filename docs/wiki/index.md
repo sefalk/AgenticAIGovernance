@@ -3,7 +3,7 @@ title: AAIG Wiki — Index
 type: overview
 description: Routing catalog and entry point for the Agentic AI Governance (AAIG) code wiki.
 tags: [aaig, governance, index, reference]
-updated: 2026-07-03
+updated: 2026-07-29
 sources: [README.md, core/L1_Framework_Architecture.md]
 ---
 
@@ -46,7 +46,7 @@ into any area below.
 | [09 · Flavor: GitHub Copilot](09-flavor-github-copilot.md) | The deployable agent framework built on core |
 | [10 · Agent Team](10-agents.md) | The agents, the maker-checker pattern, TDD phases |
 | [11 · Hooks & Autonomy](11-hooks-and-autonomy.md) | Deterministic enforcement + the three-tier autonomy classifier |
-| [12 · Deployment & Versioning](12-deployment.md) | `deploy.ps1/.sh`, three-way merge, auto-versioning |
+| [12 · Deployment & Versioning](12-deployment.md) | Deliver → onboard → curate, three-way merge, MCP path, auto-versioning |
 | [13 · Configuration](13-configuration.md) | `af-env.conf` reference |
 
 ### Operations & reference

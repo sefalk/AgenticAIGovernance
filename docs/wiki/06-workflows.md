@@ -3,7 +3,7 @@ title: Workflows (L3)
 type: concept
 description: The Level-3 workflow templates, how agents classify a task and select one, and the fallback.
 tags: [aaig, governance, workflow, l3]
-updated: 2026-07-03
+updated: 2026-07-29
 sources: [core/workflows/_index.md]
 ---
 
@@ -59,10 +59,10 @@ probe outcomes are logged. See [Platform Optionality](03-core-principles.md).
 ## In the Copilot flavor
 
 L3 workflows are realized as **slash-command prompts** and the coordinator's
-pipeline — e.g. `/tdd-feature`, `/quick-fix`, `/trivial-fix`, `/review-code`.
-The [agent team](10-agents.md) executes the phases; [hooks](11-hooks-and-autonomy.md)
-enforce the gates. Physically, L3 and L4 are often merged into the agent
-prompts for token efficiency.
+pipeline — e.g. `/af-tdd-feature`, `/af-quick-fix`, `/af-trivial-fix`,
+`/af-review-code`. The [agent team](10-agents.md) executes the phases;
+[hooks](11-hooks-and-autonomy.md) enforce the gates. Physically, L3 and L4 are
+often merged into the agent prompts for token efficiency.
 
 ## See also
 

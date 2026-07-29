@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Framework documentation re-synced with the code (wiki + README + MANIFEST).**
+  The `docs/wiki/` knowledge base had drifted since 2026-07-03 and described a
+  framework that no longer exists in several places. Corrected: slash commands
+  renamed to the `af-*` prefix (`/af-tdd-feature`, `/af-setup-project`, …); the
+  agent roster is **15** personas (1 coordinator + 10 core workers + **4** ADO
+  workers — `ado-pipeline-manager` was missing from `MANIFEST.md`); the
+  Software Development domain has **28** rules, not 27 (`R-SD-28` GitFlow
+  Quality Gates was added without updating `core/domains/_index.md`); the
+  README no longer advertises a stale `v1.17.0` header nor the withdrawn
+  "agents have no model lists" claim (deploy-resolved `AF_MODEL_TIER_*` is the
+  current design). Added the previously undocumented mechanisms: the
+  **MCP deploy path** and its tool surface, the **deliver → onboard → curate**
+  lifecycle, `CREATE`/`DEACTIVATED` deploy classes, **managed regions**,
+  canonical-byte (UTF-8/LF) hashing, **model tiers**, the `FS_WRITE` autonomy
+  category, the deployed **large-file commit guard**, `LARGE_FILE_*` /
+  `ADO_PR_MERGE_STRATEGY` config keys, the single-active-worktree limitation,
+  and the real per-agent hook inventory.
+
 - **VS Code test tasks no longer trigger a "select an instance" prompt.**
   Restricted agents (test-writer, implementer, refactorer) run tests via
   fixed-arg `run_task` because they have no `run_in_terminal`. When a

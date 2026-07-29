@@ -3,7 +3,7 @@ title: Assimilation (L0)
 type: concept
 description: The Level-0 boot sequence an agent runs before executing any user request in a governed repo.
 tags: [aaig, governance, assimilation, l0]
-updated: 2026-07-03
+updated: 2026-07-29
 sources: [core/L0_Assimilation_Protocol.md]
 ---
 
@@ -77,8 +77,14 @@ separation of concern** (makers technically blocked from approving), and
 The abstract `.aaig/` compilation is realized as the deployable
 [`.github/` package](09-flavor-github-copilot.md): native `.agent.md` personas,
 `.instructions.md` rule files, deterministic [hooks](11-hooks-and-autonomy.md),
-and [`af-env.conf`](13-configuration.md) as the L4 binding. Deploying it is the
-practical equivalent of Phase 3 — see [Deployment](12-deployment.md).
+and [`af-env.conf`](13-configuration.md) as the L4 binding. The three abstract
+phases map onto three concrete steps — see [Deployment](12-deployment.md):
+
+| Abstract phase | Concrete step |
+|---|---|
+| Phase 1/2 · Discovery & capability mapping | `/af-onboard-project` — analyse the repo (or interview for an empty one), fill `af-env.conf` |
+| Phase 3 · Deep integration & compilation | Deploy writes `.github/` + `.vscode/`; `/af-curate-skills` sets the Active vs Dormant split |
+| Phase 4 · Peer-reviewed validation | `/af-validate-framework`, `/af-audit-config`, `/af-smoke-test` |
 
 ## See also
 
