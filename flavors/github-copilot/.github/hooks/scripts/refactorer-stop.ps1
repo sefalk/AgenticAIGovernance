@@ -6,6 +6,9 @@
 # Gate 2: No new files created -- refactoring modifies existing files only.
 #         Scoped to .py files under SRC_DIR/ and tests/ to avoid false positives
 #         from pre-existing untracked files (notebooks, temp files, etc.).
+# Gate 3: Python quality (type hints, docstrings) on changed SRC_DIR/ files.
+# Gate 4: Each new type:ignore / pyright:ignore / noqa is its own commit.
+# Gate 5: ruff linting on changed files under SRC_DIR/ AND tests/.
 #
 # Fires as SubagentStop when the refactorer is invoked by the coordinator.
 # Requires chat.useCustomAgentHooks = true in .vscode/settings.json.
@@ -127,17 +130,39 @@ if ($newFiles.Count -gt 0) {
     exit 0
 }
 
-# ---------- Gate 3: Python quality on changed source files ----------
-
+# ---------- Changed-file sets for Gates 3 and 5 ----------
+# Two distinct scopes on purpose:
+#   $changedSrcPy  -- production source only. Gate 3 enforces type hints and
+#                     NumPy docstrings, which do not apply to test functions.
+#   $changedLintPy -- source AND tests. Lint violations in tests/ are real
+#                     violations; scoping Gate 5 to SRC_DIR/ let them through.
 $changedSrcPy = @()
+$changedLintPy = @()
 try {
-    $changedSrcPy = git -C $codeRoot diff --name-only --cached --diff-filter=AM -- "$SRC_DIR/" 2>$null |
-        Where-Object { $_ -match '\.py$' }
-    if (-not $changedSrcPy) {
-        $changedSrcPy = git -C $codeRoot diff --name-only HEAD --diff-filter=AM -- "$SRC_DIR/" 2>$null |
-            Where-Object { $_ -match '\.py$' }
+    $changedSrcPy = @(git -C $codeRoot diff --name-only --cached --diff-filter=AM -- "$SRC_DIR/" 2>$null |
+        Where-Object { $_ -match '\.py$' })
+    if ($changedSrcPy.Count -eq 0) {
+        $changedSrcPy = @(git -C $codeRoot diff --name-only HEAD --diff-filter=AM -- "$SRC_DIR/" 2>$null |
+            Where-Object { $_ -match '\.py$' })
+    }
+
+    $changedLintPy = @(git -C $codeRoot diff --name-only --cached --diff-filter=AM -- "$SRC_DIR/" 'tests/' 2>$null |
+        Where-Object { $_ -match '\.py$' })
+    if ($changedLintPy.Count -eq 0) {
+        $changedLintPy = @(git -C $codeRoot diff --name-only HEAD --diff-filter=AM -- "$SRC_DIR/" 'tests/' 2>$null |
+            Where-Object { $_ -match '\.py$' })
     }
 } catch {}
+
+# Resolve Python once -- Gate 3 and Gate 5 both need it. Gate 5 must still run
+# when only tests/ changed, so this cannot live inside the Gate 3 branch.
+$pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
+if (-not (Test-Path $pythonExe)) {
+    $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+    $pythonExe = if ($pythonCmd) { $pythonCmd.Source } else { $null }
+}
+
+# ---------- Gate 3: Python quality on changed source files ----------
 
 if ($changedSrcPy.Count -gt 0) {
     $qualityScript = Join-Path $mainRoot '.github/scripts/check-python-quality.py'
@@ -153,22 +178,16 @@ if ($changedSrcPy.Count -gt 0) {
         exit 0
     }
 
-    $pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
-    if (-not (Test-Path $pythonExe)) {
-        $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-        if ($pythonCmd) {
-            $pythonExe = $pythonCmd.Source
-        } else {
-            $output = @{
-                hookSpecificOutput = @{
-                    hookEventName = "Stop"
-                    decision = "block"
-                    reason = "Refactor phase violation: no Python executable found to run quality gate checks."
-                }
-            } | ConvertTo-Json -Compress -Depth 3
-            Write-Output $output
-            exit 0
-        }
+    if (-not $pythonExe) {
+        $output = @{
+            hookSpecificOutput = @{
+                hookEventName = "Stop"
+                decision = "block"
+                reason = "Refactor phase violation: no Python executable found to run quality gate checks."
+            }
+        } | ConvertTo-Json -Compress -Depth 3
+        Write-Output $output
+        exit 0
     }
 
     Push-Location $codeRoot
@@ -220,14 +239,20 @@ if ($newIgnoreLines.Count -gt 1) {
     exit 0
 }
 
-# ---------- Gate 5: Python linting on changed source files ----------
-$lintStatus = 'no src changes'
-if ($changedSrcPy.Count -gt 0) {
+# ---------- Gate 5: Python linting on changed source AND test files ----------
+$lintStatus = 'no python changes'
+if ($changedLintPy.Count -gt 0) {
     $lintStatus = 'skipped (script/python not available)'
-    $lintScript = Join-Path (Get-Location) '.github/scripts/check-python-linting.py'
+    # Resolve against $mainRoot (where .github/ is deployed), not the cwd the
+    # hook happens to inherit -- Get-Location made this gate skip silently.
+    $lintScript = Join-Path $mainRoot '.github/scripts/check-python-linting.py'
     if ((Test-Path $lintScript) -and $pythonExe) {
-        $lintResult = & $pythonExe $lintScript --files @($changedSrcPy) 2>&1
+        # cwd must be the code root: check-python-linting.py resolves ruff from
+        # ./.venv and walks up from cwd to find .github/af-env.conf.
+        Push-Location $codeRoot
+        $lintResult = & $pythonExe $lintScript --files @($changedLintPy) 2>&1
         $lintExit = $LASTEXITCODE
+        Pop-Location
         if ($lintExit -eq 2) {
             $lintSummary = ($lintResult | Select-Object -First 15 | Out-String).Trim()
             $output = @{
