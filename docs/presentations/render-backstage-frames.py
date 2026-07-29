@@ -1,13 +1,17 @@
-"""Render the Red-phase-block artefact as an animated GIF for the AAIG talk.
+"""Render the backstage view of the Red-phase block as five still frames.
 
-Draws five synthetic terminal frames (see talk-2026-07-29-artefacts.md,
-artefact 1) and writes an animated GIF plus a static fallback PNG of the
-decisive frame.
+Draws five synthetic terminal snapshots (see talk-2026-07-29-artefacts.md,
+artefact 1) and writes each one as a separate PNG. Stills rather than an
+animation on purpose: these frames carry evidence the audience is meant to
+read, and the presenter needs to control when each one appears.
+
+The front-of-house counterpart -- what the user sees in the chat while this
+happens -- is animated instead, by ``render-chat-loop.py``.
 
 Content is synthetic: generic order/refund domain, no real project data.
 
 Usage:
-    python render-red-phase-gif.py
+    python render-backstage-frames.py
 """
 
 from __future__ import annotations
@@ -18,10 +22,13 @@ from PIL import Image, ImageDraw, ImageFont
 
 # ---------------------------------------------------------------- appearance
 
-WIDTH, HEIGHT = 1280, 600
+# The canvas is measured from the content (see ``canvas_size``) rather than
+# fixed, so no frame carries dead space and the box tracks any text edit.
 MARGIN_X, MARGIN_Y = 44, 34
 FONT_SIZE = 23
 LINE_H = 32
+BAR_H = 56
+CAPTION_X = 124
 
 BG = (13, 17, 23)
 CHROME = (22, 27, 34)
@@ -38,12 +45,17 @@ PURPLE = (188, 140, 255)
 FONT_PATH = r"C:\Windows\Fonts\consola.ttf"
 FONT_BOLD_PATH = r"C:\Windows\Fonts\consolab.ttf"
 
-# Per-frame duration in milliseconds. Frame 5 is held longest.
-DURATIONS = [3000, 4000, 2800, 4200, 3600]
-
 OUT_DIR = Path(__file__).resolve().parent / "assets"
-GIF_PATH = OUT_DIR / "red-phase-block.gif"
-FALLBACK_PATH = OUT_DIR / "red-phase-block-fallback.png"
+
+# Filename stems, in frame order. Numbered so they sort into narrative order
+# in the file picker when they are dropped onto slides.
+STEMS = [
+    "backstage-1-dispatch",
+    "backstage-2-what-comes-back",
+    "backstage-3-the-run",
+    "backstage-4-the-hook",
+    "backstage-5-the-consequence",
+]
 
 # ------------------------------------------------------------------- content
 # Each line is (text, colour). None marks a blank line.
@@ -144,11 +156,46 @@ def _load_fonts() -> tuple[ImageFont.FreeTypeFont, ImageFont.FreeTypeFont]:
     return regular, bold
 
 
+def canvas_size(
+    font: ImageFont.FreeTypeFont,
+    font_bold: ImageFont.FreeTypeFont,
+) -> tuple[int, int]:
+    """Measure the smallest canvas that fits every frame.
+
+    All frames share one size so the stills stay visually consistent on a
+    slide; the size is the maximum over the whole set rather than per frame.
+
+    Parameters
+    ----------
+    font, font_bold
+        Monospace faces used for body and title-bar text.
+
+    Returns
+    -------
+    tuple of (width, height)
+        Pixel dimensions including margins, title bar and border.
+    """
+    text_w = 0.0
+    caption_w = 0.0
+    max_lines = 0
+    for caption, lines in FRAMES:
+        caption_w = max(caption_w, font_bold.getlength(caption))
+        max_lines = max(max_lines, len(lines))
+        for line in lines:
+            if line is not None:
+                text_w = max(text_w, font.getlength(line[0]))
+
+    width = max(2 * MARGIN_X + text_w, CAPTION_X + caption_w + MARGIN_X)
+    height = BAR_H + 2 * MARGIN_Y + (max_lines - 1) * LINE_H + FONT_SIZE + 5
+    return round(width), round(height)
+
+
 def render_frame(
     caption: str,
     lines: list[tuple[str, tuple[int, int, int]] | None],
     font: ImageFont.FreeTypeFont,
     font_bold: ImageFont.FreeTypeFont,
+    size: tuple[int, int],
 ) -> Image.Image:
     """Render a single terminal-styled frame.
 
@@ -160,61 +207,49 @@ def render_frame(
         Body lines as ``(text, rgb)`` tuples; ``None`` renders a blank line.
     font, font_bold
         Monospace faces for body and title bar.
+    size
+        Canvas dimensions, normally from :func:`canvas_size`.
 
     Returns
     -------
     Image.Image
         The rendered RGB frame.
     """
-    img = Image.new("RGB", (WIDTH, HEIGHT), BG)
+    width, height = size
+    img = Image.new("RGB", size, BG)
     d = ImageDraw.Draw(img)
 
     # Title bar with the three window dots.
-    bar_h = 56
-    d.rectangle([0, 0, WIDTH, bar_h], fill=CHROME)
-    d.line([0, bar_h, WIDTH, bar_h], fill=BORDER, width=2)
+    d.rectangle([0, 0, width, BAR_H], fill=CHROME)
+    d.line([0, BAR_H, width, BAR_H], fill=BORDER, width=2)
     for i, colour in enumerate(((255, 95, 86), (255, 189, 46), (39, 201, 63))):
         cx = 30 + i * 26
-        d.ellipse([cx - 8, bar_h // 2 - 8, cx + 8, bar_h // 2 + 8], fill=colour)
-    d.text((124, bar_h // 2 - FONT_SIZE // 2 - 2), caption, font=font_bold, fill=DIM)
+        d.ellipse([cx - 8, BAR_H // 2 - 8, cx + 8, BAR_H // 2 + 8], fill=colour)
+    d.text((CAPTION_X, BAR_H // 2 - FONT_SIZE // 2 - 2), caption, font=font_bold, fill=DIM)
 
-    y = bar_h + MARGIN_Y
+    y = BAR_H + MARGIN_Y
     for line in lines:
         if line is not None:
             text, colour = line
             d.text((MARGIN_X, y), text, font=font, fill=colour)
         y += LINE_H
 
-    d.rectangle([0, 0, WIDTH - 1, HEIGHT - 1], outline=BORDER, width=2)
+    d.rectangle([0, 0, width - 1, height - 1], outline=BORDER, width=2)
     return img
 
 
 def main() -> None:
-    """Render all frames and write the GIF and the fallback still."""
+    """Render every frame and write it as an individual PNG."""
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     font, font_bold = _load_fonts()
+    size = canvas_size(font, font_bold)
 
-    frames = [render_frame(cap, lines, font, font_bold) for cap, lines in FRAMES]
+    for stem, (caption, lines) in zip(STEMS, FRAMES, strict=True):
+        path = OUT_DIR / f"{stem}.png"
+        render_frame(caption, lines, font, font_bold, size).save(path, optimize=True)
+        print(f"{path.name:<34} {path.stat().st_size / 1024:>5.0f} KB")
 
-    # Quantise to a shared adaptive palette so the GIF stays small.
-    quantised = [f.quantize(colors=64, method=Image.Quantize.MEDIANCUT) for f in frames]
-
-    quantised[0].save(
-        GIF_PATH,
-        save_all=True,
-        append_images=quantised[1:],
-        duration=DURATIONS,
-        loop=0,
-        optimize=True,
-        disposal=2,
-    )
-
-    # Frame 4 (index 3) is the decisive one: the machine-issued block.
-    frames[3].save(FALLBACK_PATH, optimize=True)
-
-    print(f"GIF      : {GIF_PATH}  ({GIF_PATH.stat().st_size / 1024:.0f} KB)")
-    print(f"fallback : {FALLBACK_PATH}  ({FALLBACK_PATH.stat().st_size / 1024:.0f} KB)")
-    print(f"duration : {sum(DURATIONS) / 1000:.1f} s over {len(frames)} frames")
+    print(f"canvas   : {size[0]}×{size[1]}")
 
 
 if __name__ == "__main__":

@@ -35,7 +35,7 @@ sources: [docs/wiki/, core/L1_Core_Principles.md, core/L1_Framework_Architecture
 | **Audience** | Mixed, cross-company, **heterogeneous prior knowledge**. Cannot assume familiarity with VS Code, Copilot, agent frameworks or the EU AI Act. |
 | **Pacing** | Gentle on-ramp so nobody is lost, then a **steep climb** into the substance of AAIG. |
 | **Language** | **English** (document and presentation). |
-| **Format** | Slides + **prepared artefacts** (screenshots, code snippets, log excerpts). **No live demo** — too time-expensive and too fragile. Exactly **one animated GIF** provides the motion (artefact 1, see §6). |
+| **Format** | Slides + **prepared artefacts** (screenshots, code snippets, log excerpts). **No live demo** — too time-expensive and too fragile. Exactly **one animated sequence** provides the motion (artefact 1a, see §6); everything else is a still the presenter advances. |
 | **Project context** | **No concrete customer/project details.** It may be stated that the framework is *in productive use in real projects* — but no project names, no real data, no real repository content on screen. |
 | **Positioning** | AAIG is **not a product**. It is a tool that emerged *alongside* real work to increase efficiency. The talk is not a sales pitch for the framework. |
 | **Intent** | **Demonstrate competence.** The message is the advertisement: we have been working with generative AI since the LLM era, we understand agentic systems, and this is a current example of that. |
@@ -641,7 +641,8 @@ The set maps 1:1 onto the three stops in D.1. Ready-to-use drafts are in
 
 | # | Artefact | Section | Form | Status |
 |---|---|---|---|---|
-| 1 | **Red-phase block** — dispatch, a *passing* test comes back, the stop hook blocks the handoff | D.1 stop 1 | **GIF 15–20 s** + static fallback | text drafted |
+| 1a | **Red-phase block, front of house** — the chat transcript: a task is dispatched, the subagent believes it is finished, the hook refuses the handoff, the subagent self-corrects | D.1 stop 1 | **GIF, 8 frames, 26.6 s** + static fallback | **rendered** |
+| 1b | **Red-phase block, backstage** — dispatch, the *passing* test that comes back, the run, the raw hook JSON, the refused handoff | D.1 stop 1 | **5 stills**, presenter-advanced | **rendered** |
 | 2 | Implementer's self-reported gate summary (all green) | D.1 stop 2 | Text block | text drafted |
 | 3 | Code-critic `REJECTED` verdict naming the gate that actually failed | D.1 stop 2 | Text block | text drafted |
 | 4 | Pre-action denial of a forbidden git operation | D.1 stop 3 | Terminal still | text drafted |
@@ -650,12 +651,21 @@ The set maps 1:1 onto the three stops in D.1. Ready-to-use drafts are in
 | 7 | Re-deploy conflict classification (customised file preserved) | D.2 | Text block | text drafted |
 | 8 | The two self-quotes (self-check is SOFT; prompts are not the security boundary) | B.4 / E.1 | Pull quote | ready — verbatim in the repo |
 
-> **On the GIF (item 1).** It is the only motion in the talk, so it has to carry
-> the most convincing moment. The Red-phase block is that moment: the audience
-> watches a **green** test suite get **rejected**, which is counter-intuitive
-> and therefore memorable. Under 20 seconds, no narration, looped while
-> speaking. Always prepare the static fallback frame — embedded video is the
-> most reliable way to derail a conference talk.
+> **On artefact 1 — why it is split.** The two halves answer different
+> questions and therefore need different media. **1a is a reversal**: it looks
+> like success, then it is refused. A reversal needs a time axis, so it is the
+> talk's only animation — it loops beside you while you narrate, and it shows
+> the **user's** point of view, which is the one the audience can put itself in.
+> **1b is evidence**: JSON, assertions, exit codes. Evidence has to be *read*,
+> and a loop that moves on mid-sentence fights the reader — so it is five stills
+> the presenter advances. Shown side by side, 1a supplies the feeling and 1b
+> supplies the proof.
+>
+> Both are rendered from scripts rather than screen-recorded, and the chat panel
+> is deliberately stylised rather than an imitation of a real client. Name that
+> in half a sentence on the day: a convincing fake screenshot would cast doubt
+> on every genuine artefact around it. Always prepare the static fallback frame
+> — embedded video is the most reliable way to derail a conference talk.
 
 > **Sanitisation rule.** Realistic in structure, neutral in content: generic
 > module names (`payments`, `orders`), no project or customer names, no real
@@ -721,7 +731,8 @@ Five minutes, so three or four questions at most. These are the likely ones.
 - [x] ~~Draft the artefacts.~~ See
       [talk-2026-07-29-artefacts.md](talk-2026-07-29-artefacts.md).
 - [x] ~~Record the GIF for artefact 1, plus a static fallback frame.~~ Rendered
-      into `assets/` by [render-red-phase-gif.py](render-red-phase-gif.py).
+      into `assets/` by [render-chat-loop.py](render-chat-loop.py) (1a) and
+      [render-backstage-frames.py](render-backstage-frames.py) (1b).
 - [ ] Typeset artefacts 2–7 for slide legibility — font size beats completeness;
       trim any block that does not read at presentation size.
 - [ ] Verify each figure in §7 against its source once more immediately before
@@ -739,7 +750,7 @@ Five minutes, so three or four questions at most. These are the likely ones.
 | Opening with the L0–L4 layer model | Correct as design, wrong as pedagogy. Abstract-first loses a mixed room in 25 minutes. |
 | Full framework tour in section D | Ten mechanisms listed convince nobody; three shown properly do. |
 | Thesis "only self-built agent systems can guarantee this" | Easy to refute — CI, OPA and vendor hooks also enforce. Narrowed to "a harness must exist and must enforce outside the model". |
-| Live demo | Too expensive in a 25-minute slot and too fragile. Replaced by artefacts + one GIF. |
+| Live demo | Too expensive in a 25-minute slot and too fragile. Replaced by artefacts + one short animation. |
 | Leading with regulation | Overclaims quickly, and the audience is mixed-industry. Regulation supports the argument; it does not carry it. |
 | Quoting instruction-adherence failure rates | No such published figures exist. The structural argument is stronger anyway. |
 | "Don't Build Multi-Agents" (Cognition) as a cited source | The post could not be located during research. Not cited anywhere. Do not reintroduce without verifying it exists. |
