@@ -9,6 +9,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Python lint quality gate now actually runs (issue #6).**
+  `LINTING_STRICTNESS=strict` was configured in a consuming project, yet a PR
+  merged with 41 ruff violations — 34 of them in `tests/`. `check-python-linting.py`
+  was sound; everything around it was mis-wired. Four defects, all closed:
+  1. **Scope.** The `refactorer-stop` lint gate diffed `SRC_DIR/` only, so
+     `tests/` was never linted. The pathspec now covers `SRC_DIR/` **and**
+     `tests/` (`.ps1` + `.sh`). Note the gate's file set was **split** rather
+     than widened: `check-python-quality.py` (type hints + NumPy docstrings)
+     keeps the `SRC_DIR/`-only set, because those rules do not apply to test
+     functions and widening the shared variable would have blocked every
+     legitimate test file.
+  2. **Agent binding.** Linting hung off the *optional* Refactor step — a
+     coordinator that skipped Refactor got no linting at all. The gate is now
+     mirrored into `implementer-stop` (`.ps1` + `.sh`) and listed in the
+     implementer's exit gates in `quality-gates.instructions.md`.
+  3. **No repo-wide entry point.** Added `.github/scripts/run-lint.ps1` /
+     `run-lint.sh` (`-Scope all|src|tests`, `-Fix`, `-Strictness`), modelled on
+     `run-tests.*` for venv resolution and exit-code semantics (0 clean,
+     1 blocked, 2 violations). The check path delegates to
+     `check-python-linting.py`, so the rule set stays single-sourced.
+  4. **Tasks bypassed the tooling.** The `lint:` tasks in `.vscode/tasks.json`
+     invoked a bare `ruff`, which fails with `CommandNotFoundException` because
+     task shells do not activate the venv — the documented fallback path for
+     restricted agents was therefore dead. Lint tasks now call `run-lint.ps1`
+     (plus new `lint: ruff check src|tests` and `lint: ruff fix`), and the
+     `ruff format` tasks call `.venv\Scripts\python.exe -m ruff`.
+
+  Two further defects surfaced while proving the fix:
+  - `check-python-linting.py` passed `--output-format=text`, removed in ruff
+    0.9. On any current ruff the gate blocked **every** handoff with a bogus
+    "violations found" message. Now `concise`.
+  - The same script mapped any non-zero ruff exit to "violations". ruff uses
+    1 for violations and ≥ 2 for its own failures; a broken invocation now
+    reports BLOCKED instead of masquerading as a code-quality problem.
+
+  Regression proof: `.github/scripts/test-lint-gate.ps1` builds throwaway git
+  repos, plants a real `F401` in `tests/`, and drives both stop hooks end to
+  end — including a clean-tree negative control and an assertion that the
+  quality gate is *not* applied to test files. 5/5 scenarios pass; the suite
+  skips cleanly when ruff or Python is unavailable.
+
+- **`createAndRunTask` works again — `tasks.json` is strict JSON.**
+  The documented fallback for agents without terminal access (test-writer,
+  implementer, refactorer) was dead: `createAndRunTask` cannot parse JSONC, and
+  `.vscode/tasks.json` carried a 12-line `//` header. Combined with the broken
+  lint tasks above, those agents had no working lint path at all. The header is
+  removed; per-task explanation lives in the `detail` field (data, not
+  comments), and the cross-cutting rules move to a new
+  **`instructions/tooling.instructions.md`** scoped with
+  `applyTo: '**/.vscode/tasks.json'` — so it loads exactly when an agent edits
+  that file and costs nothing otherwise. It documents what the header said
+  (labels are a stable API; task shells do not activate the venv) plus rules
+  that were previously only implicit: fixed arguments only, no `${input:...}`
+  prompts, and the mandatory `presentation` / `runOptions.instanceLimit` block.
+
+  Enforcement instead of hope: the git `pre-commit` shim is generalised from a
+  single large-file check to a **guard set**, and gains
+  `check-strict-json.py`, which rejects a staged `.vscode/tasks.json` that is
+  not strict JSON (override: `ALLOW_JSONC=1`). Without it the next `//` line
+  would silently break the tool again.
+
 - **Framework documentation re-synced with the code (wiki + README + MANIFEST).**
   The `docs/wiki/` knowledge base had drifted since 2026-07-03 and described a
   framework that no longer exists in several places. Corrected: slash commands

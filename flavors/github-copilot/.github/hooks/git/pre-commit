@@ -1,15 +1,22 @@
 #!/usr/bin/env sh
-# Large-file commit guard for the Agent Framework (real git pre-commit hook,
-# not a VS Code agent hook). Blocks `git commit` when a staged file exceeds
-# LARGE_FILE_MAX_BYTES (default 1 MB) from .github/af-env.conf, unless the path
-# is allowlisted or the commit runs with ALLOW_LARGE_FILES=1.
+# Pre-commit guards for the Agent Framework (real git pre-commit hook, not a
+# VS Code agent hook). Runs each checker in .github/hooks/scripts and blocks
+# `git commit` if any of them fails:
+#
+#   check-large-files.py  -- staged file exceeds LARGE_FILE_MAX_BYTES from
+#                            .github/af-env.conf   (override: ALLOW_LARGE_FILES=1)
+#   check-strict-json.py  -- staged .vscode/tasks.json is not strict JSON
+#                            (override: ALLOW_JSONC=1)
+#
+# Fail-open if a checker or a Python interpreter is missing; the checkers
+# themselves are fail-closed on git errors.
+#
 # Enable once per clone (bootstrap does this):
 #   git config core.hooksPath .github/hooks/git
-set -eu
+set -u
 
 repo_root="$(git rev-parse --show-toplevel)"
-checker="$repo_root/.github/hooks/scripts/check-large-files.py"
-[ -f "$checker" ] || exit 0  # fail-open if checker missing
+scripts_dir="$repo_root/.github/hooks/scripts"
 
 python_bin=""
 python_bin_extra_args=""
@@ -25,7 +32,15 @@ elif command -v py >/dev/null 2>&1; then
     python_bin="py"; python_bin_extra_args="-3"
 fi
 if [ -z "$python_bin" ]; then
-    echo "[large-file-guard] WARN: no python interpreter found -- skipping check." >&2
+    echo "[pre-commit] WARN: no python interpreter found -- skipping guards." >&2
     exit 0
 fi
-"$python_bin" $python_bin_extra_args "$checker"
+
+status=0
+for checker in check-large-files.py check-strict-json.py; do
+    [ -f "$scripts_dir/$checker" ] || continue  # fail-open if checker missing
+    if ! "$python_bin" $python_bin_extra_args "$scripts_dir/$checker"; then
+        status=1
+    fi
+done
+exit "$status"

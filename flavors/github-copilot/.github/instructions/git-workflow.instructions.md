@@ -403,16 +403,34 @@ Recommended `.gitignore` additions:
 /.worktrees/
 ```
 
-## Large File Commit Guard
+## Pre-Commit Guards
 
 A real git `pre-commit` hook (`.github/hooks/git/pre-commit`, enabled via
 `git config core.hooksPath .github/hooks/git` — done automatically by
-`bootstrap-python-env.ps1`/`.sh`) blocks commits that stage a file above
-**`LARGE_FILE_MAX_BYTES`** (`.github/af-env.conf`, default 1 MB /
-1,048,576 bytes). It measures the **staged index blob** (exactly what would be
-committed), not the working tree. This is a real git hook, not a VS Code agent
-hook, so it enforces regardless of whether a human or an agent runs
-`git commit`.
+`bootstrap-python-env.ps1`/`.sh`) runs a set of checkers against the **staged
+index blobs** (exactly what would be committed), not the working tree. This is
+a real git hook, not a VS Code agent hook, so it enforces regardless of whether
+a human or an agent runs `git commit`. Each checker is fail-closed on git
+errors; the shim is fail-open if a checker or a Python interpreter is missing.
+
+| Checker | Blocks | Override |
+|---|---|---|
+| `check-large-files.py` | Staged file above `LARGE_FILE_MAX_BYTES` | `ALLOW_LARGE_FILES=1` |
+| `check-strict-json.py` | Staged `.vscode/tasks.json` that is not strict JSON | `ALLOW_JSONC=1` |
+
+**Existing clones** must re-run `bootstrap-python-env.ps1`/`.sh` (or run
+`git config core.hooksPath .github/hooks/git` manually) to pick up the guards —
+they are not retroactive for clones set up before this change.
+
+**Design note:** the shim lives at `.github/hooks/git/pre-commit` (not a
+repo-root `.githooks/`) so it deploys with the rest of `.github/` via the
+existing `.af-manifest` `hooks/` entry — no change to the deploy payload scope
+was needed.
+
+### Large File Guard
+
+Blocks commits that stage a file above **`LARGE_FILE_MAX_BYTES`**
+(`.github/af-env.conf`, default 1 MB / 1,048,576 bytes).
 
 **Rationale:** repo weight. Commit Plotly HTML exports in CDN mode
 (~16 KB), never self-contained mode (~4.8 MB per file) — the latter was the
@@ -423,16 +441,21 @@ trigger for adding this guard.
 - **Allowlist (deliberate large files):** add a comma-separated fnmatch glob
   (repo-relative staged path) to `LARGE_FILE_ALLOWLIST` in
   `.github/af-env.conf` (e.g. `LARGE_FILE_ALLOWLIST=docs/wiki/assets/**`).
-- **Existing clones** must re-run `bootstrap-python-env.ps1`/`.sh` (or run
-  `git config core.hooksPath .github/hooks/git` manually) to pick up the
-  guard — it is not retroactive for clones set up before this change.
-- **Design note:** the shim lives at `.github/hooks/git/pre-commit` (not a
-  repo-root `.githooks/`) so it deploys with the rest of `.github/` via the
-  existing `.af-manifest` `hooks/` entry — no change to the deploy payload
-  scope was needed. Checker logic: `.github/hooks/scripts/check-large-files.py`
-  (fail-closed on git errors → exit 2; the shim is fail-open if the checker or
-  a Python interpreter is missing). Regression suite:
-  `.github/scripts/test-large-file-guard.ps1`.
+- Checker logic: `.github/hooks/scripts/check-large-files.py`. Regression
+  suite: `.github/scripts/test-large-file-guard.ps1`.
+
+### Strict JSON Guard
+
+Blocks commits that stage a `.vscode/tasks.json` which is not parseable as
+strict JSON (comments, trailing commas).
+
+**Rationale:** VS Code accepts JSONC there, but the `createAndRunTask` agent
+tool does not — a single `//` line silently disables the documented fallback
+execution path for agents without terminal access. Authoring rules and where
+the knowledge belongs instead: `instructions/tooling.instructions.md`.
+
+- **Override (one-off):** `ALLOW_JSONC=1 git commit -m "..."`.
+- Checker logic: `.github/hooks/scripts/check-strict-json.py`.
 
 ### Handling Large Files with Git LFS
 

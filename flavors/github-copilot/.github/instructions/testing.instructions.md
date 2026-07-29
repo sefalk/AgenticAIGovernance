@@ -165,6 +165,19 @@ Use `run_task` with the task label. Arguments are fixed — no dynamic params.
 | `tests: all + fail-fast` | `-Scope all -FailFast` | refactorer, implementer |
 | `tests: all + coverage + save` | `-Scope all -Coverage -OutputFile` | code-critic |
 | `tests: adapters + fail-fast` | `-Scope adapters -FailFast` | implementer |
+| `lint: ruff check` | `-Scope all` | implementer, refactorer, code-critic |
+| `lint: ruff check src` | `-Scope src` | implementer, refactorer |
+| `lint: ruff check tests` | `-Scope tests` | test-writer, refactorer |
+| `lint: ruff fix` | `-Scope all -Fix` | refactorer |
+
+All `lint:` tasks call `.github/scripts/run-lint.ps1`, which resolves the venv
+interpreter itself and derives the rule set from `LINTING_STRICTNESS` in
+`af-env.conf`. **Never invoke `ruff` directly** — task shells do not activate
+the venv, so a bare `ruff` command fails with `CommandNotFoundException`, and a
+direct call would bypass the configured strictness.
+
+The stop-hook lint gate only sees *changed* files. Use these tasks to check the
+repository as a whole.
 
 ### Fallback: `runTests` or `createAndRunTask` (dynamic cases only)
 
@@ -174,6 +187,10 @@ checks, custom lint), use `createAndRunTask`.
 
 Only `code-critic` and `coordinator` have `run_in_terminal` — other agents
 must use `run_task`, `runTests`, or `createAndRunTask`.
+
+`createAndRunTask` requires `.vscode/tasks.json` to be strict JSON — it cannot
+parse JSONC. When adding or editing tasks, follow
+`instructions/tooling.instructions.md`; a pre-commit guard enforces it.
 
 ### Phase-Specific Test Strategy
 
