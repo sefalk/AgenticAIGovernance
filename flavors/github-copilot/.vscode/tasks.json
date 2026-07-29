@@ -13,7 +13,9 @@
       "command": ".github/scripts/run-tests.ps1",
       "args": ["-Scope", "all"],
       "group": "test",
-      "detail": "Run all tests (refactorer regression, implementer final)"
+      "detail": "Run all tests (refactorer regression, implementer final)",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "tests: domain",
@@ -21,7 +23,9 @@
       "command": ".github/scripts/run-tests.ps1",
       "args": ["-Scope", "domain"],
       "group": "test",
-      "detail": "Run domain tests only — fast, no Spark"
+      "detail": "Run domain tests only — fast, no Spark",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "tests: adapters",
@@ -29,7 +33,9 @@
       "command": ".github/scripts/run-tests.ps1",
       "args": ["-Scope", "adapters"],
       "group": "test",
-      "detail": "Run adapter tests — requires Spark"
+      "detail": "Run adapter tests — requires Spark",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "tests: properties",
@@ -37,7 +43,9 @@
       "command": ".github/scripts/run-tests.ps1",
       "args": ["-Scope", "properties"],
       "group": "test",
-      "detail": "Run property-based tests (hypothesis)"
+      "detail": "Run property-based tests (hypothesis)",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "tests: contracts",
@@ -45,7 +53,9 @@
       "command": ".github/scripts/run-tests.ps1",
       "args": ["-Scope", "contracts"],
       "group": "test",
-      "detail": "Run port-adapter contract tests"
+      "detail": "Run port-adapter contract tests",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "tests: all + coverage",
@@ -53,7 +63,9 @@
       "command": ".github/scripts/run-tests.ps1",
       "args": ["-Scope", "all", "-Coverage"],
       "group": "test",
-      "detail": "Full suite with coverage — code-critic gate metrics"
+      "detail": "Full suite with coverage — code-critic gate metrics",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "tests: domain + coverage",
@@ -61,7 +73,9 @@
       "command": ".github/scripts/run-tests.ps1",
       "args": ["-Scope", "domain", "-Coverage"],
       "group": "test",
-      "detail": "Domain tests with coverage — Domain ≥ 90% gate"
+      "detail": "Domain tests with coverage — Domain ≥ 90% gate",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "tests: adapters + coverage",
@@ -69,7 +83,9 @@
       "command": ".github/scripts/run-tests.ps1",
       "args": ["-Scope", "adapters", "-Coverage"],
       "group": "test",
-      "detail": "Adapter tests with coverage — Adapters ≥ 60% gate"
+      "detail": "Adapter tests with coverage — Adapters ≥ 60% gate",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "tests: domain + fail-fast",
@@ -77,7 +93,9 @@
       "command": ".github/scripts/run-tests.ps1",
       "args": ["-Scope", "domain", "-FailFast"],
       "group": "test",
-      "detail": "Domain tests, stop on first failure — Red phase verification"
+      "detail": "Domain tests, stop on first failure — Red phase verification",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "tests: all + fail-fast",
@@ -85,7 +103,9 @@
       "command": ".github/scripts/run-tests.ps1",
       "args": ["-Scope", "all", "-FailFast"],
       "group": "test",
-      "detail": "Full suite, stop on first failure — quick smoke check"
+      "detail": "Full suite, stop on first failure — quick smoke check",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "tests: all + coverage + save",
@@ -93,7 +113,9 @@
       "command": ".github/scripts/run-tests.ps1",
       "args": ["-Scope", "all", "-Coverage", "-OutputFile"],
       "group": "test",
-      "detail": "Full coverage report saved to .github/test-output.txt"
+      "detail": "Full coverage report saved to .github/test-output.txt",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "tests: adapters + fail-fast",
@@ -101,119 +123,153 @@
       "command": ".github/scripts/run-tests.ps1",
       "args": ["-Scope", "adapters", "-FailFast"],
       "group": "test",
-      "detail": "Adapter tests, stop on first failure — slow scope early exit"
+      "detail": "Adapter tests, stop on first failure — slow scope early exit",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "git: current branch",
       "type": "shell",
       "command": "git",
       "args": ["branch", "--show-current"],
-      "detail": "Show current branch name"
+      "detail": "Show current branch name",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "git: status",
       "type": "shell",
       "command": "git",
       "args": ["status", "--short"],
-      "detail": "Show git status (short format)"
+      "detail": "Show git status (short format)",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "git: diff stat",
       "type": "shell",
       "command": "git",
       "args": ["diff", "--stat"],
-      "detail": "Show changed files summary"
+      "detail": "Show changed files summary",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "git: branch list",
       "type": "shell",
       "command": "git",
       "args": ["branch", "--list"],
-      "detail": "List local branches"
+      "detail": "List local branches",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "git: log oneline",
       "type": "shell",
       "command": "git",
       "args": ["log", "--oneline", "-20"],
-      "detail": "Show last 20 commits (one line each)"
+      "detail": "Show last 20 commits (one line each)",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "lint: ruff check",
       "type": "shell",
       "command": "ruff",
       "args": ["check", "."],
-      "detail": "Run ruff linter on all Python files"
+      "detail": "Run ruff linter on all Python files",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "lint: ruff format check",
       "type": "shell",
       "command": "ruff",
       "args": ["format", "--check", "."],
-      "detail": "Check ruff formatting (no changes)"
+      "detail": "Check ruff formatting (no changes)",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "lint: ruff format",
       "type": "shell",
       "command": "ruff",
       "args": ["format", "."],
-      "detail": "Apply ruff formatting"
+      "detail": "Apply ruff formatting",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "metrics: complexity",
       "type": "shell",
       "command": ".github/scripts/run-metrics.ps1",
       "args": ["-Metric", "complexity"],
-      "detail": "Cyclomatic complexity via radon — code-critic gate"
+      "detail": "Cyclomatic complexity via radon — code-critic gate",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "metrics: test-to-code ratio",
       "type": "shell",
       "command": ".github/scripts/run-metrics.ps1",
       "args": ["-Metric", "ratio"],
-      "detail": "Test-to-code line ratio — code-critic advisory"
+      "detail": "Test-to-code line ratio — code-critic advisory",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "metrics: pip-audit",
       "type": "shell",
       "command": ".github/scripts/run-metrics.ps1",
       "args": ["-Metric", "audit"],
-      "detail": "Check dependencies for known CVEs — code-critic security gate"
+      "detail": "Check dependencies for known CVEs — code-critic security gate",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "pip: install dev",
       "type": "shell",
       "command": ".github/scripts/run-deps.ps1",
       "args": ["-Scope", "dev"],
-      "detail": "Install dev/test Python packages (reads DEP_DEV_FILE from af-env.conf)"
+      "detail": "Install dev/test Python packages (reads DEP_DEV_FILE from af-env.conf)",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "pip: install runtime",
       "type": "shell",
       "command": ".github/scripts/run-deps.ps1",
       "args": ["-Scope", "runtime"],
-      "detail": "Install runtime Python packages (reads DEP_FILE from af-env.conf)"
+      "detail": "Install runtime Python packages (reads DEP_FILE from af-env.conf)",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "audit: tools",
       "type": "shell",
       "command": ".github/scripts/audit-tools.ps1",
       "args": [],
-      "detail": "Validate agent tool assignments against reference baseline and TOOLS.md"
+      "detail": "Validate agent tool assignments against reference baseline and TOOLS.md",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "audit: tools verbose",
       "type": "shell",
       "command": ".github/scripts/audit-tools.ps1",
       "args": ["-Verbose"],
-      "detail": "Detailed agent tool audit with per-agent breakdown"
+      "detail": "Detailed agent tool audit with per-agent breakdown",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     },
     {
       "label": "test: hooks",
       "type": "shell",
       "command": ".github/scripts/test-hooks.ps1",
       "args": ["-Verbose"],
-      "detail": "Run integration tests for all Copilot agent hooks"
+      "detail": "Run integration tests for all Copilot agent hooks",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     }
   ]
 }

@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **VS Code test tasks no longer trigger a "select an instance" prompt.**
+  Restricted agents (test-writer, implementer, refactorer) run tests via
+  fixed-arg `run_task` because they have no `run_in_terminal`. When a
+  `type: shell` task label was re-triggered while a previous instance was still
+  running and no `runOptions.instanceLimit` was set, VS Code interrupted with a
+  "select an instance" prompt that blocked autonomous execution. Every task in
+  `.vscode/tasks.json` now carries
+  `"runOptions": { "instanceLimit": 1 }` and a dedicated-panel `presentation`
+  block (`panel: dedicated`, `showReuseMessage: false`, `clear: true`), which
+  removes the collision prompt. Task labels and `args` are unchanged (stable
+  API preserved). The `terminal.integrated.defaultProfile` setting is
+  deliberately left untouched to avoid imposing a platform-specific terminal
+  profile on target repos. Fixes
+  [#4](https://github.com/sefalk/AgenticAIGovernance/issues/4).
+
 - **Deactivated skills no longer churn as a perpetual `CREATE`.** When a project
   turned off an active-by-default skill (e.g. `git-worktrees` with
   `WORKTREE_ENABLED=false`), `/af-curate-skills` used to *delete*
