@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The lint gate is reachable without pytest or a `tests/` directory (issue #12).**
+  Third finding in the same area as #6 and #10, this time about *reach* rather
+  than correctness. Both stop hooks opened with two early `exit 0`s: no `pytest`
+  on `PATH`, or no `tests/` directory, ended the hook right there. Every gate
+  behind them — linting, provenance markers, python quality, ignore hygiene —
+  died with the test gate, even though ruff needs neither a test runner nor a
+  test directory. The message said "Green gate skipped", which reads like one
+  gate was waived; in fact the whole hook was.
+
+  A missing test runner now skips **only** the test gate. Execution falls
+  through to the remaining gates, and the skip reason is surfaced in the final
+  message (`tests gate skipped (pytest not found)`) instead of being reported
+  as an unqualified PASS. Applies to `implementer-stop` and `refactorer-stop`,
+  `.ps1` and `.sh`.
+
+  Regression suite extended 9 → 13 scenarios: a `F401` violation in `SRC_DIR/`
+  must block for both hooks with no `tests/` directory and with no `pytest` on
+  `PATH`, plus a negative control that a clean tree without `tests/` still
+  passes *and* still reports the skip. All four fail against the previous hooks
+  and pass against the fixed ones.
+
 - **The lint gate no longer overrules the project's own ruff config (issue #10).**
   Follow-up to #6: once the gate actually ran, it turned out to ignore the
   consuming project's ruff configuration entirely. `check-python-linting.py`

@@ -1,4 +1,4 @@
-# Regression tests for the Python linting hard gate (issues #6, #10).
+# Regression tests for the Python linting hard gate (issues #6, #10, #12).
 #
 # #6 -- the defect: LINTING_STRICTNESS was configured, yet violations shipped.
 # Root cause was wiring, not the checker -- the gate's git pathspec covered
@@ -7,6 +7,10 @@
 # #10 -- the gate passed its rule set as a CLI --select, which outranks the
 # project's own ruff `ignore`. Explicit project exceptions now win, except for
 # CORE_RULES, which no project configuration may switch off.
+#
+# #12 -- the gate sat behind the test gate's early exits, so a missing pytest
+# or tests/ directory silently disabled linting too. A missing test runner now
+# skips the test gate only.
 #
 # These tests build throwaway git repos, plant a real ruff violation in
 # tests/, and drive the actual stop hooks end to end. Run from anywhere:
