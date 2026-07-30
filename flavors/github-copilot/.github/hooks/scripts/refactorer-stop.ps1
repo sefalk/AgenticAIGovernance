@@ -38,22 +38,13 @@ if (Test-Path $confPath) {
 $null = [Console]::In.ReadToEnd()
 
 # ---------- Gate 1: All tests must pass ----------
-
-$pytest = Get-Command pytest -ErrorAction SilentlyContinue
-if (-not $pytest) {
-    $output = @{
-        systemMessage = "refactorer:Stop -- pytest not found, test gate skipped"
-    } | ConvertTo-Json -Compress
-    Write-Output $output
-    exit 0
-}
-
-if (-not (Test-Path (Join-Path $codeRoot 'tests'))) {
-    $output = @{
-        systemMessage = "refactorer:Stop -- no tests/ directory, test gate skipped"
-    } | ConvertTo-Json -Compress
-    Write-Output $output
-    exit 0
+# A missing test runner disables THIS gate only. Gates 2-5 need neither pytest
+# nor a tests/ directory, and exiting here used to take them down too (#12).
+$testGateSkipped = $null
+if (-not (Get-Command pytest -ErrorAction SilentlyContinue)) {
+    $testGateSkipped = 'pytest not found'
+} elseif (-not (Test-Path (Join-Path $codeRoot 'tests'))) {
+    $testGateSkipped = 'no tests/ directory'
 }
 
 # ---------- Test Log Freshness Check ----------
@@ -61,7 +52,7 @@ if (-not (Test-Path (Join-Path $codeRoot 'tests'))) {
 # No time limit — change detection is the criterion, not elapsed time.
 $testLogPath = Join-Path $mainRoot '.github/test-log.json'
 $fromLog = $false
-if (Test-Path $testLogPath) {
+if (-not $testGateSkipped -and (Test-Path $testLogPath)) {
     try {
         $log = Get-Content $testLogPath -Raw | ConvertFrom-Json
         $allEntry = $null
@@ -76,7 +67,7 @@ if (Test-Path $testLogPath) {
     } catch {}
 }
 
-if ($fromLog) {
+if ($testGateSkipped -or $fromLog) {
     $exitCode = 0
 } else {
     $scriptPath = Join-Path $mainRoot '.github/scripts/run-tests.ps1'
@@ -282,7 +273,7 @@ if ($changedLintPy.Count -gt 0) {
 
 # All gates passed
 $output = @{
-    systemMessage = "refactorer:Stop -- all gates PASS: tests $(if ($fromLog) {'accepted from log'} else {'green'}), no new files created, python quality verified, linting: $lintStatus"
+    systemMessage = "refactorer:Stop -- all gates PASS: tests $(if ($testGateSkipped) {"gate skipped ($testGateSkipped)"} elseif ($fromLog) {'accepted from log'} else {'green'}), no new files created, python quality verified, linting: $lintStatus"
 } | ConvertTo-Json -Compress
 Write-Output $output
 exit 0

@@ -1,8 +1,16 @@
-# Regression tests for the Python linting hard gate (issue #6).
+# Regression tests for the Python linting hard gate (issues #6, #10, #12).
 #
-# The defect: LINTING_STRICTNESS was configured, yet violations shipped.
+# #6 -- the defect: LINTING_STRICTNESS was configured, yet violations shipped.
 # Root cause was wiring, not the checker -- the gate's git pathspec covered
 # SRC_DIR/ only, and the gate existed solely in the optional refactorer step.
+#
+# #10 -- the gate passed its rule set as a CLI --select, which outranks the
+# project's own ruff `ignore`. Explicit project exceptions now win, except for
+# CORE_RULES, which no project configuration may switch off.
+#
+# #12 -- the gate sat behind the test gate's early exits, so a missing pytest
+# or tests/ directory silently disabled linting too. A missing test runner now
+# skips the test gate only.
 #
 # These tests build throwaway git repos, plant a real ruff violation in
 # tests/, and drive the actual stop hooks end to end. Run from anywhere:
@@ -155,11 +163,71 @@ def add(a: int, b: int) -> int:
     return a + b
 '@
 
+# F401 (unused import) + F821 (undefined name). F821 is in CORE_RULES and must
+# survive any project ignore; F401 is not and may be waived by the project.
+$UNDEFINED_TEST = @'
+"""Tests for the sample module."""
+# copilot:generated | tester | 2026-07-29
+
+import os
+
+from src.app import add
+
+
+def test_add():
+    assert add(1, 2) == undefined_total
+'@
+
+# Clean but MODIFIED source: a negative control needs a file that actually
+# appears in the changed set, otherwise nothing is linted and it proves nothing.
+$CLEAN_SRC_EXTENDED = @'
+"""Sample module."""
+# copilot:generated | tester | 2026-07-29
+
+
+def add(a: int, b: int) -> int:
+    """Add two numbers.
+
+    Parameters
+    ----------
+    a : int
+        First operand.
+    b : int
+        Second operand.
+
+    Returns
+    -------
+    int
+        The sum.
+    """
+    return a + b
+
+
+def double(a: int) -> int:
+    """Double a number.
+
+    Parameters
+    ----------
+    a : int
+        The operand.
+
+    Returns
+    -------
+    int
+        Twice the operand.
+    """
+    return a * 2
+'@
+
 function New-GateRepo {
+    param([string]$Pyproject, [switch]$NoTests)
+
     $repo = Join-Path ([IO.Path]::GetTempPath()) ("lintgate-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
     New-Item -ItemType Directory -Path $repo -Force | Out-Null
 
-    foreach ($d in @('.github/scripts', '.github/hooks/scripts', 'src', 'tests')) {
+    $dirs = @('.github/scripts', '.github/hooks/scripts', 'src')
+    if (-not $NoTests) { $dirs += 'tests' }
+    foreach ($d in $dirs) {
         New-Item -ItemType Directory -Path (Join-Path $repo $d) -Force | Out-Null
     }
 
@@ -177,27 +245,66 @@ function New-GateRepo {
         Set-Content (Join-Path $repo '.github/scripts/run-tests.ps1')
 
     $CLEAN_SRC  | Set-Content (Join-Path $repo 'src/app.py')
-    $CLEAN_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    if (-not $NoTests) { $CLEAN_TEST | Set-Content (Join-Path $repo 'tests/test_app.py') }
+    if ($Pyproject) { $Pyproject | Set-Content (Join-Path $repo 'pyproject.toml') }
 
     Push-Location $repo
     try {
         git init -q
         git config user.email t@example.com
         git config user.name tester
-        git add -- ':(literal).github' ':(literal)src' ':(literal)tests' | Out-Null
+        git add -- ':(literal).github' ':(literal)src' | Out-Null
+        if (-not $NoTests) { git add -- ':(literal)tests' | Out-Null }
+        if ($Pyproject) { git add -- ':(literal)pyproject.toml' | Out-Null }
         git commit -qm seed | Out-Null
     } finally { Pop-Location }
     return $repo
 }
 
+# PATH with every directory that provides pytest removed, so the hook cannot
+# find a test runner. ruff usually lives in the same venv Scripts directory as
+# pytest, so it is copied into $ToolBin (a standalone binary) and prepended --
+# otherwise the scenario would pass vacuously with the lint gate skipped for
+# lack of ruff. Returns $null when ruff cannot be preserved.
+function Get-PathWithoutPytest {
+    param([string]$ToolBin)
+    $sep = [IO.Path]::PathSeparator
+    $ruff = Get-Command ruff -ErrorAction SilentlyContinue
+    if (-not $ruff) { return $null }
+    $kept = $env:PATH -split $sep | Where-Object {
+        if (-not $_) { return $false }
+        foreach ($n in @('pytest.exe', 'pytest.cmd', 'pytest.bat', 'pytest')) {
+            if (Test-Path (Join-Path $_ $n) -ErrorAction SilentlyContinue) { return $false }
+        }
+        return $true
+    }
+    New-Item -ItemType Directory -Path $ToolBin -Force | Out-Null
+    Copy-Item $ruff.Source -Destination $ToolBin -Force
+    $probe = $env:PATH
+    try {
+        $env:PATH = (@($ToolBin) + $kept) -join $sep
+        if (-not (Get-Command python -ErrorAction SilentlyContinue)) { return $null }
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $null }
+        if (Get-Command pytest -ErrorAction SilentlyContinue) { return $null }
+        return $env:PATH
+    } finally {
+        $env:PATH = $probe
+    }
+}
+
 # Runs a stop hook inside $repo and returns the parsed JSON output.
 function Invoke-StopHook {
-    param([string]$Repo, [string]$Hook)
+    param([string]$Repo, [string]$Hook, [string]$PathOverride)
     $hookPath = Join-Path $Repo ".github/hooks/scripts/$Hook"
+    $savedPath = $env:PATH
+    if ($PathOverride) { $env:PATH = $PathOverride }
     Push-Location $Repo
     try {
         $out = '{}' | powershell -NoProfile -ExecutionPolicy Bypass -File $hookPath 2>&1
-    } finally { Pop-Location }
+    } finally {
+        Pop-Location
+        $env:PATH = $savedPath
+    }
     $text = ($out | Out-String).Trim()
     return @{ Text = $text; Json = ($text | ConvertFrom-Json -ErrorAction SilentlyContinue) }
 }
@@ -259,6 +366,96 @@ try {
     $r = Invoke-StopHook -Repo $repo -Hook 'refactorer-stop.ps1'
     $results['refactorer_blocks_violation_in_src'] = Test-Blocked $r 'linting gate failed[\s\S]*F401'
     $details['refactorer_blocks_violation_in_src'] = $r.Text
+
+    # --- Issue #10: project config precedence ---
+
+    # 6. An explicit project ignore wins over the framework rule set. Before
+    #    the fix the CLI --select outranked the project's own ruff config, so
+    #    a codebase that is clean by its own contract was blocked.
+    $repo = New-GateRepo -Pyproject "[tool.ruff.lint]`nignore = [`"F401`"]"
+    $repos += $repo
+    $DIRTY_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
+    $results['project_ignore_is_honoured'] = ($r.Json.hookSpecificOutput.decision -ne 'block')
+    $details['project_ignore_is_honoured'] = $r.Text
+
+    # 7. Not selecting a rule is NOT an exception. The project selects only E,
+    #    yet the framework floor still enforces F401. Guards against "project
+    #    config wins" collapsing into "project config replaces".
+    $repo = New-GateRepo -Pyproject "[tool.ruff.lint]`nselect = [`"E`"]"
+    $repos += $repo
+    $DIRTY_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
+    $results['floor_applies_to_unselected_rule'] = Test-Blocked $r 'linting gate failed[\s\S]*F401'
+    $details['floor_applies_to_unselected_rule'] = $r.Text
+
+    # 8. CORE_RULES survive an EXACT project ignore. ruff resolves selectors by
+    #    specificity, so --extend-select alone loses to ignore = ["F821"];
+    #    the checker must drop such entries from the passthrough.
+    $repo = New-GateRepo -Pyproject "[tool.ruff.lint]`nignore = [`"F821`"]"
+    $repos += $repo
+    $UNDEFINED_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
+    $results['core_survives_exact_ignore'] = Test-Blocked $r 'linting gate failed[\s\S]*F821'
+    $details['core_survives_exact_ignore'] = $r.Text
+
+    # 9. CORE_RULES survive a BROAD project ignore, while the rest of that
+    #    ignore is still honoured: F821 blocks, F401 does not appear.
+    $repo = New-GateRepo -Pyproject "[tool.ruff.lint]`nignore = [`"F`"]"
+    $repos += $repo
+    $UNDEFINED_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
+    $results['core_survives_broad_ignore'] =
+        (Test-Blocked $r 'linting gate failed[\s\S]*F821') -and
+        ($r.Json.hookSpecificOutput.reason -notmatch 'F401')
+    $details['core_survives_broad_ignore'] = $r.Text
+
+    # --- Issue #12: gate reachability ---
+    # The lint gate sits behind the test gate's early returns. A missing test
+    # runner must skip the TEST gate only -- ruff needs neither pytest nor a
+    # tests/ directory, so linting must still run and still block.
+
+    # 10./11. No tests/ directory: a violation in SRC_DIR/ must still block.
+    foreach ($hook in @('implementer-stop.ps1', 'refactorer-stop.ps1')) {
+        $repo = New-GateRepo -NoTests; $repos += $repo
+        $DIRTY_SRC | Set-Content (Join-Path $repo 'src/app.py')
+        git -C $repo add -- ':(literal)src/app.py' | Out-Null
+        $r = Invoke-StopHook -Repo $repo -Hook $hook
+        $key = 'lint_runs_without_tests_dir_' + $hook.Split('-')[0]
+        $results[$key] = Test-Blocked $r 'linting gate failed[\s\S]*F401'
+        $details[$key] = $r.Text
+    }
+
+    # 12. No pytest on PATH: same expectation. git, python and ruff remain
+    #     reachable, only the test runner is gone.
+    $toolBin = Join-Path ([IO.Path]::GetTempPath()) ("lintgate-bin-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $repos += $toolBin
+    $noPytestPath = Get-PathWithoutPytest -ToolBin $toolBin
+    if (-not $noPytestPath) {
+        Write-Host '  SKIP  lint_runs_without_pytest (cannot build a pytest-free PATH that keeps git/python/ruff)'
+    } else {
+        $repo = New-GateRepo; $repos += $repo
+        $DIRTY_SRC | Set-Content (Join-Path $repo 'src/app.py')
+        git -C $repo add -- ':(literal)src/app.py' | Out-Null
+        $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1' -PathOverride $noPytestPath
+        $results['lint_runs_without_pytest'] = Test-Blocked $r 'linting gate failed[\s\S]*F401'
+        $details['lint_runs_without_pytest'] = $r.Text
+    }
+
+    # 13. Negative control + visibility: a clean tree without tests/ must NOT
+    #     block, and the output must still say the test gate was skipped.
+    $repo = New-GateRepo -NoTests; $repos += $repo
+    $CLEAN_SRC_EXTENDED | Set-Content (Join-Path $repo 'src/app.py')
+    git -C $repo add -- ':(literal)src/app.py' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
+    $results['clean_repo_without_tests_dir_passes'] =
+        ($r.Json.hookSpecificOutput.decision -ne 'block') -and
+        ($r.Text -match 'skipped')
+    $details['clean_repo_without_tests_dir_passes'] = $r.Text
 } finally {
     $env:PATH = $origPath
     foreach ($r in $repos) {

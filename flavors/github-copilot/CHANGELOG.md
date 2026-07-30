@@ -9,6 +9,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The lint gate is reachable without pytest or a `tests/` directory (issue #12).**
+  Third finding in the same area as #6 and #10, this time about *reach* rather
+  than correctness. Both stop hooks opened with two early `exit 0`s: no `pytest`
+  on `PATH`, or no `tests/` directory, ended the hook right there. Every gate
+  behind them — linting, provenance markers, python quality, ignore hygiene —
+  died with the test gate, even though ruff needs neither a test runner nor a
+  test directory. The message said "Green gate skipped", which reads like one
+  gate was waived; in fact the whole hook was.
+
+  A missing test runner now skips **only** the test gate. Execution falls
+  through to the remaining gates, and the skip reason is surfaced in the final
+  message (`tests gate skipped (pytest not found)`) instead of being reported
+  as an unqualified PASS. Applies to `implementer-stop` and `refactorer-stop`,
+  `.ps1` and `.sh`.
+
+  Regression suite extended 9 → 13 scenarios: a `F401` violation in `SRC_DIR/`
+  must block for both hooks with no `tests/` directory and with no `pytest` on
+  `PATH`, plus a negative control that a clean tree without `tests/` still
+  passes *and* still reports the skip. All four fail against the previous hooks
+  and pass against the fixed ones.
+
+- **The lint gate no longer overrules the project's own ruff config (issue #10).**
+  Follow-up to #6: once the gate actually ran, it turned out to ignore the
+  consuming project's ruff configuration entirely. `check-python-linting.py`
+  passed its strictness set as a CLI `--select`, and a CLI selector outranks
+  `ignore` in `pyproject.toml`. In the first project it was deployed to,
+  `ruff check mpusage/ tests/` reported `All checks passed!` while the gate
+  reported **296 errors** — 290 of them `E501`, a rule that project explicitly
+  ignores. A gate that contradicts the codebase's own contract gets switched
+  off, so this was a credibility problem, not a cosmetic one.
+
+  The rule is now **project refinement over framework default, with a
+  non-overridable core**:
+  - The strictness set is a **floor**, not a replacement.
+  - An explicit `ignore` / `extend-ignore` / `per-file-ignores` in
+    `.ruff.toml`, `ruff.toml` or `pyproject.toml [tool.ruff]` **wins** — it is
+    passed through to ruff as `--ignore` / `--per-file-ignores`.
+  - `select` is deliberately **not** honoured: not selecting a rule is not an
+    exception, so the floor still applies.
+  - **`F8` (unused imports, undefined names) is non-overridable.** No project
+    config switches it off.
+  - Every applied or rejected override is printed in the gate banner
+    (`project_ignore=…`, `core_override_rejected=…`), so a suppression is
+    visible rather than silent.
+
+  Config is discovered per file by walking up to the nearest ruff config, so a
+  monorepo with several configs is handled correctly (files are grouped and
+  ruff is invoked once per group). On Python < 3.11 (no `tomllib`) the gate
+  degrades to the old behaviour and says so via `LINTING_GATE_NOTICE`.
+
+  Implementation note worth keeping: protecting the core needs **two**
+  mechanisms, not one. A probe disproved the obvious design — ruff resolves
+  selectors by **specificity, not CLI order**, so `--extend-select=F8` beats a
+  broad `ignore = ["F"]` but *loses* to an exact `ignore = ["F821"]`. Hence
+  `--extend-select=F8` **plus** stripping core-overlapping entries out of the
+  passthrough.
+
+  Regression proof: `test-lint-gate.ps1` grows from 5 to **9 scenarios** —
+  project `ignore` honoured, floor still applied to an unselected rule, and the
+  core surviving both an exact (`F821`) and a broad (`F`) project ignore while
+  the non-core part of that same ignore is still respected. 9/9 pass. Verified
+  end to end against the real project that exposed the defect: **296 → 6**
+  findings, the 6 remaining being genuine `C901` complexity violations.
+
 - **The Python lint quality gate now actually runs (issue #6).**
   `LINTING_STRICTNESS=strict` was configured in a consuming project, yet a PR
   merged with 41 ruff violations — 34 of them in `tests/`. `check-python-linting.py`
