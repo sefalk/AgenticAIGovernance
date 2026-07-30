@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Ignore hygiene reaches `tests/` (issue #18).** `check-python-quality.py`
+  enforces that every `# noqa` / `# type: ignore` / `# pyright: ignore` carries
+  an explicit rule code and a justification — but both stop hooks invoked it on
+  the `SRC_DIR/` set only. A suppression in `tests/` was never checked.
+
+  That was defensible while the quality gate was source-only. #13 made it a
+  problem: `# noqa: RULE  # reason` is now the sanctioned way to acknowledge an
+  inherited lint violation, and the canonical inherited file is a Red-phase
+  file in `tests/`. The acknowledgement path ran exactly through the one place
+  the justification check did not reach, so `# noqa` alone would have silenced
+  the gate with nothing recorded.
+
+  `check-python-quality.py` gains `--checks all|ignore-hygiene`. The hooks now
+  run the full gate on `SRC_DIR/` as before, plus a hygiene-only pass over the
+  rest of the lint set. The *checks* split stays in the script; the *mapping*
+  from file class to check set stays in the hooks, so the `SRC_DIR`/`tests`
+  convention does not leak into the checker.
+
+  Scope follows #13: the hygiene set is the branch delta minus the files that
+  already got the full gate. Without that, the #13 blind spot simply reappears
+  one level up — an acknowledgement committed in an earlier phase would be
+  invisible to every later phase. Type hints and docstrings stay current-step
+  and source-only; those are authorship claims about this step.
+
+  Regression suite 17 → **21 scenarios**. All four fixtures suppress the `F401`
+  as far as ruff is concerned, so the lint gate goes quiet and only hygiene can
+  still see them — the scenarios cannot pass for the wrong reason. Red 18/21
+  (bare `# noqa`, unjustified `# noqa: F401`, and the same defect inherited
+  from an earlier phase), Green 21/21. `quality_gate_not_applied_to_tests` still
+  passes: the new block message deliberately avoids the `type hints/docstrings`
+  wording that scenario asserts against.
+
+  Also corrects two stale rows in `quality-gates.instructions.md` that still
+  described the lint gate as current-step scoped after #13 widened it.
+
 - **The lint gate now covers what the branch merges, not just the current step
   (issue #13).** Fourth finding in the same area as #6, #10 and #12, this time
   about the gate's *input set*. Both stop hooks linted the current step's diff

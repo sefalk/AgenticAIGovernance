@@ -1,4 +1,4 @@
-# Regression tests for the Python linting hard gate (issues #6, #10, #12, #13).
+# Regression tests for the Python linting hard gate (issues #6, #10, #12, #13, #18).
 #
 # #6 -- the defect: LINTING_STRICTNESS was configured, yet violations shipped.
 # Root cause was wiring, not the checker -- the gate's git pathspec covered
@@ -16,6 +16,11 @@
 # workflow committed in an EARLIER phase (Red-phase tests, above all) were
 # invisible to every later phase and shipped unlinted. The input set is now the
 # branch delta against BASE_BRANCH: what the merge adds is what gets linted.
+#
+# #18 -- the ignore-hygiene check ran on SRC_DIR/ only, so a `# noqa` in tests/
+# was never checked for a rule code or a reason. #13 routes the acknowledgement
+# of inherited debt through exactly those files, so hygiene now covers the
+# whole lint set.
 #
 # These tests build throwaway git repos, plant a real ruff violation in
 # tests/, and drive the actual stop hooks end to end. Run from anywhere:
