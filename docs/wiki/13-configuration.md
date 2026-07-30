@@ -57,8 +57,32 @@ array. Blank = deploy's curated built-in default.
 |---|---|
 | `DEP_FILE` / `DEP_DEV_FILE` | Runtime / dev dependency spec files |
 | `LINTING_STRICTNESS` | ruff rule set for the lint gate in the implementer and refactorer stop hooks: `minimal` / `standard` / `strict` |
+| `BASE_BRANCH` | Branch the lint gate diffs against to find files an earlier phase of the same workflow committed (default `dev`) |
 | `PYLANCE_TYPE_CHECKING` | Mirrors `python.analysis.typeCheckingMode` (`off`…`strict`) |
 | `NOTEBOOKS_ENABLED` | Registers the `nbstripout` git filter when `true` |
+
+### Lint gate scope
+
+The lint gate's input set is the **branch delta** —
+`merge-base(HEAD, BASE_BRANCH)..HEAD` — not just the current step's diff.
+Without this, files the workflow committed in an earlier phase (Red-phase test
+files above all) were invisible to every later phase and shipped unlinted.
+
+The two sets are linted separately so pre-existence is part of the decision:
+
+- **Current step** — violations block with the usual message.
+- **Inherited from an earlier phase** — violations also block, but the message
+  names them as such and offers two legal moves: fix them, or acknowledge each
+  with `# noqa: RULE  # reason` in its own standalone commit. Acknowledgement
+  is already enforced elsewhere (ignore-justification and atomic-ignore-commit
+  gates) and shows up in the PR diff, so debt becomes an explicit, reviewable
+  decision instead of being carried silently.
+
+`BASE_BRANCH` is deliberately separate from `ADO_DEFAULT_TARGET_BRANCH`, which
+is capability-scoped to the Azure DevOps integration; the lint gate must work
+with no provider configured. If the branch cannot be resolved (locally or as
+`origin/<name>`), the inherited set is empty and the gate falls back to the
+current-step scope — degradation never turns into a block.
 
 ## Large-file commit guard
 
