@@ -27,14 +27,14 @@ fi
 # Read stdin (hook input JSON — required by protocol)
 cat > /dev/null
 
+# A missing test runner disables the TEST gate only. Provenance, quality,
+# linting and ignore hygiene need neither pytest nor a tests/ directory, and
+# exiting here used to take them down with it (issue #12).
+test_gate_skipped=""
 if ! command -v pytest &>/dev/null; then
-    echo '{"systemMessage": "implementer:Stop — pytest not found, Green gate skipped"}'
-    exit 0
-fi
-
-if [ ! -d "tests/" ]; then
-    echo '{"systemMessage": "implementer:Stop — no tests/ directory, Green gate skipped"}'
-    exit 0
+    test_gate_skipped="pytest not found"
+elif [ ! -d "tests/" ]; then
+    test_gate_skipped="no tests/ directory"
 fi
 
 # ---------- Test Log Freshness Check ----------
@@ -42,7 +42,7 @@ fi
 # No time limit — change detection is the criterion, not elapsed time.
 TEST_LOG=".github/test-log.json"
 from_log=false
-if [[ -f "$TEST_LOG" ]]; then
+if [[ -z "$test_gate_skipped" ]] && [[ -f "$TEST_LOG" ]]; then
     _flat=$(tr -d '\n\r' < "$TEST_LOG" | tr -s ' ')
     _all_block=$(echo "$_flat" | sed -n 's/.*"all" *: *\({[^}]*}\).*/\1/p')
     if [[ -n "$_all_block" ]]; then
@@ -63,7 +63,10 @@ if [[ -f "$TEST_LOG" ]]; then
     fi
 fi
 
-if [[ "$from_log" == true ]]; then
+if [[ -n "$test_gate_skipped" ]]; then
+    exit_code=0
+    output="Tests: gate skipped (${test_gate_skipped})"
+elif [[ "$from_log" == true ]]; then
     exit_code=0
     output="Tests: accepted from test log (${log_info} passed, no code changes since)"
 else
@@ -179,7 +182,9 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
         exit 0
     fi
 
-    if [[ "$from_log" == true ]]; then
+    if [[ -n "$test_gate_skipped" ]]; then
+        pass_detail="test gate skipped (${test_gate_skipped})"
+    elif [[ "$from_log" == true ]]; then
         pass_detail="tests accepted from log"
     else
         pass_detail="all tests pass"

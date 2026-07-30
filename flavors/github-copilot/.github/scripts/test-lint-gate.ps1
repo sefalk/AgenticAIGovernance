@@ -257,10 +257,16 @@ function New-GateRepo {
     return $repo
 }
 
-# PATH with every directory that provides pytest removed. Used to prove the
-# lint gate is reachable without a test runner -- git, python and ruff stay.
+# PATH with every directory that provides pytest removed, so the hook cannot
+# find a test runner. ruff usually lives in the same venv Scripts directory as
+# pytest, so it is copied into $ToolBin (a standalone binary) and prepended --
+# otherwise the scenario would pass vacuously with the lint gate skipped for
+# lack of ruff. Returns $null when ruff cannot be preserved.
 function Get-PathWithoutPytest {
+    param([string]$ToolBin)
     $sep = [IO.Path]::PathSeparator
+    $ruff = Get-Command ruff -ErrorAction SilentlyContinue
+    if (-not $ruff) { return $null }
     $kept = $env:PATH -split $sep | Where-Object {
         if (-not $_) { return $false }
         foreach ($n in @('pytest.exe', 'pytest.cmd', 'pytest.bat', 'pytest')) {
@@ -268,7 +274,18 @@ function Get-PathWithoutPytest {
         }
         return $true
     }
-    return ($kept -join $sep)
+    New-Item -ItemType Directory -Path $ToolBin -Force | Out-Null
+    Copy-Item $ruff.Source -Destination $ToolBin -Force
+    $probe = $env:PATH
+    try {
+        $env:PATH = (@($ToolBin) + $kept) -join $sep
+        if (-not (Get-Command python -ErrorAction SilentlyContinue)) { return $null }
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $null }
+        if (Get-Command pytest -ErrorAction SilentlyContinue) { return $null }
+        return $env:PATH
+    } finally {
+        $env:PATH = $probe
+    }
 }
 
 # Runs a stop hook inside $repo and returns the parsed JSON output.
@@ -409,15 +426,21 @@ try {
         $details[$key] = $r.Text
     }
 
-    # 12. No pytest on PATH: same expectation. git/python/ruff remain reachable,
-    #     only the test runner is gone.
-    $noPytestPath = Get-PathWithoutPytest
-    $repo = New-GateRepo; $repos += $repo
-    $DIRTY_SRC | Set-Content (Join-Path $repo 'src/app.py')
-    git -C $repo add -- ':(literal)src/app.py' | Out-Null
-    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1' -PathOverride $noPytestPath
-    $results['lint_runs_without_pytest'] = Test-Blocked $r 'linting gate failed[\s\S]*F401'
-    $details['lint_runs_without_pytest'] = $r.Text
+    # 12. No pytest on PATH: same expectation. git, python and ruff remain
+    #     reachable, only the test runner is gone.
+    $toolBin = Join-Path ([IO.Path]::GetTempPath()) ("lintgate-bin-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $repos += $toolBin
+    $noPytestPath = Get-PathWithoutPytest -ToolBin $toolBin
+    if (-not $noPytestPath) {
+        Write-Host '  SKIP  lint_runs_without_pytest (cannot build a pytest-free PATH that keeps git/python/ruff)'
+    } else {
+        $repo = New-GateRepo; $repos += $repo
+        $DIRTY_SRC | Set-Content (Join-Path $repo 'src/app.py')
+        git -C $repo add -- ':(literal)src/app.py' | Out-Null
+        $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1' -PathOverride $noPytestPath
+        $results['lint_runs_without_pytest'] = Test-Blocked $r 'linting gate failed[\s\S]*F401'
+        $details['lint_runs_without_pytest'] = $r.Text
+    }
 
     # 13. Negative control + visibility: a clean tree without tests/ must NOT
     #     block, and the output must still say the test gate was skipped.
