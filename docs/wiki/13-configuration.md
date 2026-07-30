@@ -56,7 +56,7 @@ array. Blank = deploy's curated built-in default.
 | Key | Purpose |
 |---|---|
 | `DEP_FILE` / `DEP_DEV_FILE` | Runtime / dev dependency spec files |
-| `LINTING_STRICTNESS` | ruff rule set for the refactorer gate: `minimal` / `standard` / `strict` |
+| `LINTING_STRICTNESS` | ruff rule set for the lint gate in the implementer and refactorer stop hooks: `minimal` / `standard` / `strict` |
 | `PYLANCE_TYPE_CHECKING` | Mirrors `python.analysis.typeCheckingMode` (`off`…`strict`) |
 | `NOTEBOOKS_ENABLED` | Registers the `nbstripout` git filter when `true` |
 

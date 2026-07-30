@@ -41,22 +41,14 @@ $null = [Console]::In.ReadToEnd()
 # The input JSON contains stop_hook_active but we read it as raw;
 # a simple env-based guard is more reliable for scripts.
 
-$pytest = Get-Command pytest -ErrorAction SilentlyContinue
-if (-not $pytest) {
-    # Cannot verify -- warn but do not block
-    $output = @{
-        systemMessage = "implementer:Stop -- pytest not found, Green gate skipped"
-    } | ConvertTo-Json -Compress
-    Write-Output $output
-    exit 0
-}
-
-if (-not (Test-Path (Join-Path $codeRoot 'tests'))) {
-    $output = @{
-        systemMessage = "implementer:Stop -- no tests/ directory, Green gate skipped"
-    } | ConvertTo-Json -Compress
-    Write-Output $output
-    exit 0
+# A missing test runner disables the TEST gate only. Provenance, quality,
+# linting and ignore hygiene need neither pytest nor a tests/ directory, and
+# exiting here used to take them down with it (issue #12).
+$testGateSkipped = $null
+if (-not (Get-Command pytest -ErrorAction SilentlyContinue)) {
+    $testGateSkipped = 'pytest not found'
+} elseif (-not (Test-Path (Join-Path $codeRoot 'tests'))) {
+    $testGateSkipped = 'no tests/ directory'
 }
 
 # ---------- Test Log Freshness Check ----------
@@ -64,7 +56,7 @@ if (-not (Test-Path (Join-Path $codeRoot 'tests'))) {
 # No time limit — change detection is the criterion, not elapsed time.
 $testLogPath = Join-Path $mainRoot '.github/test-log.json'
 $fromLog = $false
-if (Test-Path $testLogPath) {
+if (-not $testGateSkipped -and (Test-Path $testLogPath)) {
     try {
         $log = Get-Content $testLogPath -Raw | ConvertFrom-Json
         $allEntry = $null
@@ -79,7 +71,10 @@ if (Test-Path $testLogPath) {
     } catch {}
 }
 
-if ($fromLog) {
+if ($testGateSkipped) {
+    $exitCode = 0
+    $result = "Tests: gate skipped ($testGateSkipped)"
+} elseif ($fromLog) {
     $exitCode = 0
     $result = "Tests: accepted from test log ($($allEntry.passed)/$($allEntry.total) passed, no code changes since)"
 } else {
@@ -263,8 +258,11 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
     }
 
     # All gates pass
+    $testsStatus = if ($testGateSkipped) { "gate skipped ($testGateSkipped)" }
+                   elseif ($fromLog) { 'accepted from log' }
+                   else { 'all pass' }
     $output = @{
-        systemMessage = "implementer:Stop -- Green gate PASS: tests $(if ($fromLog) {'accepted from log'} else {'all pass'}), provenance + python quality verified, linting: $lintStatus"
+        systemMessage = "implementer:Stop -- Green gate PASS: tests $testsStatus, provenance + python quality verified, linting: $lintStatus"
     } | ConvertTo-Json -Compress
     Write-Output $output
     exit 0
