@@ -1,8 +1,12 @@
-# Regression tests for the Python linting hard gate (issue #6).
+# Regression tests for the Python linting hard gate (issues #6, #10).
 #
-# The defect: LINTING_STRICTNESS was configured, yet violations shipped.
+# #6 -- the defect: LINTING_STRICTNESS was configured, yet violations shipped.
 # Root cause was wiring, not the checker -- the gate's git pathspec covered
 # SRC_DIR/ only, and the gate existed solely in the optional refactorer step.
+#
+# #10 -- the gate passed its rule set as a CLI --select, which outranks the
+# project's own ruff `ignore`. Explicit project exceptions now win, except for
+# CORE_RULES, which no project configuration may switch off.
 #
 # These tests build throwaway git repos, plant a real ruff violation in
 # tests/, and drive the actual stop hooks end to end. Run from anywhere:
@@ -155,7 +159,24 @@ def add(a: int, b: int) -> int:
     return a + b
 '@
 
+# F401 (unused import) + F821 (undefined name). F821 is in CORE_RULES and must
+# survive any project ignore; F401 is not and may be waived by the project.
+$UNDEFINED_TEST = @'
+"""Tests for the sample module."""
+# copilot:generated | tester | 2026-07-29
+
+import os
+
+from src.app import add
+
+
+def test_add():
+    assert add(1, 2) == undefined_total
+'@
+
 function New-GateRepo {
+    param([string]$Pyproject)
+
     $repo = Join-Path ([IO.Path]::GetTempPath()) ("lintgate-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
     New-Item -ItemType Directory -Path $repo -Force | Out-Null
 
@@ -178,6 +199,7 @@ function New-GateRepo {
 
     $CLEAN_SRC  | Set-Content (Join-Path $repo 'src/app.py')
     $CLEAN_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    if ($Pyproject) { $Pyproject | Set-Content (Join-Path $repo 'pyproject.toml') }
 
     Push-Location $repo
     try {
@@ -185,6 +207,7 @@ function New-GateRepo {
         git config user.email t@example.com
         git config user.name tester
         git add -- ':(literal).github' ':(literal)src' ':(literal)tests' | Out-Null
+        if ($Pyproject) { git add -- ':(literal)pyproject.toml' | Out-Null }
         git commit -qm seed | Out-Null
     } finally { Pop-Location }
     return $repo
@@ -259,6 +282,53 @@ try {
     $r = Invoke-StopHook -Repo $repo -Hook 'refactorer-stop.ps1'
     $results['refactorer_blocks_violation_in_src'] = Test-Blocked $r 'linting gate failed[\s\S]*F401'
     $details['refactorer_blocks_violation_in_src'] = $r.Text
+
+    # --- Issue #10: project config precedence ---
+
+    # 6. An explicit project ignore wins over the framework rule set. Before
+    #    the fix the CLI --select outranked the project's own ruff config, so
+    #    a codebase that is clean by its own contract was blocked.
+    $repo = New-GateRepo -Pyproject "[tool.ruff.lint]`nignore = [`"F401`"]"
+    $repos += $repo
+    $DIRTY_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
+    $results['project_ignore_is_honoured'] = ($r.Json.hookSpecificOutput.decision -ne 'block')
+    $details['project_ignore_is_honoured'] = $r.Text
+
+    # 7. Not selecting a rule is NOT an exception. The project selects only E,
+    #    yet the framework floor still enforces F401. Guards against "project
+    #    config wins" collapsing into "project config replaces".
+    $repo = New-GateRepo -Pyproject "[tool.ruff.lint]`nselect = [`"E`"]"
+    $repos += $repo
+    $DIRTY_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
+    $results['floor_applies_to_unselected_rule'] = Test-Blocked $r 'linting gate failed[\s\S]*F401'
+    $details['floor_applies_to_unselected_rule'] = $r.Text
+
+    # 8. CORE_RULES survive an EXACT project ignore. ruff resolves selectors by
+    #    specificity, so --extend-select alone loses to ignore = ["F821"];
+    #    the checker must drop such entries from the passthrough.
+    $repo = New-GateRepo -Pyproject "[tool.ruff.lint]`nignore = [`"F821`"]"
+    $repos += $repo
+    $UNDEFINED_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
+    $results['core_survives_exact_ignore'] = Test-Blocked $r 'linting gate failed[\s\S]*F821'
+    $details['core_survives_exact_ignore'] = $r.Text
+
+    # 9. CORE_RULES survive a BROAD project ignore, while the rest of that
+    #    ignore is still honoured: F821 blocks, F401 does not appear.
+    $repo = New-GateRepo -Pyproject "[tool.ruff.lint]`nignore = [`"F`"]"
+    $repos += $repo
+    $UNDEFINED_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
+    $results['core_survives_broad_ignore'] =
+        (Test-Blocked $r 'linting gate failed[\s\S]*F821') -and
+        ($r.Json.hookSpecificOutput.reason -notmatch 'F401')
+    $details['core_survives_broad_ignore'] = $r.Text
 } finally {
     $env:PATH = $origPath
     foreach ($r in $repos) {
