@@ -1,4 +1,4 @@
-# Regression tests for the Python linting hard gate (issues #6, #10, #12).
+# Regression tests for the Python linting hard gate (issues #6, #10, #12, #13).
 #
 # #6 -- the defect: LINTING_STRICTNESS was configured, yet violations shipped.
 # Root cause was wiring, not the checker -- the gate's git pathspec covered
@@ -11,6 +11,11 @@
 # #12 -- the gate sat behind the test gate's early exits, so a missing pytest
 # or tests/ directory silently disabled linting too. A missing test runner now
 # skips the test gate only.
+#
+# #13 -- the gate's input set was the current step's diff, so files the
+# workflow committed in an EARLIER phase (Red-phase tests, above all) were
+# invisible to every later phase and shipped unlinted. The input set is now the
+# branch delta against BASE_BRANCH: what the merge adds is what gets linted.
 #
 # These tests build throwaway git repos, plant a real ruff violation in
 # tests/, and drive the actual stop hooks end to end. Run from anywhere:
@@ -219,8 +224,25 @@ def double(a: int) -> int:
     return a * 2
 '@
 
+# Same F401 as $DIRTY_TEST, but acknowledged the only way the framework
+# accepts one: explicit rule code plus a justification.
+$ACKNOWLEDGED_TEST = @'
+"""Tests for the sample module."""
+# copilot:generated | tester | 2026-07-29
+
+import os  # noqa: F401  # imported for its registration side effect
+
+from src.app import add
+
+
+def test_add():
+    assert add(1, 2) == 3
+'@
+
+# -BaseBranch builds the workflow topology: a `dev` base plus a feature branch
+# checked out on top, so merge-base resolves and a phase commit is inherited.
 function New-GateRepo {
-    param([string]$Pyproject, [switch]$NoTests)
+    param([string]$Pyproject, [switch]$NoTests, [switch]$BaseBranch)
 
     $repo = Join-Path ([IO.Path]::GetTempPath()) ("lintgate-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
     New-Item -ItemType Directory -Path $repo -Force | Out-Null
@@ -231,7 +253,9 @@ function New-GateRepo {
         New-Item -ItemType Directory -Path (Join-Path $repo $d) -Force | Out-Null
     }
 
-    "SRC_DIR=src`nLINTING_STRICTNESS=standard" |
+    # BASE_BRANCH is always configured; only -BaseBranch repos actually have
+    # the branch, so the others exercise the unresolvable-base fallback.
+    "SRC_DIR=src`nLINTING_STRICTNESS=standard`nBASE_BRANCH=dev" |
         Set-Content (Join-Path $repo '.github/af-env.conf')
 
     # Real checkers and real hooks -- this is what is under test.
@@ -250,13 +274,14 @@ function New-GateRepo {
 
     Push-Location $repo
     try {
-        git init -q
+        git init -q -b $(if ($BaseBranch) { 'dev' } else { 'master' })
         git config user.email t@example.com
         git config user.name tester
         git add -- ':(literal).github' ':(literal)src' | Out-Null
         if (-not $NoTests) { git add -- ':(literal)tests' | Out-Null }
         if ($Pyproject) { git add -- ':(literal)pyproject.toml' | Out-Null }
         git commit -qm seed | Out-Null
+        if ($BaseBranch) { git checkout -q -b agent/wf }
     } finally { Pop-Location }
     return $repo
 }
@@ -456,6 +481,44 @@ try {
         ($r.Json.hookSpecificOutput.decision -ne 'block') -and
         ($r.Text -match 'skipped')
     $details['clean_repo_without_tests_dir_passes'] = $r.Text
+
+    # --- Issue #13: branch delta as the gate's input set ---
+    # Both diffs the hooks use are blind to a file committed in an EARLIER phase
+    # of the same workflow -- exactly what the coordinator does at the end of the
+    # Red phase. The unit of accountability is the branch delta: what the merge
+    # will actually add.
+
+    # 14./15. Violation committed in the Red phase, working tree clean afterwards.
+    foreach ($hook in @('implementer-stop.ps1', 'refactorer-stop.ps1')) {
+        $repo = New-GateRepo -BaseBranch; $repos += $repo
+        $DIRTY_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+        git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+        git -C $repo commit -qm '[agent:test-writer] failing tests: red phase' | Out-Null
+        $r = Invoke-StopHook -Repo $repo -Hook $hook
+        $key = 'lint_covers_earlier_phase_commit_' + $hook.Split('-')[0]
+        $results[$key] = Test-Blocked $r 'earlier phase[\s\S]*F401'
+        $details[$key] = $r.Text
+    }
+
+    # 16. Unresolvable base branch: no `dev` exists, so there is no merge-base.
+    #     The gate must fall back to today's behaviour, not block for that reason.
+    $repo = New-GateRepo; $repos += $repo
+    $DIRTY_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+    git -C $repo commit -qm '[agent:test-writer] failing tests: red phase' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
+    $results['unresolvable_base_branch_degrades'] = ($r.Json.hookSpecificOutput.decision -ne 'block')
+    $details['unresolvable_base_branch_degrades'] = $r.Text
+
+    # 17. The escape hatch has to actually work end to end, otherwise the gate
+    #     deadlocks on inherited debt instead of forcing a recorded decision.
+    $repo = New-GateRepo -BaseBranch; $repos += $repo
+    $ACKNOWLEDGED_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+    git -C $repo commit -qm '[agent:test-writer] justify ignore: tests/test_app.py:4 F401' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
+    $results['acknowledged_inherited_violation_passes'] = ($r.Json.hookSpecificOutput.decision -ne 'block')
+    $details['acknowledged_inherited_violation_passes'] = $r.Text
 } finally {
     $env:PATH = $origPath
     foreach ($r in $repos) {

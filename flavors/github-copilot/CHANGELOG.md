@@ -9,6 +9,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The lint gate now covers what the branch merges, not just the current step
+  (issue #13).** Fourth finding in the same area as #6, #10 and #12, this time
+  about the gate's *input set*. Both stop hooks linted the current step's diff
+  (`--cached`, falling back to `HEAD`). But the coordinator commits the
+  Red-phase test files before the implementer ever starts, so by the Green step
+  those files are in neither diff — invisible to every later phase, and shipped
+  unlinted. The gate was reachable (#12), correct (#10), and correctly wired
+  (#6), and still let a whole file class through.
+
+  The input set is now the **branch delta**: `merge-base(HEAD, BASE_BRANCH)..HEAD`,
+  filtered to `SRC_DIR/` and `tests/` `.py` files that still exist in the
+  worktree. The unit of accountability is what the merge adds, not what the
+  last agent happened to touch. Only the **lint** gate widens — provenance and
+  python-quality keep the current-phase set, since those are authorship claims
+  about this step.
+
+  The two sets are linted in **separate ruff invocations**, so pre-existence is
+  part of the decision rather than lost in a merged report:
+  - Current-step violations block exactly as before.
+  - Inherited violations also block, but with a message that names them as
+    earlier-phase debt and offers two legal moves: fix them, or acknowledge
+    each with `# noqa: RULE  # reason` in its own standalone commit.
+
+  Blocking with an acknowledgement path was chosen over a warning and over a
+  separate debt ledger. A warning is how the current silent carry-forward
+  happens; a ledger file would be new machinery nobody reads. The
+  acknowledgement path reuses gates that already exist and are already enforced
+  (ignore justification, atomic ignore commits) and lands in the PR diff, so
+  old debt is cheap to fix when it is easy and *explicitly decided* when it is
+  not — but never carried silently. Volume is bounded because the branch delta
+  contains one workflow's own output, not repo history.
+
+  New `BASE_BRANCH` key in `af-env.conf` (default `dev`), deliberately separate
+  from the capability-scoped `ADO_DEFAULT_TARGET_BRANCH` — the lint gate must
+  work with no provider configured. Resolution tries the local ref then
+  `origin/<name>`; if neither resolves, the inherited set is empty and the gate
+  falls back to the previous scope. Degradation never becomes a block.
+
+  Regression suite extended 13 → **17 scenarios**. The Red proof is the two
+  `lint_covers_earlier_phase_commit_*` scenarios (a `F401` committed on the
+  feature branch, clean working tree, both hooks must block): 15/17 against the
+  unmodified hooks, 17/17 after. The other two are negative controls that must
+  keep passing — an unresolvable base branch degrades instead of blocking, and
+  an inherited violation carrying `# noqa: F401  # reason` passes. Applies to
+  `implementer-stop` and `refactorer-stop`, `.ps1` and `.sh`.
+
 - **The lint gate is reachable without pytest or a `tests/` directory (issue #12).**
   Third finding in the same area as #6 and #10, this time about *reach* rather
   than correctness. Both stop hooks opened with two early `exit 0`s: no `pytest`
