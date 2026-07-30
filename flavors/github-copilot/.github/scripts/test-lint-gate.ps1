@@ -239,6 +239,34 @@ def test_add():
     assert add(1, 2) == 3
 '@
 
+# Both suppress the F401 as far as ruff is concerned, so the LINT gate goes
+# quiet and only the ignore-hygiene gate can still catch them.
+$BARE_NOQA_TEST = @'
+"""Tests for the sample module."""
+# copilot:generated | tester | 2026-07-29
+
+import os  # noqa
+
+from src.app import add
+
+
+def test_add():
+    assert add(1, 2) == 3
+'@
+
+$UNJUSTIFIED_NOQA_TEST = @'
+"""Tests for the sample module."""
+# copilot:generated | tester | 2026-07-29
+
+import os  # noqa: F401
+
+from src.app import add
+
+
+def test_add():
+    assert add(1, 2) == 3
+'@
+
 # -BaseBranch builds the workflow topology: a `dev` base plus a feature branch
 # checked out on top, so merge-base resolves and a phase commit is inherited.
 function New-GateRepo {
@@ -519,6 +547,48 @@ try {
     $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
     $results['acknowledged_inherited_violation_passes'] = ($r.Json.hookSpecificOutput.decision -ne 'block')
     $details['acknowledged_inherited_violation_passes'] = $r.Text
+
+    # --- Issue #18: ignore hygiene reaches tests/ ---
+    # #13 makes `# noqa: RULE  # reason` the sanctioned way to acknowledge an
+    # inherited violation, and the canonical inherited file lives in tests/ --
+    # exactly where check-python-quality.py was never invoked. All four fixtures
+    # below silence ruff, so only the hygiene gate can still see them.
+
+    # 18. Bare `# noqa` -- no rule code, so it suppresses everything on the line.
+    $repo = New-GateRepo; $repos += $repo
+    $BARE_NOQA_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
+    $results['hygiene_blocks_bare_noqa_in_tests'] = Test-Blocked $r 'ignore hygiene[\s\S]*explicit rule code'
+    $details['hygiene_blocks_bare_noqa_in_tests'] = $r.Text
+
+    # 19. Rule code but no reason -- the suppression is unexplained.
+    $repo = New-GateRepo; $repos += $repo
+    $UNJUSTIFIED_NOQA_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'refactorer-stop.ps1'
+    $results['hygiene_blocks_unjustified_noqa_in_tests'] = Test-Blocked $r 'ignore hygiene[\s\S]*justification'
+    $details['hygiene_blocks_unjustified_noqa_in_tests'] = $r.Text
+
+    # 20. Same defect committed in an earlier phase. Without this the #13 blind
+    #     spot simply reappears one level up: the acknowledgement itself becomes
+    #     invisible to every later phase.
+    $repo = New-GateRepo -BaseBranch; $repos += $repo
+    $UNJUSTIFIED_NOQA_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+    git -C $repo commit -qm '[agent:test-writer] failing tests: red phase' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
+    $results['hygiene_covers_earlier_phase_noqa_in_tests'] = Test-Blocked $r 'ignore hygiene[\s\S]*justification'
+    $details['hygiene_covers_earlier_phase_noqa_in_tests'] = $r.Text
+
+    # 21. Negative control: a properly recorded suppression must pass, or the
+    #     escape hatch from #13 is closed and inherited debt deadlocks.
+    $repo = New-GateRepo; $repos += $repo
+    $ACKNOWLEDGED_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
+    $results['hygiene_accepts_justified_noqa_in_tests'] = ($r.Json.hookSpecificOutput.decision -ne 'block')
+    $details['hygiene_accepts_justified_noqa_in_tests'] = $r.Text
 } finally {
     $env:PATH = $origPath
     foreach ($r in $repos) {
