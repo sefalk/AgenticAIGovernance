@@ -123,13 +123,16 @@ def _check_ignore_hygiene(lines: list[str], file_label: str) -> list[str]:
     return issues
 
 
-def check_file(path: Path) -> list[str]:
+def check_file(path: Path, checks: str = "all") -> list[str]:
     """Validate one Python file and return policy violations.
 
     Parameters
     ----------
     path : Path
         Python file path to validate.
+    checks : str
+        ``all`` for every check, ``ignore-hygiene`` to skip the type-hint and
+        docstring rules, which do not apply to test functions.
 
     Returns
     -------
@@ -144,6 +147,9 @@ def check_file(path: Path) -> list[str]:
 
     lines = raw.splitlines()
     issues.extend(_check_ignore_hygiene(lines, str(path)))
+
+    if checks == "ignore-hygiene":
+        return issues
 
     try:
         tree = ast.parse(raw)
@@ -168,6 +174,12 @@ def main() -> int:
     """
     parser = argparse.ArgumentParser(description="Hard-gate Python quality checks")
     parser.add_argument("--files", nargs="+", required=True, help="Python files to validate")
+    parser.add_argument(
+        "--checks",
+        choices=("all", "ignore-hygiene"),
+        default="all",
+        help="Which checks to run. Callers pass ignore-hygiene for test files, where type hints and docstrings do not apply.",
+    )
     args = parser.parse_args()
 
     all_issues: list[str] = []
@@ -175,7 +187,7 @@ def main() -> int:
         p = Path(file_arg)
         if not p.exists() or p.suffix != ".py":
             continue
-        all_issues.extend(check_file(p))
+        all_issues.extend(check_file(p, args.checks))
 
     if all_issues:
         print("PYTHON_QUALITY_GATE_FAIL")

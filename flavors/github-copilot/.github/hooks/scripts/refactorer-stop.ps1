@@ -221,6 +221,46 @@ if ($changedSrcPy.Count -gt 0) {
     }
 }
 
+# ---------- Gate 3b: Ignore hygiene on the rest of the lint set ----------
+# #13 makes `# noqa: RULE  # reason` the sanctioned way to acknowledge an
+# inherited violation, and those live in tests/ -- where Gate 3 never looked.
+# Hygiene applies everywhere a suppression can ship; type hints and docstrings
+# stay source-only.
+$hygienePy = @(@($changedLintPy) + @($inheritedLintPy) |
+    Where-Object { $changedSrcPy -notcontains $_ } | Select-Object -Unique)
+
+if ($hygienePy.Count -gt 0) {
+    $qualityScript = Join-Path $mainRoot '.github/scripts/check-python-quality.py'
+    if (-not (Test-Path $qualityScript) -or -not $pythonExe) {
+        $output = @{
+            hookSpecificOutput = @{
+                hookEventName = "Stop"
+                decision = "block"
+                reason = "Ignore hygiene gate unavailable: check-python-quality.py or a Python executable is missing."
+            }
+        } | ConvertTo-Json -Compress -Depth 3
+        Write-Output $output
+        exit 0
+    }
+
+    Push-Location $codeRoot
+    $hygieneResult = & $pythonExe $qualityScript --files @($hygienePy) --checks ignore-hygiene 2>&1
+    $hygieneExit = $LASTEXITCODE
+    Pop-Location
+    if ($hygieneExit -ne 0) {
+        $summary = ($hygieneResult | Select-Object -First 10 | Out-String).Trim()
+        $output = @{
+            hookSpecificOutput = @{
+                hookEventName = "Stop"
+                decision = "block"
+                reason = "Refactor phase violation: ignore hygiene gate failed -- every suppression must be explicit and justified. Findings: $summary"
+            }
+        } | ConvertTo-Json -Compress -Depth 3
+        Write-Output $output
+        exit 0
+    }
+}
+
 # ---------- Gate 4: Atomic ignore commit check ----------
 $diffLines = @()
 try {
