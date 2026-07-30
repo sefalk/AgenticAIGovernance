@@ -1,4 +1,4 @@
-# Regression tests for the Python linting hard gate (issues #6, #10, #12).
+# Regression tests for the Python linting hard gate (issues #6, #10, #12, #13).
 #
 # #6 -- the defect: LINTING_STRICTNESS was configured, yet violations shipped.
 # Root cause was wiring, not the checker -- the gate's git pathspec covered
@@ -11,6 +11,11 @@
 # #12 -- the gate sat behind the test gate's early exits, so a missing pytest
 # or tests/ directory silently disabled linting too. A missing test runner now
 # skips the test gate only.
+#
+# #13 -- the gate's input set was the current step's diff, so files the
+# workflow committed in an EARLIER phase (Red-phase tests, above all) were
+# invisible to every later phase and shipped unlinted. The input set is now the
+# branch delta against BASE_BRANCH: what the merge adds is what gets linted.
 #
 # These tests build throwaway git repos, plant a real ruff violation in
 # tests/, and drive the actual stop hooks end to end. Run from anywhere:

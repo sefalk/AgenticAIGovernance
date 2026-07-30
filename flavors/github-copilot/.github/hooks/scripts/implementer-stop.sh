@@ -18,10 +18,13 @@ set -uo pipefail
 
 # Load project config
 SRC_DIR="src"
+BASE_BRANCH=""
 _conf=".github/af-env.conf"
 if [ -f "$_conf" ]; then
     _val=$(grep -E '^SRC_DIR=' "$_conf" | head -1 | cut -d= -f2-)
     [ -n "$_val" ] && SRC_DIR="$_val"
+    _val=$(grep -E '^BASE_BRANCH=' "$_conf" | head -1 | cut -d= -f2-)
+    [ -n "$_val" ] && BASE_BRANCH="$_val"
 fi
 
 # Read stdin (hook input JSON — required by protocol)
@@ -105,13 +108,36 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
     changed_lint_py=""
     if [ -n "$changed_py" ]; then
         while IFS= read -r f; do
-            if [[ "$f" == "$SRC_DIR/"* || "$f" == "$SRC_DIR\\"* ]]; then
+            if [[ "$f" == "$SRC_DIR/"* ]]; then
                 changed_src_py+="$f "$'\n'
                 changed_lint_py+="$f "$'\n'
-            elif [[ "$f" == tests/* || "$f" == tests\\* ]]; then
+            elif [[ "$f" == tests/* ]]; then
                 changed_lint_py+="$f "$'\n'
             fi
         done <<< "$changed_py"
+    fi
+
+    # Files committed in an EARLIER phase of this workflow appear in neither
+    # diff above -- the coordinator commits the test files at the end of the Red
+    # phase, so they were invisible here and shipped unlinted (issue #13).
+    # The unit of accountability is the branch delta: what the merge will add.
+    inherited_lint_py=""
+    merge_base=""
+    if [ -n "$BASE_BRANCH" ]; then
+        merge_base=$(git merge-base HEAD "$BASE_BRANCH" 2>/dev/null | head -1)
+        [ -z "$merge_base" ] && merge_base=$(git merge-base HEAD "origin/$BASE_BRANCH" 2>/dev/null | head -1)
+    fi
+    if [ -n "$merge_base" ]; then
+        branch_delta=$(git diff --name-only --diff-filter=AM "${merge_base}..HEAD" -- '*.py' 2>/dev/null)
+        if [ -n "$branch_delta" ]; then
+            while IFS= read -r f; do
+                [ -z "$f" ] && continue
+                [ -f "$f" ] || continue
+                if [[ "$f" != "$SRC_DIR/"* && "$f" != tests/* ]]; then continue; fi
+                if echo "$changed_lint_py" | grep -qxF "$f "; then continue; fi
+                inherited_lint_py+="$f "$'\n'
+            done <<< "$branch_delta"
+        fi
     fi
 
     # Resolve Python once -- quality gate and linting gate both need it.
@@ -149,21 +175,38 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
     # Mirrors refactorer-stop Gate 5. The Refactor step is optional, so binding
     # linting to it alone meant "no refactorer => no lint at all" (issue #6).
     lint_status="no python changes"
-    if [ -n "$changed_lint_py" ]; then
+    if [ -n "$changed_lint_py" ] || [ -n "$inherited_lint_py" ]; then
         lint_status="skipped (script/python not available)"
         lint_script=".github/scripts/check-python-linting.py"
         if [ -f "$lint_script" ] && [ -n "$python_exe" ]; then
-            lint_output=$(echo "$changed_lint_py" | xargs "$python_exe" "$lint_script" --files 2>&1)
-            lint_exit=$?
+            lint_exit=0
+            if [ -n "$changed_lint_py" ]; then
+                lint_output=$(echo "$changed_lint_py" | xargs "$python_exe" "$lint_script" --files 2>&1)
+                lint_exit=$?
+            fi
+            # Inherited files are checked separately so the block message can
+            # say whose debt this is and which moves are legal.
+            inherited_exit=0
+            if [ "$lint_exit" -eq 0 ] && [ -n "$inherited_lint_py" ]; then
+                inherited_output=$(echo "$inherited_lint_py" | xargs "$python_exe" "$lint_script" --files 2>&1)
+                inherited_exit=$?
+            fi
             if [ "$lint_exit" -eq 2 ]; then
                 lint_summary=$(echo "$lint_output" | head -15 | tr '\n' ' ' | sed 's/"/\\"/g')
                 echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Green phase violation: linting gate failed. Fix with: ruff check --fix <files>. Violations: ${lint_summary}\"}}"
                 exit 0
-            elif [ "$lint_exit" -eq 1 ]; then
+            elif [ "$lint_exit" -eq 1 ] || [ "$inherited_exit" -eq 1 ]; then
                 echo '{"hookSpecificOutput": {"hookEventName": "Stop", "decision": "block", "reason": "Green phase blocked: linting gate unavailable because ruff is not installed. Install dev dependencies or run: pip install ruff"}}'
+                exit 0
+            elif [ "$inherited_exit" -eq 2 ]; then
+                inherited_summary=$(echo "$inherited_output" | head -15 | tr '\n' ' ' | sed 's/"/\\"/g')
+                echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Green phase violation: linting gate failed on files this branch committed in an EARLIER phase (branch delta vs ${BASE_BRANCH}). You did not author them in this step, but they ship on merge. Two legal moves: fix them (usually ruff check --fix <files>), or acknowledge each one with '# noqa: RULE  # reason' in its own standalone commit ([agent:name] justify ignore: file:line RULE -- reason). Do not leave them unrecorded. Violations: ${inherited_summary}\"}}"
                 exit 0
             else
                 lint_status="clean"
+                if [ -n "$inherited_lint_py" ]; then
+                    lint_status="clean (incl. $(echo "$inherited_lint_py" | grep -c '[^[:space:]]') inherited from earlier phases)"
+                fi
             fi
         fi
     fi

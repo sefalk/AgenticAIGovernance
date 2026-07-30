@@ -28,10 +28,13 @@ if (Test-Path $sentinel) {
 
 # Load project config
 $SRC_DIR = 'src'
+$BASE_BRANCH = ''
 $confPath = Join-Path $mainRoot '.github/af-env.conf'
 if (Test-Path $confPath) {
     $m = Select-String -Path $confPath -Pattern '^SRC_DIR=(.+)$'
     if ($m) { $SRC_DIR = $m.Matches[0].Groups[1].Value.Trim() }
+    $b = Select-String -Path $confPath -Pattern '^BASE_BRANCH=(.+)$'
+    if ($b) { $BASE_BRANCH = $b.Matches[0].Groups[1].Value.Trim() }
 }
 
 # Read stdin (hook input JSON -- required by protocol)
@@ -145,6 +148,25 @@ try {
     }
 } catch {}
 
+# Files committed in an EARLIER phase of this workflow appear in neither diff
+# above -- the coordinator commits the test files at the end of the Red phase,
+# so they were invisible here and shipped unlinted (issue #13). The unit of
+# accountability is the branch delta: what the merge will add.
+$inheritedLintPy = @()
+$mergeBase = $null
+foreach ($ref in @($BASE_BRANCH, "origin/$BASE_BRANCH")) {
+    if (-not $BASE_BRANCH) { break }
+    $mergeBase = @(git -C $codeRoot merge-base HEAD $ref 2>$null)[0]
+    if ($mergeBase) { break }
+}
+if ($mergeBase) {
+    $branchDelta = git -C $codeRoot diff --name-only --diff-filter=AM "$mergeBase..HEAD" -- "$SRC_DIR/" 'tests/' 2>$null
+    $inheritedLintPy = @($branchDelta | Where-Object {
+        $_ -and ($_ -match '\.py$') -and ($changedLintPy -notcontains $_) -and
+        (Test-Path (Join-Path $codeRoot $_))
+    })
+}
+
 # Resolve Python once -- Gate 3 and Gate 5 both need it. Gate 5 must still run
 # when only tests/ changed, so this cannot live inside the Gate 3 branch.
 $pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
@@ -232,7 +254,7 @@ if ($newIgnoreLines.Count -gt 1) {
 
 # ---------- Gate 5: Python linting on changed source AND test files ----------
 $lintStatus = 'no python changes'
-if ($changedLintPy.Count -gt 0) {
+if ($changedLintPy.Count -gt 0 -or $inheritedLintPy.Count -gt 0) {
     $lintStatus = 'skipped (script/python not available)'
     # Resolve against $mainRoot (where .github/ is deployed), not the cwd the
     # hook happens to inherit -- Get-Location made this gate skip silently.
@@ -241,8 +263,20 @@ if ($changedLintPy.Count -gt 0) {
         # cwd must be the code root: check-python-linting.py resolves ruff from
         # ./.venv and walks up from cwd to find .github/af-env.conf.
         Push-Location $codeRoot
-        $lintResult = & $pythonExe $lintScript --files @($changedLintPy) 2>&1
-        $lintExit = $LASTEXITCODE
+        $lintResult = $null
+        $lintExit = 0
+        if ($changedLintPy.Count -gt 0) {
+            $lintResult = & $pythonExe $lintScript --files @($changedLintPy) 2>&1
+            $lintExit = $LASTEXITCODE
+        }
+        # Inherited files are checked separately so the block message can say
+        # whose debt this is and which moves are legal.
+        $inheritedResult = $null
+        $inheritedExit = 0
+        if ($lintExit -eq 0 -and $inheritedLintPy.Count -gt 0) {
+            $inheritedResult = & $pythonExe $lintScript --files @($inheritedLintPy) 2>&1
+            $inheritedExit = $LASTEXITCODE
+        }
         Pop-Location
         if ($lintExit -eq 2) {
             $lintSummary = ($lintResult | Select-Object -First 15 | Out-String).Trim()
@@ -255,7 +289,7 @@ if ($changedLintPy.Count -gt 0) {
             } | ConvertTo-Json -Compress -Depth 3
             Write-Output $output
             exit 0
-        } elseif ($lintExit -eq 1) {
+        } elseif ($lintExit -eq 1 -or $inheritedExit -eq 1) {
             $output = @{
                 hookSpecificOutput = @{
                     hookEventName = "Stop"
@@ -265,8 +299,21 @@ if ($changedLintPy.Count -gt 0) {
             } | ConvertTo-Json -Compress -Depth 3
             Write-Output $output
             exit 0
+        } elseif ($inheritedExit -eq 2) {
+            $inheritedSummary = ($inheritedResult | Select-Object -First 15 | Out-String).Trim()
+            $output = @{
+                hookSpecificOutput = @{
+                    hookEventName = "Stop"
+                    decision = "block"
+                    reason = "Refactor phase violation: linting gate failed on files this branch committed in an EARLIER phase (branch delta vs $BASE_BRANCH). You did not author them in this step, but they ship on merge. Two legal moves: fix them (usually ruff check --fix <files>), or acknowledge each one with '# noqa: RULE  # reason' in its own standalone commit ([agent:name] justify ignore: file:line RULE -- reason). Do not leave them unrecorded. Violations: $inheritedSummary"
+                }
+            } | ConvertTo-Json -Compress -Depth 3
+            Write-Output $output
+            exit 0
         } else {
-            $lintStatus = 'clean'
+            $lintStatus = if ($inheritedLintPy.Count -gt 0) {
+                "clean (incl. $($inheritedLintPy.Count) inherited from earlier phases)"
+            } else { 'clean' }
         }
     }
 }
