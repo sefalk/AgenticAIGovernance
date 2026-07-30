@@ -171,6 +171,34 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
         fi
     fi
 
+    # ---------- Ignore hygiene on the rest of the lint set ----------
+    # #13 makes `# noqa: RULE  # reason` the sanctioned way to acknowledge an
+    # inherited violation, and those live in tests/ -- where the quality gate
+    # above never looked. Hygiene applies everywhere a suppression can ship;
+    # type hints and docstrings stay source-only.
+    hygiene_py=""
+    while IFS= read -r f; do
+        [ -z "${f// /}" ] && continue
+        if echo "$changed_src_py" | grep -qxF "$f"; then continue; fi
+        if echo "$hygiene_py" | grep -qxF "$f"; then continue; fi
+        hygiene_py+="$f"$'\n'
+    done <<< "${changed_lint_py}${inherited_lint_py}"
+
+    if [ -n "${hygiene_py// /}" ]; then
+        quality_script=".github/scripts/check-python-quality.py"
+        if [ ! -f "$quality_script" ] || [ -z "$python_exe" ]; then
+            echo '{"hookSpecificOutput": {"hookEventName": "Stop", "decision": "block", "reason": "Ignore hygiene gate unavailable: check-python-quality.py or a Python executable is missing."}}'
+            exit 0
+        fi
+        hygiene_output=$(echo "$hygiene_py" | xargs "$python_exe" "$quality_script" --checks ignore-hygiene --files 2>&1)
+        hygiene_exit=$?
+        if [ "$hygiene_exit" -ne 0 ]; then
+            summary=$(echo "$hygiene_output" | head -10 | tr '\n' ' ' | sed 's/"/\\"/g')
+            echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Green phase violation: ignore hygiene gate failed -- every suppression must be explicit and justified. Findings: ${summary}\"}}"
+            exit 0
+        fi
+    fi
+
     # ---------- Linting hard gate (source AND tests) ----------
     # Mirrors refactorer-stop Gate 5. The Refactor step is optional, so binding
     # linting to it alone meant "no refactorer => no lint at all" (issue #6).
