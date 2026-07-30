@@ -111,7 +111,7 @@ reference the metric thresholds from MANIFEST § 5.
 | Zero syntax/import errors | HARD | Run syntax checker | Standard+ |
 | Python type hints complete (changed source files) | HARD | Verify all public functions have full argument+return annotations in changed `SRC_DIR/**/*.py` files | Standard+ |
 | Python docstrings present and structured (changed source files) | HARD | Verify changed public functions include non-trivial docstrings with parameters/returns sections when applicable | Standard+ |
-| Ignore statements justified | HARD | Reject `# type: ignore` / `# pyright: ignore` without explicit rule code and justification comment | Standard+ |
+| Ignore statements justified | HARD | Reject `# type: ignore` / `# pyright: ignore` without explicit rule code and justification comment. Same rule for a new `ignore` / `per-file-ignores` entry in the project's ruff config — the linting gate honours those, so each needs a comment stating why. | Standard+ |
 | Linting clean (changed source **and test** files) | HARD | Run `check-python-linting.py` on changed `SRC_DIR/**/*.py` **and** `tests/**/*.py` files; rule set determined by `LINTING_STRICTNESS` in `af-env.conf`. Gate is BLOCKED (not fail) if `ruff` is not installed. Mirrored from the refactorer because the Refactor step is optional. | Standard+ |
 | Line coverage ≥ threshold | HARD | Run coverage tool, compare to MANIFEST § 5 thresholds: Domain ≥ 90%, Ports ≥ 80%, Adapters ≥ 60%, Utilities ≥ 85% | Standard+ |
 | No secrets in changed files | HARD | Grep for credential patterns, API keys | Standard+ |
@@ -129,7 +129,7 @@ reference the metric thresholds from MANIFEST § 5.
 | Zero syntax/import errors | HARD | Run syntax checker | Standard+ |
 | Python type hints remain complete (changed source files) | HARD | Verify all changed public functions in `SRC_DIR/**/*.py` retain full annotations | Standard+ |
 | Python docstrings remain complete (changed source files) | HARD | Verify changed public functions retain structured docstrings | Standard+ |
-| Ignore statements justified | HARD | Reject `# type: ignore` / `# pyright: ignore` without explicit rule code and justification comment | Standard+ |
+| Ignore statements justified | HARD | Reject `# type: ignore` / `# pyright: ignore` without explicit rule code and justification comment. Same rule for a new `ignore` / `per-file-ignores` entry in the project's ruff config — the linting gate honours those, so each needs a comment stating why. | Standard+ |
 | No new files created (refactoring only) | HARD | Self-check: only existing files modified | Standard+ |
 | Linting clean (changed source **and test** files) | HARD | Run `check-python-linting.py` on changed `SRC_DIR/**/*.py` **and** `tests/**/*.py` files; rule set determined by `LINTING_STRICTNESS` in `af-env.conf` (`minimal`/`standard`/`strict`). Gate is BLOCKED (not fail) if `ruff` is not installed. | Standard+ |
 | Skills read declaration | SOFT | `Skills Read:` line in Gate Summary (critic flags if missing) | Standard+ |
