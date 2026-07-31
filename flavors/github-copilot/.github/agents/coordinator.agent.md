@@ -213,64 +213,25 @@ Set complexity tier to **Standard** minimum.
 Boundary heuristic: if the commit message would need a paragraph to explain
 the *why*, it's Quick Fix.
 
-### Optional ADO Sync Workflow (when provider capability is enabled)
+### Optional ADO Workflows (only when `ADO_CAPABILITY_MODE != off`)
 
-```
-ado-work-item-manager(resolve + set Active)   # WIT-first, BEFORE the branch
-   -> [create branch agent/{wit-id}-{slug}]
-   -> compliance-checker(pre)
-   -> ado-wiki-manager (optional, task-dependent)
-   -> ado-work-item-manager(finalize: AC->evidence map, no Close)
-   -> compliance-checker(post)
-   -> [push feature branch] -> ado-pr-manager (autocomplete, transitionWorkItems:false)
-   -> [merge confirmed] -> ado-work-item-manager(reconcile: Resolved w/ evidence)
-```
+The default is `off` — for pure-git projects, skip this section entirely.
 
-Use this only when the project contract defines Azure DevOps capability as
-required or optional. If optional and unavailable, require degraded fallback
-output and continue with local traceability artifacts.
+When a provider capability is enabled, two workflows apply: **ADO Sync**
+(work-item first, then branch, then request-based integration) and **ADO
+Pipeline** (the deliverable is a build-validation pipeline). Both sequences,
+the work-item-first contract, the request-based push/PR path, and post-merge
+reconciliation are in `skills/ado-shared/SKILL.md` § Coordinator Workflow
+Sequences — **read it before invoking any `ado-*` worker.**
 
-### Optional ADO Pipeline Workflow (when provider capability is enabled)
+**Integration path selection (mandatory, every workflow):**
 
-```
-compliance-checker(pre)
-        -> [implementer: pipeline YAML + gate script]
-        -> code-critic -> documenter
-        -> ado-pipeline-manager (register + run + verify)  [optional]
-        -> compliance-checker(post)
-        -> [push feature branch] -> ado-pr-manager (optional)
-```
-
-Use this when the deliverable is establishing or operating an Azure DevOps
-pipeline (e.g., a PR quality-gate / build-validation pipeline). The
-**implementer** authors the pipeline YAML and any gate script; the
-**ado-pipeline-manager** registers the definition, runs it to verify
-(cross-checking agent-pool availability), and emits the exact Build Validation
-branch-policy settings. **Attaching the branch policy is human-guided** — no
-MCP tool exists for policy creation; the coordinator relays the emitted
-settings to the human. When `ADO_CAPABILITY_MODE=off`, do not run
-`ado-pipeline-manager`.
-
-**Integration path selection (Mandatory):**
-
-- **Pure git (default, `ADO_CAPABILITY_MODE=off`):** do not run
-  `ado-pr-manager`. The coordinator commits locally; push and merge remain
-  human-controlled. End the workflow with the standard "ready for push" note.
-- **Request-based (optional, ADO PR capability enabled):** after a clean
-  post-flight, the coordinator pushes the feature branch `agent/{id}` from
-  the active work location (main checkout or worktree, per
-  `WORKTREE_ENABLED`) with `git push -u origin agent/{id}` — never a
-  protected branch, never force. Then invoke `ado-pr-manager` to open/update
-  the PR and apply the branch-scoped completion policy (integration branch
-  autocompletes; protected branch is human-only). If the PR manager returns
-  `BLOCKED (branch not published)`, push and re-invoke.
-- **Post-merge reconciliation (Mandatory, request-based):** the PR carries
-  `transitionWorkItems: false`, so it never changes work-item status. Once the
-  merge into the integration branch is **confirmed**, invoke
-  **ado-work-item-manager** to transition the linked work item to **Resolved**
-  with an AC→evidence map (Closed only later, at verification / promotion). This
-  is the single point where the code and work-item state machines reconnect —
-  status follows merged evidence, never the PR's auto-transition.
+- **Pure git (default, `ADO_CAPABILITY_MODE=off`):** never run
+  `ado-pr-manager`. Commit locally; push and merge remain human-controlled.
+  End the workflow with the standard "ready for push" note.
+- **Request-based (ADO PR capability enabled):** push the feature branch, then
+  delegate the PR and its completion policy to `ado-pr-manager`. The PR never
+  transitions work items — reconciliation happens post-merge. See the skill.
 
 See `skills/git-workflow/SKILL.md` § 2 for the full two-path
 integration contract.
@@ -384,22 +345,13 @@ in the next subagent prompt.
 
 **Applies only when `ADO_CAPABILITY_MODE != off`.** Skip for pure-git projects.
 
-Before any branch is created, establish the work item so code and tracker stay
-aligned from the start (prevents reactive, mis-attributed, or WIT-less work):
+**No branch is created without a resolved work item.** Invoke
+**ado-work-item-manager** (`mode=resolve`), ensure the item is **Active**, and
+use its id in the branch slug `agent/{work-item-id}-{workflow-id}`. One unit of
+work → one work item; never reuse an unrelated open item. If resolution is
+impossible while the capability is required, halt and escalate (Fail-Safe).
 
-1. Invoke **ado-work-item-manager** (`mode=resolve`) to find or create the work
-   item for **this specific task**. One unit of work → one work item; do not
-   reuse an unrelated open item — infra/dependency bumps, tooling fixes, and
-   analysis tasks each get their own item. If the task spans several concerns,
-   split them.
-2. Ensure the item is set to **Active** at work start.
-3. Use its id in the branch slug: `agent/{work-item-id}-{workflow-id}`.
-4. **No branch without a resolved work item.** If resolution is impossible
-   (capability required but unavailable), halt and escalate (Fail-Safe).
-
-The **planner** may propose the work item title/scope; the **coordinator**
-confirms the item and its id before branch creation. This id is the single
-source of truth for the branch slug, the PR link, and post-merge reconciliation.
+Full contract: `skills/ado-shared/SKILL.md` § Coordinator Workflow Sequences.
 
 ### Step 0b: Compliance Pre-Flight (mandatory)
 
