@@ -42,6 +42,7 @@ scripts/tools-reference.txt
 scripts/test-hooks.ps1
 scripts/check-python-quality.py
 scripts/check-python-linting.py
+scripts/check-mcp-tool-ids.py
 scripts/setup-worktree.ps1
 scripts/setup-worktree.sh
 scripts/cleanup-worktree.ps1
