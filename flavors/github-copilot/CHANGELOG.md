@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **ADO agents restored after the upstream MCP toolset consolidation
+  (issue #31).** The `azure-devops-mcp` server merged its per-operation tools
+  into grouped tools driven by an `action` parameter. Every `ado-*` agent named
+  the old ids, so all four stopped working at once.
+
+  The failure mode is what makes this worth recording: an unknown tool id fails
+  prompt validation and is dropped **silently**. The agents did not error — they
+  ran with a reduced toolset and reported plausible-looking task failures, which
+  is far more expensive to diagnose than a crash.
+
+  Migrated across 7 files. The issue's own migration matrix covered `wit_*` and
+  `repo_*`; `pipelines_*` and `wiki_*` had consolidated too and were equally
+  broken, and the damage reached past the agent files into
+  `quality-gates.instructions.md` and two `ado-*` skills. Fixing only what the
+  issue described would have left half the regression in place.
+
+  Two latent defects surfaced on the way. `ado-pr-manager` instructed calling
+  `wit_add_artifact_link` in prose while that tool had never been in its
+  frontmatter, so the deferred work-item linking fallback could never have
+  worked — predating this regression entirely. And `ado-shared` required "the
+  resolved organization" to construct artifact links with nothing in the
+  framework defining it; `ADO_ORGANIZATION` now does.
+
+  New guard: `.github/scripts/check-mcp-tool-ids.py`, wired into the existing
+  `session-mcp-readiness` **SessionStart** hook and gated on
+  `ADO_CAPABILITY_MODE != off`. Deliberately a **denylist**, not an allowlist
+  against the current toolset — an incomplete allowlist produces false
+  positives, and a stale one produces silent false negatives, which is the exact
+  failure this guard exists to prevent. A denylist cannot go stale in a way that
+  fakes a pass, and every hit carries its migration target. The hook invokes the
+  Python checker rather than mirroring the 70-entry id table into PowerShell and
+  Bash, accepting one process spawn per session to avoid the dual-maintenance
+  pattern that caused the regression in the first place.
+
+  Also adds an authentication and toolset-drift runbook to `ado-shared`. Auth
+  was previously undocumented anywhere in the payload. The runbook separates
+  three faults that present the identical symptom *"the tool does not exist"*:
+  upstream consolidation, tool filtering (`-d` locally, `X-MCP-Toolsets`
+  remotely), and identity/tenant failures.
+
+  Version pinning was evaluated and deliberately declined — `@latest` stays, on
+  the explicit condition that drift is now *detected*. Migration to the remote
+  MCP server was evaluated and deferred; see issue #32 for the blockers and the
+  re-evaluation triggers.
+
+  **Deployers note:** `af-env.conf` is `[customizable]`, so `ADO_ORGANIZATION`
+  is not written into existing projects on update. Add it manually to any
+  project that uses the ADO workers.
+
 - **Ignore hygiene reaches `tests/` (issue #18).** `check-python-quality.py`
   enforces that every `# noqa` / `# type: ignore` / `# pyright: ignore` carries
   an explicit rule code and a justification — but both stop hooks invoked it on
