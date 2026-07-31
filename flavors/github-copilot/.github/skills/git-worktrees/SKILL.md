@@ -56,32 +56,119 @@ repo/            ← main checkout (on dev), shared .git
 
 ## 2. Lifecycle in the AF Workflow
 
+This is the coordinator's runbook for **Step 0d** (bootstrap) and **Step 8**
+(cleanup). `coordinator.agent.md` names the two steps and their preconditions;
+the executable detail lives here.
+
+### Applicability
+
+| Condition | Behaviour |
+|---|---|
+| `WORKTREE_ENABLED=false` (default) | Skip both steps entirely. All subagent work runs in the main checkout. Intended for CI/CD or single-threaded environments; not recommended for parallel workflows. |
+| `WORKTREE_ENABLED=true`, Trivial Fix | Skip — single file, no parallel work expected. |
+| `WORKTREE_ENABLED=true`, all other workflows | Run Step 0d after branch creation, Step 8 after the human confirms the merge. |
+
 ### Step 0d: Create
 
-```bash
-# Read from af-env.conf
-WT_DIR=$(grep "^WORKTREE_DIR=" .github/af-env.conf | cut -d= -f2 | xargs)
-WT_DIR="${WT_DIR:-../wt}"
+**1. Resolve `WORKTREE_DIR`.** Read it from `.github/af-env.conf`. If empty or
+unset, compute `../{git_repo_folder_name}_worktrees` — e.g. a repo named
+`MP Field Data Analysis CT` yields `../MP Field Data Analysis CT_worktrees`.
+Record the resolved path.
 
+```bash
+WT_DIR=$(grep "^WORKTREE_DIR=" .github/af-env.conf | cut -d= -f2 | xargs)
+: "${WT_DIR:=../$(basename "$(git rev-parse --show-toplevel)")_worktrees}"
+```
+
+```powershell
+$afenv = Get-Content .github/af-env.conf | Where-Object { $_ -match '^WORKTREE_DIR=' }
+$WT_DIR = ($afenv -split '=', 2)[1].Trim()
+if (-not $WT_DIR) { $WT_DIR = "../$(Split-Path -Leaf (git rev-parse --show-toplevel))_worktrees" }
+```
+
+**2. Check for stale worktrees.** Run `git worktree list --porcelain`. If
+prunable entries exist, run `git worktree prune` and report to the human.
+
+**3. Create:**
+
+```bash
 git worktree add "$WT_DIR/$WORKFLOW_ID" -b "agent/$WORKFLOW_ID" dev
 ```
 
-**PowerShell equivalent:**
+**4. Write the active-worktree sentinel.** Immediately after creation, write the
+absolute worktree path to `.github/.active-worktree` in the **main checkout**:
+
 ```powershell
-$afenv = Get-Content .github/af-env.conf | Where-Object { $_ -match '^WORKTREE_DIR=' }
-$WT_DIR = if ($afenv) { ($afenv -split '=')[1].Trim() } else { '../wt' }
-git worktree add "$WT_DIR/$env:WORKFLOW_ID" -b "agent/$env:WORKFLOW_ID" dev
+Set-Content -Path .github/.active-worktree -Value {absolute_worktree_path} -NoNewline
 ```
+
+This lets the hook scripts (pretooluse, stop) resolve `$codeRoot` to the active
+worktree instead of the main-checkout CWD, so quality gates (pytest,
+`git status`, `SRC_DIR` lookups) target the worktree.
+
+> ⚠️ **Single-worktree constraint:** only one active sentinel is supported.
+> Creating a second worktree while the first is active overwrites it — parallel
+> worktrees are not supported until Option B (auto-deploy) is verified.
+> See `ideas/feature-git-worktrees.md` §12–13.
+
+**5. Verify** the worktree directory exists and is accessible.
+
+**6. Resolve the Python interpreter — without prompting the user.** Read
+`WORKTREE_VENV_MODE` from `.github/af-env.conf` (default `shared`).
+
+- `shared`: point at the parent repo interpreter —
+  `{repo_root}/.venv/Scripts/python.exe` (Windows) or
+  `{repo_root}/.venv/bin/python` (Linux/macOS) — and write
+  `python.defaultInterpreterPath` into `{worktree}/.vscode/settings.json`.
+  If the parent `.venv` is missing, fall back to `isolated` for this workflow.
+- `isolated` (or the fallback above): create `{worktree}/.venv` and point
+  `python.defaultInterpreterPath` at it.
+
+Only ask the human to choose if **both** strategies fail.
+
+**7. Add to the VS Code workspace.** If a `.code-workspace` file exists at the
+repo root, add the worktree folder; otherwise create one with this structure:
+
+```json
+{
+  "folders": [
+    { "path": "." },
+    { "path": "{WORKTREE_DIR}/{workflow-id}", "name": "agent/{workflow-id}" }
+  ]
+}
+```
+
+Narrate: `"VS Code workspace updated to include worktree folder."`
+
+**8. Record** `worktree: {absolute_path}` in the plan metadata (or in the WIP
+checkpoint for Trivial/Quick Fix).
+
+**9. Narrate:** `"Worktree created at {path} on branch agent/{workflow-id}. Proceeding inside worktree."`
+
+All subsequent subagent calls include the worktree path in their context block
+(see `coordinator.agent.md` § Subagent Context Injection).
 
 ### Step 8: Cleanup
 
-```bash
-# Only after human confirms merge
-git status --porcelain "$WT_DIR/$WORKFLOW_ID"   # must be empty
-git worktree remove "$WT_DIR/$WORKFLOW_ID"
-git worktree prune
-git worktree list                                # verify removal
-```
+Runs only after the human confirms the branch was merged to `dev`.
+
+1. **Confirm merge:** `"Please confirm branch agent/{id} has been merged to dev."`
+2. **Check clean:** `git status --porcelain` in the worktree. If dirty, **halt
+   and escalate** — never force-remove.
+3. **Delete the sentinel** from the main checkout, returning hooks to
+   main-checkout mode *before* removal:
+   ```powershell
+   Remove-Item -Force .github/.active-worktree -ErrorAction SilentlyContinue
+   ```
+4. **Isolated venv cleanup:** if this workflow used `WORKTREE_VENV_MODE=isolated`,
+   remove `{worktree}/.venv` before removing the worktree.
+5. **Remove:** `git worktree remove {WORKTREE_DIR}/{workflow-id}`
+6. **Prune:** `git worktree prune`
+7. **Verify:** `git worktree list` must no longer show the path.
+8. **Clean up the workspace file** (if `.code-workspace` exists): remove the
+   worktree folder entry.
+9. **Narrate:** `"Worktree {path} removed. Branch agent/{id} cleanup complete."`
+10. **Log:** record the cleanup timestamp and final commit hash in the workflow log.
 
 ---
 
@@ -193,13 +280,15 @@ All worktree configuration lives in `.github/af-env.conf`:
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `WORKTREE_DIR` | `../wt` | Root directory for all agent worktrees |
+| `WORKTREE_ENABLED` | `false` | Master switch. When false, Steps 0d and 8 are skipped entirely. |
+| `WORKTREE_DIR` | *(empty)* | Root directory for agent worktrees. Empty means: compute `../{git_repo_folder_name}_worktrees`. |
+| `WORKTREE_VENV_MODE` | `shared` | `shared` reuses the parent repo `.venv`; `isolated` creates one per worktree. |
 | `WORKTREE_BRANCH_PREFIX` | `agent` | Branch prefix; all worktree branches = `{prefix}/{id}` |
 
 Read in scripts:
 ```bash
 WT_DIR=$(grep "^WORKTREE_DIR=" .github/af-env.conf | cut -d= -f2 | xargs)
-: "${WT_DIR:=../wt}"
+: "${WT_DIR:=../$(basename "$(git rev-parse --show-toplevel)")_worktrees}"
 ```
 
 ---
