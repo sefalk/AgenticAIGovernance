@@ -9,12 +9,10 @@ tools:
   - todo
   - microsoft/azure-devops-mcp/core_list_projects
   - microsoft/azure-devops-mcp/search_wiki
-  - microsoft/azure-devops-mcp/wiki_get_page_by_path
-  - microsoft/azure-devops-mcp/wiki_get_page_content
-  - microsoft/azure-devops-mcp/wiki_create_or_update_page
-  - microsoft/azure-devops-mcp/wiki_list_wikis
+  - microsoft/azure-devops-mcp/wiki
+  - microsoft/azure-devops-mcp/wiki_upsert_page
   - microsoft/azure-devops-mcp/repo_create_branch
-  - microsoft/azure-devops-mcp/repo_create_pull_request
+  - microsoft/azure-devops-mcp/repo_pull_request_write
 ---
 
 # ADO Wiki Manager Agent
@@ -84,10 +82,10 @@ On `TF402455`:
 1. **PR route (preferred).** Create a feature branch in the wiki repository
    (`repo_create_branch` from `wikiMaster`; the wiki's `repositoryId` equals
    its wiki id), write the page on that branch, then open a PR to `wikiMaster`
-   (`repo_create_pull_request`). Protected-branch completion is **human-only**
-   — the human merges the PR to publish the page.
+   (`repo_pull_request_write` action `create`). Protected-branch completion is
+   **human-only** — the human merges the PR to publish the page.
    - **Known MCP limitation:** on some azure-devops-mcp builds the
-     `wiki_create_or_update_page` `branch` parameter is unreliable and fails
+     `wiki_upsert_page` `branch` parameter is unreliable and fails
      with `version '{0}' invalid` for any non-default branch. If the
      branch-scoped write fails this way, do not loop — go to step 2 and report
      the tool limitation explicitly.

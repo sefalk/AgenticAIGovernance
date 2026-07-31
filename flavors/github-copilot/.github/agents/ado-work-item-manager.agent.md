@@ -8,15 +8,12 @@ tools:
   - read/problems
   - todo
   - microsoft/azure-devops-mcp/core_list_projects
-  - microsoft/azure-devops-mcp/wit_my_work_items
   - microsoft/azure-devops-mcp/search_workitem
-  - microsoft/azure-devops-mcp/wit_query_by_wiql
-  - microsoft/azure-devops-mcp/wit_get_work_item
-  - microsoft/azure-devops-mcp/wit_create_work_item
-  - microsoft/azure-devops-mcp/wit_update_work_items_batch
-  - microsoft/azure-devops-mcp/wit_add_work_item_comment
-  - microsoft/azure-devops-mcp/wit_work_items_link
-  - microsoft/azure-devops-mcp/wit_add_artifact_link
+  - microsoft/azure-devops-mcp/wit_work_item
+  - microsoft/azure-devops-mcp/wit_query
+  - microsoft/azure-devops-mcp/wit_work_item_write
+  - microsoft/azure-devops-mcp/wit_work_item_comment_write
+  - microsoft/azure-devops-mcp/wit_work_item_link_write
 ---
 
 # ADO Work Item Manager Agent
@@ -79,8 +76,8 @@ in the UI. **Never write a type-specific field silently.**
 Before writing a type-specific field (e.g. `AcceptanceCriteria`,
 `Microsoft.VSTS.TCM.ReproSteps`, `Microsoft.VSTS.Common.Steps`):
 
-1. Call `wit_get_work_item_type` for the target type and confirm the field's
-   reference name is in the type's `fields`.
+1. Call `wit_work_item` (action `get_type`) for the target type and confirm
+   the field's reference name is in the type's `fields`.
 2. If it **is** present → write normally.
 3. If it is **absent** (would be stored but invisible), take exactly one path
    and **report which**:
@@ -95,7 +92,7 @@ Before writing a type-specific field (e.g. `AcceptanceCriteria`,
      mandatory.
 
 **Scope (be honest about it):** this verifies field *applicability to the type*
-(queryable via `wit_get_work_item_type`). It does **not** guarantee full
+(queryable via `wit_work_item` action `get_type`). It does **not** guarantee full
 form-layout visibility — the form layout is not exposed by the available MCP
 tools, so a field that is on the type yet hidden by a custom form layout is out
 of scope. Never claim “verified visible on the form”; claim “field applicable to
