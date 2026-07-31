@@ -4,10 +4,11 @@ description: Git autonomy boundary, integration paths (pure git vs request-based
 argument-hint: '[operation] [branch]'
 metadata:
   activation:
-    signals:
-      agents: [coordinator, planner, documenter]
+    agents: [coordinator, planner, documenter]
     priority: recommended
 ---
+
+# Git Workflow
 
 **Domain:** Git workflow / Integration / Traceability
 
