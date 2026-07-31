@@ -29,6 +29,7 @@ if (-not (Test-Path $confPath)) {
     }
 
     $projectMatch = $conf | Select-String -Pattern '^ADO_PROJECT=(.+)$'
+    $orgMatch = $conf | Select-String -Pattern '^ADO_ORGANIZATION=(.+)$'
     $wikiMatch = $conf | Select-String -Pattern '^ADO_WIKI_IDENTIFIER=(.+)$'
     $repoIdMatch = $conf | Select-String -Pattern '^ADO_REPOSITORY_ID=(.+)$'
     $repoNameMatch = $conf | Select-String -Pattern '^ADO_REPOSITORY_NAME=(.+)$'
@@ -44,6 +45,10 @@ if (-not (Test-Path $confPath)) {
 
     if (-not $wikiIdentifier) {
         $advisories.Add('ADO_WIKI_IDENTIFIER missing (wiki workflows may need confirmation)')
+    }
+
+    if ($mode -ne 'off' -and -not $orgMatch) {
+        $advisories.Add('ADO_ORGANIZATION missing (artifact web links depend on the MCP response carrying a URL)')
     }
 
     if (-not $repoIdMatch -and -not $repoNameMatch) {

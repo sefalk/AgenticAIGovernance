@@ -32,6 +32,7 @@ else
     mode="$(printf '%s' "$mode" | tr '[:upper:]' '[:lower:]')"
 
     project="$(get_conf_value ADO_PROJECT)"
+    organization="$(get_conf_value ADO_ORGANIZATION)"
     wiki_identifier="$(get_conf_value ADO_WIKI_IDENTIFIER)"
     repo_id="$(get_conf_value ADO_REPOSITORY_ID)"
     repo_name="$(get_conf_value ADO_REPOSITORY_NAME)"
@@ -44,6 +45,10 @@ else
 
     if [[ -z "$wiki_identifier" ]]; then
         advisories+=("ADO_WIKI_IDENTIFIER missing (wiki workflows may need confirmation)")
+    fi
+
+    if [[ "$mode" != "off" && -z "$organization" ]]; then
+        advisories+=("ADO_ORGANIZATION missing (artifact web links depend on the MCP response carrying a URL)")
     fi
 
     if [[ -z "$repo_id" && -z "$repo_name" ]]; then

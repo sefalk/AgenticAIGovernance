@@ -70,7 +70,8 @@ a tool does not exist*. Diagnose in this order before changing anything:
 | Symptom | Cause | Fix |
 |---|---|---|
 | One tool name rejected; agent silently drops it | **Toolset consolidation upstream** — the tool was merged into a grouped tool with an `action` parameter | Run `.github/scripts/check-mcp-tool-ids.py`; migrate the ids it reports |
-| A whole family is absent (all `wiki_*`, all `pipelines_*`) | **Domain filter** — the server's `-d` args exclude that domain | Add the domain to `-d` in `mcp.json`; `core` should always be present |
+| A whole family is absent (all wiki tools, all pipeline tools) | **Tool filtering** — `-d` args (local) or `X-MCP-Toolsets` / `X-MCP-Tools` headers (remote) exclude that group | Add the group to the filter; keep `core` enabled |
+| Reads work, every write is rejected | `X-MCP-Readonly` is set (remote only) | Remove the header for workflows that create or update artifacts |
 | Tools are listed, but every call returns 401/403 | **Identity/tenant**, not the toolset | See *Authentication* above |
 
 The first case is the dangerous one: an unknown tool id fails prompt validation
@@ -96,7 +97,39 @@ enough to outweigh the feature lag. (`@next` is nightly and drifts more.)
 
 Microsoft now recommends the **remote** server (`https://mcp.dev.azure.com/{org}`,
 transport `http`) over the local `npx` server and is focusing new work there.
-Migrating removes the version-drift surface entirely.
+See *Remote vs Local Server* below.
+
+## Remote vs Local Server
+
+The remote server would remove the version-drift surface entirely: it is
+versioned server-side, and there is no `npx` package to pin or update.
+
+**The tool ids are the same consolidated names on both servers.** A switch is
+therefore a configuration change, not an agent rewrite — the migration this
+framework already performed is the prerequisite either way, and the
+`check-mcp-tool-ids.py` guard stays valid.
+
+Two things do change:
+
+- **Authentication:** remote is Microsoft Entra ID (OAuth) only. The `azcli`
+  and PAT paths above do **not** apply; VS Code prompts for an Entra account,
+  and the organization must be Entra-connected.
+- **Organization:** baked into the URL. It may be omitted from the URL, but
+  then every tool call must carry it as context — which is what
+  `ADO_ORGANIZATION` is for.
+
+**Current recommendation: stay on the local server.** Evaluated 2026-07 against
+the remote server documentation; the blockers are concrete, not stylistic:
+
+| Blocker | Impact |
+|---|---|
+| Public preview, rolling out gradually | Availability is not guaranteed per organization |
+| WIQL is Insiders-only (`X-MCP-Insiders`) | `wit_query` offers only `get` / `get_results` remotely; the work-item worker's WIQL matching degrades |
+| `wiki` exposes no `get_page_content` action | Folded into `get_page`; the wiki worker's read path needs adjusting |
+| VS Code and Visual Studio only | Other MCP clients need OAuth client registration in Entra and cannot connect |
+
+Re-evaluate at general availability, or earlier if WIQL leaves Insiders. The
+first two rows would force agent changes; the rest are environmental.
 
 ## Reference Hygiene
 
@@ -108,8 +141,8 @@ surfaces the clickable reference to the user in chat.
 
 - **URL source:** use the web URL from the MCP response
   (`webUrl` / `remoteUrl` / `_links.html.href`). Only if the response carries
-  no web URL, construct it from the canonical pattern using the resolved
-  organization + `ADO_PROJECT`:
+  no web URL, construct it from the canonical pattern using
+  `ADO_ORGANIZATION` + `ADO_PROJECT`:
   - Work item:    `https://dev.azure.com/{org}/{project}/_workitems/edit/{id}`
   - Pull request: `https://dev.azure.com/{org}/{project}/_git/{repo}/pullrequest/{prId}`
   - Wiki page:    the page's `remoteUrl` from the wiki MCP response
