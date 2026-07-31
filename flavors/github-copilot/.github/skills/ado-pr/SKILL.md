@@ -33,10 +33,11 @@ implement request-based integration. Implements the provider-agnostic
 ## Work Item Linking
 
 - Preferred: pass the work item id(s) via the `workItems` parameter of
-  `repo_create_pull_request` at creation.
+  `repo_pull_request_write` (action `create`) at creation.
 - Fallback: if the work item is not attached, return `NEEDS_WORKITEM_LINK`
   with the PR id so the `ado-work-item-manager` adds the PR artifact link
-  (`wit_add_artifact_link` with `pullRequestId`) afterward.
+  (`wit_work_item_link_write` action `add_artifact_link`, or action
+  `link_to_pull_request`) afterward.
 - Always report which linkage path was used.
 - **Autocomplete depends on the link:** with a `linked work items = Required`
   policy, do not set autocomplete until the work item is linked. If the link
@@ -46,25 +47,25 @@ implement request-based integration. Implements the provider-agnostic
 ## Plan Reference Verification
 
 - Before posting a clickable plan URL, verify the file exists on the target
-  branch/ref via repository content lookup (`repo_get_file_content`).
+  branch/ref via repository content lookup (`repo_file` action `get_content`).
 - If the plan is not yet on the remote, mark the reference as `pending push`
   rather than posting a URL that 404s.
 
 ## Traceability Thread
 
 - After create/update, post a single concise thread via
-  `repo_create_pull_request_thread` **with a resolved status** (`status:
-  Closed`) summarizing the linked work item, plan reference, and completion
-  mode. The resolved status is mandatory: a `comment resolution = Required`
-  branch policy blocks autocomplete while any thread is active. Do not
-  duplicate it on re-runs.
+  `repo_pull_request_thread_write` (action `create`) **with a resolved status**
+  (`status: Closed`) summarizing the linked work item, plan reference, and
+  completion mode. The resolved status is mandatory: a
+  `comment resolution = Required` branch policy blocks autocomplete while any
+  thread is active. Do not duplicate it on re-runs.
 
 ## Branch-Scoped Completion Policy
 
 The completion behavior is determined by the PR **target branch**:
 
 - **Autocomplete branches** (`ADO_PR_AUTOCOMPLETE_BRANCHES`, default `dev`):
-  autonomous mode (A2). Call `repo_update_pull_request` with
+  autonomous mode (A2). Call `repo_pull_request_write` (action `update`) with
   `autoComplete: true`, `mergeStrategy` from `ADO_PR_MERGE_STRATEGY`
   (default `noFastForward`), `deleteSourceBranch: true`, and
   `transitionWorkItems: false` (the MCP default is `true` — always set it

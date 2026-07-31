@@ -196,7 +196,7 @@ reference the metric thresholds from MANIFEST § 5.
 | Required unavailable => BLOCKED | HARD | If required and unavailable, operation halts with escalation | Standard+ |
 | Optional unavailable => fallback artifact | HARD | If optional and unavailable, fallback/pending-sync output exists | Standard+ |
 | Board routing applied on create | SOFT | New items set Area Path from `ADO_DEFAULT_AREA_PATH` (and Iteration from `ADO_DEFAULT_ITERATION_PATH`), or the run warns that the project default area is used | Standard+ |
-| Type-specific field applicability checked before write | HARD | Before writing a type-specific field (e.g. `AcceptanceCriteria`), the field is confirmed present in the target type's `wit_get_work_item_type` fields; an absent field is not written silently (a type carrying it is chosen, or the content is mirrored to `System.Description` and the path is reported) | Standard+ |
+| Type-specific field applicability checked before write | HARD | Before writing a type-specific field (e.g. `AcceptanceCriteria`), the field is confirmed present in the target type's `wit_work_item` (action `get_type`) fields; an absent field is not written silently (a type carrying it is chosen, or the content is mirrored to `System.Description` and the path is reported) | Standard+ |
 | Non-destructive update policy followed | SOFT | Reviewer checks append/targeted update behavior | Standard+ |
 | No Close at finalize (Resolve only, pre-merge) | HARD | Finalize never sets Closed; item is Resolved or kept Active | Standard+ |
 | AC coverage map posted before any closure transition | HARD | Verify an AC->evidence map comment exists for the item | Standard+ |
@@ -236,9 +236,9 @@ reference the metric thresholds from MANIFEST § 5.
 | Gate | Type | How to Verify | Tier |
 |---|---|---|---|
 | No terminal/git operations performed | HARD | Verify the agent used only MCP/read tools | Standard+ |
-| Pipeline YAML present on the target branch | HARD | `repo_get_file_content` confirms the YAML on the branch | Standard+ |
-| Definition registered or reused (no duplicate) | HARD | `pipelines_get_build_definitions` checked before create | Standard+ |
-| Run triggered and final status reported | HARD | `pipelines_run_pipeline` + `pipelines_get_build_status` | Standard+ |
+| Pipeline YAML present on the target branch | HARD | `repo_file` (action `get_content`) confirms the YAML on the branch | Standard+ |
+| Definition registered or reused (no duplicate) | HARD | `pipelines_definition` (action `list`) checked before create | Standard+ |
+| Run triggered and final status reported | HARD | `pipelines_write` (action `run_pipeline`) + `pipelines_build` (action `get_status`) | Standard+ |
 | Agent-pool readiness classified | HARD | Distinguish `queued-no-agent` from `started`; report BLOCKED on no agent | Standard+ |
 | `ADO_PROJECT` injected on project-aware calls | HARD | Explicit project on every MCP call | Standard+ |
 | Build Validation policy settings emitted for human | SOFT | Reviewer checks the policy settings block (buildDefinitionId, isBlocking, branch scopes from `ADO_GATE_BRANCHES`) | Standard+ |

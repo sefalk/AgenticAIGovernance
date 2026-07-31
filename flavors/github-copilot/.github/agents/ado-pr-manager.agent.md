@@ -8,17 +8,13 @@ tools:
   - read/problems
   - todo
   - microsoft/azure-devops-mcp/core_list_projects
-  - microsoft/azure-devops-mcp/repo_list_repos_by_project
-  - microsoft/azure-devops-mcp/repo_get_repo_by_name_or_id
-  - microsoft/azure-devops-mcp/repo_get_file_content
-  - microsoft/azure-devops-mcp/repo_list_branches_by_repo
-  - microsoft/azure-devops-mcp/repo_get_branch_by_name
-  - microsoft/azure-devops-mcp/repo_list_pull_requests_by_repo_or_project
-  - microsoft/azure-devops-mcp/repo_get_pull_request_by_id
-  - microsoft/azure-devops-mcp/repo_create_pull_request
-  - microsoft/azure-devops-mcp/repo_update_pull_request
-  - microsoft/azure-devops-mcp/repo_update_pull_request_reviewers
-  - microsoft/azure-devops-mcp/repo_create_pull_request_thread
+  - microsoft/azure-devops-mcp/repo_repository
+  - microsoft/azure-devops-mcp/repo_file
+  - microsoft/azure-devops-mcp/repo_branch
+  - microsoft/azure-devops-mcp/repo_pull_request
+  - microsoft/azure-devops-mcp/repo_pull_request_write
+  - microsoft/azure-devops-mcp/repo_pull_request_thread_write
+  - microsoft/azure-devops-mcp/wit_work_item_link_write
 ---
 
 # PR Manager Agent (Optional Capability Worker)
@@ -68,10 +64,10 @@ Rules:
 
 ### Completion Mechanics (MCP)
 
-- **Autocomplete (integration branch, A2):** call `repo_update_pull_request`
-  with `autoComplete: true`, `mergeStrategy` from `ADO_PR_MERGE_STRATEGY`
-  (default `noFastForward`), `deleteSourceBranch: true`, and
-  `transitionWorkItems: false`. The platform completes the PR once required
+- **Autocomplete (integration branch, A2):** call `repo_pull_request_write`
+  (action `update`) with `autoComplete: true`, `mergeStrategy` from
+  `ADO_PR_MERGE_STRATEGY` (default `noFastForward`), `deleteSourceBranch: true`,
+  and `transitionWorkItems: false`. The platform completes the PR once required
   branch policies pass.
 - **Merge strategy (Mandatory):** always pass `mergeStrategy` from
   `ADO_PR_MERGE_STRATEGY` (default `noFastForward`). Never use `squash` for
@@ -81,11 +77,11 @@ Rules:
   force-delete. `noFastForward` keeps the branch tip reachable and lets safe
   deletion succeed.
 - **Human-only (protected branch, A1):** do **not** call
-  `repo_update_pull_request` with `autoComplete`/`status`. Leave completion
-  to the human.
-- `repo_update_pull_request` exposes `autoComplete`, `mergeStrategy`,
-  `status`, `deleteSourceBranch`, and `transitionWorkItems` (verified against
-  the azure-devops-mcp TOOLSET).
+  `repo_pull_request_write` (action `update`) with `autoComplete`/`status`.
+  Leave completion to the human.
+- `repo_pull_request_write` (action `update`) exposes `autoComplete`,
+  `mergeStrategy`, `status`, `deleteSourceBranch`, and `transitionWorkItems`
+  (verified against the azure-devops-mcp TOOLSET).
 - **Autocomplete ordering (Mandatory):** only enable autocomplete once the
   work item link is confirmed at creation. If the link is deferred
   (`NEEDS_WORKITEM_LINK`), do **not** set autocomplete — a
@@ -93,8 +89,9 @@ Rules:
   autocomplete is already set. Return `NEEDS_WORKITEM_LINK`, let the
   coordinator resolve the link, then re-invoke to set autocomplete.
 - **Do not auto-close work items (Mandatory):** **always** pass
-  `transitionWorkItems: false` in the *same* `repo_update_pull_request` call
-  that enables autocomplete. The azure-devops-mcp default is `true`, so omitting
+  `transitionWorkItems: false` in the *same* `repo_pull_request_write`
+  (action `update`) call that enables autocomplete. The azure-devops-mcp default
+  is `true`, so omitting
   it lets a fast autocomplete merge transition (close) **all** linked work items
   without acceptance-criteria checking — prematurely closing a multi-phase
   Feature, and a fast merge can outrun a separate corrective call. Leave work
@@ -125,7 +122,7 @@ You have no terminal access and never push. The coordinator publishes the
 feature branch before invoking you. Before creating the PR:
 
 1. Confirm the source branch exists on the remote using
-   `repo_get_branch_by_name` (or `repo_list_branches_by_repo`).
+   `repo_branch` (action `get`, or action `list`).
 2. If the branch is **not** present on the remote, return `BLOCKED` with
    reason `branch not published` so the coordinator pushes it first.
 3. Never attempt to push, merge, or mutate refs yourself.
@@ -140,21 +137,22 @@ feature branch before invoking you. Before creating the PR:
 4. Build the PR title from the plan heading or first commit; build the
    description from the workflow artifacts (plan, YAML log, gate summaries).
 5. **Link the related work item** to the PR. Preferred path: pass the work
-   item id(s) via the `workItems` parameter on `repo_create_pull_request` at
-   creation. If that path does not attach the work item, do not fail — report
-   the created PR id and status `NEEDS_WORKITEM_LINK` so the coordinator can
-   have the `ado-work-item-manager(finalize)` add the PR artifact link to the
-   work item (`wit_add_artifact_link` with the `pullRequestId`). Always state
+   item id(s) via the `workItems` parameter on `repo_pull_request_write`
+   (action `create`) at creation. If that path does not attach the work item,
+   do not fail — report the created PR id and status `NEEDS_WORKITEM_LINK` so
+   the coordinator can have the `ado-work-item-manager(finalize)` add the PR
+   artifact link to the work item (`wit_work_item_link_write` action
+   `add_artifact_link`, or action `link_to_pull_request`). Always state
    which linkage path was used.
 6. **Add the implementation plan reference.** Before posting a clickable
    plan URL, verify the file exists on the target branch/ref using
-   `repo_get_file_content`. If the plan is not yet on the remote (branch not
-   pushed, or file absent), mark the reference as `pending push` instead of
-   posting a URL that 404s.
+   `repo_file` (action `get_content`). If the plan is not yet on the remote
+   (branch not pushed, or file absent), mark the reference as `pending push`
+   instead of posting a URL that 404s.
 7. **Assign reviewers** from `ADO_PR_DEFAULT_REVIEWERS` when configured via
-   `repo_update_pull_request_reviewers`; otherwise report `none`.
+   `repo_pull_request_write` (action `update_reviewers`); otherwise report `none`.
 8. **Post a traceability thread** on the PR via
-   `repo_create_pull_request_thread` with a **resolved status**
+   `repo_pull_request_thread_write` (action `create`) with a **resolved status**
    (`status: Closed`) summarizing: linked work item, plan reference (or
    `pending push`), and the completion mode applied. The resolved status is
    **mandatory** — a `comment resolution = Required` branch policy blocks

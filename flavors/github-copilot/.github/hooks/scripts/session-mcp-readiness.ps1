@@ -29,6 +29,7 @@ if (-not (Test-Path $confPath)) {
     }
 
     $projectMatch = $conf | Select-String -Pattern '^ADO_PROJECT=(.+)$'
+    $orgMatch = $conf | Select-String -Pattern '^ADO_ORGANIZATION=(.+)$'
     $wikiMatch = $conf | Select-String -Pattern '^ADO_WIKI_IDENTIFIER=(.+)$'
     $repoIdMatch = $conf | Select-String -Pattern '^ADO_REPOSITORY_ID=(.+)$'
     $repoNameMatch = $conf | Select-String -Pattern '^ADO_REPOSITORY_NAME=(.+)$'
@@ -44,6 +45,10 @@ if (-not (Test-Path $confPath)) {
 
     if (-not $wikiIdentifier) {
         $advisories.Add('ADO_WIKI_IDENTIFIER missing (wiki workflows may need confirmation)')
+    }
+
+    if ($mode -ne 'off' -and -not $orgMatch) {
+        $advisories.Add('ADO_ORGANIZATION missing (artifact web links depend on the MCP response carrying a URL)')
     }
 
     if (-not $repoIdMatch -and -not $repoNameMatch) {
@@ -72,6 +77,23 @@ if (Test-Path $agentsDir) {
             $agentName = ($txt | Select-String -Pattern '^name:\s*(.+)$' | Select-Object -First 1).Matches[0].Groups[1].Value
             if ($agentName -and -not $agentName.StartsWith('ado-')) {
                 $advisories.Add("ADO agent without ado- prefix: $agentName")
+            }
+        }
+    }
+}
+
+# Legacy MCP tool ids fail prompt validation silently, so catch them once per
+# session rather than discovering it mid-workflow.
+if ($mode -ne 'off') {
+    $checker = Join-Path $repoRoot '.github/scripts/check-mcp-tool-ids.py'
+    if (Test-Path $checker) {
+        $py = Get-Command python -ErrorAction SilentlyContinue
+        if (-not $py) { $py = Get-Command python3 -ErrorAction SilentlyContinue }
+        if ($py) {
+            $checkOut = & $py.Source $checker --root (Join-Path $repoRoot '.github') --quiet 2>$null
+            if ($LASTEXITCODE -eq 1) {
+                $count = if ("$checkOut" -match '(\d+) legacy') { $Matches[1] } else { 'some' }
+                $advisories.Add("$count legacy azure-devops-mcp tool id(s) present -- ADO agents will silently lose tools (run .github/scripts/check-mcp-tool-ids.py)")
             }
         }
     }
