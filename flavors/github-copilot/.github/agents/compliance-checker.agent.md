@@ -62,6 +62,16 @@ The coordinator invokes you with `mode=pre-flight` and provides:
 
 ### Pre-Flight Return Format
 
+**On PASS** under `OUTPUT_VERBOSITY=standard` or `lean` (`af-env.conf`), one
+line is enough — nothing downstream acts on a clean checkpoint:
+
+```markdown
+### Pre-Flight Verdict: PASS
+Branch `{branch}` · plan dir `{path}` · {no WIP | resuming from {phase}} · retros scanned · branch relevance OK
+```
+
+**On FAIL, or any WARNING/BLOCKING item**, itemise — in every mode:
+
 ```markdown
 ## Pre-Flight Check
 
@@ -71,9 +81,9 @@ The coordinator invokes you with `mode=pre-flight` and provides:
 - **Retros scanned:** {yes | no}
 - **Branch relevance:** {OK: new branch | OK: branch matches task | WARNING: branch may not match task}
 
-### Pre-Flight Verdict: {PASS | FAIL}
+### Pre-Flight Verdict: FAIL
 
-{If FAIL: list blocking issues and recommend abort}
+{List blocking issues and recommend abort}
 ```
 
 ## Mode: Post-Flight
@@ -98,6 +108,17 @@ The coordinator invokes you with `mode=post-flight` and provides:
 
 ### Post-Flight Return Format
 
+**On PASS** under `OUTPUT_VERBOSITY=standard` or `lean` (`af-env.conf`):
+
+```markdown
+### Post-Flight Verdict: PASS
+Plan COMPLETED · log `{path}` · retro `{path}` · integration {matches mode | N/A pure git} · R-SD-08 {OK | N/A} · provenance {n}/{n}
+```
+
+**On FAIL, or any missing marker**, itemise — in every mode. A missing
+artifact is precisely what the coordinator has to remediate, so it needs the
+names, not a count:
+
 ```markdown
 ## Post-Flight Check
 
@@ -113,12 +134,12 @@ The coordinator invokes you with `mode=post-flight` and provides:
 - **Markers present:** {count}
 - **Markers missing:** {list of files, or "none"}
 
-### Post-Flight Verdict: {PASS | FAIL}
+### Post-Flight Verdict: FAIL
 
-**Missing artifacts:** {list, or "none"}
+**Missing artifacts:** {list}
 
-{If FAIL: "Coordinator must invoke the documenter with full workflow
-context to create the missing artifacts, then re-run post-flight."}
+"Coordinator must invoke the documenter with full workflow context to create
+the missing artifacts, then re-run post-flight."
 ```
 
 ## Complexity Tier Behaviour

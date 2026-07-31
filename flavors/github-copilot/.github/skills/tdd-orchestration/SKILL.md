@@ -103,6 +103,8 @@ When invoking any subagent, prepend this **context block** to the prompt:
 > Quality thresholds: coverage ≥ {line_cov}% line, ≥ {branch_cov}% branch;
 > complexity ≤ {cc_limit}.
 > Work location: {work_location}. Branch: agent/{workflow-id}.
+> Output verbosity: {output_verbosity} — apply it to your success path only;
+> return full detail on any failure, rejection, or BLOCKED gate.
 > Retro lessons (if any): {retro_lessons_or_none}.
 > Before starting, read your relevant skills (listed in your Skills section)
 > by calling read_file on each SKILL.md that applies to this task."
@@ -110,6 +112,10 @@ When invoking any subagent, prepend this **context block** to the prompt:
 Where `{work_location}` is:
 - `Worktree: {absolute_worktree_path}` (if `WORKTREE_ENABLED=true`)
 - `Main checkout (worktrees disabled)` (if `WORKTREE_ENABLED=false`)
+
+`{output_verbosity}` is `OUTPUT_VERBOSITY` from `af-env.conf` (default `full`).
+Read it once at Step 0 and reuse the value for every subagent in the workflow —
+mixing modes across steps makes returns inconsistent for no benefit.
 
 Fill placeholders from the plan (or defaults from MANIFEST § 5 if no plan yet).
 For Trivial Fix / Review Only where no plan exists, use: tier = Trivial,

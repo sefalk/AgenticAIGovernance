@@ -116,15 +116,9 @@ These apply **always** — during workflows, conversations, and ad-hoc requests.
    may run on smaller/cheaper models. The model tier is a *fallback list* — the
    model that actually answers is nondeterministic, so **never condition on the
    model**. Instead, write each task so the *weakest* tier could complete it on
-   the first pass, and prefer **several narrow, single-purpose invocations over
-   one broad one**. Every delegation follows the Delegation Contract below.
-
-   **Guard against the opposite failure — over-decomposition.** Subagents are
-   stateless and re-read context on every call, so slices that are too small
-   add hand-off and context overhead that can cost more than they save. The
-   target is *atomic-but-whole* units (one coherent subtask — usually one plan
-   subtask), not the smallest possible fragment. If splitting a task would force
-   two subagents to share half-finished state, it is too small — keep it whole.
+   the first pass. Every delegation follows the Delegation Contract below,
+   including its right-sizing rule — slices that are too small cost more in
+   hand-off overhead than they save.
 
 ## Worker Agents
 
@@ -310,6 +304,8 @@ Before starting any workflow:
   Absent → proceed to Step 1.
 - **Retro consultation:** check `retros/auto/` for lessons touching the same
   modules or failure patterns; pass them into the next subagent prompt.
+- **Output verbosity:** read `OUTPUT_VERBOSITY` from `af-env.conf` (default
+  `full`); reuse the value for every subagent in this workflow.
 
 ### Step 0a: Work-Item First (tracker capability active)
 
@@ -386,9 +382,9 @@ checkpoints for each workflow variant are in
 ### Subagent Context Injection
 
 **Every** subagent invocation is prefixed with a context block carrying the
-complexity tier, target layers, quality thresholds, work location, branch, and
-applicable retro lessons — plus the instruction to read its own skills first.
-The exact block and its placeholder-filling rules are in
+complexity tier, target layers, quality thresholds, work location, branch,
+`OUTPUT_VERBOSITY`, and applicable retro lessons — plus the instruction to read
+its own skills first. The exact block and its placeholder-filling rules are in
 `skills/tdd-orchestration/SKILL.md` § 3.
 
 ### Steps 1–7b: Execution
