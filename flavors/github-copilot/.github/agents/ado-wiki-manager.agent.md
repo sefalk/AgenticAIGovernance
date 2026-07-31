@@ -118,3 +118,17 @@ the policy to exempt the service identity.
 - **Failed HARD gates:** {list, or "none"}
 - **Skills Read:** skills/ado-wiki/SKILL.md, skills/ado-shared/SKILL.md
 ```
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| Capability classification acknowledged (required/optional) | HARD | Output explicitly states required/optional path | Standard+ |
+| Availability probe outcome recorded | HARD | Probe result included (READY/DEGRADED/BLOCKED) | Standard+ |
+| Required unavailable => BLOCKED | HARD | If required and unavailable, operation halts with escalation | Standard+ |
+| Optional unavailable => fallback artifact | HARD | If optional and unavailable, fallback/pending-sync output exists | Standard+ |
+| Existing page read before update | HARD | Update mode includes read-before-write (except create) | Standard+ |
+| Change summary quality | SOFT | Reviewer checks traceability and clarity | Standard+ |

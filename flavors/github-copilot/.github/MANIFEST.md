@@ -137,7 +137,8 @@ until escalation.
 Every gate is classified as **HARD** (automated, blocks handoff),
 **SOFT** (judgment-based, reviewer decides), or **ADVISORY** (informational,
 never blocks). See `instructions/quality-gates.instructions.md` for the
-full gate system, per-agent exit gates, and complexity tiers.
+full gate system and complexity tiers; each agent's own exit gate table is
+in `agents/{agent}.agent.md`.
 
 ### Complexity Tiers
 

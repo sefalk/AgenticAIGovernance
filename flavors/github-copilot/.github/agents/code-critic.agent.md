@@ -191,3 +191,16 @@ Return your verdict in this exact format so the coordinator can parse it:
 ### Review Attempt
 - Attempt: {1 | 2 | 3} of 3
 ```
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| Gate 1 auto-check items verified | HARD | Run syntax/import/lint/test checks | Standard+ |
+| Architecture review completed | SOFT | Self-check: layer boundary analysis done | Standard+ |
+| Metrics collected and compared to thresholds | HARD | Run coverage + complexity tools | Standard+ |
+| Security checklist completed | SOFT | Self-check: Gate 4 items checked | Standard+ |
+| Verdict header is parseable | HARD | Verify `## Code Review Verdict: {V}` format | Standard+ |

@@ -298,7 +298,7 @@ CHANGELOG.md                               # Release history (Keep a Changelog f
 │   ├── copilot-authoring.instructions.md  # Rules for authoring copilot files
 │   ├── git-workflow.instructions.md       # Core git rules (depth: git-workflow skill)
 │   ├── provenance.instructions.md         # AI traceability markers
-│   ├── quality-gates.instructions.md      # Gate taxonomy, tiers, per-agent exit gates
+│   ├── quality-gates.instructions.md      # Gate taxonomy, tiers, exit protocol
 │   └── testing.instructions.md            # TDD and test conventions
 ├── templates/                             # Structured document templates
 │   ├── PLAN.md                            # Plan template (persisted as {type}-{date}-{slug}.md in docs/plans/)

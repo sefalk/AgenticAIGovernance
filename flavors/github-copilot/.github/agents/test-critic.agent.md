@@ -131,3 +131,14 @@ Return your verdict in this exact format so the coordinator can parse it:
 ### Review Attempt
 - Attempt: {1 | 2 | 3} of 3
 ```
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| All checklist items evaluated | SOFT | Self-check: checklist completed | Standard+ |
+| Verdict header is parseable | HARD | Verify `## Test Review Verdict: {V}` format | Standard+ |
+| Anti-gaming scan performed | SOFT | Self-check: anti-pattern list checked | Standard+ |
