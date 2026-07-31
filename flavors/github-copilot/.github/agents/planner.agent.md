@@ -34,6 +34,7 @@ Consult these skills when relevant to the task:
 - **task-decomposition** (`skills/task-decomposition/SKILL.md`) — work breakdown, acceptance criteria, estimation
 - **risk-management** (`skills/risk-management/SKILL.md`) — risk identification, mitigation strategies
 - **design-patterns** (`skills/design-patterns/SKILL.md`) — architecture patterns, SOLID, when NOT to use patterns
+- **git-workflow** (`skills/git-workflow/SKILL.md`) — § 6 planning document naming, location, and lifecycle
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 

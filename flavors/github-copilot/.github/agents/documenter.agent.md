@@ -41,6 +41,7 @@ as a **subagent** by the coordinator as the last step of every workflow.
 
 Consult these skills when relevant to the task:
 - **documentation** (`skills/documentation/SKILL.md`) — docstrings, ADRs, README, handoff logs
+- **git-workflow** (`skills/git-workflow/SKILL.md`) — § 6 planning document lifecycle and finalisation
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 

@@ -32,19 +32,20 @@
 | 21 | `unit-testing` | Verify correctness of individual units of code in isolation. AAA pattern, test doubles, language-specific guidance, edge cases, and coverage quality gates. | test-writer, test-critic |
 | 22 | `git-worktrees` | Create, manage, and remove git worktrees for parallel agent task execution. Lifecycle commands, context verification, troubleshooting, and recovery procedures. | coordinator |
 | 23 | `notebook-execution` | Interact with local Jupyter / `.ipynb` notebooks via the VS Code notebook tools (run/edit cells, kernel selection, read outputs) instead of terminal scripts. | coordinator, implementer, refactorer, code-critic, test-writer |
+| 24 | `git-workflow` | Git autonomy boundary, integration paths (pure git vs request-based), branch/work-item association (R-SD-08), phase-to-commit mapping, planning document lifecycle, and pre-commit guards. | coordinator, planner, documenter |
 
 ## Agent Skill Matrix
 
 | Agent | Skills |
 |-------|--------|
-| **planner** | task-decomposition, risk-management, design-patterns |
-| **coordinator** | git-worktrees, databricks-execution-patterns, notebook-execution |
+| **planner** | task-decomposition, risk-management, design-patterns, git-workflow |
+| **coordinator** | git-workflow, git-worktrees, databricks-execution-patterns, notebook-execution |
 | **test-writer** | unit-testing, property-testing, error-handling, human-escalation, notebook-execution |
 | **test-critic** | unit-testing, code-review, property-testing |
 | **implementer** | hexagonal-architecture, pydantic, error-handling, design-patterns, static-analysis, dependency-management, human-escalation, databricks-execution-patterns, notebook-execution |
 | **code-critic** | code-review, static-analysis, metrics, secure-coding, hexagonal-architecture, dependency-management, notebook-execution |
 | **refactorer** | refactoring, design-patterns, hexagonal-architecture, pydantic, human-escalation, notebook-execution |
-| **documenter** | documentation |
+| **documenter** | documentation, git-workflow |
 | **arbiter** | human-escalation, design-patterns, hexagonal-architecture |
 | **researcher** | data-pipeline-design, data-modeling, data-quality |
 | **compliance-checker** | *(no skills — process checkpoint agent)* |

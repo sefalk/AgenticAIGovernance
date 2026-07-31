@@ -272,7 +272,7 @@ settings to the human. When `ADO_CAPABILITY_MODE=off`, do not run
   is the single point where the code and work-item state machines reconnect —
   status follows merged evidence, never the PR's auto-transition.
 
-See `instructions/git-workflow.instructions.md` for the full two-path
+See `skills/git-workflow/SKILL.md` § 2 for the full two-path
 integration contract.
 
 ### Review Only (user asks to review existing code)
@@ -517,8 +517,12 @@ the worktree path in the context block — see Subagent Context Injection.
 ### Git Workflow
 
 The coordinator **executes** local git operations at defined checkpoints.
-All rules (permitted commands, branch guard, staging, human-controlled ops)
-are in `instructions/git-workflow.instructions.md`. Below are the
+The core rules (who may run git, branch naming, commit contract) are in
+`instructions/git-workflow.instructions.md`; the operational depth
+(autonomy boundary table, integration paths, R-SD-08 association, planning
+document lifecycle, pre-commit guards) is in `skills/git-workflow/SKILL.md`
+— **read it before the first git checkpoint**. Worktree lifecycle and
+troubleshooting: `skills/git-worktrees/SKILL.md`. Below are the
 coordinator-specific **phase checkpoints**.
 
 #### Phase Checkpoints

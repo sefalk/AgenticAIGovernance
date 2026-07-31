@@ -296,7 +296,7 @@ CHANGELOG.md                               # Release history (Keep a Changelog f
 ├── instructions/                          # Auto-applied instruction files
 │   ├── architecture.instructions.md       # Architecture map (customise!)
 │   ├── copilot-authoring.instructions.md  # Rules for authoring copilot files
-│   ├── git-workflow.instructions.md       # Branch lifecycle, atomic commits, plan files
+│   ├── git-workflow.instructions.md       # Core git rules (depth: git-workflow skill)
 │   ├── provenance.instructions.md         # AI traceability markers
 │   ├── quality-gates.instructions.md      # Gate taxonomy, tiers, per-agent exit gates
 │   └── testing.instructions.md            # TDD and test conventions

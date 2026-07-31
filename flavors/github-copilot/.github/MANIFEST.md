@@ -269,7 +269,8 @@ Agents receive only the tools and permissions needed for their role:
   three-tier classifier (auto-approve safe / prompt durable / hard-deny
   destructive), tuned via `AUTONOMY_LEVEL` / `AUTONOMY_CAT_*` in `af-env.conf`
 - One atomic commit per workflow phase (plan, tests, implementation, docs)
-- See `instructions/git-workflow.instructions.md` for the full protocol
+- See `instructions/git-workflow.instructions.md` for the core rules and
+  `skills/git-workflow/SKILL.md` for the full protocol
 
 ### Planning Documents
 
