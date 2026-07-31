@@ -67,6 +67,31 @@ while IFS= read -r -d '' f; do
     fi
 done < <(find "$repo_root/.github/agents" -maxdepth 1 -name '*.agent.md' -type f -print0 2>/dev/null)
 
+# Legacy MCP tool ids fail prompt validation silently, so catch them once per
+# session rather than discovering it mid-workflow.
+# Every step below is guarded: under `set -e` a failing probe must degrade this
+# advisory, never abort the hook.
+if [[ "$mode" != "off" ]]; then
+    checker="$repo_root/.github/scripts/check-mcp-tool-ids.py"
+    if [[ -f "$checker" ]]; then
+        py=""
+        if command -v python3 >/dev/null 2>&1; then
+            py="python3"
+        elif command -v python >/dev/null 2>&1; then
+            py="python"
+        fi
+        if [[ -n "$py" ]]; then
+            check_rc=0
+            check_out=$("$py" "$checker" --root "$repo_root/.github" --quiet 2>/dev/null) || check_rc=$?
+            if [[ $check_rc -eq 1 ]]; then
+                count=$(printf '%s' "$check_out" | grep -oE '[0-9]+ legacy' | head -1 | grep -oE '[0-9]+' || true)
+                [[ -z "$count" ]] && count="some"
+                advisories+=("$count legacy azure-devops-mcp tool id(s) present -- ADO agents will silently lose tools (run .github/scripts/check-mcp-tool-ids.py)")
+            fi
+        fi
+    fi
+fi
+
 auth_hint="auth-provider-managed"
 if [[ -n "${AZURE_DEVOPS_EXT_PAT:-}" || -n "${ADO_PAT:-}" || -n "${SYSTEM_ACCESSTOKEN:-}" ]]; then
     auth_hint="token-env-present"

@@ -77,6 +77,23 @@ if (Test-Path $agentsDir) {
     }
 }
 
+# Legacy MCP tool ids fail prompt validation silently, so catch them once per
+# session rather than discovering it mid-workflow.
+if ($mode -ne 'off') {
+    $checker = Join-Path $repoRoot '.github/scripts/check-mcp-tool-ids.py'
+    if (Test-Path $checker) {
+        $py = Get-Command python -ErrorAction SilentlyContinue
+        if (-not $py) { $py = Get-Command python3 -ErrorAction SilentlyContinue }
+        if ($py) {
+            $checkOut = & $py.Source $checker --root (Join-Path $repoRoot '.github') --quiet 2>$null
+            if ($LASTEXITCODE -eq 1) {
+                $count = if ("$checkOut" -match '(\d+) legacy') { $Matches[1] } else { 'some' }
+                $advisories.Add("$count legacy azure-devops-mcp tool id(s) present -- ADO agents will silently lose tools (run .github/scripts/check-mcp-tool-ids.py)")
+            }
+        }
+    }
+}
+
 $authHint = 'auth-provider-managed'
 if ($env:AZURE_DEVOPS_EXT_PAT -or $env:ADO_PAT -or $env:SYSTEM_ACCESSTOKEN) {
     $authHint = 'token-env-present'
