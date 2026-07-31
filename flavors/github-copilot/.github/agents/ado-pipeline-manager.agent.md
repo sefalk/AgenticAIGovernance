@@ -6,15 +6,13 @@ user-invocable: false
 tools:
   - read/readFile
   - microsoft/azure-devops-mcp/core_list_projects
-  - microsoft/azure-devops-mcp/repo_get_repo_by_name_or_id
-  - microsoft/azure-devops-mcp/repo_get_branch_by_name
-  - microsoft/azure-devops-mcp/repo_get_file_content
-  - microsoft/azure-devops-mcp/pipelines_create_pipeline
-  - microsoft/azure-devops-mcp/pipelines_get_build_definitions
-  - microsoft/azure-devops-mcp/pipelines_run_pipeline
-  - microsoft/azure-devops-mcp/pipelines_get_build_status
-  - microsoft/azure-devops-mcp/pipelines_get_build_log
-  - microsoft/azure-devops-mcp/pipelines_get_build_log_by_id
+  - microsoft/azure-devops-mcp/repo_repository
+  - microsoft/azure-devops-mcp/repo_branch
+  - microsoft/azure-devops-mcp/repo_file
+  - microsoft/azure-devops-mcp/pipelines_definition
+  - microsoft/azure-devops-mcp/pipelines_build
+  - microsoft/azure-devops-mcp/pipelines_build_log
+  - microsoft/azure-devops-mcp/pipelines_write
 ---
 
 # Pipeline Manager Agent (Optional Capability Worker)
@@ -40,9 +38,9 @@ The Azure DevOps MCP **covers pipelines but NOT branch policies**. Therefore:
 
 | Action | Surface | Who |
 |---|---|---|
-| Register / update a pipeline definition from a repo YAML | MCP `pipelines_create_pipeline` | **this agent** |
-| Run a pipeline and monitor status/logs | MCP `pipelines_run_pipeline`, `pipelines_get_build_status`, `pipelines_get_build_log`, `pipelines_get_build_log_by_id` | **this agent** |
-| List existing definitions (idempotency check) | MCP `pipelines_get_build_definitions` | **this agent** |
+| Register / update a pipeline definition from a repo YAML | MCP `pipelines_write` (action `create_pipeline`) | **this agent** |
+| Run a pipeline and monitor status/logs | MCP `pipelines_write` (action `run_pipeline`), `pipelines_build` (action `get_status`), `pipelines_build_log` (actions `list`, `get_content`) | **this agent** |
+| List existing definitions (idempotency check) | MCP `pipelines_definition` (action `list`) | **this agent** |
 | Attach a **Build Validation branch policy** (required, blocking) on the configured gate branches (`ADO_GATE_BRANCHES`) | REST `POST /_apis/policy/configurations` (the Build Validation policy type id is an Azure DevOps platform constant, the same for every org: `0609b952-1397-4640-95ec-e00a01b2c241`; scope `vso.code_write`) or ADO UI | **human-guided** — no MCP tool exists; this agent emits the exact settings for the human to apply |
 
 You never create, relax, or disable branch policies yourself, and you never
@@ -59,19 +57,21 @@ Consult these skills when relevant to the task:
 
 1. Read `.github/af-env.conf` and resolve `ADO_PROJECT` and repository.
 2. Verify the branch carrying the pipeline YAML is published on the remote
-   (`repo_get_branch_by_name`) and the YAML exists (`repo_get_file_content`).
+   (`repo_branch` action `get`) and the YAML exists (`repo_file` action
+   `get_content`).
 3. **Idempotent registration:** list existing definitions
-   (`pipelines_get_build_definitions`); reuse a matching definition by name
-   instead of creating a duplicate, else create it from the YAML path.
+   (`pipelines_definition` action `list`); reuse a matching definition by name
+   instead of creating a duplicate, else create it from the YAML path
+   (`pipelines_write` action `create_pipeline`).
 4. **Run & monitor (verification):** trigger a run on a given branch
-   (`pipelines_run_pipeline`), poll `pipelines_get_build_status`, and on
-   failure fetch `pipelines_get_build_log` (log index) then
-   `pipelines_get_build_log_by_id` (specific log content by id) to read
+   (`pipelines_write` action `run_pipeline`), poll `pipelines_build` action
+   `get_status`, and on failure fetch `pipelines_build_log` action `list`
+   (log index) then action `get_content` (specific log content by id) to read
    actual step output, confirm log markers, and report the cause — do not
    infer outcomes from the build status alone.
 5. **Agent-pool readiness check:** if a queued run does not start within a
-   short window (e.g. ~90 s of repeated `pipelines_get_build_status` checks),
-   report `BLOCKED (no agent / parallelism)` — the org must be linked to an
+   short window (e.g. ~90 s of repeated `pipelines_build` action `get_status`
+   checks), report `BLOCKED (no agent / parallelism)` — the org must be linked to an
    Azure subscription (Microsoft-hosted free tier) or have a self-hosted
    agent. Distinguish "queued, no agent" from "started, failed".
 6. **Emit human-guided policy settings:** after registration, return the exact
@@ -115,9 +115,9 @@ policy settings for the human, and a Gate Summary.
 | Gate | Type | How to verify |
 |---|---|---|
 | No terminal/git operations performed | HARD | Only MCP/read tools used |
-| Pipeline definition registered or reused (no duplicate) | HARD | `pipelines_get_build_definitions` checked before create |
-| YAML present on the target branch | HARD | `repo_get_file_content` succeeded |
-| Run triggered and status reported | HARD | `pipelines_run_pipeline` + `pipelines_get_build_status` |
+| Pipeline definition registered or reused (no duplicate) | HARD | `pipelines_definition` (action `list`) checked before create |
+| YAML present on the target branch | HARD | `repo_file` (action `get_content`) succeeded |
+| Run triggered and status reported | HARD | `pipelines_write` (action `run_pipeline`) + `pipelines_build` (action `get_status`) |
 | Agent-pool readiness classified | HARD | queued-no-agent vs started reported |
 | Build Validation policy settings emitted for human | SOFT | settings block present in return |
 | `ADO_PROJECT` injected on project-aware calls | HARD | explicit project on every MCP call |

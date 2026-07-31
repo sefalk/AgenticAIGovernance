@@ -131,7 +131,7 @@ reviewer.
   (`wikiMaster`) has a PR-required policy. Do not retry the direct write.
 - Prefer the PR route: branch off `wikiMaster` in the wiki repo, write the page
   on the branch, open a PR (human completes). Note the known
-  `wiki_create_or_update_page` `branch`-param bug (`version '{0}' invalid`) —
+  `wiki_upsert_page` `branch`-param bug (`version '{0}' invalid`) —
   if the branch write fails that way, fall back to a DEGRADED handoff with the
   ready page markdown.
 - Never relax the wiki branch policy from an agent; that is a human/UI action.
