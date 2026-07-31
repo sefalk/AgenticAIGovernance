@@ -1,0 +1,14 @@
+{
+  "compaction_credits": 6399.81,
+  "compactions": 157,
+  "context_before_max": 528060,
+  "context_before_mean": 177580,
+  "context_before_p50": 119519,
+  "context_before_p90": 340323,
+  "credits_per_compaction": 40.76,
+  "rounds_between_compactions": 103.2,
+  "schema_version": 1,
+  "tokens_cache_read": 35801161,
+  "tokens_input_uncached": 8871734,
+  "tokens_output": 1241116
+}
