@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Context budget as a regression gate — `check-context-budget.py`
+  (issue #29).** Issue #23 cut the always-on instruction set from ~13,000 to
+  ~4,800 tokens. Nothing kept it there. Instruction files grow by accretion,
+  and `applyTo: '**'` is the path of least resistance for any rule an author
+  is unsure where to put — so the trim would have silently eroded, one
+  reasonable-looking commit at a time.
+
+  The always-on payload is fully computable offline: parse the `applyTo`
+  glob out of each instruction file's frontmatter, keep the ones that match
+  everything, add the unconditional `copilot-instructions.md`. The checker
+  does exactly that and fails when the sum exceeds `AF_CONTEXT_BUDGET_TOKENS`,
+  printing a per-file breakdown so the offending file is named rather than
+  merely implied. It also checks the largest **per-agent** total (own prompt
+  + always-on set) against `AF_AGENT_CONTEXT_BUDGET_TOKENS`, which is the
+  number that actually bounds a request.
+
+  Design decisions worth recording:
+
+  - **Derived, never hardcoded.** The always-on set comes from the `applyTo`
+    patterns themselves. A file that widens its glob to `**` is caught the
+    moment it does so; a hardcoded file list would have gone stale on exactly
+    the change it exists to detect.
+  - **A missing or empty `applyTo` counts as always-on**, with a warning.
+    That is the conservative direction: the ambiguous case is charged rather
+    than excused.
+  - **BLOCKED (exit 2) is distinct from over-budget (exit 1).** A missing
+    instructions directory, a missing `copilot-instructions.md`, a missing
+    agents directory, or a malformed budget value stops the check with
+    "unknown" — it never falls through to a pass. Silence must not read as
+    success (cf. issue #12).
+  - **Frontmatter only.** `applyTo:` is read from the leading `---` block, so
+    an instruction file that *discusses* `applyTo` in its body cannot
+    false-match itself into or out of the always-on set.
+  - **No dependencies.** Tokens are estimated as bytes ÷ 4, which is accurate
+    enough for a budget ceiling and keeps the gate runnable anywhere.
+  - **Works in both trees.** The `.github` root is derived from the script's
+    own location, so it behaves identically in the framework source tree and
+    in a deployed project.
+
+  Defaults are calibrated against the measured payload with deliberately
+  small headroom — always-on 4,868/5,000 tok, largest agent (coordinator)
+  10,666/11,000 tok, roughly 3% in both cases. That is the point: adding an
+  always-on rule should require removing something, narrowing a glob, or
+  consciously raising the budget, not drifting past it unnoticed.
+
+  Ships with `test-context-budget.ps1` (15 checks over synthetic `.github`
+  fixtures, plus one that holds the real payload to its own budget) and a
+  pre-save checklist entry in `copilot-authoring.instructions.md` — which is
+  itself narrowly scoped, so the guidance loads exactly when someone is
+  editing an instruction file and costs nothing on every other turn.
+
+  **Existing projects:** `af-env.conf` is `[customizable]` and is not
+  overwritten on redeploy. Add `AF_CONTEXT_BUDGET_TOKENS` and
+  `AF_AGENT_CONTEXT_BUDGET_TOKENS` manually to tune them; absent keys fall
+  back to the documented defaults, so the gate works either way.
+
 ### Changed
 
 - **Always-on instruction set trimmed from ~13,000 to ~4,800 tokens per

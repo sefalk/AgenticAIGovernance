@@ -50,6 +50,8 @@ scripts/cleanup-worktree.sh
 scripts/test-worktree-scripts.ps1
 scripts/test-large-file-guard.ps1
 scripts/test-lint-gate.ps1
+scripts/check-context-budget.py
+scripts/test-context-budget.ps1
 
 # Instructions
 instructions/
