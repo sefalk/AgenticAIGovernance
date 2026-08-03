@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Always-on instruction set trimmed from ~13,000 to ~4,800 tokens per
+  request (issue #23).** Three instruction files carry `applyTo: '**'`, so
+  every agent on every request paid for all of their content. Most of it was
+  addressed to exactly one agent.
+
+  The measurement that motivated this: background compaction accounts for
+  97.7% of recorded spend, at ~40.8 credits per compaction with a mean
+  pre-compaction context of ~178k tokens. Always-on overhead is paid on every
+  turn *and* re-paid through the compaction it accelerates, so it compounds.
+
+  Three moves, no rule removed:
+
+  - **`git-workflow.instructions.md` (5,322 → 1,190 tokens).** Only the
+    coordinator runs git, yet every worker loaded the 22-row autonomy boundary
+    table, both integration paths, the planning document lifecycle, the
+    pre-commit guards, and Git LFS guidance. That depth moved to a new
+    **`git-workflow` skill**; the instruction keeps what a worker actually
+    needs — who may run git, the hard-denied operations, branch naming, and
+    the atomic commit contract. Safe because the `block-dangerous` and
+    `coordinator-pretooluse` hooks enforce the boundary mechanically, not via
+    prompt text.
+  - **`quality-gates.instructions.md` (4,979 → 1,375 tokens).** The Per-Agent
+    Exit Gates block held all 15 agents' gate tables; each agent needs one.
+    All 100 gate rows moved verbatim into the `## Exit Gates` section of the
+    corresponding `agents/*.agent.md`, where they load exactly when that agent
+    runs. This follows a pattern `ado-pipeline-manager` already used. The
+    taxonomy, complexity tiers, exit protocol, and Gate Summary format stay
+    always-on because they are genuinely universal.
+  - **`provenance.instructions.md` (1,298 → 818 tokens).** Condensed prose;
+    the marker formats moved into a single table. No rule changed.
+
+  Two duplications surfaced and were resolved rather than carried along: the
+  instruction's Worktree Lifecycle sections were a subset of the existing
+  `git-worktrees` skill and were deleted, and `ado-pipeline-manager`'s local
+  gate table had drifted from the canonical one (it was missing the
+  "never creates/relaxes branch policies" HARD gate) — it is now reconciled.
+
 ### Fixed
 
 - **ADO agents restored after the upstream MCP toolset consolidation

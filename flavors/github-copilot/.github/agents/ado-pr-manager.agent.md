@@ -198,3 +198,21 @@ feature branch before invoking you. Before creating the PR:
 - **Failed HARD gates:** {list, or "none"}
 - **Skills Read:** ../skills/ado-pr/SKILL.md, ../skills/ado-shared/SKILL.md
 ```
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| No terminal/git operations performed | HARD | Verify the agent used only MCP/read tools (no push/merge) | Standard+ |
+| Remote branch present before PR | HARD | Verify source branch exists on remote, or `BLOCKED (branch not published)` reported | Standard+ |
+| Target branch resolved | HARD | Verify PR target branch present (default `ADO_DEFAULT_TARGET_BRANCH`) | Standard+ |
+| PR created or existing PR updated (no duplicate) | HARD | Verify single active PR for the source branch | Standard+ |
+| Work item linked to PR | HARD | Verify work item linked at creation, or `NEEDS_WORKITEM_LINK` reported for deferred linking, or explicit none-with-reason | Standard+ |
+| Completion policy applied by target | HARD | Integration branch → autocomplete set; protected/unresolved → human-only, no autocomplete | Standard+ |
+| No work-item auto-transition on autocomplete | HARD | The autocomplete call passed `transitionWorkItems: false` (never `true`; the azure-devops-mcp default is `true`) | Standard+ |
+| Plan reference attached | SOFT | Reviewer checks clickable URL (remote-verified) or `pending push` fallback | Standard+ |
+| Traceability thread posted | SOFT | Reviewer checks a PR thread summarizes work item, plan, and completion mode (idempotent) | Standard+ |
+| Reviewers/PR description quality | SOFT | Reviewer checks description completeness and reviewer assignment | Deep |

@@ -119,7 +119,7 @@ if ($toolName -match 'terminal') {
                 hookSpecificOutput = @{
                     hookEventName      = 'PreToolUse'
                     permissionDecision = 'deny'
-                    permissionDecisionReason = "Worktree branch name '$branchMatch' is invalid. Must match '^agent/[a-z0-9-]+' (e.g. agent/feat-auth, agent/fix-db-pool). See git-workflow.instructions.md Worktree Lifecycle."
+                    permissionDecisionReason = "Worktree branch name '$branchMatch' is invalid. Must match '^agent/[a-z0-9-]+' (e.g. agent/feat-auth, agent/fix-db-pool). See skills/git-worktrees/SKILL.md."
                 }
             } | ConvertTo-Json -Depth 3 -Compress
             exit 0

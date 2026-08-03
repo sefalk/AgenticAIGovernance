@@ -34,6 +34,7 @@ Consult these skills when relevant to the task:
 - **task-decomposition** (`skills/task-decomposition/SKILL.md`) — work breakdown, acceptance criteria, estimation
 - **risk-management** (`skills/risk-management/SKILL.md`) — risk identification, mitigation strategies
 - **design-patterns** (`skills/design-patterns/SKILL.md`) — architecture patterns, SOLID, when NOT to use patterns
+- **git-workflow** (`skills/git-workflow/SKILL.md`) — § 6 planning document naming, location, and lifecycle
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 
@@ -130,3 +131,16 @@ Delete if not applicable.}
 - **Suggested workflow:** {Full TDD / Quick Fix / Review Only}
 - **Skills consulted:** {list of SKILL.md files read, or "none"}
 ```
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| Every subtask has ≥ 1 testable acceptance criterion | SOFT | Self-check (self-checks are SOFT) | Standard+ |
+| Dependencies between subtasks are acyclic | SOFT | Self-check: verify sequence has no cycles | Standard+ |
+| Complexity tier assigned | SOFT | `complexity_tier` field present in output | Standard+ |
+| Scope assessment complete (files, layers, size, risks) | SOFT | Self-check: all fields filled | Standard+ |
+| Risk section populated (≥ 1 risk identified) | SOFT | Self-check | Deep |

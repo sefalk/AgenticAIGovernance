@@ -844,9 +844,9 @@ const INSTRUCTIONS = [
   { name: 'copilot-instructions', file: 'copilot-instructions.md', applyTo: '** (always active)', desc: 'Root project config. Project overview, tech stack, coding standards, repo structure, pre-delivery checklist, skill index. Auto-injected into every agent.' },
   { name: 'architecture', file: 'architecture.instructions.md', applyTo: 'mpusage/**/*.py', desc: 'Layer classification (Domain Core, Ports, Adapters, Orchestrators), dependency rules, module-to-layer mapping.' },
   { name: 'testing', file: 'testing.instructions.md', applyTo: 'tests/**/*.py, **/conftest.py', desc: 'TDD workflow conventions, test naming, directory structure, fixtures, quality gates for test files.' },
-  { name: 'git-workflow', file: 'git-workflow.instructions.md', applyTo: '**', desc: 'Branch lifecycle (agent/{id}), atomic commit strategy, autonomy boundary table, planning document workflow.' },
+  { name: 'git-workflow', file: 'git-workflow.instructions.md', applyTo: '**', desc: 'Core git rules only: who may run git, branch naming, atomic commit contract. Depth lives in the git-workflow skill.' },
   { name: 'provenance', file: 'provenance.instructions.md', applyTo: '**', desc: '3-layer provenance model (in-code markers, git commits, workflow logs). Marker format and lifecycle rules.' },
-  { name: 'quality-gates', file: 'quality-gates.instructions.md', applyTo: '**', desc: 'Gate taxonomy (HARD/SOFT/ADVISORY), complexity tiers (Trivial/Standard/Deep), per-agent exit gates, Gate Summary format.' },
+  { name: 'quality-gates', file: 'quality-gates.instructions.md', applyTo: '**', desc: 'Gate taxonomy (HARD/SOFT/ADVISORY), complexity tiers (Trivial/Standard/Deep), exit protocol, Gate Summary format. Per-agent gate tables live in each agent file.' },
   { name: 'copilot-authoring', file: 'copilot-authoring.instructions.md', applyTo: '**/*.agent.md, *.instructions.md, *.prompt.md', desc: 'Gotchas, YAML frontmatter conventions, link rules, and pre-save checklist for authoring AF files.' }
 ];
 

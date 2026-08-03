@@ -41,6 +41,7 @@ as a **subagent** by the coordinator as the last step of every workflow.
 
 Consult these skills when relevant to the task:
 - **documentation** (`skills/documentation/SKILL.md`) — docstrings, ADRs, README, handoff logs
+- **git-workflow** (`skills/git-workflow/SKILL.md`) — § 6 planning document lifecycle and finalisation
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 
@@ -212,3 +213,16 @@ The human should review these during periodic governance audits.
 ### Suggested Git Commit
 `[agent:documenter] {summary}`
 ```
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| Plan file status set to COMPLETED | HARD | Verify status field updated | Standard+ |
+| YAML workflow log created and valid | HARD | Verify file exists, mandatory fields present | Standard+ |
+| Provenance markers verified on all AI-touched files | HARD | Scan changed files for markers | Standard+ |
+| Retro snippet generated in `retros/auto/` | HARD | Verify file created with required fields | Standard+ |
+| Architecture docs updated (if new modules/ports) | SOFT | Self-check: applicable only if new elements | Deep |

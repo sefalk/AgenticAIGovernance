@@ -183,3 +183,24 @@ stories (`NEEDS_CONFIRMATION`), and keep it open.
 - **Failed HARD gates:** {list, or "none"}
 - **Skills Read:** skills/ado-workitem/SKILL.md, skills/ado-shared/SKILL.md
 ```
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| Capability classification acknowledged (required/optional) | HARD | Output explicitly states required/optional path | Standard+ |
+| Availability probe outcome recorded | HARD | Probe result included (READY/DEGRADED/BLOCKED) | Standard+ |
+| Required unavailable => BLOCKED | HARD | If required and unavailable, operation halts with escalation | Standard+ |
+| Optional unavailable => fallback artifact | HARD | If optional and unavailable, fallback/pending-sync output exists | Standard+ |
+| Board routing applied on create | SOFT | New items set Area Path from `ADO_DEFAULT_AREA_PATH` (and Iteration from `ADO_DEFAULT_ITERATION_PATH`), or the run warns that the project default area is used | Standard+ |
+| Type-specific field applicability checked before write | HARD | Before writing a type-specific field (e.g. `AcceptanceCriteria`), the field is confirmed present in the target type's `wit_work_item` (action `get_type`) fields; an absent field is not written silently (a type carrying it is chosen, or the content is mirrored to `System.Description` and the path is reported) | Standard+ |
+| Non-destructive update policy followed | SOFT | Reviewer checks append/targeted update behavior | Standard+ |
+| No Close at finalize (Resolve only, pre-merge) | HARD | Finalize never sets Closed; item is Resolved or kept Active | Standard+ |
+| AC coverage map posted before any closure transition | HARD | Verify an AC->evidence map comment exists for the item | Standard+ |
+| Closure only against merged evidence | HARD | Closed only post-merge; otherwise `CLOSE_PENDING_MERGE` or `BLOCKED_CLOSURE` | Standard+ |
+| AC fully covered (map correctness) | SOFT | Reviewer checks each AC maps to real evidence | Standard+ |
+| No bulk-close of linked work items | HARD | Each linked item closed only after its own AC verification | Standard+ |
+| Multi-phase detection is deterministic; child closed not parent | HARD | Feature/tag/child signal used; Feature stays open, delivered phase closed via child story | Standard+ |

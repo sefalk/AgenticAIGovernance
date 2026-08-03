@@ -147,3 +147,20 @@ context to create the missing artifacts, then re-run post-flight."}
 - **Artifacts remediated:** {count, or "none"}
 - **Blocking issues:** {list, or "none"}
 ```
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| Pre-flight: branch not on main/master | HARD | Check branch name | Standard+ |
+| Pre-flight: plan directory resolved | HARD | Verify directory exists | Standard+ |
+| Pre-flight: work-item first (tracker active) | HARD | When `ADO_CAPABILITY_MODE != off`: a resolved work item exists, is Active, and its id prefixes the branch slug | Standard+ |
+| Post-flight: plan file status = COMPLETED | HARD | Read plan file, check status field | Standard+ |
+| Post-flight: workflow log YAML exists | HARD | Check `.github/logs/{workflow-id}.yaml` | Standard+ |
+| Post-flight: retro snippet exists | HARD | Check `retros/auto/{workflow-id}.md` | Standard+ |
+| Post-flight: integration path matches capability mode | HARD | If `ADO_CAPABILITY_MODE=required`, a PR was opened; if `off`, no PR worker ran | Standard+ |
+| Post-flight: branch-to-work-item association (R-SD-08) | HARD | When tracker capability is active (`ADO_CAPABILITY_MODE != off`): the branch-slug work item id equals the PR-linked work item id (no cross-attribution), the item was Active at work start, and it links the branch + plan path. Tracker off ⇒ local traceability artifact instead. | Standard+ |
+| Post-flight: provenance markers on new files | SOFT | Read first 5 lines of new files | Standard+ |

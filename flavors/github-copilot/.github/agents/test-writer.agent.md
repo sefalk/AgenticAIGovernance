@@ -158,3 +158,17 @@ have terminal access.
 ### Files Changed
 - `{path}` — {description}
 ```
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| All new tests FAIL (Red phase) | HARD | Run test suite, verify non-zero exit code for new tests | Standard+ |
+| Zero syntax/import errors in test files | HARD | Run syntax checker (Pylance, `py_compile`) | Standard+ |
+| Provenance marker on new test files | HARD | Verify `copilot:generated` header present | Standard+ |
+| Skills read declaration | SOFT | `Skills Read:` line in Gate Summary (critic flags if missing) | Standard+ |
+| Edge cases covered per acceptance criteria | SOFT | test-critic reviews | Standard+ |
+| Property tests for wide input spaces | SOFT | test-critic reviews | Deep |

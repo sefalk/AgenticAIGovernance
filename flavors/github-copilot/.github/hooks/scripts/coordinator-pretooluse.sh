@@ -88,7 +88,7 @@ except Exception:
             # Extract branch name after -b flag
             BRANCH=$(echo "$COMMAND" | grep -oP '(?<=-b )\S+' || true)
             if [ -n "$BRANCH" ] && ! echo "$BRANCH" | grep -qE '^agent/[a-z0-9][a-z0-9-]*$'; then
-                printf '%s\n' "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Worktree branch name '${BRANCH}' is invalid. Must match '^agent/[a-z0-9-]+' (e.g. agent/feat-auth, agent/fix-db-pool). See git-workflow.instructions.md Worktree Lifecycle.\"}}"
+                printf '%s\n' "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Worktree branch name '${BRANCH}' is invalid. Must match '^agent/[a-z0-9-]+' (e.g. agent/feat-auth, agent/fix-db-pool). See skills/git-worktrees/SKILL.md.\"}}"
                 exit 0
             fi
             # Extract worktree path (first arg after 'add')

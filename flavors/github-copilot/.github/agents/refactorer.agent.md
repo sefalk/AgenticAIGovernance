@@ -160,3 +160,20 @@ via `.github/scripts/check-python-quality.py`.
 ### Files Changed
 - `{path}` — {description}
 ```
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| All tests still pass after each step | HARD | Run test suite after each refactoring | Standard+ |
+| Zero syntax/import errors | HARD | Run syntax checker | Standard+ |
+| Python type hints remain complete (changed source files) | HARD | Verify all changed public functions in `SRC_DIR/**/*.py` retain full annotations | Standard+ |
+| Python docstrings remain complete (changed source files) | HARD | Verify changed public functions retain structured docstrings | Standard+ |
+| Ignore statements justified | HARD | Reject `# noqa` / `# type: ignore` / `# pyright: ignore` without explicit rule code and justification comment, across `SRC_DIR/**/*.py` **and** `tests/**/*.py` — the acknowledgement path for inherited lint debt runs through test files. Same rule for a new `ignore` / `per-file-ignores` entry in the project's ruff config — the linting gate honours those, so each needs a comment stating why. | Standard+ |
+| No new files created (refactoring only) | HARD | Self-check: only existing files modified | Standard+ |
+| Linting clean (branch delta, source **and** tests) | HARD | Run `check-python-linting.py` on `SRC_DIR/**/*.py` **and** `tests/**/*.py` across the branch delta (`merge-base(HEAD, BASE_BRANCH)..HEAD`), not just the current step. Rule set determined by `LINTING_STRICTNESS` in `af-env.conf` (`minimal`/`standard`/`strict`). Gate is BLOCKED (not fail) if `ruff` is not installed. | Standard+ |
+| Skills read declaration | SOFT | `Skills Read:` line in Gate Summary (critic flags if missing) | Standard+ |
+| Complexity reduced or unchanged | ADVISORY | Run complexity tool, compare before/after | Standard+ |
