@@ -239,6 +239,25 @@ try {
     $results['L_drift_unavailable'] = ($r.Code -eq 0 -and
                                        $r.Output -match '(?m)^\s*available:\s*false\s*$' -and
                                        $r.Output -match 'reason:\s*schema_drift')
+
+    # --- M: the watched attribute set is pinned -----------------------------
+    # These field names carry no compatibility promise. Pinning the set here
+    # means silently narrowing what the collector depends on -- and therefore
+    # silently losing drift detection -- breaks a test instead of a total.
+    $probe = @'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("c", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+print(",".join(sorted(set(mod.REQUIRED_REQUEST_ATTRS) | {mod.BILLING_ATTR})))
+print(mod.NANO_AIU_PER_CREDIT)
+'@
+    $probeFile = Join-Path ([IO.Path]::GetTempPath()) ("cost-probe-" + [Guid]::NewGuid().ToString('N') + '.py')
+    Set-Content -LiteralPath $probeFile -Value $probe -Encoding UTF8
+    $probeOut = (& $python $probeFile $collector 2>&1) -join "`n"
+    Remove-Item $probeFile -Force -ErrorAction SilentlyContinue
+    $results['M_watched_attrs_pinned'] = ($probeOut -match 'cachedTokens,copilotUsageNanoAiu,inputTokens,model,outputTokens')
+    $results['M_credit_unit_pinned']   = ($probeOut -match '(?m)^1000000000\s*$')
 }
 finally {
     foreach ($f in $fixtures) {
