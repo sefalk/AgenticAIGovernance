@@ -38,6 +38,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`git ls-files .github/logs`) and states plainly that the removal is a
     human decision — the alternative would be an agent deleting history-tracked
     files on the strength of a pattern match.
+  - **The retro location had to be settled first.** The agents wrote
+    `retros/auto/`, the documenter's own output section said
+    `.github/retros/auto/`, and the stop hooks accepted either. Predictably,
+    one project ended up with 27 snippets at the repository root and 2 under
+    `.github/` — and only the latter can ever be covered by a rule the
+    framework ships, because the payload cannot place a file outside
+    `.github/`. `.github/retros/auto/` is now stated consistently across the
+    documenter, compliance-checker, coordinator and the retro-summary prompt.
+    The stop hooks still accept the bare path so existing projects keep passing
+    their gates, but they name the canonical one when reporting a miss. Without
+    this, the shipped rule would have protected a directory the agents were not
+    writing to.
 
   Prerequisite for the cost-logging work under issue #22: writing usage figures
   into a tracked file would commit usage data.

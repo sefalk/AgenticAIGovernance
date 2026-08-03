@@ -8,7 +8,7 @@ tools:
 
 # /af-retro-summary — Pull Workflow History
 
-Aggregate and summarise recent retro snippets from `retros/auto/` to inform
+Aggregate and summarise recent retro snippets from `.github/retros/auto/` to inform
 the current workflow. This is a **pull model** — only invoked on demand, not
 auto-injected into every session.
 
