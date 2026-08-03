@@ -134,6 +134,52 @@ cost:
   environment: { vscode: "1.131.0", copilot_chat: "0.59.0" }
 ```
 
+### Storage and retention — local only, never committed
+
+Usage records do not belong in a git repository. Two independent reasons, either
+sufficient on its own:
+
+1. **Sensitivity.** The surrounding workflow log already carries `trigger:
+   "<user request>"` verbatim, and the debug log the block is derived from
+   contains full prompts, tool arguments, and absolute paths with user and
+   corporate storage identifiers. A numeric allowlist keeps the *block* clean;
+   it does not make the *file* it lives in publishable.
+2. **Irrelevance to the product.** Workflow logs and retros are self-improvement
+   instrumentation. They are not source, not documentation, and not audit
+   evidence for the project — they describe how the framework worked, not what
+   the project does. Committing them puts machine-local operational noise into
+   the history of a product repository forever.
+
+This is already the framework's stated intent — `README.md` describes `logs/` as
+gitignored and MANIFEST § lists a 30-day retention — but nothing enforces it,
+and practice has drifted:
+
+| Observation | State |
+|---|---|
+| `deploy` ships no `.gitignore` rule for `logs/` or `retros/` | The rule exists only where a human added it by hand |
+| `MP Usage XP at Teamplay` has `.github/logs/*.yaml` ignored | Added locally, not by the framework |
+| `.github/logs/refactor-test-performance.yaml` is tracked there anyway | `.gitignore` does not untrack a file added before the rule |
+| `retros/auto/*.md` is tracked in bulk in that project | Contradicts the same principle; retros are self-improvement artifacts too |
+
+So the storage decision for the cost block is not a new constraint — it is the
+existing one, applied consistently for the first time. **No change to the
+artifact's location is needed** (`.github/logs/{workflow-id}.yaml` stays), only
+the guarantee that the location is ignored, and that the framework ships that
+guarantee rather than assuming it.
+
+Two consequences worth stating explicitly:
+
+- **Durability is unaffected, and this was the whole point.** Local files are
+  not subject to the debug log's eviction (`maxRetainedSessionLogs: 50`) or
+  truncation. Being local is sufficient for the transience problem; being
+  committed was never what solved it.
+- **Calibration data does not travel.** A fresh clone starts with no history, so
+  cross-workflow calibration is per-machine. If a shared baseline is ever wanted,
+  only the **derived constants** qualify — credits per subagent invocation by
+  role and model, containing no paths, no prompts, no identifiers — and they
+  belong in the framework repository, not in a target project. Deferred; not
+  needed until Tier 2 data actually accumulates.
+
 ## Critical evaluation — what can go wrong
 
 | # | Trap | Why it bites | Mitigation |
@@ -155,7 +201,8 @@ cost:
 - No per-phase (Red/Green/Refactor) attribution in v1. It is feasible via
   timestamps and it roughly doubles the complexity for a question nobody has
   asked yet.
-- No committed raw logs (size, and F5).
+- **Nothing about usage is committed** — neither raw logs nor the derived block
+  (see *Storage and retention*).
 - No historical backfill — the logs did not exist.
 - No quality gate. The block is ADVISORY, permanently.
 - The ad-hoc probe used for this measurement stays a temp file. A throwaway
@@ -174,6 +221,10 @@ per workflow — and only becomes relevant once Tier 2 data actually accumulates
 - Implementation of the two-tier collector — needs its own issue under
   [#22](https://github.com/sefalk/AgenticAIGovernance/issues/22); not created
   as part of this evaluation.
+- The framework should **ship** the ignore rule for `logs/` and `retros/`
+  rather than document it, and the already-tracked files in existing projects
+  need a deliberate decision (untracking is a destructive, human-owned step).
+  Independent of this issue and older than it — worth its own ticket.
 - [#44](https://github.com/sefalk/AgenticAIGovernance/issues/44) should be
   re-planned against measured attach rates rather than the computed worst case.
 - [#43](https://github.com/sefalk/AgenticAIGovernance/issues/43)
@@ -185,3 +236,4 @@ per workflow — and only becomes relevant once Tier 2 data actually accumulates
 | Date | Agent | Change |
 |---|---|---|
 | 2026-08-03 | planner | Measurement of Q1–Q4 recorded; self-logging concept evaluated (F1–F10) |
+| 2026-08-03 | planner | Storage rule added: usage records are local-only, never committed; existing drift in `logs/` and `retros/` documented |
