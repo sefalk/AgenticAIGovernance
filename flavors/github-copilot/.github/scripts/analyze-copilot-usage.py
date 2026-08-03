@@ -10,12 +10,14 @@ Two record shapes exist and are reported separately:
 2. ``source: background`` -- context compaction / summarization, billed to a
    separate, usually cheaper model. This is framework overhead, not work.
 
-Foreground turns are barely represented: repeated measurement shows a stable
-~2 % share regardless of how many sessions accumulate, so per-turn foreground
-usage is simply not persisted here. Compaction, by contrast, is recorded
-consistently and accounts for most of the recorded spend -- which makes it the
-usable signal. Its cost scales with context size, so ``contextLengthBefore`` is
-the metric that framework trimming has to move.
+Foreground turns are *sampled*, not recorded per turn: measurement across 139
+session files found roughly one foreground record per file, regardless of how
+long the session ran. The records that are kept skew expensive, so their share
+of credits far exceeds their share of turns -- read the record count, not the
+credit share, before trusting any per-workflow attribution. Compaction, by
+contrast, is recorded consistently, which makes it the usable signal. Its cost
+scales with context size, so ``contextLengthBefore`` is the metric that
+framework trimming has to move.
 
 Ground truth vs estimate
 ------------------------
@@ -55,6 +57,9 @@ from pathlib import Path
 
 NANO_AIU_PER_CREDIT = 1_000_000_000
 USD_PER_CREDIT = 0.01
+
+# Per-workflow attribution needs a usage record per turn; below that it samples.
+FOREGROUND_ATTRIBUTION_DENSITY = 1.0
 
 USAGE_MARKER = '"usage":{'
 
@@ -623,29 +628,32 @@ def _print_compaction(report: dict[str, object]) -> None:
 def _print_coverage(report: dict[str, object]) -> None:
     """Warn about the limits of the local telemetry.
 
-    The chat session store is not a billing statement. Foreground turns hold a
-    stable ~2 % share no matter how many sessions accumulate, so they are not
-    merely lagging behind a newer format -- per-turn foreground usage is not
-    persisted. Treat the totals as a compaction profile, not as spend.
+    The chat session store is not a billing statement. Foreground turns are
+    sampled rather than recorded per turn, so the totals describe compaction
+    overhead well and total agent spend poorly. The density is measured here
+    rather than asserted, because the sampling behaviour is an implementation
+    detail of the Copilot Chat extension and may change.
     """
     by_source = report["by_source"]  # type: ignore[index]
-    totals = report["totals"]  # type: ignore[index]
-    assert isinstance(by_source, dict) and isinstance(totals, dict)
+    assert isinstance(by_source, dict)
 
     fg = int(by_source.get("foreground", {}).get("requests", 0))
     bg = int(by_source.get("background", {}).get("requests", 0))
+    files = int(report.get("files_scanned", 0))  # type: ignore[arg-type]
+    per_file = fg / files if files else 0.0
 
     print()
     print("-- Coverage " + "-" * 65)
-    print(f"Session files scanned      : {int(report.get('files_scanned', 0))}")  # type: ignore[arg-type]
-    print(f"Foreground turns recorded  : {fg}")
+    print(f"Session files scanned      : {files}")
+    print(f"Foreground turns recorded  : {fg}  ({per_file:.2f} per session file)")
     print(f"Background summarizations  : {bg}")
-    if fg <= bg:
+    if per_file < FOREGROUND_ATTRIBUTION_DENSITY:
         print()
-        print("NOTE: foreground turns are not persisted by VS Code beyond a stable")
-        print("      ~2 % sample, so the totals above are a compaction profile, not")
-        print("      total agent spend. Use the compaction metrics for regression")
-        print("      tracking, and the organisation usage export for absolute cost.")
+        print("NOTE: foreground turns are sampled, not recorded per turn -- about")
+        print(f"      {per_file:.2f} record(s) per session file, where per-workflow attribution")
+        print("      needs one per turn. The sampled records skew expensive, so their")
+        print("      credit share overstates their share of turns. Treat the totals as")
+        print("      a compaction profile; use the organisation usage export for spend.")
 
 
 BASELINE_SCHEMA_VERSION = 1
