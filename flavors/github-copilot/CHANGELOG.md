@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`analyze-copilot-usage.py` asserted a foreground coverage figure that has
+  since been disproved.** Both the module docstring and the report footer
+  claimed per-turn foreground usage "is not persisted by VS Code beyond a
+  stable ~2 % sample". Re-measurement on 139 session files gives 49 foreground
+  records — 22.7% of recorded requests and 30.8% of credits, with records
+  present as far back as March. The original reading was wrong: foreground
+  turns are **sampled**, at roughly 0.35 records per session file regardless
+  of session length, not absent.
+
+  The corrected conclusion is unchanged in its practical effect — 0.35 records
+  per session is still far below the one-per-turn density that per-workflow
+  attribution needs — but the reason matters, and a frozen percentage in a
+  docstring is how a stale finding outlives its evidence. The figure is now
+  computed and printed (`0.35 per session file`) instead of asserted, so the
+  tool corrects itself as the data changes.
+
+  Also recorded: the sampled records skew expensive, so their **credit share
+  overstates their share of turns**. Read the record count, not the credit
+  share, before trusting any attribution built on them.
+
 ### Added
 
 - **Context budget as a regression gate — `check-context-budget.py`
