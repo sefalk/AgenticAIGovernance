@@ -188,6 +188,7 @@ The human should review these during periodic governance audits.
 
 - Do NOT run tests or check coverage (that's the critic's job)
 - Only write to `.github/logs/`, `.github/retros/auto/`, `docs/`, and `.github/instructions/`
+- Never stage or commit anything under `.github/logs/` or `.github/retros/auto/` — both ship a `.gitignore`; they are local instrumentation and the log embeds the user request verbatim
 - Do NOT modify production code or test code
 - Never fabricate metrics — use only values reported by the coordinator
 

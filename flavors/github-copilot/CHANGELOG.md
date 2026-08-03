@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The local-only rule for logs and retros is now shipped, not merely
+  documented (issue #49).** The README described `logs/` as gitignored and
+  MANIFEST set a 30-day retention, but nothing enforced either. The rule
+  existed only where a human had happened to add it — and in at least one
+  project a workflow log had been committed anyway, `trigger:` (the verbatim
+  user request) included.
+
+  Two `.gitignore` files now travel with the payload: `.github/logs/.gitignore`
+  and `.github/retros/auto/.gitignore`, each ignoring its directory's contents
+  and re-admitting only itself and the README.
+
+  Design decisions worth recording:
+
+  - **Directory-scoped, not root-scoped.** Appending to the project's own
+    `.gitignore` would mean merging into a file the project owns, with all the
+    clobber and drift questions that `af-env.conf` needed `[customizable]`
+    handling to answer. A `.gitignore` inside the directory it protects is an
+    ordinary payload file: the existing deploy copies it, the existing hash
+    tracking updates it, and the project's `.gitignore` is never touched.
+  - **Split by author, not by topic.** `retros/auto/` is agent-generated and
+    ignored; hand-written retrospectives one level up stay the project's
+    choice. A retrospective a team wrote and agreed on is documentation, not
+    instrumentation, and the framework has no business deciding its fate.
+  - **Untracking is not automated.** A `.gitignore` has no effect on files
+    committed before it existed, so shipping this changes nothing in a project
+    that already tracks logs. `logs/README.md` names the check
+    (`git ls-files .github/logs`) and states plainly that the removal is a
+    human decision — the alternative would be an agent deleting history-tracked
+    files on the strength of a pattern match.
+
+  Prerequisite for the cost-logging work under issue #22: writing usage figures
+  into a tracked file would commit usage data.
+
 - **Context budget as a regression gate — `check-context-budget.py`
   (issue #29).** Issue #23 cut the always-on instruction set from ~13,000 to
   ~4,800 tokens. Nothing kept it there. Instruction files grow by accretion,

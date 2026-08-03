@@ -529,6 +529,6 @@ escalation context (see `templates/WIP.md` § Escalation Context).
 |---|---|---|---|
 | Plan file (`docs/plans/{type}-{date}-{slug}.md`) | Planner -> Coordinator | Implementer, Documenter | Permanent (human-readable documentation) |
 | WIP.md (`docs/plans/WIP.md`) | Coordinator (on interrupt) | Coordinator (on resume) | Branch-scoped, deleted on completion |
-| Workflow YAML log | Documenter | Human, audit | 30-day retention |
+| Workflow YAML log | Documenter | Human, audit | Local only, never committed; 30-day retention |
 | Provenance markers | All producing agents | Documenter (verification) | Permanent in source |
 | ADRs | Human / Code-critic | All agents | Permanent in docs/ |
