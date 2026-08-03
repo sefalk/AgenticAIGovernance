@@ -134,6 +134,52 @@ cost:
   environment: { vscode: "1.131.0", copilot_chat: "0.59.0" }
 ```
 
+### Storage and retention — local only, never committed
+
+Usage records do not belong in a git repository. Two independent reasons, either
+sufficient on its own:
+
+1. **Sensitivity.** The surrounding workflow log already carries `trigger:
+   "<user request>"` verbatim, and the debug log the block is derived from
+   contains full prompts, tool arguments, and absolute paths with user and
+   corporate storage identifiers. A numeric allowlist keeps the *block* clean;
+   it does not make the *file* it lives in publishable.
+2. **Irrelevance to the product.** Workflow logs and retros are self-improvement
+   instrumentation. They are not source, not documentation, and not audit
+   evidence for the project — they describe how the framework worked, not what
+   the project does. Committing them puts machine-local operational noise into
+   the history of a product repository forever.
+
+This is already the framework's stated intent — `README.md` describes `logs/` as
+gitignored and MANIFEST § lists a 30-day retention — but nothing enforces it,
+and practice has drifted:
+
+| Observation | State |
+|---|---|
+| `deploy` ships no `.gitignore` rule for `logs/` or `retros/` | The rule exists only where a human added it by hand |
+| `MP Usage XP at Teamplay` has `.github/logs/*.yaml` ignored | Added locally, not by the framework |
+| `.github/logs/refactor-test-performance.yaml` is tracked there anyway | `.gitignore` does not untrack a file added before the rule |
+| `retros/auto/*.md` is tracked in bulk in that project | Contradicts the same principle; retros are self-improvement artifacts too |
+
+So the storage decision for the cost block is not a new constraint — it is the
+existing one, applied consistently for the first time. **No change to the
+artifact's location is needed** (`.github/logs/{workflow-id}.yaml` stays), only
+the guarantee that the location is ignored, and that the framework ships that
+guarantee rather than assuming it.
+
+Two consequences worth stating explicitly:
+
+- **Durability is unaffected, and this was the whole point.** Local files are
+  not subject to the debug log's eviction (`maxRetainedSessionLogs: 50`) or
+  truncation. Being local is sufficient for the transience problem; being
+  committed was never what solved it.
+- **Calibration data does not travel.** A fresh clone starts with no history, so
+  cross-workflow calibration is per-machine. If a shared baseline is ever wanted,
+  only the **derived constants** qualify — credits per subagent invocation by
+  role and model, containing no paths, no prompts, no identifiers — and they
+  belong in the framework repository, not in a target project. Deferred; not
+  needed until Tier 2 data actually accumulates.
+
 ## Critical evaluation — what can go wrong
 
 | # | Trap | Why it bites | Mitigation |
@@ -155,7 +201,8 @@ cost:
 - No per-phase (Red/Green/Refactor) attribution in v1. It is feasible via
   timestamps and it roughly doubles the complexity for a question nobody has
   asked yet.
-- No committed raw logs (size, and F5).
+- **Nothing about usage is committed** — neither raw logs nor the derived block
+  (see *Storage and retention*).
 - No historical backfill — the logs did not exist.
 - No quality gate. The block is ADVISORY, permanently.
 - The ad-hoc probe used for this measurement stays a temp file. A throwaway
@@ -169,11 +216,89 @@ additional documenter step, ~12 lines of schema. Per workflow the recurring
 cost is a single script invocation. Calibration is re-run occasionally, not
 per workflow — and only becomes relevant once Tier 2 data actually accumulates.
 
+## Cross-session verification
+
+The Q1 coverage number in the measurement above was taken from a **single**
+session. Recording a single-source finding as a property of the system is the
+exact failure this evaluation criticised in
+[#28](https://github.com/sefalk/AgenticAIGovernance/issues/28), so the scan was
+repeated across all 22 retained session directories (26 `.jsonl` files,
+136 `llm_request` events).
+
+| Observation | Value |
+|---|---|
+| `llm_request` with `copilotUsageNanoAiu` | 133 / 136 (97.8 %) |
+| The three without it | all `debugName: backgroundTodoAgent`, model `gpt-4o-mini`, `status: ok`, no error |
+| Distinct `debugName` values | `panel/editAgent` (74), `tool/runSubagent-*` (58), `backgroundTodoAgent` (3), `summarizeConversationHistory` (1) |
+| Distinct models | `claude-opus-5` (73), `claude-sonnet-5` (35), `claude-haiku-4.5` (23), `gpt-4o-mini` (3), `gpt-5.3-codex` (2) |
+
+The corrected statement is therefore **not** "100 % of requests are billed" but:
+**every billed request carries the billing attribute; unbilled infrastructure
+requests carry none.** A missing attribute means *not billed*, not *lost*. This
+sharpens trap F10 — an absent value must be **classified**, never defaulted to
+zero and never dropped silently.
+
+Two further facts fall out of the same scan:
+
+- **Compaction is recorded.** Conversation summarisation appears as an ordinary
+  `llm_request` with `debugName: summarizeConversationHistory`, carrying its own
+  billed cost. The debug log needs no special case for it.
+- **The two instruments agree.** That single compaction cost **40.57 credits**;
+  `docs/metrics/usage-baseline.json`, produced by the older
+  `analyze-copilot-usage.py` from a different store using list prices, records a
+  mean of **40.76 credits** over 157 compactions — a 0.5 % spread between two
+  independent sources. The pre-[#23](https://github.com/sefalk/AgenticAIGovernance/issues/23)
+  baseline is corroborated, not superseded.
+
+## Fate of the existing tooling
+
+`analyze-copilot-usage.py` (754 lines) reads `chatSessions/*.jsonl` and prices
+via `models.json`. Most of its bulk exists to fight that store's shape, not to
+solve the accounting problem — so the new collector is small, but only two
+parts of the old one transfer.
+
+| Component | Verdict | Reason |
+|---|---|---|
+| Storage-root + session discovery | **Reuse** | Same `workspaceStorage` tree, different leaf directory |
+| `build_baseline` / `BASELINE_SCHEMA_VERSION` | **Reuse the pattern** | Deterministic, schema-versioned, no timestamps or ids — exactly the shape the `cost:` block needs |
+| Exit-code convention (`0` report / `1` no records / `2` fatal) | **Reuse** | Already the framework convention |
+| `_percentile` | **Reuse** | 9 lines, dependency-free |
+| Brace-matching parser (`_extract_object`, `_parse_window`, `parse_session_file`) | **Eliminate** | Debug logs are real JSONL — one `json.loads` per line replaces ~100 lines of regex and brace counting |
+| `deduplicate` | **Eliminate** | No double-persistence in the debug log; keep the *idea* as a smoke assertion, not as code |
+| `load_price_table` / `estimate_credits` / `PRICE_FIELDS` / `discover_models_json` | **Eliminate** | Billed cost is present at source; list prices overstate by 10.7 % |
+| `compaction_stats` / `_print_compaction` | **Eliminate from the new path** | Compaction arrives as a normal request with its own billed cost |
+| `_print_coverage` (foreground density) | **Eliminate from the new path** | It measures a sampling defect the new source does not have |
+
+**The old script is frozen, not deleted.** Three reasons it retains standalone
+value: it is the only reader of the store the pre-#23 baseline was built from;
+it covers sessions recorded before file logging was enabled, and beyond the
+50-session retention window; and the two stores evict independently, which makes
+it a genuine second instrument — one that has now been shown to agree with the
+new source to within 0.5 %.
+
+Consequences:
+
+- Two scripts, not one. Different store, different shape, different caller
+  (human ad-hoc analysis vs. documenter, once per workflow). A single script
+  with two parsers, two pricing paths and a mode flag would be worse than both.
+- [#47](https://github.com/sefalk/AgenticAIGovernance/pull/47) stays valid and
+  should be merged as-is: it corrects the *legacy* tool's own coverage
+  statement. It must not be folded into the new collector.
+- `docs/metrics/usage-baseline.json` stays frozen and is **not** regenerated.
+- The ~20 lines of shared discovery are duplicated deliberately rather than
+  extracted into a shared module — the two scripts have different lifetimes,
+  and coupling them would tie a frozen script to an evolving one.
+
 ## Follow-up
 
-- Implementation of the two-tier collector — needs its own issue under
-  [#22](https://github.com/sefalk/AgenticAIGovernance/issues/22); not created
-  as part of this evaluation.
+- [#50](https://github.com/sefalk/AgenticAIGovernance/issues/50) — implementation
+  of the two-tier collector, filed as a sub-issue of
+  [#22](https://github.com/sefalk/AgenticAIGovernance/issues/22).
+- [#49](https://github.com/sefalk/AgenticAIGovernance/issues/49) — ship the
+  ignore rule for `logs/` and `retros/` rather than document it. Hard
+  prerequisite for #50: writing a cost block into a tracked file would commit
+  usage data. Untracking the already-tracked files in existing projects stays a
+  human-owned, destructive step.
 - [#44](https://github.com/sefalk/AgenticAIGovernance/issues/44) should be
   re-planned against measured attach rates rather than the computed worst case.
 - [#43](https://github.com/sefalk/AgenticAIGovernance/issues/43)
@@ -185,3 +310,5 @@ per workflow — and only becomes relevant once Tier 2 data actually accumulates
 | Date | Agent | Change |
 |---|---|---|
 | 2026-08-03 | planner | Measurement of Q1–Q4 recorded; self-logging concept evaluated (F1–F10) |
+| 2026-08-03 | planner | Storage rule added: usage records are local-only, never committed; existing drift in `logs/` and `retros/` documented |
+| 2026-08-03 | planner | Coverage re-measured across all 22 sessions (single-source claim corrected); compaction shown to be recorded and to cross-validate the pre-#23 baseline; component-level verdict on the existing tooling recorded |
