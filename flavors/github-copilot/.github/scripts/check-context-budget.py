@@ -1,0 +1,238 @@
+"""Context budget gate: fail when the always-on instruction payload regrows.
+
+The always-on set is what VS Code prepends to *every* chat request in a project:
+``copilot-instructions.md`` plus every ``instructions/*.md`` whose ``applyTo``
+glob matches all files. It is fully computable offline -- no instrumentation
+needed -- because the globs are static and the file sizes are known.
+
+Instruction files grow by accretion: every new rule looks small in isolation,
+and ``applyTo: '**'`` is the path of least resistance for an author who wants a
+rule to be seen. This check turns that drift into a build failure.
+
+Also reports the per-agent total (agent file + always-on set), so a single
+agent prompt cannot silently regrow either.
+
+Budgets come from ``.github/af-env.conf``:
+  AF_CONTEXT_BUDGET_TOKENS        -- always-on set
+  AF_AGENT_CONTEXT_BUDGET_TOKENS  -- agent file + always-on set, per agent
+
+Exit codes: 0 pass, 1 over budget, 2 blocked (required input missing/unreadable).
+"""
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+# Rough estimate. Good enough for a drift gate: we care about a 20% regression,
+# not about a 3% tokenizer discrepancy. Deliberately dependency-free -- adding a
+# real tokenizer would make this gate unrunnable wherever that package is absent.
+BYTES_PER_TOKEN = 4
+
+# applyTo globs that match every file. An author writing any of these means
+# "always on"; anything narrower is conditional and not part of the budget.
+UNIVERSAL_GLOBS = {"**", "**/*", "**/**", "*"}
+
+DEFAULT_CONTEXT_BUDGET = 5000
+DEFAULT_AGENT_BUDGET = 11000
+
+TAG = "[context-budget]"
+
+
+class Blocked(Exception):
+    """A required input is missing or unreadable, so the result is unknown.
+
+    Distinct from "over budget" on purpose: silence must not read as success.
+    """
+
+
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    except OSError as exc:
+        raise Blocked(f"cannot read {path}: {exc}") from exc
+
+
+def _tokens(path: Path) -> int:
+    try:
+        return path.stat().st_size // BYTES_PER_TOKEN
+    except OSError as exc:
+        raise Blocked(f"cannot stat {path}: {exc}") from exc
+
+
+def _frontmatter(text: str) -> str | None:
+    """Return the YAML frontmatter block, or None when the file has none."""
+    if not text.startswith("---"):
+        return None
+    end = text.find("\n---", 3)
+    return None if end == -1 else text[3:end]
+
+
+def _apply_to(path: Path) -> tuple[str | None, bool]:
+    """Return (raw applyTo value, is_always_on) for an instruction file.
+
+    A missing or empty ``applyTo`` counts as always-on: that is the expensive
+    reading, and an ambiguous file should push the total up rather than hide in
+    it. The caller surfaces it as a warning so the author can disambiguate.
+    """
+    front = _frontmatter(_read_text(path))
+    if front is None:
+        return None, True
+    match = re.search(r"^applyTo:\s*(.+)$", front, re.MULTILINE)
+    if not match:
+        return None, True
+    raw = match.group(1).strip().strip("'\"")
+    if not raw:
+        return None, True
+    globs = {g.strip().strip("'\"") for g in raw.split(",") if g.strip()}
+    return raw, bool(globs & UNIVERSAL_GLOBS)
+
+
+def _read_budgets(conf_path: Path) -> tuple[int, int]:
+    budgets = {
+        "AF_CONTEXT_BUDGET_TOKENS": DEFAULT_CONTEXT_BUDGET,
+        "AF_AGENT_CONTEXT_BUDGET_TOKENS": DEFAULT_AGENT_BUDGET,
+    }
+    if not conf_path.is_file():
+        return budgets["AF_CONTEXT_BUDGET_TOKENS"], budgets["AF_AGENT_CONTEXT_BUDGET_TOKENS"]
+    text = _read_text(conf_path)
+    for key in budgets:
+        match = re.search(rf"^{key}=(.*)$", text, re.MULTILINE)
+        if not match:
+            continue
+        value = match.group(1).strip()
+        if not value:
+            continue
+        if not value.isdigit() or int(value) <= 0:
+            raise Blocked(f"{key} in af-env.conf is not a positive integer: {value!r}")
+        budgets[key] = int(value)
+    return budgets["AF_CONTEXT_BUDGET_TOKENS"], budgets["AF_AGENT_CONTEXT_BUDGET_TOKENS"]
+
+
+def _always_on_set(github_dir: Path) -> tuple[list[tuple[str, int]], list[str]]:
+    """Return ([(name, tokens)], warnings) for everything sent on every request."""
+    entries: list[tuple[str, int]] = []
+    warnings: list[str] = []
+
+    root_instructions = github_dir / "copilot-instructions.md"
+    if not root_instructions.is_file():
+        raise Blocked(f"copilot-instructions.md not found in {github_dir}")
+    entries.append((root_instructions.name, _tokens(root_instructions)))
+
+    instructions_dir = github_dir / "instructions"
+    if not instructions_dir.is_dir():
+        raise Blocked(f"instructions/ directory not found in {github_dir}")
+
+    for path in sorted(instructions_dir.glob("*.md")):
+        raw, always_on = _apply_to(path)
+        if not always_on:
+            continue
+        if raw is None:
+            warnings.append(f"{path.name} has no applyTo -- counted as always-on")
+        entries.append((path.name, _tokens(path)))
+    return entries, warnings
+
+
+def _agent_totals(github_dir: Path, always_on_total: int) -> list[tuple[str, int, int]]:
+    agents_dir = github_dir / "agents"
+    if not agents_dir.is_dir():
+        raise Blocked(f"agents/ directory not found in {github_dir}")
+    totals = [
+        (path.stem.replace(".agent", ""), _tokens(path), _tokens(path) + always_on_total)
+        for path in sorted(agents_dir.glob("*.agent.md"))
+    ]
+    if not totals:
+        raise Blocked(f"no agent files found in {agents_dir}")
+    return sorted(totals, key=lambda row: row[2], reverse=True)
+
+
+def _print_breakdown(entries: list[tuple[str, int]], total: int, budget: int) -> None:
+    print(f"{TAG} always-on set -- sent with every chat request:")
+    for name, tokens in sorted(entries, key=lambda row: row[1], reverse=True):
+        print(f"  {tokens:6,} tok  {name}")
+    print(f"  {'-' * 6}")
+    print(f"  {total:6,} tok  TOTAL (budget {budget:,})")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Fail when the always-on instruction payload exceeds its budget.",
+        epilog="Budgets: AF_CONTEXT_BUDGET_TOKENS, AF_AGENT_CONTEXT_BUDGET_TOKENS "
+               "in .github/af-env.conf.",
+    )
+    parser.add_argument(
+        "--github-dir", type=Path, default=None,
+        help="Path to the .github directory (defaults to the one containing this script)",
+    )
+    parser.add_argument(
+        "--verbose", action="store_true",
+        help="Print the per-file breakdown even when the check passes",
+    )
+    args = parser.parse_args(argv)
+
+    # This script lives at <github-dir>/scripts/, which resolves correctly both
+    # in the AF source tree and in a deployed project.
+    github_dir = args.github_dir or Path(__file__).resolve().parents[1]
+
+    try:
+        if not github_dir.is_dir():
+            raise Blocked(f"github directory not found: {github_dir}")
+        context_budget, agent_budget = _read_budgets(github_dir / "af-env.conf")
+        entries, warnings = _always_on_set(github_dir)
+        always_on_total = sum(tokens for _, tokens in entries)
+        agent_totals = _agent_totals(github_dir, always_on_total)
+    except Blocked as exc:
+        print(f"{TAG} BLOCKED -- {exc}", file=sys.stderr)
+        print(f"{TAG} Result unknown, not passing. Fix the input and re-run.", file=sys.stderr)
+        return 2
+
+    for warning in warnings:
+        print(f"{TAG} WARNING: {warning}")
+
+    worst_agent, worst_agent_tokens, worst_total = agent_totals[0]
+    over_context = always_on_total > context_budget
+    over_agent = worst_total > agent_budget
+
+    if not (over_context or over_agent):
+        if args.verbose:
+            _print_breakdown(entries, always_on_total, context_budget)
+            print()
+        print(
+            f"{TAG} PASS -- always-on {always_on_total:,}/{context_budget:,} tok; "
+            f"largest agent {worst_agent} {worst_total:,}/{agent_budget:,} tok"
+        )
+        return 0
+
+    if over_context:
+        _print_breakdown(entries, always_on_total, context_budget)
+        print()
+        print(
+            f"{TAG} FAIL -- always-on set is {always_on_total - context_budget:,} tok "
+            f"over budget ({always_on_total:,} > {context_budget:,})."
+        )
+        print()
+        print("To fix, in order of preference:")
+        print("  - Narrow the applyTo glob so the file loads only when relevant.")
+        print("  - Move depth into a skill (loaded on demand) or the owning agent file.")
+        print("  - Delete duplication -- check whether the rule already exists elsewhere.")
+        print("  - Raise AF_CONTEXT_BUDGET_TOKENS only as a deliberate, justified decision.")
+
+    if over_agent:
+        if over_context:
+            print()
+        print(f"{TAG} agent context totals (agent file + always-on set):")
+        for name, own, total in agent_totals:
+            marker = "  <-- over budget" if total > agent_budget else ""
+            print(f"  {total:6,} tok  {name} (own {own:,}){marker}")
+        print()
+        print(
+            f"{TAG} FAIL -- {worst_agent} is {worst_total - agent_budget:,} tok over "
+            f"budget ({worst_total:,} > {agent_budget:,}); own prompt {worst_agent_tokens:,} tok."
+        )
+
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

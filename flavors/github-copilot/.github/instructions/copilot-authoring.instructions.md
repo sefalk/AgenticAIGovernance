@@ -220,6 +220,25 @@ Before saving any `.agent.md`, `.prompt.md`, or `.instructions.md` file:
 - [ ] `applyTo` globs use forward slashes and `**` patterns
 - [ ] `infer` not used (deprecated — use `user-invocable` + `disable-model-invocation`)
 - [ ] Model arrays use exact model names with vendor suffix: `Model Name (copilot)`
+- [ ] Context budget still holds: `pwsh .github/scripts/check-context-budget.py`
+
+### Before widening an `applyTo` to `**`
+
+`applyTo: '**'` puts the file into the **always-on set** — prepended to every
+chat request, in every workflow, forever. Its cost is the file size multiplied
+by every turn the project will ever run, which makes it the most expensive
+decision available in this directory.
+
+Prefer, in order:
+
+1. **A narrower glob.** Most rules are about a file type, not about everything.
+2. **A skill.** Depth belongs in `skills/` and loads on demand.
+3. **The owning agent file.** A rule only one agent needs is not a global rule.
+4. **`applyTo: '**'`** — only for rules every agent needs on every turn.
+
+`check-context-budget.py` enforces the ceiling (`AF_CONTEXT_BUDGET_TOKENS`).
+The headroom is deliberately small: adding an always-on rule should mean
+removing something else, not raising the budget.
 
 ## 6. Agent Hooks Authoring
 
