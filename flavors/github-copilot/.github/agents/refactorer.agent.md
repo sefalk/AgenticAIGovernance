@@ -144,8 +144,27 @@ via `.github/scripts/check-python-quality.py`.
 
 ## Return Format
 
+### On COMPLETED
+
+Under `OUTPUT_VERBOSITY=standard` or `lean` (`af-env.conf`):
+
 ```markdown
-## Refactoring Summary: {COMPLETED | PARTIAL | FAILED}
+## Refactoring Summary: COMPLETED
+
+{One line per change: what and why.}
+Tests {passed}/{total} before and after — unchanged.
+
+### Files Changed
+- `{path}` — {description}
+```
+
+Under `lean`, list the paths without descriptions. Under `full`, emit the
+complete structure below.
+
+### On PARTIAL or FAILED — full detail, all modes
+
+```markdown
+## Refactoring Summary: {PARTIAL | FAILED}
 
 ### Changes Made
 1. {What and why}
@@ -154,12 +173,15 @@ via `.github/scripts/check-python-quality.py`.
 - Before: {passed}/{total}
 - After: {passed}/{total} (must be identical)
 
-### Skipped Refactorings (if PARTIAL or FAILED)
+### Skipped Refactorings
 - {What was attempted and why it broke tests}
 
 ### Files Changed
 - `{path}` — {description}
 ```
+
+A skipped refactoring is never omitted — it is the record of a structural
+problem someone still has to decide about.
 
 ## Exit Gates
 

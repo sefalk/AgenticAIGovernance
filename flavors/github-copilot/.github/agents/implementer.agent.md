@@ -167,8 +167,27 @@ for syntax/import checks.
 
 ## Return Format
 
+### On success (all tests pass, no HARD gate failed)
+
+Under `OUTPUT_VERBOSITY=standard` or `lean` (`af-env.conf`):
+
 ```markdown
-## Implementation Summary
+## Implementation Summary: COMPLETED
+
+Subtasks {done}/{total}. Tests {passed}/{total}. Coverage {line}% line / {branch}% branch.
+
+### Files Changed
+- `{path}` — {what changed}
+```
+
+Under `lean`, list the paths without descriptions — but never drop the list
+itself: the code-critic reviews exactly those files. Under `full`, emit the
+complete structure below.
+
+### On PARTIAL, FAILED, or any failed/BLOCKED HARD gate — full detail, all modes
+
+```markdown
+## Implementation Summary: {COMPLETED | PARTIAL | FAILED}
 
 ### Completed Subtasks
 - [x] {Subtask 1}: {description}
@@ -183,6 +202,10 @@ for syntax/import checks.
 ### Issues Encountered
 - {Any problems or deviations from the plan}
 ```
+
+Always report deviations from the plan, an unmet acceptance criterion, or a
+HARD gate you could not verify — in every mode. A silent deviation is the one
+thing the coordinator cannot recover from.
 
 ## Exit Gates
 

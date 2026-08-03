@@ -87,6 +87,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documents empty → compute `../{repo}_worktrees`. Two duplicate list-numbering
   bugs in the moved Step 0d / Step 8 procedures were corrected as well.
 
+- **Subagent return verbosity is now conditional on outcome (issue #24).**
+  Everything a subagent returns enters the coordinator's context and is
+  **re-sent as input with every following coordinator turn**. A verbose success
+  therefore costs far more than the tokens it took to write once — cost scales
+  with the number of remaining turns, not with the size of the return.
+
+  New `OUTPUT_VERBOSITY=full|standard|lean` in `af-env.conf`, **defaulting to
+  `full`** so existing projects are unaffected until they opt in. `af-env.conf`
+  is `[customizable]`, so a redeploy will not inject the key silently — and an
+  absent key resolves to `full`, i.e. today's behaviour.
+
+  **The invariant, in every mode: failure output is never reduced.** REJECTED,
+  ESCALATE, FAILED, BLOCKED, and any failed HARD gate always return full
+  detail, because that is exactly what the retry consumes. Verdict headers
+  (`## Code Review Verdict: {V}` etc.) are HARD gates and are never dropped.
+  Only the path where nothing went wrong gets shorter.
+
+  Applied to the Gate Summary (collapses to one line when all HARD gates pass
+  and nothing is BLOCKED), both critic verdicts, the three producer summaries,
+  the documenter, and both compliance-checker checkpoints. Estimated ~900–1,000
+  tokens of returned output per green Standard workflow, which is re-sent
+  roughly four more times on average.
+
+  Two things were deliberately **not** changed. The **arbiter** is only ever
+  invoked on a dispute, so its entire output is already the failure path.
+  The **planner** could not adopt the issue's "reference the plan file, don't
+  restate it" proposal: the planner is read-only by design and the coordinator
+  persists the plan, so the plan has to travel through chat. Reducing plan size
+  is issue #26's subject, not this one.
+
+  An early draft also shortened the REJECTED path by dropping passing checklist
+  lines. That was reverted — a rule stated as absolute ("failure output is
+  never reduced") survives contact with a weak executor; the same rule with an
+  exception does not.
+
 ### Fixed
 
 - **ADO agents restored after the upstream MCP toolset consolidation

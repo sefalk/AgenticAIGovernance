@@ -109,6 +109,19 @@ Every agent appends this section to their return:
 - **Skills Read:** {list of SKILL.md files read, or "none — no applicable skills"}
 ```
 
+**Collapse it when everything passed.** If `OUTPUT_VERBOSITY` (`af-env.conf`)
+is `standard` or `lean` **and** all HARD gates passed with nothing BLOCKED and
+no SOFT gate needing a judgment call, emit one line instead:
+
+```markdown
+### Gate Summary
+{Tier} · HARD {passed}/{total} · SOFT {count} evaluated · BLOCKED none · Skills: {list or none}
+```
+
+Any failure, BLOCKED gate, or ADVISORY metric worth reporting → emit the full
+block regardless of mode. When in doubt, emit the full block: the cost of an
+extra table is small, the cost of a silently dropped gate failure is not.
+
 **Skills Read compliance (producer agents only — test-writer, implementer,
 refactorer):** The `Skills Read:` line is a SOFT gate. If missing or empty,
 the reviewing critic flags it as a SOFT gate failure. If the producer claims

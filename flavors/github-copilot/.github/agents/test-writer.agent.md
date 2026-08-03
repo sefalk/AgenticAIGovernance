@@ -140,6 +140,30 @@ have terminal access.
 
 ## Return Format
 
+### On success (all new tests fail for the right reason, 0 errors)
+
+Under `OUTPUT_VERBOSITY=standard` or `lean` (`af-env.conf`):
+
+```markdown
+## Test Suite Summary (Red Phase)
+
+{F} failing (expected), {P} passing (pre-existing), 0 errors.
+
+### Tests Created
+- `{path}` — {count} tests covering {what}
+
+### Coverage of Acceptance Criteria
+- [x] {Criterion 1} → tested by `test_{name}`
+- [ ] {Criterion 3} → not testable at unit level
+```
+
+The acceptance-criteria map is what the test-critic reviews — it is never
+shortened, in any mode. `Tests Created` already names every file, so no
+separate `Files Changed` list is needed. Under `full`, emit the complete
+structure below.
+
+### On errors > 0, or any criterion left untested — full detail, all modes
+
 ```markdown
 ## Test Suite Summary (Red Phase)
 
