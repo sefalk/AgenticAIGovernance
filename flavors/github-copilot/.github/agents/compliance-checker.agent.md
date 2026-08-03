@@ -56,7 +56,7 @@ The coordinator invokes you with `mode=pre-flight` and provides:
 | Branch is not `main`/`master` | Compare branch name | **BLOCKING** — abort workflow |
 | Plan directory resolved | Path is non-empty, directory exists | **WARNING** — coordinator must fix |
 | WIP.md state is consistent | If found, status is valid (`IN_PROGRESS`, `PAUSED`, `CANCELLED`) | **WARNING** |
-| Retro directory scanned | `retros/auto/` was checked for lessons | **ADVISORY** |
+| Retro directory scanned | `.github/retros/auto/` was checked for lessons | **ADVISORY** |
 | Branch relates to task description | Compare branch slug semantics to task | **ADVISORY** |
 | Work-item first (tracker active) | If `ADO_CAPABILITY_MODE != off`: a resolved work item exists, is **Active**, and its id prefixes the branch slug | **BLOCKING** when tracker active |
 
@@ -100,7 +100,7 @@ The coordinator invokes you with `mode=post-flight` and provides:
 |---|---|---|
 | Plan file status = COMPLETED | Read plan file, check status field | **MISSING** |
 | Workflow log YAML exists | Check `.github/logs/{workflow-id}.yaml` | **MISSING** |
-| Retro snippet exists | Check `retros/auto/{workflow-id}.md` | **MISSING** |
+| Retro snippet exists | Check `.github/retros/auto/{workflow-id}.md` | **MISSING** |
 | Provenance markers on new files | Read first 5 lines of each new file, check for `copilot:generated` | **WARNING** |
 | Provenance markers on modified files | Check for `copilot:modified` in substantially changed files | **ADVISORY** |
 | Integration path matches capability mode | Read `ADO_CAPABILITY_MODE` from `af-env.conf`: if `required`, a PR must have been opened (request-based); if `off`, no PR worker ran (pure git). Mismatch = wrong integration path | **MISSING** for request-based |
@@ -181,7 +181,7 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Pre-flight: work-item first (tracker active) | HARD | When `ADO_CAPABILITY_MODE != off`: a resolved work item exists, is Active, and its id prefixes the branch slug | Standard+ |
 | Post-flight: plan file status = COMPLETED | HARD | Read plan file, check status field | Standard+ |
 | Post-flight: workflow log YAML exists | HARD | Check `.github/logs/{workflow-id}.yaml` | Standard+ |
-| Post-flight: retro snippet exists | HARD | Check `retros/auto/{workflow-id}.md` | Standard+ |
+| Post-flight: retro snippet exists | HARD | Check `.github/retros/auto/{workflow-id}.md` | Standard+ |
 | Post-flight: integration path matches capability mode | HARD | If `ADO_CAPABILITY_MODE=required`, a PR was opened; if `off`, no PR worker ran | Standard+ |
 | Post-flight: branch-to-work-item association (R-SD-08) | HARD | When tracker capability is active (`ADO_CAPABILITY_MODE != off`): the branch-slug work item id equals the PR-linked work item id (no cross-attribution), the item was Active at work start, and it links the branch + plan path. Tracker off ⇒ local traceability artifact instead. | Standard+ |
 | Post-flight: provenance markers on new files | SOFT | Read first 5 lines of new files | Standard+ |

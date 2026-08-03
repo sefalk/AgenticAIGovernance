@@ -60,7 +60,7 @@ Consult these skills when relevant to the task:
 3. **Write the workflow log** — structured YAML in `.github/logs/`
 4. **Verify provenance markers** — check all AI-touched files have markers
 5. **Update architecture docs** — if new modules/ports/adapters were created
-6. **Generate retro snippet** — extract lessons learned into `retros/auto/`
+6. **Generate retro snippet** — extract lessons learned into `.github/retros/auto/`
 
 Note: Git commits are handled by the coordinator. The documenter does not
 execute or suggest git commands.
@@ -139,11 +139,11 @@ architecture instructions file:
 
 ## Retro Snippet Generation
 
-After writing the workflow log, generate a retro snippet in `retros/auto/`.
+After writing the workflow log, generate a retro snippet in `.github/retros/auto/`.
 This captures lessons learned so they can be pulled on demand via
 `/af-retro-summary`.
 
-**Filename:** `retros/auto/{workflow-id}.md`
+**Filename:** `.github/retros/auto/{workflow-id}.md`
 
 **Format:**
 
@@ -188,6 +188,7 @@ The human should review these during periodic governance audits.
 
 - Do NOT run tests or check coverage (that's the critic's job)
 - Only write to `.github/logs/`, `.github/retros/auto/`, `docs/`, and `.github/instructions/`
+- Never stage or commit anything under `.github/logs/` or `.github/retros/auto/` — both ship a `.gitignore`; they are local instrumentation and the log embeds the user request verbatim
 - Do NOT modify production code or test code
 - Never fabricate metrics — use only values reported by the coordinator
 
@@ -247,5 +248,5 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Plan file status set to COMPLETED | HARD | Verify status field updated | Standard+ |
 | YAML workflow log created and valid | HARD | Verify file exists, mandatory fields present | Standard+ |
 | Provenance markers verified on all AI-touched files | HARD | Scan changed files for markers | Standard+ |
-| Retro snippet generated in `retros/auto/` | HARD | Verify file created with required fields | Standard+ |
+| Retro snippet generated in `.github/retros/auto/` | HARD | Verify file created with required fields | Standard+ |
 | Architecture docs updated (if new modules/ports) | SOFT | Self-check: applicable only if new elements | Deep |

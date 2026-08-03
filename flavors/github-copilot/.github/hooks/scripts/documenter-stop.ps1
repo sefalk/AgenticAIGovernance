@@ -38,10 +38,12 @@ if (-not (Test-Path $logPath1) -and -not (Test-Path $logPath2)) {
 
 # ---------- Gate 2: Retro snippet ----------
 
-$retroPath1 = "retros/auto/$workflowId.md"
-$retroPath2 = ".github/retros/auto/$workflowId.md"
+# Canonical location is .github/retros/auto/; the bare path is accepted for
+# projects that adopted it before the location was settled.
+$retroPath1 = ".github/retros/auto/$workflowId.md"
+$retroPath2 = "retros/auto/$workflowId.md"
 if (-not (Test-Path $retroPath1) -and -not (Test-Path $retroPath2)) {
-    $missing += "retro snippet (retros/auto/$workflowId.md)"
+    $missing += "retro snippet (.github/retros/auto/$workflowId.md)"
 }
 
 # ---------- Verdict ----------

@@ -22,9 +22,9 @@ if [[ "$branch" =~ ^agent/(.+)$ ]]; then
         missing+=("workflow log (.github/logs/${workflow_id}.yaml)")
     fi
 
-    # Check for retro snippet
-    if [ ! -f "retros/auto/${workflow_id}.md" ] && [ ! -f ".github/retros/auto/${workflow_id}.md" ]; then
-        missing+=("retro snippet (retros/auto/${workflow_id}.md)")
+    # Check for retro snippet (canonical first, legacy root path still accepted)
+    if [ ! -f ".github/retros/auto/${workflow_id}.md" ] && [ ! -f "retros/auto/${workflow_id}.md" ]; then
+        missing+=("retro snippet (.github/retros/auto/${workflow_id}.md)")
     fi
 
     # Check for plan file marked COMPLETED

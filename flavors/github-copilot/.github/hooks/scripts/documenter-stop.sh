@@ -33,8 +33,10 @@ fi
 
 # ---------- Gate 2: Retro snippet ----------
 
-if [ ! -f "retros/auto/${workflow_id}.md" ] && [ ! -f ".github/retros/auto/${workflow_id}.md" ]; then
-    missing+=("retro snippet (retros/auto/${workflow_id}.md)")
+# Canonical location is .github/retros/auto/; the bare path is accepted for
+# projects that adopted it before the location was settled.
+if [ ! -f ".github/retros/auto/${workflow_id}.md" ] && [ ! -f "retros/auto/${workflow_id}.md" ]; then
+    missing+=("retro snippet (.github/retros/auto/${workflow_id}.md)")
 fi
 
 # ---------- Verdict ----------

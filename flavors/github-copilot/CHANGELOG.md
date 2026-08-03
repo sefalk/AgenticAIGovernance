@@ -31,6 +31,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The local-only rule for logs and retros is now shipped, not merely
+  documented (issue #49).** The README described `logs/` as gitignored and
+  MANIFEST set a 30-day retention, but nothing enforced either. The rule
+  existed only where a human had happened to add it — and in at least one
+  project a workflow log had been committed anyway, `trigger:` (the verbatim
+  user request) included.
+
+  Two `.gitignore` files now travel with the payload: `.github/logs/.gitignore`
+  and `.github/retros/auto/.gitignore`, each ignoring its directory's contents
+  and re-admitting only itself and the README.
+
+  Design decisions worth recording:
+
+  - **Directory-scoped, not root-scoped.** Appending to the project's own
+    `.gitignore` would mean merging into a file the project owns, with all the
+    clobber and drift questions that `af-env.conf` needed `[customizable]`
+    handling to answer. A `.gitignore` inside the directory it protects is an
+    ordinary payload file: the existing deploy copies it, the existing hash
+    tracking updates it, and the project's `.gitignore` is never touched.
+  - **Split by author, not by topic.** `retros/auto/` is agent-generated and
+    ignored; hand-written retrospectives one level up stay the project's
+    choice. A retrospective a team wrote and agreed on is documentation, not
+    instrumentation, and the framework has no business deciding its fate.
+  - **Untracking is not automated.** A `.gitignore` has no effect on files
+    committed before it existed, so shipping this changes nothing in a project
+    that already tracks logs. `logs/README.md` names the check
+    (`git ls-files .github/logs`) and states plainly that the removal is a
+    human decision — the alternative would be an agent deleting history-tracked
+    files on the strength of a pattern match.
+  - **The retro location had to be settled first.** The agents wrote
+    `retros/auto/`, the documenter's own output section said
+    `.github/retros/auto/`, and the stop hooks accepted either. Predictably,
+    one project ended up with 27 snippets at the repository root and 2 under
+    `.github/` — and only the latter can ever be covered by a rule the
+    framework ships, because the payload cannot place a file outside
+    `.github/`. `.github/retros/auto/` is now stated consistently across the
+    documenter, compliance-checker, coordinator and the retro-summary prompt.
+    The stop hooks still accept the bare path so existing projects keep passing
+    their gates, but they name the canonical one when reporting a miss. Without
+    this, the shipped rule would have protected a directory the agents were not
+    writing to.
+
+  Prerequisite for the cost-logging work under issue #22: writing usage figures
+  into a tracked file would commit usage data.
+
 - **Context budget as a regression gate — `check-context-budget.py`
   (issue #29).** Issue #23 cut the always-on instruction set from ~13,000 to
   ~4,800 tokens. Nothing kept it there. Instruction files grow by accretion,

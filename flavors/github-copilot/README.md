@@ -326,9 +326,11 @@ CHANGELOG.md                               # Release history (Keep a Changelog f
 │   ├── review-code.prompt.md              # /af-review-code → code review only
 │   ├── smoke-test.prompt.md               # /af-smoke-test → verify framework health
 │   └── workflow-summary.prompt.md         # /af-workflow-summary → log summary
-├── logs/                                  # Workflow handoff logs (gitignored)
+├── logs/                                  # Workflow handoff logs (local only)
+│   ├── .gitignore                          # ships the rule — keeps logs out of git
 │   └── README.md
 └── retros/                                # Retrospective documents
+    ├── auto/.gitignore                     # agent-generated snippets stay local
     └── README.md
 ```
 

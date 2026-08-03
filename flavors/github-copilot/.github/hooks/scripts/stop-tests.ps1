@@ -25,11 +25,11 @@ if ($branch -and $branch -match '^agent/(.+)$') {
         }
     }
 
-    # Check for retro snippet
-    $retroPattern = "retros/auto/$workflowId.md"
-    $retroPatternGH = ".github/retros/auto/$workflowId.md"
+    # Check for retro snippet (canonical first, legacy root path still accepted)
+    $retroPattern = ".github/retros/auto/$workflowId.md"
+    $retroPatternGH = "retros/auto/$workflowId.md"
     if (-not (Test-Path $retroPattern) -and -not (Test-Path $retroPatternGH)) {
-        $missing += "retro snippet (retros/auto/$workflowId.md)"
+        $missing += "retro snippet (.github/retros/auto/$workflowId.md)"
     }
 
     # Check for plan file in docs/plans/ (any file mentioning COMPLETED)
