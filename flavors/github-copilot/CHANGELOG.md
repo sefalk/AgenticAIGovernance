@@ -46,6 +46,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gate table had drifted from the canonical one (it was missing the
   "never creates/relaxes branch policies" HARD gate) — it is now reconciled.
 
+- **`coordinator.agent.md` modularised from ~11,400 to ~6,000 tokens
+  (issue #25).** The coordinator is the entry point for every task, so its
+  system prompt is a fixed prefix on every coordinator turn — and it had grown
+  into a single file holding routing rules, git procedure, worktree bootstrap,
+  optional ADO sequences, and the verbatim delegation prompt for all nine
+  workflow steps.
+
+  The issue proposed splitting per workflow variant. That axis does not work:
+  Steps 0–8 are largely *shared* across Full TDD, Quick Fix, and Trivial Fix —
+  only which steps run varies — so a per-variant split would duplicate rather
+  than reduce. The split used instead is by **conditionality and frequency of
+  need**: content for features that are off by default, and content needed only
+  once a workflow is actually executing.
+
+  Three extractions:
+
+  - **Worktree bootstrap and cleanup → `git-worktrees` skill § 2.** Steps 0d
+    and 8 are skipped entirely when `WORKTREE_ENABLED=false` (the default) or
+    on a Trivial Fix, yet ~914 + ~356 tokens of procedure were paid on every
+    turn. The coordinator now carries a conditional pointer with the
+    preconditions and the "if dirty, halt — never force-remove" rule inline.
+  - **ADO Sync and ADO Pipeline workflow sequences → `ado-shared` skill.**
+    ~788 tokens describing what happens when `ADO_CAPABILITY_MODE != off`
+    (default: `off`). The pure-git default stays inline because it is what
+    happens in almost every run.
+  - **Execution runbook → new `tdd-orchestration` skill.** The workflow state
+    machine, phase checkpoints, subagent context block, the Step 1–7b
+    delegation prompts, and interruption/cancellation recovery — needed only
+    once a workflow executes, not to decide *whether* to execute one.
+
+  Degradation safety was the design constraint: the agent file keeps the
+  workflow-selection diagrams (which agents, in which order) and a compact
+  control-point table (retry ceilings and escalation branches per step), so a
+  coordinator that never reads the runbook still retains the skeleton. The
+  runbook adds precision, not the basic sequence.
+
+  A documentation drift was fixed on the way: `git-worktrees/SKILL.md` stated
+  a `WORKTREE_DIR` default of `../wt` in two places, while `af-env.conf`
+  documents empty → compute `../{repo}_worktrees`. Two duplicate list-numbering
+  bugs in the moved Step 0d / Step 8 procedures were corrected as well.
+
 ### Fixed
 
 - **ADO agents restored after the upstream MCP toolset consolidation

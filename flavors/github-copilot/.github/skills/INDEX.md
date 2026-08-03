@@ -33,13 +33,14 @@
 | 22 | `git-worktrees` | Create, manage, and remove git worktrees for parallel agent task execution. Lifecycle commands, context verification, troubleshooting, and recovery procedures. | coordinator |
 | 23 | `notebook-execution` | Interact with local Jupyter / `.ipynb` notebooks via the VS Code notebook tools (run/edit cells, kernel selection, read outputs) instead of terminal scripts. | coordinator, implementer, refactorer, code-critic, test-writer |
 | 24 | `git-workflow` | Git autonomy boundary, integration paths (pure git vs request-based), branch/work-item association (R-SD-08), phase-to-commit mapping, planning document lifecycle, and pre-commit guards. | coordinator, planner, documenter |
+| 25 | `tdd-orchestration` | The coordinator's execution runbook — workflow state machine, git phase checkpoints, subagent context injection, the Step 1–7b delegation prompts with their retry and escalation policies, per-return protocols, and interruption/cancellation recovery. | coordinator |
 
 ## Agent Skill Matrix
 
 | Agent | Skills |
 |-------|--------|
 | **planner** | task-decomposition, risk-management, design-patterns, git-workflow |
-| **coordinator** | git-workflow, git-worktrees, databricks-execution-patterns, notebook-execution |
+| **coordinator** | tdd-orchestration, git-workflow, git-worktrees, databricks-execution-patterns, notebook-execution |
 | **test-writer** | unit-testing, property-testing, error-handling, human-escalation, notebook-execution |
 | **test-critic** | unit-testing, code-review, property-testing |
 | **implementer** | hexagonal-architecture, pydantic, error-handling, design-patterns, static-analysis, dependency-management, human-escalation, databricks-execution-patterns, notebook-execution |
