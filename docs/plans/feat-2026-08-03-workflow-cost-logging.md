@@ -159,10 +159,30 @@ Given a session directory, decide whether it can be totalled at all.
 
 **Acceptance criteria**
 
-- The documenter invokes the collector once per workflow, passing the session
-  path and the workflow start time.
+- The collector runs once per workflow against the session of the run, with the
+  workflow start time passed in.
 - MANIFEST and `logs/README.md` describe the block and its ADVISORY status.
 - CHANGELOG entry.
+
+**Revised during implementation.** The plan assumed the documenter agent would
+invoke the collector. It does not: its **Stop hook** does, after the artifact
+gate passes, appending the script's output verbatim.
+
+Two findings forced the change, both measured against the real log:
+
+1. The hook input JSON carries `session_id` and `transcript_path`, and both name
+   the **parent** session even when the hook fires inside a subagent. The
+   session directory is therefore derivable
+   (`<ws>/GitHub.copilot-chat/debug-logs/<session_id>`) without the
+   `VSCODE_TARGET_SESSION_LOG` template variable — which the documenter, having
+   no terminal tool, could not have acted on anyway.
+2. Numbers routed through the documenter would be transcribed by a language
+   model. The hook writes them verbatim, so they cannot drift.
+
+The workflow start is the oldest commit on the branch, so a session that began
+after the workflow yields `coverage: partial` without anyone having to pass a
+timestamp. The block is a snapshot at documenter-stop time; the coordinator's
+closing turns are not in it.
 
 ## Conventions
 
@@ -193,3 +213,4 @@ is not regenerated.
 | Date | Change |
 |---|---|
 | 2026-08-03 | Created. Pre-implementation measurement of `VSCODE_TARGET_SESSION_LOG` folded into the design. |
+| 2026-08-03 | Subtasks 1-4 implemented (32 checks green). Subtask 5 revised: the documenter's Stop hook appends the block, not the documenter — hook stdin carries the parent `session_id` and `transcript_path`, and a hook writes the numbers verbatim instead of via a language model. |
