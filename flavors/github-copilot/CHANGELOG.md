@@ -7,6 +7,121 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Always-on instruction set trimmed from ~13,000 to ~4,800 tokens per
+  request (issue #23).** Three instruction files carry `applyTo: '**'`, so
+  every agent on every request paid for all of their content. Most of it was
+  addressed to exactly one agent.
+
+  The measurement that motivated this: background compaction accounts for
+  97.7% of recorded spend, at ~40.8 credits per compaction with a mean
+  pre-compaction context of ~178k tokens. Always-on overhead is paid on every
+  turn *and* re-paid through the compaction it accelerates, so it compounds.
+
+  Three moves, no rule removed:
+
+  - **`git-workflow.instructions.md` (5,322 → 1,190 tokens).** Only the
+    coordinator runs git, yet every worker loaded the 22-row autonomy boundary
+    table, both integration paths, the planning document lifecycle, the
+    pre-commit guards, and Git LFS guidance. That depth moved to a new
+    **`git-workflow` skill**; the instruction keeps what a worker actually
+    needs — who may run git, the hard-denied operations, branch naming, and
+    the atomic commit contract. Safe because the `block-dangerous` and
+    `coordinator-pretooluse` hooks enforce the boundary mechanically, not via
+    prompt text.
+  - **`quality-gates.instructions.md` (4,979 → 1,375 tokens).** The Per-Agent
+    Exit Gates block held all 15 agents' gate tables; each agent needs one.
+    All 100 gate rows moved verbatim into the `## Exit Gates` section of the
+    corresponding `agents/*.agent.md`, where they load exactly when that agent
+    runs. This follows a pattern `ado-pipeline-manager` already used. The
+    taxonomy, complexity tiers, exit protocol, and Gate Summary format stay
+    always-on because they are genuinely universal.
+  - **`provenance.instructions.md` (1,298 → 818 tokens).** Condensed prose;
+    the marker formats moved into a single table. No rule changed.
+
+  Two duplications surfaced and were resolved rather than carried along: the
+  instruction's Worktree Lifecycle sections were a subset of the existing
+  `git-worktrees` skill and were deleted, and `ado-pipeline-manager`'s local
+  gate table had drifted from the canonical one (it was missing the
+  "never creates/relaxes branch policies" HARD gate) — it is now reconciled.
+
+- **`coordinator.agent.md` modularised from ~11,400 to ~6,000 tokens
+  (issue #25).** The coordinator is the entry point for every task, so its
+  system prompt is a fixed prefix on every coordinator turn — and it had grown
+  into a single file holding routing rules, git procedure, worktree bootstrap,
+  optional ADO sequences, and the verbatim delegation prompt for all nine
+  workflow steps.
+
+  The issue proposed splitting per workflow variant. That axis does not work:
+  Steps 0–8 are largely *shared* across Full TDD, Quick Fix, and Trivial Fix —
+  only which steps run varies — so a per-variant split would duplicate rather
+  than reduce. The split used instead is by **conditionality and frequency of
+  need**: content for features that are off by default, and content needed only
+  once a workflow is actually executing.
+
+  Three extractions:
+
+  - **Worktree bootstrap and cleanup → `git-worktrees` skill § 2.** Steps 0d
+    and 8 are skipped entirely when `WORKTREE_ENABLED=false` (the default) or
+    on a Trivial Fix, yet ~914 + ~356 tokens of procedure were paid on every
+    turn. The coordinator now carries a conditional pointer with the
+    preconditions and the "if dirty, halt — never force-remove" rule inline.
+  - **ADO Sync and ADO Pipeline workflow sequences → `ado-shared` skill.**
+    ~788 tokens describing what happens when `ADO_CAPABILITY_MODE != off`
+    (default: `off`). The pure-git default stays inline because it is what
+    happens in almost every run.
+  - **Execution runbook → new `tdd-orchestration` skill.** The workflow state
+    machine, phase checkpoints, subagent context block, the Step 1–7b
+    delegation prompts, and interruption/cancellation recovery — needed only
+    once a workflow executes, not to decide *whether* to execute one.
+
+  Degradation safety was the design constraint: the agent file keeps the
+  workflow-selection diagrams (which agents, in which order) and a compact
+  control-point table (retry ceilings and escalation branches per step), so a
+  coordinator that never reads the runbook still retains the skeleton. The
+  runbook adds precision, not the basic sequence.
+
+  A documentation drift was fixed on the way: `git-worktrees/SKILL.md` stated
+  a `WORKTREE_DIR` default of `../wt` in two places, while `af-env.conf`
+  documents empty → compute `../{repo}_worktrees`. Two duplicate list-numbering
+  bugs in the moved Step 0d / Step 8 procedures were corrected as well.
+
+- **Subagent return verbosity is now conditional on outcome (issue #24).**
+  Everything a subagent returns enters the coordinator's context and is
+  **re-sent as input with every following coordinator turn**. A verbose success
+  therefore costs far more than the tokens it took to write once — cost scales
+  with the number of remaining turns, not with the size of the return.
+
+  New `OUTPUT_VERBOSITY=full|standard|lean` in `af-env.conf`, **defaulting to
+  `full`** so existing projects are unaffected until they opt in. `af-env.conf`
+  is `[customizable]`, so a redeploy will not inject the key silently — and an
+  absent key resolves to `full`, i.e. today's behaviour.
+
+  **The invariant, in every mode: failure output is never reduced.** REJECTED,
+  ESCALATE, FAILED, BLOCKED, and any failed HARD gate always return full
+  detail, because that is exactly what the retry consumes. Verdict headers
+  (`## Code Review Verdict: {V}` etc.) are HARD gates and are never dropped.
+  Only the path where nothing went wrong gets shorter.
+
+  Applied to the Gate Summary (collapses to one line when all HARD gates pass
+  and nothing is BLOCKED), both critic verdicts, the three producer summaries,
+  the documenter, and both compliance-checker checkpoints. Estimated ~900–1,000
+  tokens of returned output per green Standard workflow, which is re-sent
+  roughly four more times on average.
+
+  Two things were deliberately **not** changed. The **arbiter** is only ever
+  invoked on a dispute, so its entire output is already the failure path.
+  The **planner** could not adopt the issue's "reference the plan file, don't
+  restate it" proposal: the planner is read-only by design and the coordinator
+  persists the plan, so the plan has to travel through chat. Reducing plan size
+  is issue #26's subject, not this one.
+
+  An early draft also shortened the REJECTED path by dropping passing checklist
+  lines. That was reverted — a rule stated as absolute ("failure output is
+  never reduced") survives contact with a weak executor; the same rule with an
+  exception does not.
+
 ### Fixed
 
 - **ADO agents restored after the upstream MCP toolset consolidation

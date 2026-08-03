@@ -60,7 +60,9 @@ prompts/
 # Skills
 skills/
 skills/INDEX.md                                          [customizable]
+skills/git-workflow/SKILL.md
 skills/git-worktrees/SKILL.md
+skills/tdd-orchestration/SKILL.md
 skills/curated-assignments.json                          [customizable, optional]
 
 # Templates

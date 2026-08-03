@@ -62,6 +62,16 @@ The coordinator invokes you with `mode=pre-flight` and provides:
 
 ### Pre-Flight Return Format
 
+**On PASS** under `OUTPUT_VERBOSITY=standard` or `lean` (`af-env.conf`), one
+line is enough — nothing downstream acts on a clean checkpoint:
+
+```markdown
+### Pre-Flight Verdict: PASS
+Branch `{branch}` · plan dir `{path}` · {no WIP | resuming from {phase}} · retros scanned · branch relevance OK
+```
+
+**On FAIL, or any WARNING/BLOCKING item**, itemise — in every mode:
+
 ```markdown
 ## Pre-Flight Check
 
@@ -71,9 +81,9 @@ The coordinator invokes you with `mode=pre-flight` and provides:
 - **Retros scanned:** {yes | no}
 - **Branch relevance:** {OK: new branch | OK: branch matches task | WARNING: branch may not match task}
 
-### Pre-Flight Verdict: {PASS | FAIL}
+### Pre-Flight Verdict: FAIL
 
-{If FAIL: list blocking issues and recommend abort}
+{List blocking issues and recommend abort}
 ```
 
 ## Mode: Post-Flight
@@ -98,6 +108,17 @@ The coordinator invokes you with `mode=post-flight` and provides:
 
 ### Post-Flight Return Format
 
+**On PASS** under `OUTPUT_VERBOSITY=standard` or `lean` (`af-env.conf`):
+
+```markdown
+### Post-Flight Verdict: PASS
+Plan COMPLETED · log `{path}` · retro `{path}` · integration {matches mode | N/A pure git} · R-SD-08 {OK | N/A} · provenance {n}/{n}
+```
+
+**On FAIL, or any missing marker**, itemise — in every mode. A missing
+artifact is precisely what the coordinator has to remediate, so it needs the
+names, not a count:
+
 ```markdown
 ## Post-Flight Check
 
@@ -113,12 +134,12 @@ The coordinator invokes you with `mode=post-flight` and provides:
 - **Markers present:** {count}
 - **Markers missing:** {list of files, or "none"}
 
-### Post-Flight Verdict: {PASS | FAIL}
+### Post-Flight Verdict: FAIL
 
-**Missing artifacts:** {list, or "none"}
+**Missing artifacts:** {list}
 
-{If FAIL: "Coordinator must invoke the documenter with full workflow
-context to create the missing artifacts, then re-run post-flight."}
+"Coordinator must invoke the documenter with full workflow context to create
+the missing artifacts, then re-run post-flight."
 ```
 
 ## Complexity Tier Behaviour
@@ -147,3 +168,20 @@ context to create the missing artifacts, then re-run post-flight."}
 - **Artifacts remediated:** {count, or "none"}
 - **Blocking issues:** {list, or "none"}
 ```
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| Pre-flight: branch not on main/master | HARD | Check branch name | Standard+ |
+| Pre-flight: plan directory resolved | HARD | Verify directory exists | Standard+ |
+| Pre-flight: work-item first (tracker active) | HARD | When `ADO_CAPABILITY_MODE != off`: a resolved work item exists, is Active, and its id prefixes the branch slug | Standard+ |
+| Post-flight: plan file status = COMPLETED | HARD | Read plan file, check status field | Standard+ |
+| Post-flight: workflow log YAML exists | HARD | Check `.github/logs/{workflow-id}.yaml` | Standard+ |
+| Post-flight: retro snippet exists | HARD | Check `retros/auto/{workflow-id}.md` | Standard+ |
+| Post-flight: integration path matches capability mode | HARD | If `ADO_CAPABILITY_MODE=required`, a PR was opened; if `off`, no PR worker ran | Standard+ |
+| Post-flight: branch-to-work-item association (R-SD-08) | HARD | When tracker capability is active (`ADO_CAPABILITY_MODE != off`): the branch-slug work item id equals the PR-linked work item id (no cross-attribution), the item was Active at work start, and it links the branch + plan path. Tracker off ⇒ local traceability artifact instead. | Standard+ |
+| Post-flight: provenance markers on new files | SOFT | Read first 5 lines of new files | Standard+ |

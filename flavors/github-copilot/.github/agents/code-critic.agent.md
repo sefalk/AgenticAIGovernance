@@ -151,10 +151,38 @@ the workflow's test budget.
 
 ## Return Format
 
-Return your verdict in this exact format so the coordinator can parse it:
+The verdict header is a HARD gate — emit it exactly, always:
 
 ```markdown
 ## Code Review Verdict: {APPROVED | REJECTED | ESCALATE}
+```
+
+### On APPROVED
+
+Nothing is wrong, so nothing needs to be reconstructed downstream. Under
+`OUTPUT_VERBOSITY=standard` (`af-env.conf`) return the header, a 1–2 sentence
+summary, the metric line, and the Gate Summary — no checklists:
+
+```markdown
+## Code Review Verdict: APPROVED
+
+{1–2 sentences: what was reviewed and why it passes.}
+Coverage {X}% line / {Y}% branch (thresholds {A}%/{B}%). Attempt {N} of 3.
+{Unresolved SHOULD-FIX / ADVISORY items, one line each — omit if none.}
+```
+
+Under `lean`, drop the prose sentences and keep the metric line. Under `full`,
+emit the complete structure below.
+
+An ADVISORY or unaddressed SHOULD-FIX finding is **not** noise — it is what the
+documenter puts in the plan's Follow-Up section. Always carry it, in every mode.
+
+### On REJECTED or ESCALATE — full detail, all modes
+
+A retry can only be as good as the feedback it receives. Never compress this:
+
+```markdown
+## Code Review Verdict: {REJECTED | ESCALATE}
 
 ### Summary
 {1–3 sentence overview}
@@ -180,14 +208,27 @@ Return your verdict in this exact format so the coordinator can parse it:
 - [x] No vulnerable dependencies
 - [x] Input validation at boundaries
 
-### Issues Found (if REJECTED)
+### Issues Found
 1. **{file}:{line}** — **{BLOCKING | SHOULD-FIX | ADVISORY}** — {description}
    - Suggested fix: {guidance}
 
-### Rejection Detail (REJECTED only)
+### Rejection Detail
 - **blocking_count:** {N}
 - **retry_guidance:** {1-2 sentences of actionable direction for the maker's retry}
 
 ### Review Attempt
 - Attempt: {1 | 2 | 3} of 3
 ```
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| Gate 1 auto-check items verified | HARD | Run syntax/import/lint/test checks | Standard+ |
+| Architecture review completed | SOFT | Self-check: layer boundary analysis done | Standard+ |
+| Metrics collected and compared to thresholds | HARD | Run coverage + complexity tools | Standard+ |
+| Security checklist completed | SOFT | Self-check: Gate 4 items checked | Standard+ |
+| Verdict header is parseable | HARD | Verify `## Code Review Verdict: {V}` format | Standard+ |

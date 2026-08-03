@@ -112,12 +112,16 @@ policy settings for the human, and a Gate Summary.
 
 ## Exit Gates
 
-| Gate | Type | How to verify |
-|---|---|---|
-| No terminal/git operations performed | HARD | Only MCP/read tools used |
-| Pipeline definition registered or reused (no duplicate) | HARD | `pipelines_definition` (action `list`) checked before create |
-| YAML present on the target branch | HARD | `repo_file` (action `get_content`) succeeded |
-| Run triggered and status reported | HARD | `pipelines_write` (action `run_pipeline`) + `pipelines_build` (action `get_status`) |
-| Agent-pool readiness classified | HARD | queued-no-agent vs started reported |
-| Build Validation policy settings emitted for human | SOFT | settings block present in return |
-| `ADO_PROJECT` injected on project-aware calls | HARD | explicit project on every MCP call |
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| No terminal/git operations performed | HARD | Verify the agent used only MCP/read tools | Standard+ |
+| Pipeline YAML present on the target branch | HARD | `repo_file` (action `get_content`) confirms the YAML on the branch | Standard+ |
+| Definition registered or reused (no duplicate) | HARD | `pipelines_definition` (action `list`) checked before create | Standard+ |
+| Run triggered and final status reported | HARD | `pipelines_write` (action `run_pipeline`) + `pipelines_build` (action `get_status`) | Standard+ |
+| Agent-pool readiness classified | HARD | Distinguish `queued-no-agent` from `started`; report BLOCKED on no agent | Standard+ |
+| `ADO_PROJECT` injected on project-aware calls | HARD | Explicit project on every MCP call | Standard+ |
+| Build Validation policy settings emitted for human | SOFT | Reviewer checks the policy settings block (buildDefinitionId, isBlocking, branch scopes from `ADO_GATE_BRANCHES`) | Standard+ |
+| Never creates/relaxes branch policies or completes PRs | HARD | Verify no policy mutation and no PR completion | Standard+ |

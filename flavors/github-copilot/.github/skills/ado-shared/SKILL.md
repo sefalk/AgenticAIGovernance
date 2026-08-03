@@ -176,3 +176,92 @@ workers, so the individual agents reference it instead of restating it:
 
 When these rules change, update them here once; workers should not duplicate
 the detail.
+
+## Coordinator Workflow Sequences
+
+For the **coordinator only**, and only when `ADO_CAPABILITY_MODE != off`
+(the default is `off`). `coordinator.agent.md` names these workflows and the
+work-item-first rule; the sequences and their contracts live here.
+
+### ADO Sync Workflow
+
+```
+ado-work-item-manager(resolve + set Active)   # WIT-first, BEFORE the branch
+   -> [create branch agent/{wit-id}-{slug}]
+   -> compliance-checker(pre)
+   -> ado-wiki-manager (optional, task-dependent)
+   -> ado-work-item-manager(finalize: AC->evidence map, no Close)
+   -> compliance-checker(post)
+   -> [push feature branch] -> ado-pr-manager (autocomplete, transitionWorkItems:false)
+   -> [merge confirmed] -> ado-work-item-manager(reconcile: Resolved w/ evidence)
+```
+
+Use this only when the project contract defines Azure DevOps capability as
+required or optional. If optional and unavailable, require degraded fallback
+output and continue with local traceability artifacts.
+
+### Step 0a: Work-Item First
+
+Establish the work item before any branch exists, so code and tracker stay
+aligned from the start (this prevents reactive, mis-attributed, or WIT-less work):
+
+1. Invoke **ado-work-item-manager** (`mode=resolve`) to find or create the work
+   item for **this specific task**. One unit of work → one work item; do not
+   reuse an unrelated open item — infra/dependency bumps, tooling fixes, and
+   analysis tasks each get their own item. If the task spans several concerns,
+   split them.
+2. Ensure the item is set to **Active** at work start.
+3. Use its id in the branch slug: `agent/{work-item-id}-{workflow-id}`.
+4. **No branch without a resolved work item.** If resolution is impossible
+   (capability required but unavailable), halt and escalate (Fail-Safe).
+
+The **planner** may propose the work item title/scope; the **coordinator**
+confirms the item and its id before branch creation. This id is the single
+source of truth for the branch slug, the PR link, and post-merge reconciliation.
+
+### ADO Pipeline Workflow
+
+```
+compliance-checker(pre)
+        -> [implementer: pipeline YAML + gate script]
+        -> code-critic -> documenter
+        -> ado-pipeline-manager (register + run + verify)  [optional]
+        -> compliance-checker(post)
+        -> [push feature branch] -> ado-pr-manager (optional)
+```
+
+Use this when the deliverable is establishing or operating an Azure DevOps
+pipeline (e.g., a PR quality-gate / build-validation pipeline). The
+**implementer** authors the pipeline YAML and any gate script; the
+**ado-pipeline-manager** registers the definition, runs it to verify
+(cross-checking agent-pool availability), and emits the exact Build Validation
+branch-policy settings. **Attaching the branch policy is human-guided** — no
+MCP tool exists for policy creation; the coordinator relays the emitted
+settings to the human. When `ADO_CAPABILITY_MODE=off`, do not run
+`ado-pipeline-manager`.
+
+### Request-Based Integration Path
+
+Applies once an ADO PR capability is enabled. (The pure-git default — never
+run `ado-pr-manager`, push and merge stay human-controlled — is stated in
+`coordinator.agent.md`.)
+
+After a clean post-flight, the coordinator pushes the feature branch
+`agent/{id}` from the active work location (main checkout or worktree, per
+`WORKTREE_ENABLED`) with `git push -u origin agent/{id}` — never a protected
+branch, never force. Then it invokes `ado-pr-manager` to open/update the PR and
+apply the branch-scoped completion policy: an integration branch autocompletes,
+a protected branch is human-only. If the PR manager returns
+`BLOCKED (branch not published)`, push and re-invoke.
+
+### Post-Merge Reconciliation (mandatory, request-based)
+
+The PR carries `transitionWorkItems: false`, so it never changes work-item
+status. Once the merge into the integration branch is **confirmed**, invoke
+**ado-work-item-manager** to transition the linked work item to **Resolved**
+with an AC→evidence map (Closed only later, at verification / promotion).
+
+This is the single point where the code and work-item state machines reconnect
+— status follows merged evidence, never the PR's auto-transition.
+
+See `skills/git-workflow/SKILL.md` § 2 for the full two-path integration contract.

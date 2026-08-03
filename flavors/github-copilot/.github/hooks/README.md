@@ -26,7 +26,7 @@ wired via `core.hooksPath`:
   works on Windows without a `.ps1` equivalent). It calls
   `.github/hooks/scripts/check-large-files.py` to reject staged files above
   `LARGE_FILE_MAX_BYTES` (see `.github/af-env.conf` — the large-file commit
-  guard). See [git-workflow.instructions.md](../instructions/git-workflow.instructions.md)
+  guard). See [git-workflow SKILL.md](../skills/git-workflow/SKILL.md) § 7
   for the threshold/override/allowlist design.
 - Enabled per clone by `git config core.hooksPath .github/hooks/git` — done
   automatically by `scripts/bootstrap-python-env.ps1` / `.sh`. **Existing

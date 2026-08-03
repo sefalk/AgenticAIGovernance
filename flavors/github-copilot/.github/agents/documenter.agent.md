@@ -41,6 +41,7 @@ as a **subagent** by the coordinator as the last step of every workflow.
 
 Consult these skills when relevant to the task:
 - **documentation** (`skills/documentation/SKILL.md`) — docstrings, ADRs, README, handoff logs
+- **git-workflow** (`skills/git-workflow/SKILL.md`) — § 6 planning document lifecycle and finalisation
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 
@@ -192,8 +193,27 @@ The human should review these during periodic governance audits.
 
 ## Return Format
 
+### On success (all artifacts written)
+
+Under `OUTPUT_VERBOSITY=standard` or `lean` (`af-env.conf`) — the artifacts
+themselves are the deliverable, so the return only has to say where they are:
+
 ```markdown
-## Documentation Summary
+## Documentation Summary: COMPLETED
+
+Log `.github/logs/{workflow-id}.yaml` · retro `.github/retros/auto/{workflow-id}.md`
+· plan status COMPLETED · provenance {present}/{checked} ({added} added)
+· architecture {updated | no updates needed}
+
+`[agent:documenter] {summary}`
+```
+
+### On PARTIAL or FAILED — full detail, all modes
+
+The coordinator has to know exactly which artifact is missing to remediate it:
+
+```markdown
+## Documentation Summary: {PARTIAL | FAILED}
 
 ### Workflow Log
 - Written to: `.github/logs/{workflow-id}.yaml`
@@ -202,6 +222,7 @@ The human should review these during periodic governance audits.
 - Files checked: {count}
 - Markers present: {count}
 - Markers added: {count}
+- Markers still missing: {list}
 
 ### Architecture Updates
 - {What was updated, or "No updates needed"}
@@ -209,6 +230,22 @@ The human should review these during periodic governance audits.
 ### Retro Snippet
 - Written to: `.github/retros/auto/{workflow-id}.md`
 
+### What Failed
+- {Which artifact, and why}
+
 ### Suggested Git Commit
 `[agent:documenter] {summary}`
 ```
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| Plan file status set to COMPLETED | HARD | Verify status field updated | Standard+ |
+| YAML workflow log created and valid | HARD | Verify file exists, mandatory fields present | Standard+ |
+| Provenance markers verified on all AI-touched files | HARD | Scan changed files for markers | Standard+ |
+| Retro snippet generated in `retros/auto/` | HARD | Verify file created with required fields | Standard+ |
+| Architecture docs updated (if new modules/ports) | SOFT | Self-check: applicable only if new elements | Deep |

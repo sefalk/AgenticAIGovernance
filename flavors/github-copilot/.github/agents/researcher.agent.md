@@ -136,3 +136,16 @@ Follow the [Agent Team Manifest](../MANIFEST.md) principles:
 - **Separation of Concerns** — you retrieve and synthesize information.
   Planning, coding, testing, and reviewing are other agents' responsibilities.
 - **Traceability** — every claim must have a source URL and retrieval date.
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| Every factual claim has a source URL | HARD | Self-verify: no unsourced assertions | Standard+ |
+| No credentials or tokens in fetched URLs | HARD | Grep output for secret patterns | Standard+ |
+| Output is structured brief, not raw content | HARD | Self-verify: no verbatim page dumps | Standard+ |
+| Sources are authoritative (official docs preferred) | SOFT | Consumer (planner/human) judges | Standard+ |
+| Retrieval timestamp noted per source | ADVISORY | Informs staleness assessment | Standard+ |

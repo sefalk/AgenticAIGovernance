@@ -88,3 +88,14 @@ Apply these principles in order:
 - **No execution** — do NOT run tests or terminal commands
 - Your recommendation is **binding** for this workflow cycle
 - If the dispute involves a **new architectural element**, always ESCALATE
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| Both positions read and summarised | SOFT | Self-check: positions quoted | Deep |
+| Verdict header is parseable | HARD | Verify `## Arbiter Decision: {V}` format | Deep |
+| Decision references a principle or precedent | SOFT | Human judgment on appeal | Deep |
