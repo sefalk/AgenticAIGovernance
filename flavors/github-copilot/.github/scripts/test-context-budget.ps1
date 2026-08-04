@@ -205,7 +205,9 @@ try {
     # N: an agent whose worst case breaches the agent budget is marked, but the
     #    exit code stays 0 -- gating it would fail every agent for one shared
     #    cause. The teeth are on the conditional total instead (see O).
-    $gh = New-Fixture -RootTokens 100 -Conf $condConf -Agents @{ 'solo' = 50 } -Instructions @{
+    #    own 3,000 + always-on 300 = 3,300 unconditional (passes 5,000);
+    #    + 1,900 conditional = 5,200 worst case (over 5,000, marked only).
+    $gh = New-Fixture -RootTokens 100 -Conf $condConf -Agents @{ 'solo' = 3000 } -Instructions @{
         'wide.instructions.md'   = @{ Tokens = 200; ApplyTo = '**' }
         'narrow.instructions.md' = @{ Tokens = 1900; ApplyTo = 'src/**/*.py' }
     }

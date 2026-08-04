@@ -12,9 +12,17 @@ rule to be seen. This check turns that drift into a build failure.
 Also reports the per-agent total (agent file + always-on set), so a single
 agent prompt cannot silently regrow either.
 
+The *conditional* files -- those with a narrower ``applyTo`` -- are measured
+too. A narrow glob makes a file load less often; it does not make it cheap, and
+for the agents whose job is to touch matching files it is close to always-on.
+Which conditional files co-occur in a real turn is not computable offline, so
+this reports the **upper bound** (all of them) per agent and puts the
+enforcement on the conditional set as a whole.
+
 Budgets come from ``.github/af-env.conf``:
   AF_CONTEXT_BUDGET_TOKENS        -- always-on set
   AF_AGENT_CONTEXT_BUDGET_TOKENS  -- agent file + always-on set, per agent
+  AF_CONDITIONAL_BUDGET_TOKENS    -- all narrowly-scoped instruction files
 
 Exit codes: 0 pass, 1 over budget, 2 blocked (required input missing/unreadable).
 """
@@ -36,6 +44,7 @@ UNIVERSAL_GLOBS = {"**", "**/*", "**/**", "*"}
 
 DEFAULT_CONTEXT_BUDGET = 5000
 DEFAULT_AGENT_BUDGET = 11000
+DEFAULT_CONDITIONAL_BUDGET = 10000
 
 TAG = "[context-budget]"
 
@@ -89,57 +98,90 @@ def _apply_to(path: Path) -> tuple[str | None, bool]:
     return raw, bool(globs & UNIVERSAL_GLOBS)
 
 
-def _read_budgets(conf_path: Path) -> tuple[int, int]:
+def _read_budgets(conf_path: Path) -> tuple[int, int, int]:
     budgets = {
         "AF_CONTEXT_BUDGET_TOKENS": DEFAULT_CONTEXT_BUDGET,
         "AF_AGENT_CONTEXT_BUDGET_TOKENS": DEFAULT_AGENT_BUDGET,
+        "AF_CONDITIONAL_BUDGET_TOKENS": DEFAULT_CONDITIONAL_BUDGET,
     }
-    if not conf_path.is_file():
-        return budgets["AF_CONTEXT_BUDGET_TOKENS"], budgets["AF_AGENT_CONTEXT_BUDGET_TOKENS"]
-    text = _read_text(conf_path)
-    for key in budgets:
-        match = re.search(rf"^{key}=(.*)$", text, re.MULTILINE)
-        if not match:
-            continue
-        value = match.group(1).strip()
-        if not value:
-            continue
-        if not value.isdigit() or int(value) <= 0:
-            raise Blocked(f"{key} in af-env.conf is not a positive integer: {value!r}")
-        budgets[key] = int(value)
-    return budgets["AF_CONTEXT_BUDGET_TOKENS"], budgets["AF_AGENT_CONTEXT_BUDGET_TOKENS"]
+    if conf_path.is_file():
+        text = _read_text(conf_path)
+        for key in budgets:
+            match = re.search(rf"^{key}=(.*)$", text, re.MULTILINE)
+            if not match:
+                continue
+            value = match.group(1).strip()
+            if not value:
+                continue
+            if not value.isdigit() or int(value) <= 0:
+                raise Blocked(f"{key} in af-env.conf is not a positive integer: {value!r}")
+            budgets[key] = int(value)
+    return (
+        budgets["AF_CONTEXT_BUDGET_TOKENS"],
+        budgets["AF_AGENT_CONTEXT_BUDGET_TOKENS"],
+        budgets["AF_CONDITIONAL_BUDGET_TOKENS"],
+    )
 
 
-def _always_on_set(github_dir: Path) -> tuple[list[tuple[str, int]], list[str]]:
-    """Return ([(name, tokens)], warnings) for everything sent on every request."""
-    entries: list[tuple[str, int]] = []
+def _instruction_sets(
+    github_dir: Path,
+) -> tuple[list[tuple[str, int]], list[tuple[str, int, str]], list[str]]:
+    """Split the instruction payload into what always loads and what may load.
+
+    Parameters
+    ----------
+    github_dir : Path
+        The ``.github`` directory to scan.
+
+    Returns
+    -------
+    tuple[list[tuple[str, int]], list[tuple[str, int, str]], list[str]]
+        Always-on entries ``(name, tokens)``, conditional entries
+        ``(name, tokens, glob)``, and warnings about ambiguous files.
+    """
+    always_on: list[tuple[str, int]] = []
+    conditional: list[tuple[str, int, str]] = []
     warnings: list[str] = []
 
     root_instructions = github_dir / "copilot-instructions.md"
     if not root_instructions.is_file():
         raise Blocked(f"copilot-instructions.md not found in {github_dir}")
-    entries.append((root_instructions.name, _tokens(root_instructions)))
+    always_on.append((root_instructions.name, _tokens(root_instructions)))
 
     instructions_dir = github_dir / "instructions"
     if not instructions_dir.is_dir():
         raise Blocked(f"instructions/ directory not found in {github_dir}")
 
     for path in sorted(instructions_dir.glob("*.md")):
-        raw, always_on = _apply_to(path)
-        if not always_on:
-            continue
-        if raw is None:
-            warnings.append(f"{path.name} has no applyTo -- counted as always-on")
-        entries.append((path.name, _tokens(path)))
-    return entries, warnings
+        raw, is_always_on = _apply_to(path)
+        if is_always_on:
+            if raw is None:
+                warnings.append(f"{path.name} has no applyTo -- counted as always-on")
+            always_on.append((path.name, _tokens(path)))
+        else:
+            conditional.append((path.name, _tokens(path), raw or ""))
+    return always_on, conditional, warnings
 
 
-def _agent_totals(github_dir: Path, always_on_total: int) -> list[tuple[str, int, int]]:
+def _agent_totals(
+    github_dir: Path, always_on_total: int, conditional_total: int
+) -> list[tuple[str, int, int, int]]:
+    """Return per-agent ``(name, own, unconditional, worst_case)``, worst first.
+
+    ``worst_case`` assumes every conditional file matches at once. It is an
+    upper bound, not an estimate: co-occurrence depends on which files are in
+    context during a turn, which cannot be known offline.
+    """
     agents_dir = github_dir / "agents"
     if not agents_dir.is_dir():
         raise Blocked(f"agents/ directory not found in {github_dir}")
     totals = [
-        (path.stem.replace(".agent", ""), _tokens(path), _tokens(path) + always_on_total)
+        (
+            path.stem.replace(".agent", ""),
+            _tokens(path),
+            _tokens(path) + always_on_total,
+            _tokens(path) + always_on_total + conditional_total,
+        )
         for path in sorted(agents_dir.glob("*.agent.md"))
     ]
     if not totals:
@@ -155,11 +197,34 @@ def _print_breakdown(entries: list[tuple[str, int]], total: int, budget: int) ->
     print(f"  {total:6,} tok  TOTAL (budget {budget:,})")
 
 
+def _print_conditional(entries: list[tuple[str, int, str]], total: int, budget: int) -> None:
+    print(f"{TAG} conditional set -- loaded when a matching file is in context:")
+    for name, tokens, glob in sorted(entries, key=lambda row: row[1], reverse=True):
+        print(f"  {tokens:6,} tok  {name:<40} {glob}")
+    print(f"  {'-' * 6}")
+    print(f"  {total:6,} tok  TOTAL (budget {budget:,})")
+
+
+def _print_agents(
+    totals: list[tuple[str, int, int, int]], agent_budget: int, conditional_total: int
+) -> None:
+    print(f"{TAG} per-agent worst case (own + always-on + all {conditional_total:,} conditional):")
+    for name, own, unconditional, worst in totals:
+        print(f"  {worst:6,} tok  {name:<24} (own {own:,}, unconditional {unconditional:,})")
+    over = [row for row in totals if row[3] > agent_budget]
+    if over:
+        # Marking each row instead would repeat one shared cause fifteen times.
+        print(
+            f"  worst case exceeds agent budget ({agent_budget:,}) for "
+            f"{len(over)} of {len(totals)} agents -- the conditional set is in every row."
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Fail when the always-on instruction payload exceeds its budget.",
-        epilog="Budgets: AF_CONTEXT_BUDGET_TOKENS, AF_AGENT_CONTEXT_BUDGET_TOKENS "
-               "in .github/af-env.conf.",
+        epilog="Budgets: AF_CONTEXT_BUDGET_TOKENS, AF_AGENT_CONTEXT_BUDGET_TOKENS, "
+               "AF_CONDITIONAL_BUDGET_TOKENS in .github/af-env.conf.",
     )
     parser.add_argument(
         "--github-dir", type=Path, default=None,
@@ -178,10 +243,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if not github_dir.is_dir():
             raise Blocked(f"github directory not found: {github_dir}")
-        context_budget, agent_budget = _read_budgets(github_dir / "af-env.conf")
-        entries, warnings = _always_on_set(github_dir)
+        context_budget, agent_budget, conditional_budget = _read_budgets(github_dir / "af-env.conf")
+        entries, conditional_entries, warnings = _instruction_sets(github_dir)
         always_on_total = sum(tokens for _, tokens in entries)
-        agent_totals = _agent_totals(github_dir, always_on_total)
+        conditional_total = sum(tokens for _, tokens, _ in conditional_entries)
+        agent_totals = _agent_totals(github_dir, always_on_total, conditional_total)
     except Blocked as exc:
         print(f"{TAG} BLOCKED -- {exc}", file=sys.stderr)
         print(f"{TAG} Result unknown, not passing. Fix the input and re-run.", file=sys.stderr)
@@ -190,16 +256,23 @@ def main(argv: list[str] | None = None) -> int:
     for warning in warnings:
         print(f"{TAG} WARNING: {warning}")
 
-    worst_agent, worst_agent_tokens, worst_total = agent_totals[0]
+    worst_agent, worst_agent_tokens, worst_total, _ = agent_totals[0]
     over_context = always_on_total > context_budget
     over_agent = worst_total > agent_budget
+    over_conditional = conditional_total > conditional_budget
 
-    if not (over_context or over_agent):
+    if not (over_context or over_agent or over_conditional):
         if args.verbose:
             _print_breakdown(entries, always_on_total, context_budget)
             print()
+            if conditional_entries:
+                _print_conditional(conditional_entries, conditional_total, conditional_budget)
+                print()
+            _print_agents(agent_totals, agent_budget, conditional_total)
+            print()
         print(
             f"{TAG} PASS -- always-on {always_on_total:,}/{context_budget:,} tok; "
+            f"conditional {conditional_total:,}/{conditional_budget:,} tok; "
             f"largest agent {worst_agent} {worst_total:,}/{agent_budget:,} tok"
         )
         return 0
@@ -218,13 +291,28 @@ def main(argv: list[str] | None = None) -> int:
         print("  - Delete duplication -- check whether the rule already exists elsewhere.")
         print("  - Raise AF_CONTEXT_BUDGET_TOKENS only as a deliberate, justified decision.")
 
-    if over_agent:
+    if over_conditional:
         if over_context:
             print()
+        _print_conditional(conditional_entries, conditional_total, conditional_budget)
+        print()
+        print(
+            f"{TAG} FAIL -- conditional set is {conditional_total - conditional_budget:,} tok "
+            f"over budget ({conditional_total:,} > {conditional_budget:,})."
+        )
+        print()
+        print("A narrow applyTo makes a file load less often, not cheaply: for the")
+        print("agents whose job is to touch matching files it is effectively always-on.")
+        print("  - Move reference depth into a skill; keep the contract in the instruction.")
+        print("  - Check the glob is not broader than the rule it carries.")
+
+    if over_agent:
+        if over_context or over_conditional:
+            print()
         print(f"{TAG} agent context totals (agent file + always-on set):")
-        for name, own, total in agent_totals:
+        for name, own, total, worst in agent_totals:
             marker = "  <-- over budget" if total > agent_budget else ""
-            print(f"  {total:6,} tok  {name} (own {own:,}){marker}")
+            print(f"  {total:6,} tok  {name} (own {own:,}, worst case {worst:,}){marker}")
         print()
         print(
             f"{TAG} FAIL -- {worst_agent} is {worst_total - agent_budget:,} tok over "
