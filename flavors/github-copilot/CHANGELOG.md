@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Python quality gate judged whole files, so an untouched neighbour
+  could block a commit (issue #45).** `check-python-quality.py` received a
+  file list and reported every function in it. In WIT #3105 a one-line
+  registry change therefore demanded ~90 lines of NumPy docstrings on six
+  unrelated methods, blocked three commit attempts, and ended in a recorded
+  deviation — the only alternatives were out-of-scope edits or bypassing a
+  HARD gate.
+
+  The checker now takes `--diff-base REF` and reports only functions whose
+  line span intersects the branch's diff against that ref. Decorator lines
+  count as part of the function, so a decorator-only change is in scope.
+
+  Three deliberate choices:
+
+  - **The default did not change.** The issue proposed diff scoping by
+    default with whole-file behind a flag; that is inverted here. A caller
+    that forgets the flag would otherwise get a silently *weaker* HARD gate.
+    Scoping activates only when a base is passed.
+  - **No second base-branch resolver.** The stop hooks already resolve
+    `merge-base HEAD $BASE_BRANCH` (falling back to `origin/`); they hand
+    that result to the checker. `resolve_base` only verifies the ref.
+  - **Unresolvable history fails wide, not narrow.** A shallow clone, a
+    missing branch, or no repository at all falls back to whole-file scanning
+    with a `NOTICE:` line — never to a silent pass. Untracked files are
+    likewise scanned whole, since no diff can speak for them.
+
+  `# noqa` / `# type: ignore` hygiene follows the same scope, but a
+  suppression that predates the branch is reported as `ADVISORY:` rather than
+  discarded — visible without blocking on inherited debt. A suppression added
+  in an *earlier phase of the same branch* still blocks: it is after the
+  merge-base, so the branch owns it.
+
+  Verified by a new `test-quality-gate.ps1` (15 cases, each in a throwaway
+  repository with a real base branch — the #37 lesson about tests that
+  inherit the developer's working tree) and by mutation: 7/7 mutants killed.
+
 - **Four hook gates were green for the wrong reason, and two hooks never ran
   at all (issue #37).** The issue reported that the test-writer and refactorer
   branch guards "never fire". They fire; the *test* never established a branch,

@@ -6,7 +6,7 @@
 - **Issue:** [#45](https://github.com/sefalk/AgenticAIGovernance/issues/45)
 - **Branch:** `agent/45-quality-gate-diff-scope`
 - **Complexity tier:** Standard
-- **Status:** IN PROGRESS
+- **Status:** COMPLETED
 
 ## The reported symptom is real; the stated cause is not
 
@@ -104,6 +104,36 @@ Advisory output keeps them visible without blocking on someone else's debt.
 5. Unresolvable git history falls back to whole-file with an explicit notice,
    never to a silent pass.
 
+## Outcome
+
+| # | Acceptance criterion | Evidence |
+|---|---|---|
+| 1 | Untouched undocumented functions pass | `untouched functions are out of scope (WIT-3105 shape)` |
+| 2 | Newly added undocumented function fails | `newly added public function is in scope` |
+| 3 | Modified function with a bad docstring fails | `changed function with no docstring fails`, `... unstructured docstring fails`, `... without annotations fails` |
+| 4 | No second base-branch resolver | `resolve_base` verifies a ref but never computes a merge-base; the four stop hooks pass their existing `merge_base` in via `--diff-base` |
+| 5 | Unresolvable history degrades loudly | `unresolvable base falls back to whole-file with a notice`, `no git repository falls back to whole-file with a notice` |
+
+**Suites:** `test-quality-gate.ps1` 15/15 (new), `test-lint-gate.ps1` 21/21,
+`test-hooks.ps1` 63/63, `test-hooks-integration.ps1` 7/7.
+
+**Mutation: 7/7 killed.** Mutants covered the scope check, decorator spans,
+the untracked-file fallback, pure deletions, the unresolved-base fallback, and
+both directions of the blocking/advisory split.
+
+One mutant (`cat-file -e {base}:` -> `cat-file -e HEAD:`) survived at first and
+turned out to be **equivalent**, not a coverage gap: a file merely absent from
+the base is already reported as wholly added by `git diff`, so the probe's only
+real job is the *untracked* case -- where both refs miss alike. Rather than
+annotating an equivalent mutant, the probe was replaced by the condition it
+actually tests (`git ls-files --error-unmatch`), after which the mutant is no
+longer expressible and its replacement dies.
+
+**Process lesson.** Two mutation runs were started concurrently. The second
+snapshotted the file *mid-mutation* and wrote that snapshot back as the
+"restored" original, silently leaving a mutant in the working tree. Never run
+mutation harnesses in parallel, and always re-run the baseline after a restore.
+
 ## Risks
 
 - **Line ranges vs. AST ranges disagree on decorators.** `ast` reports
@@ -121,3 +151,5 @@ Advisory output keeps them visible without blocking on someone else's debt.
 | Date | Change |
 |---|---|
 | 2026-08-04 | Created. Corrects the issue's stated cause: no diff logic exists in either checker; the hooks resolve the base and the defect is function-vs-file granularity. |
+| 2026-08-04 | Human decision (c): ignore hygiene is diff-scoped, inherited suppressions are reported as ADVISORY. |
+| 2026-08-04 | COMPLETED. `--diff-base` implemented and wired into all four stop hooks; 15 new tests; mutation 7/7. |
