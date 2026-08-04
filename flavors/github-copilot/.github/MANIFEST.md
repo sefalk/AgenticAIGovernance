@@ -285,6 +285,24 @@ as a living document.
 
 ### Workflow Logs
 
+The documenter writes one YAML log per workflow to `.github/logs/{workflow-id}.yaml`
+(schema in `agents/documenter.agent.md`). Logs are local instrumentation: the
+directory ships a `.gitignore`, because `trigger:` holds the user request
+verbatim.
+
+The documenter Stop hook then appends an **ADVISORY** `cost:` block measuring
+what the workflow actually cost — billed requests, tokens and credits for the
+parent session *and* its subagents, broken down by model. It comes from the chat
+debug log via `scripts/collect-session-cost.py`; the hook appends the script's
+output verbatim, so the numbers never pass through a language model and no agent
+ever reads the log (tens of megabytes, every prompt verbatim).
+
+Its source is an experiment-flagged vendor setting, so the block **may be absent
+or `available: false` at any time, and nothing may gate on it**. A `coverage`
+field qualifies every total; when the log lost its start, no total is emitted
+rather than a number that looks complete but is biased downward. Details:
+`logs/README.md`.
+
 ## 8. Agent Hooks (Deterministic Enforcement)
 
 Hooks execute shell commands at lifecycle points during agent sessions.
@@ -300,6 +318,7 @@ Configuration lives in `.github/hooks/*.json`.
 | `PreToolUse` | Safety Gate | Three-tier classifier: auto-approve safe commands, prompt durable changes, hard-deny `rm -rf`/`DROP TABLE`/force push/etc. |
 | `PostToolUse` | Secret Scan | Scans edited files for hardcoded secrets (gitleaks or regex fallback) |
 | `Stop` | Test Gate | Runs `pytest tests/ -q --tb=line` before session ends |
+| `SubagentStop` | Documenter Artifact Gate | Blocks on a missing workflow log or retro snippet, then appends the ADVISORY `cost:` block to the log |
 
 ### Hook Output Control
 

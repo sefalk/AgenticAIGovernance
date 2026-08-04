@@ -31,6 +31,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Workflow logs now record what the workflow cost (issue #50).** The framework
+  could describe every step of a workflow but not what any of it cost, so the
+  cost of a gate, a retry or an extra critic pass was a matter of opinion.
+
+  `scripts/collect-session-cost.py` reads the chat debug log of the running
+  session and emits an ADVISORY `cost:` block — billed requests, uncached/cached
+  input tokens, output tokens, credits and a per-model breakdown. The documenter
+  Stop hook appends it to `.github/logs/{workflow-id}.yaml` after the artifact
+  gate passes, appending the script's output **verbatim**: the numbers never pass
+  through a language model, and no agent reads the debug log (30 MB in one
+  session here, every prompt included).
+
+  Four decisions carry the design:
+
+  - **Subagent cost is counted.** Subagent turns are absent from `main.jsonl`
+    and run on different models; the collector sums every `runSubagent-*.jsonl`
+    beside it. Reading only the parent understates every workflow that delegates
+    — which is all of them.
+  - **The session is derived, never guessed.** The hook builds the log path from
+    the `session_id` and `transcript_path` that VS Code passes on stdin, which
+    name the *parent* session even inside a subagent (measured). Picking a
+    session directory by modification time would misattribute silently whenever
+    parallel worktrees run concurrent sessions.
+  - **An incomplete measurement reports as incomplete.** `coverage` is `full`,
+    `partial` (the session began after the workflow did) or `truncated` — and
+    when truncated, **no total is emitted at all**. The log's size cap drops the
+    *oldest* entries, i.e. exactly the plan and Red phases, so a total would look
+    complete while being biased downward.
+  - **It stays ADVISORY, permanently.** The source is an experiment-flagged
+    vendor setting that Microsoft can switch off remotely. A missing block is
+    normal, `available: false` always carries a `reason`, the exit code is `0`
+    on every degraded path, and nothing may gate on the number. Schema drift in
+    the vendor's undocumented fields degrades to `available: false,
+    reason: schema_drift` rather than emitting wrong numbers; a test pins the
+    watched attribute set so that detection cannot be narrowed silently.
+
+  Two measurement traps are handled explicitly: `inputTokens` already includes
+  `cachedTokens` (the block reports `input_uncached`, and the two are never
+  added), and a request without the billing attribute is *not billed* rather
+  than free — those are counted separately as `unbilled_requests` instead of
+  being summed as zero. Only numbers and short identifiers are ever emitted,
+  against an explicit key allowlist, because request payloads carry whatever was
+  pasted into chat. Regression tests: `scripts/test-session-cost.ps1`.
+
 - **The local-only rule for logs and retros is now shipped, not merely
   documented (issue #49).** The README described `logs/` as gitignored and
   MANIFEST set a 30-day retention, but nothing enforced either. The rule

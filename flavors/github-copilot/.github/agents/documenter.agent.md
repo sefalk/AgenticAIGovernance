@@ -121,6 +121,10 @@ For the `verdict` field in step entries, use the parseable format from
 MANIFEST § 13 (Inter-Agent Contracts → Verdict Format): APPROVED,
 REJECTED, ESCALATE, RESOLVED, or COMPROMISE.
 
+**Do not write a `cost:` block.** Your Stop hook measures the session and
+appends it after your artifact gate passes. Never estimate or transcribe those
+numbers — an unmeasured cost is worse than none.
+
 ## Provenance Marker Verification
 
 1. List all files changed in this workflow
