@@ -175,11 +175,17 @@ reject structurally.
 
 ### 4. Green — fix the incentive
 
+**Scope widened** — see *In-flight confirmation* above. The behaviour is not
+coordinator-specific, so a fix confined to `coordinator.agent.md` would miss the
+agents that actually produced the specimen.
+
 **Acceptance criteria**
 - `coordinator.agent.md` rule 3 rewritten: the two tools are described as
   different things (parameterless entry points vs parameterised calls into the
   same reviewed surface), not as rungs of a freedom ladder. The git/terminal
   reservation is promoted out of the trailing clause.
+- Every other agent definition granting `createAndRunTask` carries the same
+  framing. The audit is part of the subtask, not an assumption.
 - `TOOLS.md`: the "tasks over terminal" principle reworded, and the
   `execute/runInTerminal` rationale row updated so it no longer claims a
   restriction the task path used to undo.
@@ -196,9 +202,40 @@ reject structurally.
 **Acceptance criteria**
 - A workflow-end check reports scratch labels remaining in `.vscode/tasks.json`
   beyond the curated set.
+- `.vscode/` is gitignored in this repo. It is ignored downstream in MP but not
+  here, so the scratch file described above was one `git add -A` away from being
+  committed as if it were a framework artifact.
 
 *Drop first if scope grows.* The allowlist removes most of the pressure by
 construction: one script invoked with varying arguments replaces N labels.
+
+## In-flight confirmation
+
+While subtask 2 was being implemented, the implementer agent — writing the very
+classifier that denies `powershell -Command "<inline>"` — created four scratch
+tasks in this repo's `.vscode/tasks.json`:
+
+| Label | Shape |
+|---|---|
+| `test-hooks: block-dangerous` | `powershell -NoProfile -Command "<inline>"` |
+| `parse-check: block-dangerous.ps1` | `powershell -NoProfile -Command "<inline>"` |
+| `parse-check: block-dangerous.ps1 v2` | `powershell -NoProfile -Command "<inline>"` |
+| `test-hooks: final verification` | `powershell -NoProfile -Command "<inline>"` |
+
+All four would be denied by the hook committed in `75f2dc4`. Three things follow,
+and none of them were assumptions before this:
+
+1. **The behaviour is not coordinator-specific.** The diagnosis generalises, so
+   subtask 4 must cover every agent granted `createAndRunTask`, not just rule 3
+   of `coordinator.agent.md`.
+2. **The label-churn prediction is confirmed empirically.** `… .ps1` followed by
+   `… .ps1 v2` followed by `final verification` is the untracked-history pattern
+   the plan predicted from the MP evidence, reproduced here in a single session.
+3. **The framework does not enforce its own hooks on itself.** The payload lives
+   in `flavors/github-copilot/.github/`; there is no `.github/` at the repo root,
+   so no hook was ever consulted for these calls. The enforcement being built
+   here is live in MP but inert in AAIG. That is a separate structural gap and
+   is out of scope for this fix — it needs its own issue.
 
 ## Risks
 
@@ -218,3 +255,6 @@ construction: one script invoked with varying arguments replaces N labels.
 | 2026-08-04 | Blocklist approach from the issue replaced by an allowlist on `command`. |
 | 2026-08-04 | "Track `tasks.json`" (issue item 4) retracted — the traceability it assumed never existed. |
 | 2026-08-04 | Recorded as a stopgap for #60. |
+| 2026-08-04 | Red phase measured: 82 assertions, 67 passed, 15 failed, every failure `output: {}` — the documented defect, not an incidental bug. |
+| 2026-08-04 | Green subtask 2 landed and independently verified at 82/0. The `.sh` port is unverified by execution (no bash on this host). |
+| 2026-08-04 | In-flight confirmation recorded. Subtask 4 widened beyond the coordinator; subtask 5 gained the `.gitignore` criterion. |
