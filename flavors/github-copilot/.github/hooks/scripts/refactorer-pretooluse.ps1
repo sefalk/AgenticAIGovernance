@@ -34,6 +34,13 @@ try {
 $toolName = $inputData.tool_name
 if ($toolName -match 'editFile|createFile|createDir|editNotebook') {
     $currentBranch = git -C $codeRoot branch --show-current 2>$null
+    if (-not $currentBranch) {
+        # Detached HEAD is not an agent branch either; outside a repo there is
+        # nothing to prove, so stay silent there.
+        if ((git -C $codeRoot rev-parse --is-inside-work-tree 2>$null) -eq 'true') {
+            $currentBranch = '(detached HEAD)'
+        }
+    }
     if ($currentBranch -and $currentBranch -notmatch '^agent/') {
         @{
             hookSpecificOutput = @{

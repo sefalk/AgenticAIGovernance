@@ -47,6 +47,13 @@ if ($toolName -notmatch 'editFile|createFile|createDir|editNotebook') {
 
 # Branch context proof -- block file edits if not on an agent/* branch
 $currentBranch = git -C $codeRoot branch --show-current 2>$null
+if (-not $currentBranch) {
+    # Detached HEAD is not an agent branch either; outside a repo there is
+    # nothing to prove, so stay silent there.
+    if ((git -C $codeRoot rev-parse --is-inside-work-tree 2>$null) -eq 'true') {
+        $currentBranch = '(detached HEAD)'
+    }
+}
 if ($currentBranch -and $currentBranch -notmatch '^agent/') {
     @{
         hookSpecificOutput = @{

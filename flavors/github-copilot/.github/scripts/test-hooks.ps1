@@ -32,13 +32,14 @@ function Invoke-Hook {
     param(
         [string]$Script,
         [string]$JsonInput,
-        [string]$Branch
+        [string]$Branch,
+        [switch]$Detached
     )
     $hookPath = Join-Path $scriptDir $Script
     if (-not (Test-Path $hookPath)) {
         throw "Hook not found: $hookPath"
     }
-    if (-not $Branch) {
+    if (-not $Branch -and -not $Detached) {
         # Pipe JSON to the hook script via stdin
         $output = $JsonInput | powershell -NoProfile -ExecutionPolicy Bypass -File $hookPath 2>&1
         $exitCode = $LASTEXITCODE
@@ -46,7 +47,7 @@ function Invoke-Hook {
         $text = ($output | Out-String).Trim()
         return @{ Output = $text; ExitCode = $exitCode }
     }
-    return (Invoke-HookInFixture -HookPath $hookPath -Script $Script -JsonInput $JsonInput -Branch $Branch)
+    return (Invoke-HookInFixture -HookPath $hookPath -Script $Script -JsonInput $JsonInput -Branch $Branch -Detached:$Detached)
 }
 
 # Branch-context gates read the branch of the repo the hook sits in, resolved
@@ -58,7 +59,8 @@ function Invoke-HookInFixture {
         [string]$HookPath,
         [string]$Script,
         [string]$JsonInput,
-        [string]$Branch
+        [string]$Branch,
+        [switch]$Detached
     )
     $fixture = Join-Path ([System.IO.Path]::GetTempPath()) "af-hook-branch-$(Get-Random)"
     $fixtureHooks = Join-Path $fixture '.github/hooks/scripts'
@@ -70,7 +72,12 @@ function Invoke-HookInFixture {
     try {
         Push-Location $fixture
         git init -q 2>&1 | Out-Null
-        git checkout -q -b $Branch 2>&1 | Out-Null
+        if ($Detached) {
+            git -c user.email=fixture@local -c user.name=fixture commit -q --allow-empty -m 'fixture' 2>&1 | Out-Null
+            git checkout -q --detach 2>&1 | Out-Null
+        } else {
+            git checkout -q -b $Branch 2>&1 | Out-Null
+        }
         $output = $JsonInput | powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fixtureHooks $Script) 2>&1
         $exitCode = $LASTEXITCODE
         return @{ Output = ($output | Out-String).Trim(); ExitCode = $exitCode }
@@ -81,9 +88,9 @@ function Invoke-HookInFixture {
 }
 
 function Assert-Deny {
-    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch)
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch, [switch]$Detached)
     try {
-        $result = Invoke-Hook -Script $Script -JsonInput $Json -Branch $Branch
+        $result = Invoke-Hook -Script $Script -JsonInput $Json -Branch $Branch -Detached:$Detached
         $parsed = $result.Output | ConvertFrom-Json -ErrorAction SilentlyContinue
         $decision = $parsed.hookSpecificOutput.permissionDecision
         if ($decision -eq 'deny') {
@@ -361,6 +368,11 @@ Assert-Deny "test-writer denied on non-agent branch (test file create)" `
 Assert-Allow "test-writer may edit a test file on an agent branch" `
     "test-writer-pretooluse.ps1" $testJson -Branch $agentBranch
 
+# A detached worktree is the documented way to rehearse merges, and it is not
+# an agent branch either.
+Assert-Deny "test-writer denied on detached HEAD" `
+    "test-writer-pretooluse.ps1" $testJson -Detached
+
 # Should ALLOW read tools
 Assert-Allow "test-writer can readFile" `
     "test-writer-pretooluse.ps1" `
@@ -390,6 +402,10 @@ Assert-Deny "refactorer denied on non-agent branch (file edit)" `
 Assert-Allow "refactorer may edit an existing file on an agent branch" `
     "refactorer-pretooluse.ps1" `
     '{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}' -Branch $agentBranch
+
+Assert-Deny "refactorer denied on detached HEAD" `
+    "refactorer-pretooluse.ps1" `
+    '{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}' -Detached
 
 Assert-Allow "refactorer can readFile" `
     "refactorer-pretooluse.ps1" `
