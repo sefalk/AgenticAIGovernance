@@ -115,6 +115,10 @@ function New-QualityRepo {
 
     Push-Location $repo
     git init -q 2>&1 | Out-Null
+    # Without this every fixture write emits a CRLF warning on stderr, which
+    # buries the actual test output.
+    git config core.autocrlf false 2>&1 | Out-Null
+    git config core.safecrlf false 2>&1 | Out-Null
     git checkout -q -b dev 2>&1 | Out-Null
     git add -A 2>&1 | Out-Null
     git -c user.email=fixture@local -c user.name=fixture commit -q -m 'base' 2>&1 | Out-Null
@@ -129,6 +133,14 @@ function New-QualityRepo {
 function Set-RepoFile {
     param([string]$Repo, [string]$Path, [string]$Content)
     [IO.File]::WriteAllText((Join-Path $Repo $Path), $Content)
+}
+
+function Add-RepoCommit {
+    param([string]$Repo, [string]$Message = 'phase')
+    Push-Location $Repo
+    git add -A 2>&1 | Out-Null
+    git -c user.email=fixture@local -c user.name=fixture commit -q -m $Message 2>&1 | Out-Null
+    Pop-Location
 }
 
 function Invoke-Quality {
@@ -275,6 +287,26 @@ Set-RepoFile $repo 'tests/test_app.py' ($inherited -replace 'return a \+ b', 're
 $r = Invoke-Quality -Repo $repo -Files @('tests/test_app.py') -DiffBase 'dev' -Checks 'ignore-hygiene'
 Assert-Case 'ignore-hygiene mode honours the diff scope' `
     (($r.Exit -eq 0) -and ($r.Output -match 'ADVISORY')) $r.Output
+
+# 14. A pure deletion produces a `+N,0` hunk with no added lines. Gutting a
+#     function must still put it in scope, or removing a body would go unseen.
+$gap = "def gap(x):`n    x = x + 1`n    return x`n"
+$gapGutted = "def gap(x):`n    return x`n"
+$repo = New-QualityRepo @{ 'src/app.py' = ($MODULE_HEADER + $DOCUMENTED_TOUCHED + "`n`n" + $gap) }
+Set-RepoFile $repo 'src/app.py' ($MODULE_HEADER + $DOCUMENTED_TOUCHED + "`n`n" + $gapGutted)
+Assert-GateFail 'pure deletion puts the surrounding function in scope' `
+    (Invoke-Quality -Repo $repo -Files @('src/app.py') -DiffBase 'dev') 'gap'
+
+# 15. A file added and COMMITTED in an earlier phase of this branch is invisible
+#     to a HEAD-relative diff, but the merge still ships it. This is the #13
+#     defect class, and it is what separates a base-relative diff from a lazy
+#     HEAD-relative one -- a mutant swapping the two survived without it.
+$repo = New-QualityRepo @{ 'src/app.py' = (New-Module $DOCUMENTED_TOUCHED) }
+Set-RepoFile $repo 'src/phase1.py' "`"`"`"Red phase module.`"`"`"`n# copilot:generated | tester | 2026-08-04`n`n`ndef early(x):`n    return x`n"
+Add-RepoCommit $repo 'red phase'
+Set-RepoFile $repo 'src/app.py' (New-Module $DOCUMENTED_TOUCHED_EDITED)
+Assert-GateFail 'file committed in an earlier phase is still in scope' `
+    (Invoke-Quality -Repo $repo -Files @('src/phase1.py') -DiffBase 'dev') 'early'
 
 # ------------------------------------------------------------------ report --
 
