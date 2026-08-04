@@ -269,6 +269,98 @@ Assert-Allow "non-terminal tool ignored" `
     "block-dangerous.ps1" `
     '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
 
+# ── createAndRunTask shape: hard-deny tier (mirrored from runInTerminal) ───
+# The dangerous commands must also be denied when wrapped in createAndRunTask.
+# Currently these FAIL because block-dangerous returns {} (allow) for non-terminal tools.
+Assert-Deny "createAndRunTask: force push is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"push","type":"shell","command":"git","args":["push","--force","origin","main"]}}}'
+
+Assert-Deny "createAndRunTask: push to protected branch is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"push","type":"shell","command":"git","args":["push","origin","main"]}}}'
+
+Assert-Deny "createAndRunTask: git reset --hard is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"reset","type":"shell","command":"git","args":["reset","--hard","HEAD~1"]}}}'
+
+Assert-Deny "createAndRunTask: git rebase is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"rebase","type":"shell","command":"git","args":["rebase","main"]}}}'
+
+Assert-Deny "createAndRunTask: git branch -D is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"branch-delete","type":"shell","command":"git","args":["branch","-D","old-branch"]}}}'
+
+Assert-Deny "createAndRunTask: rm -rf is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"remove","type":"shell","command":"rm","args":["-rf","/tmp/data"]}}}'
+
+Assert-Deny "createAndRunTask: --no-verify is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"commit","type":"shell","command":"git","args":["commit","--no-verify","-m","test"]}}}'
+
+# ── createAndRunTask shape: bare binary rejection (allowlist enforcement) ──
+# The allowlist policy denies bare binaries.
+Assert-Deny "createAndRunTask: bare git binary is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"git-status","type":"shell","command":"git","args":["status"]}}}'
+
+Assert-Deny "createAndRunTask: bare ruff binary is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"lint","type":"shell","command":"ruff","args":["check","mpusage/"]}}}'
+
+Assert-Deny "createAndRunTask: bare pytest binary is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"test","type":"shell","command":"pytest","args":["tests/"]}}}'
+
+Assert-Deny "createAndRunTask: bare databricks binary is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"db-list","type":"shell","command":"databricks","args":["workspace","list"]}}}'
+
+# ── createAndRunTask shape: powershell -Command inline script denial ───
+# Inline scripts via -Command are denied (must use allowlisted -File path).
+Assert-Deny "createAndRunTask: powershell -Command inline script is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"pwsh-inline","type":"shell","command":"powershell","args":["-NoProfile","-Command","Remove-Item x -Recurse -Force"]}}}'
+
+# ── createAndRunTask shape: -File outside allowlist denial ──────────────────
+# Files outside AF_TASK_SCRIPT_DIRS are denied (path-traversal prevention).
+Assert-Deny "createAndRunTask: -File to %TEMP% script is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"temp-script","type":"shell","command":"powershell","args":["-NoProfile","-File","%TEMP%\\x.ps1"]}}}'
+
+Assert-Deny "createAndRunTask: -File via path traversal is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"traversal","type":"shell","command":"powershell","args":["-NoProfile","-File",".github/scripts/../../../Windows/System32/cmd.exe"]}}}'
+
+# ── createAndRunTask shape: input-variable denial ──────────────────────────
+# Interactive input variables are denied (agents must not block on prompts).
+# Name is single-quoted: a double-quoted name would interpolate the very
+# construct under test and break the parse of everything below it.
+Assert-Deny 'createAndRunTask: interactive input variable is denied' `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"user-input","type":"shell","command":"echo","args":["${input:promptUser}"]}}}'
+
+# ── createAndRunTask shape: regression - legitimate curated invocations ────
+# These four scripts are the framework-approved entry points. They must ALLOW
+# (or defer to user, i.e. return {} which is allow-like).
+Assert-Allow "createAndRunTask: .github/scripts/run-tests.ps1 -Scope domain allows" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"test-domain","type":"shell","command":".github/scripts/run-tests.ps1","args":["-Scope","domain"]}}}'
+
+Assert-Allow "createAndRunTask: .github/scripts/run-lint.ps1 -Scope all allows" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"lint-all","type":"shell","command":".github/scripts/run-lint.ps1","args":["-Scope","all"]}}}'
+
+Assert-Allow "createAndRunTask: .github/scripts/run-metrics.ps1 -Metric complexity allows" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"metrics-complexity","type":"shell","command":".github/scripts/run-metrics.ps1","args":["-Metric","complexity"]}}}'
+
+Assert-Allow "createAndRunTask: .github/scripts/run-deps.ps1 -Scope dev allows" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"deps-dev","type":"shell","command":".github/scripts/run-deps.ps1","args":["-Scope","dev"]}}}'
+
 Write-Output ""
 
 # ── 2. coordinator-pretooluse.ps1 ────────────────────────────────────────
