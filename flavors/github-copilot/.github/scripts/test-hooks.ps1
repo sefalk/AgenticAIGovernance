@@ -14,7 +14,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$scriptDir = Join-Path (Resolve-Path "$PSScriptRoot/..").Path 'hooks/scripts'
+$githubDir = (Resolve-Path "$PSScriptRoot/..").Path
+$scriptDir = Join-Path $githubDir 'hooks/scripts'
 
 if (-not (Test-Path $scriptDir)) {
     Write-Output "ERROR: hooks/scripts not found at $scriptDir"
@@ -30,24 +31,59 @@ $script:errors = @()
 function Invoke-Hook {
     param(
         [string]$Script,
-        [string]$JsonInput
+        [string]$JsonInput,
+        [string]$Branch
     )
     $hookPath = Join-Path $scriptDir $Script
     if (-not (Test-Path $hookPath)) {
         throw "Hook not found: $hookPath"
     }
-    # Pipe JSON to the hook script via stdin
-    $output = $JsonInput | powershell -NoProfile -ExecutionPolicy Bypass -File $hookPath 2>&1
-    $exitCode = $LASTEXITCODE
-    # Parse output
-    $text = ($output | Out-String).Trim()
-    return @{ Output = $text; ExitCode = $exitCode }
+    if (-not $Branch) {
+        # Pipe JSON to the hook script via stdin
+        $output = $JsonInput | powershell -NoProfile -ExecutionPolicy Bypass -File $hookPath 2>&1
+        $exitCode = $LASTEXITCODE
+        # Parse output
+        $text = ($output | Out-String).Trim()
+        return @{ Output = $text; ExitCode = $exitCode }
+    }
+    return (Invoke-HookInFixture -HookPath $hookPath -Script $Script -JsonInput $JsonInput -Branch $Branch)
+}
+
+# Branch-context gates read the branch of the repo the hook sits in, resolved
+# from $PSScriptRoot. Copying the hook into a throwaway repo checked out to
+# $Branch makes the branch an input of the test; without it the assertion
+# silently inherits the developer's checkout and flips colour with it.
+function Invoke-HookInFixture {
+    param(
+        [string]$HookPath,
+        [string]$Script,
+        [string]$JsonInput,
+        [string]$Branch
+    )
+    $fixture = Join-Path ([System.IO.Path]::GetTempPath()) "af-hook-branch-$(Get-Random)"
+    $fixtureHooks = Join-Path $fixture '.github/hooks/scripts'
+    New-Item -ItemType Directory -Path $fixtureHooks -Force | Out-Null
+    Copy-Item $HookPath $fixtureHooks
+    # Same config the hook would read in production, so SRC_DIR is not a guess.
+    $confSrc = Join-Path $githubDir 'af-env.conf'
+    if (Test-Path $confSrc) { Copy-Item $confSrc (Join-Path $fixture '.github') }
+    try {
+        Push-Location $fixture
+        git init -q 2>&1 | Out-Null
+        git checkout -q -b $Branch 2>&1 | Out-Null
+        $output = $JsonInput | powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fixtureHooks $Script) 2>&1
+        $exitCode = $LASTEXITCODE
+        return @{ Output = ($output | Out-String).Trim(); ExitCode = $exitCode }
+    } finally {
+        Pop-Location
+        Remove-Item $fixture -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Assert-Deny {
-    param([string]$TestName, [string]$Script, [string]$Json)
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch)
     try {
-        $result = Invoke-Hook -Script $Script -JsonInput $Json
+        $result = Invoke-Hook -Script $Script -JsonInput $Json -Branch $Branch
         $parsed = $result.Output | ConvertFrom-Json -ErrorAction SilentlyContinue
         $decision = $parsed.hookSpecificOutput.permissionDecision
         if ($decision -eq 'deny') {
@@ -64,9 +100,9 @@ function Assert-Deny {
 }
 
 function Assert-Ask {
-    param([string]$TestName, [string]$Script, [string]$Json)
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch)
     try {
-        $result = Invoke-Hook -Script $Script -JsonInput $Json
+        $result = Invoke-Hook -Script $Script -JsonInput $Json -Branch $Branch
         $parsed = $result.Output | ConvertFrom-Json -ErrorAction SilentlyContinue
         $decision = $parsed.hookSpecificOutput.permissionDecision
         if ($decision -eq 'ask') {
@@ -83,9 +119,9 @@ function Assert-Ask {
 }
 
 function Assert-Allow {
-    param([string]$TestName, [string]$Script, [string]$Json)
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch)
     try {
-        $result = Invoke-Hook -Script $Script -JsonInput $Json
+        $result = Invoke-Hook -Script $Script -JsonInput $Json -Branch $Branch
         $text = $result.Output
         # Allow = empty JSON or no hookSpecificOutput or no permissionDecision
         $isAllow = ($text -eq '{}' -or $text -eq '' -or $null -eq $text)
@@ -289,36 +325,41 @@ Write-Output ""
 
 Write-Output "## test-writer-pretooluse.ps1"
 
-# Read SRC_DIR from af-env.conf (or default 'src')
+# Read SRC_DIR from the same af-env.conf the fixture hands to the hook
 $srcDir = 'src'
-$confPath = Join-Path (Get-Location) '.github/af-env.conf'
+$confPath = Join-Path $githubDir 'af-env.conf'
 if (Test-Path $confPath) {
     $m = Select-String -Path $confPath -Pattern '^SRC_DIR=(.+)$'
     if ($m) { $srcDir = $m.Matches[0].Groups[1].Value.Trim() }
 }
-$absSrcDir = (Resolve-Path $srcDir -ErrorAction SilentlyContinue).Path
-if (-not $absSrcDir) { $absSrcDir = Join-Path (Get-Location) $srcDir }
 
-# Should DENY edits to production code
-$prodFile = Join-Path $absSrcDir 'main.py'
-$prodJson = @{ tool_name = "editFiles"; tool_input = @{ filePath = $prodFile } } | ConvertTo-Json -Compress
+# File paths stay relative: the hook resolves them against its own working
+# directory, which inside a fixture is the fixture root.
+$agentBranch = 'agent/fixture-37'
+
+# SRC_DIR gate -- asserted on an agent/* branch so the branch gate, which is
+# evaluated first, cannot answer in its place.
+$prodJson = @{ tool_name = "editFiles"; tool_input = @{ filePath = "$srcDir/main.py" } } | ConvertTo-Json -Compress
 Assert-Deny "test-writer cannot edit production code" `
-    "test-writer-pretooluse.ps1" $prodJson
+    "test-writer-pretooluse.ps1" $prodJson -Branch $agentBranch
 
-$prodCreate = @{ tool_name = "createFile"; tool_input = @{ filePath = (Join-Path $absSrcDir 'new_module.py') } } | ConvertTo-Json -Compress
+$prodCreate = @{ tool_name = "createFile"; tool_input = @{ filePath = "$srcDir/new_module.py" } } | ConvertTo-Json -Compress
 Assert-Deny "test-writer cannot create production file" `
-    "test-writer-pretooluse.ps1" $prodCreate
+    "test-writer-pretooluse.ps1" $prodCreate -Branch $agentBranch
 
-# DENY test file edits/creates on non-agent branch (branch-context gate, v1.18.10+)
-# test-writer must run inside a worktree checked out to agent/* — running on
-# 'main' is a hard block regardless of whether the target file is a test file.
-$testJson = @{ tool_name = "editFiles"; tool_input = @{ filePath = (Join-Path (Get-Location) "tests/test_example.py") } } | ConvertTo-Json -Compress
+# Branch-context gate (v1.18.10+), both directions. test-writer must run inside
+# a worktree checked out to agent/*; on any other branch a test file edit is a
+# hard block, and on an agent branch it must go through.
+$testJson = @{ tool_name = "editFiles"; tool_input = @{ filePath = "tests/test_example.py" } } | ConvertTo-Json -Compress
 Assert-Deny "test-writer denied on non-agent branch (test file edit)" `
-    "test-writer-pretooluse.ps1" $testJson
+    "test-writer-pretooluse.ps1" $testJson -Branch 'dev'
 
-$testCreate = @{ tool_name = "createFile"; tool_input = @{ filePath = (Join-Path (Get-Location) "tests/test_new.py") } } | ConvertTo-Json -Compress
+$testCreate = @{ tool_name = "createFile"; tool_input = @{ filePath = "tests/test_new.py" } } | ConvertTo-Json -Compress
 Assert-Deny "test-writer denied on non-agent branch (test file create)" `
-    "test-writer-pretooluse.ps1" $testCreate
+    "test-writer-pretooluse.ps1" $testCreate -Branch 'dev'
+
+Assert-Allow "test-writer may edit a test file on an agent branch" `
+    "test-writer-pretooluse.ps1" $testJson -Branch $agentBranch
 
 # Should ALLOW read tools
 Assert-Allow "test-writer can readFile" `
@@ -331,19 +372,24 @@ Write-Output ""
 
 Write-Output "## refactorer-pretooluse.ps1"
 
-# Should DENY file/directory creation
+# No-new-files gate -- asserted on an agent/* branch so the branch gate, which
+# is evaluated first, cannot answer in its place.
 Assert-Deny "refactorer cannot createFile" `
     "refactorer-pretooluse.ps1" `
-    '{"tool_name":"createFile","tool_input":{"filePath":"src/new.py"}}'
+    '{"tool_name":"createFile","tool_input":{"filePath":"src/new.py"}}' -Branch $agentBranch
 
 Assert-Deny "refactorer cannot createDirectory" `
     "refactorer-pretooluse.ps1" `
-    '{"tool_name":"createDirectory","tool_input":{"path":"src/new_dir/"}}'
+    '{"tool_name":"createDirectory","tool_input":{"path":"src/new_dir/"}}' -Branch $agentBranch
 
-# DENY file edits on non-agent branch (branch-context gate, v1.18.10+)
+# Branch-context gate (v1.18.10+), both directions
 Assert-Deny "refactorer denied on non-agent branch (file edit)" `
     "refactorer-pretooluse.ps1" `
-    '{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}'
+    '{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}' -Branch 'dev'
+
+Assert-Allow "refactorer may edit an existing file on an agent branch" `
+    "refactorer-pretooluse.ps1" `
+    '{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}' -Branch $agentBranch
 
 Assert-Allow "refactorer can readFile" `
     "refactorer-pretooluse.ps1" `
