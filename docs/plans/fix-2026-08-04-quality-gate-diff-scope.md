@@ -82,17 +82,17 @@ same workflow stays in scope. That matches the branch-delta accountability
 argument already established for the linting gate (issue #13): the unit is what
 the merge will add.
 
-## Open question for the human
+## Resolved: ignore hygiene is scoped, inherited ones are ADVISORY
 
-**Ignore hygiene (`# noqa` / `# type: ignore` justification) is line-based and
-currently whole-file.** The same scope-discipline argument applies — an agent
-should not have to justify a suppression it did not add. But suppressions are
-cheap to add and expensive to notice, and the whole-file scan is the only thing
-that catches inherited ones.
+**Decision (human, 2026-08-04): option (c).** A suppression on a changed line
+fails the gate as today. A suppression the branch did not touch is printed as
+`ADVISORY:` and does not affect the exit code.
 
-Options: (a) leave whole-file, (b) scope it too, (c) scope it but report
-inherited ones as ADVISORY. Default if unanswered: **(c)** — it preserves
-visibility without blocking on someone else's debt.
+The reasoning: the same scope-discipline argument applies to `# noqa` as to
+docstrings — an agent should not have to justify a suppression it did not add.
+But suppressions are cheap to add and expensive to notice, so dropping the
+whole-file scan entirely would lose the only signal for inherited ones.
+Advisory output keeps them visible without blocking on someone else's debt.
 
 ## Acceptance criteria
 
