@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Four hook gates were green for the wrong reason, and two hooks never ran
+  at all (issue #37).** The issue reported that the test-writer and refactorer
+  branch guards "never fire". They fire; the *test* never established a branch,
+  so it read whatever branch the developer happened to be on. Filed from an
+  `agent/*` checkout, the assertion inverts — and from `dev` the branch gate
+  answered first for four tests named after a different gate
+  (`test-writer cannot edit production code`, `… create production file`,
+  `refactorer cannot createFile`, `… createDirectory`). Deleting the TDD phase
+  isolation gate outright would have left the suite green.
+
+  `test-hooks.ps1` now runs branch-dependent hooks inside a throwaway git
+  repository checked out on a stated branch, and asserts **both** directions —
+  denied off an agent branch, allowed on one. A test-only environment override
+  was considered and rejected: a guard that a variable can switch off is not a
+  guard. Each gate was then mutation-checked by disabling it one at a time; all
+  five mutants are killed by a named test.
+
+  Three real defects surfaced underneath:
+
+  - **The researcher allowlist was never read.** The hook resolved
+    `af-env.conf` via `git rev-parse --show-toplevel`, which misses whenever
+    `.github/` is not at the repository top level. `WEB_FETCH_ALLOWLIST` came
+    back empty, so *every* domain fell through to a prompt — and "allowlist not
+    found" was indistinguishable from "domain not listed". Resolution is now
+    script-relative and the two cases give different reasons.
+  - **`refactorer-pretooluse.sh` was dead code.** It tested `$PYTHON` without
+    ever defining it; under `set -u` the hook aborted before reaching a single
+    gate. It had no coverage, so nothing noticed.
+  - **A detached HEAD passed as an agent branch.** `git branch --show-current`
+    returns empty when detached, and the guard only denied a *non-empty*
+    non-agent branch — while the framework's own merge-rehearsal advice is
+    `git worktree add --detach`. Detached-inside-a-repo now denies; outside a
+    repository the guard still stays silent, deliberately.
+
+  The bash pendants are no longer mirrors that are only ever reviewed by
+  reading: `scripts/test-hooks.sh` runs them in the same kind of fixture
+  (10 cases, all passing). That harness is how the dead refactorer hook
+  surfaced.
+
 - **`analyze-copilot-usage.py` asserted a foreground coverage figure that has
   since been disproved.** Both the module docstring and the report footer
   claimed per-turn foreground usage "is not persisted by VS Code beyond a

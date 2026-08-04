@@ -78,14 +78,16 @@ function Emit-Fetch([string]$decision, [string]$reason) {
 # Domain allowlist: auto-approve official docs; prompt (with seed-add offer)
 # for everything else. Allowlist lives in .github/af-env.conf.
 # ---------------------------------------------------------------------------
+# Resolve config script-relative, as every other hook does. `git rev-parse
+# --show-toplevel` misses whenever .github/ is not at the repo top level, and
+# an unread allowlist is indistinguishable from an empty one.
 $allow = ''
-$repo = (git rev-parse --show-toplevel 2>$null)
-if ($repo) {
-    $conf = Join-Path $repo '.github/af-env.conf'
-    if (Test-Path $conf) {
-        $line = Select-String -Path $conf -Pattern '^\s*WEB_FETCH_ALLOWLIST=(.*)$' | Select-Object -First 1
-        if ($line) { $allow = $line.Matches[0].Groups[1].Value.Trim() }
-    }
+$mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
+$conf = Join-Path $mainRoot '.github/af-env.conf'
+$confFound = Test-Path $conf
+if ($confFound) {
+    $line = Select-String -Path $conf -Pattern '^\s*WEB_FETCH_ALLOWLIST=(.*)$' | Select-Object -First 1
+    if ($line) { $allow = $line.Matches[0].Groups[1].Value.Trim() }
 }
 
 $fetchHost = ''
@@ -98,7 +100,9 @@ if ($fetchHost) {
             Emit-Fetch 'allow' "Allowlisted documentation domain ($d).$credNote"
         }
     }
-    Emit-Fetch 'ask' ("Domain '$fetchHost' is not in WEB_FETCH_ALLOWLIST. Approve to fetch once. " +
+    $why = if ($confFound) { "Domain '$fetchHost' is not in WEB_FETCH_ALLOWLIST." }
+           else { "No allowlist available: .github/af-env.conf was not found at $conf." }
+    Emit-Fetch 'ask' ("$why Approve to fetch once. " +
         "To auto-approve this domain in future, add '$fetchHost' to WEB_FETCH_ALLOWLIST in .github/af-env.conf " +
         "(the agent can do this on your confirmation).$credNote")
 }

@@ -64,10 +64,17 @@ else
 fi
 
 # --- Domain allowlist: auto-approve official docs; prompt (with seed-add offer) otherwise ---
-REPO=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+# Resolve config script-relative, as every other hook does. `git rev-parse
+# --show-toplevel` misses whenever .github/ is not at the repo top level, and
+# an unread allowlist is indistinguishable from an empty one.
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+MAIN_ROOT=$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")
+CONF="$MAIN_ROOT/.github/af-env.conf"
 ALLOW=""
-if [ -n "$REPO" ] && [ -f "$REPO/.github/af-env.conf" ]; then
-    ALLOW=$(grep -E '^[[:space:]]*WEB_FETCH_ALLOWLIST=' "$REPO/.github/af-env.conf" 2>/dev/null | head -n1 | sed -E 's/^[[:space:]]*WEB_FETCH_ALLOWLIST=//')
+CONF_FOUND=0
+if [ -f "$CONF" ]; then
+    CONF_FOUND=1
+    ALLOW=$(grep -E '^[[:space:]]*WEB_FETCH_ALLOWLIST=' "$CONF" 2>/dev/null | head -n1 | sed -E 's/^[[:space:]]*WEB_FETCH_ALLOWLIST=//')
 fi
 
 FETCH_HOST=$(echo "$URL" | sed -E 's|^[a-zA-Z][a-zA-Z0-9+.-]*://([^/:?#]+).*|\1|' | tr '[:upper:]' '[:lower:]')
@@ -92,8 +99,13 @@ EOF
         exit 0
     fi
 
+    if [ "$CONF_FOUND" -eq 1 ]; then
+        WHY="Domain '$FETCH_HOST' is not in WEB_FETCH_ALLOWLIST."
+    else
+        WHY="No allowlist available: .github/af-env.conf was not found at $CONF."
+    fi
     cat <<EOF
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"Domain '$FETCH_HOST' is not in WEB_FETCH_ALLOWLIST. Approve to fetch once. To auto-approve this domain in future, add '$FETCH_HOST' to WEB_FETCH_ALLOWLIST in .github/af-env.conf (the agent can do this on your confirmation).$CRED_NOTE"}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"$WHY Approve to fetch once. To auto-approve this domain in future, add '$FETCH_HOST' to WEB_FETCH_ALLOWLIST in .github/af-env.conf (the agent can do this on your confirmation).$CRED_NOTE"}}
 EOF
     exit 0
 fi
