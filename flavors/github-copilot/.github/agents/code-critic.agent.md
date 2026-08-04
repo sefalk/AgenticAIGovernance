@@ -41,6 +41,7 @@ You do NOT write code — you return a structured verdict.
 Consult these skills when relevant to the task:
 - **code-review** (`skills/code-review/SKILL.md`) — review process, diff analysis, verdict template
 - **static-analysis** (`skills/static-analysis/SKILL.md`) — tools, thresholds, suppression policy
+- **test-execution** (`skills/test-execution/SKILL.md`) — coverage task labels, test budget, test log
 - **metrics** (`skills/metrics/SKILL.md`) — coverage, complexity, mutation score commands
 - **secure-coding** (`skills/secure-coding/SKILL.md`) — OWASP, injection prevention, secrets detection
 - **hexagonal-architecture** (`skills/hexagonal-architecture/SKILL.md`) — layer boundaries, dependency rule

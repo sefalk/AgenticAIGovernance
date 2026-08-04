@@ -53,6 +53,7 @@ express requirements **before** any production code is written. This is the
 
 Consult these skills when relevant to the task:
 - **unit-testing** (`skills/unit-testing/SKILL.md`) — test structure, patterns, fixtures
+- **test-execution** (`skills/test-execution/SKILL.md`) — task labels, scoping, test budget, test log
 - **property-testing** (`skills/property-testing/SKILL.md`) — property categories, strategies, discovery checklist
 - **error-handling** (`skills/error-handling/SKILL.md`) — error classification for writing error-path tests
 - **human-escalation** (`skills/human-escalation/SKILL.md`) — halt protocol when blocked or uncertain

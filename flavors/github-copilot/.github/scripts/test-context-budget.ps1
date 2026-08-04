@@ -168,6 +168,90 @@ try {
     # J: the real payload must satisfy its own budgets
     $realGh = (Resolve-Path (Join-Path $scriptDir '..')).Path
     $results['J_real_payload_within_budget'] = ((Invoke-Checker $realGh).Code -eq 0)
+
+    # --- Conditional set (issue #44) -------------------------------------
+    # Before this, the gate measured only applyTo:'**' files -- the smaller
+    # half. A narrow glob made a file invisible to the budget, not cheap.
+    $condConf = "AF_CONTEXT_BUDGET_TOKENS=1000`nAF_AGENT_CONTEXT_BUDGET_TOKENS=5000`nAF_CONDITIONAL_BUDGET_TOKENS=2000`n"
+
+    # K: the conditional set is reported with each file's own glob, so an
+    #    over-broad applyTo is visible at the point the size is shown.
+    $gh = New-Fixture -RootTokens 100 -Conf $condConf -Instructions @{
+        'wide.instructions.md'   = @{ Tokens = 200; ApplyTo = '**' }
+        'narrow.instructions.md' = @{ Tokens = 900; ApplyTo = 'src/**/*.py' }
+    }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh @('--verbose')
+    $results['K_conditional_set_reported'] = ($r.Output -match 'conditional set')
+    $results['K_conditional_names_file'] = ($r.Output -match 'narrow\.instructions\.md')
+    $results['K_conditional_shows_glob'] = ($r.Output -match [regex]::Escape('src/**/*.py'))
+    $results['K_conditional_total_correct'] = ($r.Output -match 'conditional 900')
+
+    # L: an always-on file must not be double-counted into the conditional set.
+    $results['L_always_on_excluded_from_conditional'] = ($r.Output -notmatch 'wide\.instructions\.md\s+\*\*\s*$')
+
+    # M: the per-agent worst case adds the conditional set to the unconditional
+    #    total -- the number the old gate reported as if it were the whole story.
+    #    100 root + 200 wide = 300 always-on; agent 50; conditional 900 -> 1,250.
+    $gh = New-Fixture -RootTokens 100 -Conf $condConf -Agents @{ 'solo' = 50 } -Instructions @{
+        'wide.instructions.md'   = @{ Tokens = 200; ApplyTo = '**' }
+        'narrow.instructions.md' = @{ Tokens = 900; ApplyTo = 'src/**/*.py' }
+    }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh @('--verbose')
+    $results['M_worst_case_reported'] = ($r.Output -match 'worst case')
+    $results['M_worst_case_value'] = ($r.Output -match '1,250')
+
+    # N: an agent whose worst case breaches the agent budget is marked, but the
+    #    exit code stays 0 -- gating it would fail every agent for one shared
+    #    cause. The teeth are on the conditional total instead (see O).
+    #    own 3,000 + always-on 300 = 3,300 unconditional (passes 5,000);
+    #    + 1,900 conditional = 5,200 worst case (over 5,000, marked only).
+    $gh = New-Fixture -RootTokens 100 -Conf $condConf -Agents @{ 'solo' = 3000 } -Instructions @{
+        'wide.instructions.md'   = @{ Tokens = 200; ApplyTo = '**' }
+        'narrow.instructions.md' = @{ Tokens = 1900; ApplyTo = 'src/**/*.py' }
+    }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh @('--verbose')
+    $results['N_worst_case_over_marked'] = ($r.Output -match 'exceeds agent budget')
+    $results['N_worst_case_over_does_not_fail'] = ($r.Code -eq 0)
+
+    # O: the conditional total is enforced, not merely displayed.
+    $gh = New-Fixture -RootTokens 100 -Conf $condConf -Instructions @{
+        'wide.instructions.md' = @{ Tokens = 200; ApplyTo = '**' }
+        'fat.instructions.md'  = @{ Tokens = 2500; ApplyTo = 'tests/**/*.py' }
+    }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh
+    $results['O_conditional_over_budget_fails'] = ($r.Code -eq 1)
+    $results['O_conditional_names_offender'] = ($r.Output -match 'fat\.instructions\.md')
+    $results['O_conditional_fail_is_distinct'] = ($r.Output -match 'conditional set is')
+
+    # P: a malformed conditional budget blocks, exactly like the other budgets.
+    #    A budget that silently falls back to a default is not a budget.
+    $gh = New-Fixture -RootTokens 100 -Conf "AF_CONDITIONAL_BUDGET_TOKENS=plenty`n" -Instructions @{
+        'wide.instructions.md' = @{ Tokens = 100; ApplyTo = '**' }
+    }
+    $fixtures += $gh
+    $results['P_malformed_conditional_budget_blocked'] = ((Invoke-Checker $gh).Code -eq 2)
+
+    # Q: absent conditional budget uses the documented default and still runs.
+    $gh = New-Fixture -RootTokens 100 -Instructions @{
+        'wide.instructions.md'   = @{ Tokens = 100; ApplyTo = '**' }
+        'narrow.instructions.md' = @{ Tokens = 100; ApplyTo = 'src/**/*.py' }
+    }
+    $fixtures += $gh
+    $results['Q_absent_conditional_budget_defaults'] = ((Invoke-Checker $gh).Code -eq 0)
+
+    # R: a payload with no conditional files at all must not divide by zero or
+    #    print an empty section.
+    $gh = New-Fixture -RootTokens 100 -Conf $condConf -Instructions @{
+        'wide.instructions.md' = @{ Tokens = 200; ApplyTo = '**' }
+    }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh @('--verbose')
+    $results['R_no_conditional_files_passes'] = ($r.Code -eq 0)
+    $results['R_no_conditional_files_reports_zero'] = ($r.Output -match 'conditional 0')
 }
 finally {
     foreach ($f in $fixtures) {

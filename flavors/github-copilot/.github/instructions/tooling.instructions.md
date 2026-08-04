@@ -15,7 +15,7 @@ it silently removed an agent's ability to do its job.
 
 VS Code accepts JSONC in `tasks.json`, but the `createAndRunTask` tool **cannot
 parse it**. A single `//` line disables the documented fallback path for
-restricted agents (`testing.instructions.md` § Agent Test Execution).
+restricted agents (`skills/test-execution/SKILL.md`).
 
 Do not add comments. Put per-task explanation in the `detail` field — it is
 data, survives tooling round-trips, and is shown in the task picker. Put

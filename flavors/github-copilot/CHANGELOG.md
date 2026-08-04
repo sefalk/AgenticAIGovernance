@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The context budget watched the always-on half and ignored the other one
+  (issue #44).** `check-context-budget.py` gated `copilot-instructions.md`
+  plus every `applyTo: '**'` instruction and reported `PASS`. The
+  instruction files with a *narrower* glob were never counted — 9,699 tokens,
+  twice the watched set. A narrow `applyTo` makes a file load less often; it
+  does not make it cheap, and for the agent whose job is to touch matching
+  files it is effectively always-on.
+
+  The checker now prints the conditional set per file with its glob, enforces
+  its total via `AF_CONDITIONAL_BUDGET_TOKENS`, and reports a per-agent
+  **worst case** (own + always-on + all conditional).
+
+  Two deliberate choices:
+
+  - **The worst case is reported, not gated.** Co-occurrence is not
+    computable offline, so the bound adds the same conditional total to every
+    agent. Failing all fifteen for one shared cause is a broken signal, not a
+    strict one; the budget on the *set* attacks that cause once.
+  - **The budget was set after the reduction, not before.** Calibrating to
+    the pre-existing 9,699 would have locked in the problem it was meant to
+    surface.
+
+  Measuring it also corrected the priority: the **coordinator** sits at 97% of
+  its budget before any conditional file loads, and `copilot-authoring`
+  matches `**/*.agent.md` — so it crosses the budget the moment it edits an
+  agent file, while the gate reported `PASS`.
+
+  Reduction followed the #25 pattern (contract inline, reference depth into
+  skills): `testing.instructions.md` 3,671 → 1,304 (execution runbook →
+  `skills/test-execution`; the AAA/test-doubles material was a duplicate of
+  `skills/unit-testing`) and `copilot-authoring.instructions.md` 3,176 → 1,110
+  (subagent pattern, tool-name catalogue, hooks, prompt features, tool sets →
+  `skills/copilot-authoring`). Conditional set 9,699 → 5,262;
+  `AF_CONDITIONAL_BUDGET_TOKENS=5500`. No enforceable rule left the
+  instruction files — a glob audit found all four correctly scoped, so the
+  cost was file size, not glob width.
+
 - **The Python quality gate judged whole files, so an untouched neighbour
   could block a commit (issue #45).** `check-python-quality.py` received a
   file list and reported every function in it. In WIT #3105 a one-line

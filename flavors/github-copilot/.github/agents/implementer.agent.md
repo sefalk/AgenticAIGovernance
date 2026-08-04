@@ -55,6 +55,7 @@ Consult these skills when relevant to the task:
 - **error-handling** (`skills/error-handling/SKILL.md`) — exception hierarchies, retry patterns
 - **design-patterns** (`skills/design-patterns/SKILL.md`) — pattern selection, SOLID
 - **static-analysis** (`skills/static-analysis/SKILL.md`) — lint, type check, complexity
+- **test-execution** (`skills/test-execution/SKILL.md`) — task labels, scoping, test budget, test log
 - **dependency-management** (`skills/dependency-management/SKILL.md`) — when adding packages
 - **human-escalation** (`skills/human-escalation/SKILL.md`) — halt protocol when blocked or uncertain
 - **notebook-execution** (`skills/notebook-execution/SKILL.md`) — use the notebook tools for `.ipynb`, never terminal scripts

@@ -32,6 +32,7 @@ tests are meaningful and return a structured verdict.
 
 Consult these skills when relevant to the task:
 - **unit-testing** (`skills/unit-testing/SKILL.md`) — test structure, patterns, naming conventions
+- **test-execution** (`skills/test-execution/SKILL.md`) — why test-critic runs nothing, and how to read the test log
 - **code-review** (`skills/code-review/SKILL.md`) — anti-gaming detection, review checklist patterns
 - **property-testing** (`skills/property-testing/SKILL.md`) — property categories for validating test quality
 <!-- AF:MANAGED:curated-skills:START -->
