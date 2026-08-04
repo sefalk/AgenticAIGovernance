@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
-# PreToolUse hook: three-tier terminal command classifier (allow / ask / deny).
+# PreToolUse hook: three-tier terminal command classifier (allow / ask / deny),
+# plus an allowlist classifier for task-shaped createAndRunTask payloads.
 #
-# Tiers: deny (hard-block), allow (auto-approve safe), ask (confirm durable
-# change), {} (defer to user settings -- fail-safe default).
+# Tiers (runInTerminal shape): deny (hard-block), allow (auto-approve safe),
+# ask (confirm durable change), {} (defer to user settings -- fail-safe
+# default).
+#
+# createAndRunTask shape: the segment blocklist above does not apply. Instead,
+# task.command must resolve (after path normalisation) inside a directory
+# listed in AF_TASK_SCRIPT_DIRS -- a bare binary (git, ruff, pytest, ...) never
+# can, since it has no path segment to match, so the hard-deny tier is covered
+# as a consequence. Any unrecognised task shape denies (fail closed).
 
 PYTHON=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo "")
 
@@ -17,8 +25,143 @@ tool_name=$(echo "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.std
 
 case "$tool_name" in
     *terminal*|*Terminal*) ;;
+    createAndRunTask) ;;
     *) echo '{}'; exit 0 ;;
 esac
+
+if [ "$tool_name" = "createAndRunTask" ]; then
+    # ------------------------------------------------------------------
+    # createAndRunTask allowlist -- mirrors block-dangerous.ps1. A task's
+    # `command` must resolve, after path normalisation, inside one of the
+    # AF_TASK_SCRIPT_DIRS directories -- a bare binary (git, ruff, pytest,
+    # databricks, ...) never can, since it has no path segment to match.
+    # An interpreter (powershell/cmd/bash/python/...) is checked by its
+    # PAYLOAD instead (-File/-c/a positional script path), because that is
+    # what actually runs and the interpreter binary itself is never inside
+    # the repo. Everything unrecognised fails closed. Path normalisation
+    # and the JSON walk are delegated to Python (already a hard dependency
+    # of this hook) rather than re-implemented in shell.
+    # ------------------------------------------------------------------
+    emit_task() {
+        # $1 = decision, $2 = reason
+        cat <<EOF
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"$1","permissionDecisionReason":"$2"}}
+EOF
+        exit 0
+    }
+
+    if printf '%s' "$raw" | grep -qF '${input:'; then
+        emit_task deny "Policy hard-deny: task payload contains an interactive \${input:...} variable, which blocks on a prompt an agent cannot answer. Remove it and pass the value as a literal argument instead. Point the task command at a reviewed script under AF_TASK_SCRIPT_DIRS (default .github/scripts), or run the command yourself in the terminal."
+    fi
+
+    task_repo=$(git rev-parse --show-toplevel 2>/dev/null)
+    task_conf="$task_repo/.github/af-env.conf"
+    task_dirs_raw=""
+    if [ -f "$task_conf" ]; then
+        task_dirs_raw=$(grep -E '^[[:space:]]*AF_TASK_SCRIPT_DIRS=' "$task_conf" 2>/dev/null | head -n1 | sed -E 's/^[[:space:]]*AF_TASK_SCRIPT_DIRS=//')
+        task_dirs_raw=$(printf '%s' "$task_dirs_raw" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+    fi
+    [ -z "$task_dirs_raw" ] && task_dirs_raw=".github/scripts"
+
+    decision=$(printf '%s' "$raw" | "$PYTHON" -c '
+import sys, json, os
+
+raw = sys.stdin.read()
+repo = sys.argv[1] if len(sys.argv) > 1 else ""
+dirs_raw = sys.argv[2] if len(sys.argv) > 2 else ".github/scripts"
+
+sanctioned = (
+    "Point the task command at a reviewed script under AF_TASK_SCRIPT_DIRS "
+    "(default .github/scripts), e.g. .github/scripts/run-tests.ps1, or run "
+    "the command yourself in the terminal."
+)
+
+def resolve(p):
+    if not repo or not p:
+        return None
+    p = os.path.expandvars(p)
+    return os.path.normpath(os.path.join(repo, p))
+
+allowed = []
+for d in dirs_raw.split(","):
+    d = d.strip()
+    if not d:
+        continue
+    r = resolve(d)
+    if r:
+        allowed.append(r + os.sep)
+
+def in_allowlist(p):
+    full = resolve(p)
+    if not full:
+        return False
+    return any(full.lower().startswith(a.lower()) for a in allowed)
+
+try:
+    data = json.loads(raw)
+except Exception:
+    print("DENY|Policy hard-deny: unrecognised task payload shape (invalid JSON); fail-closed. " + sanctioned)
+    sys.exit(0)
+
+task = data.get("tool_input", {}).get("task")
+command = task.get("command", "") if isinstance(task, dict) else ""
+if not isinstance(task, dict) or not command:
+    print("DENY|Policy hard-deny: unrecognised task payload shape (no usable command found); fail-closed. " + sanctioned)
+    sys.exit(0)
+
+args = task.get("args", [])
+if not isinstance(args, list):
+    args = []
+args = [str(a) for a in args]
+
+interpreters = {"powershell", "pwsh", "cmd", "bash", "sh", "zsh", "python", "python3", "node", "perl", "ruby", "wscript", "cscript"}
+base = os.path.splitext(os.path.basename(command))[0].lower()
+
+if base in interpreters:
+    inline = False
+    file_target = None
+    saw_file_flag = False
+    for i, a in enumerate(args):
+        if a.lower() in ("-command", "-c", "/c", "-encodedcommand"):
+            inline = True
+            break
+        if a.lower() == "-file":
+            saw_file_flag = True
+            if i + 1 < len(args):
+                file_target = args[i + 1]
+            break
+    if inline:
+        print("DENY|Policy hard-deny: interpreter " + command + " invoked with an inline command payload (-Command/-c/-EncodedCommand) that is not visible to the task classifier. " + sanctioned)
+        sys.exit(0)
+    if not saw_file_flag:
+        for a in args:
+            if a and not a.startswith("-"):
+                file_target = a
+                break
+    if not file_target or not in_allowlist(file_target):
+        print("DENY|Policy hard-deny: interpreter " + command + " payload " + str(file_target) + " does not resolve inside an AF_TASK_SCRIPT_DIRS directory (unrecognised or external script). " + sanctioned)
+        sys.exit(0)
+    print("ALLOW|Safe: interpreter payload resolves to a reviewed script under AF_TASK_SCRIPT_DIRS.")
+    sys.exit(0)
+
+if not in_allowlist(command):
+    print("DENY|Policy hard-deny: task command " + command + " does not resolve inside an AF_TASK_SCRIPT_DIRS directory. " + sanctioned)
+    sys.exit(0)
+print("ALLOW|Safe: task command resolves to a reviewed script under AF_TASK_SCRIPT_DIRS.")
+' "$task_repo" "$task_dirs_raw")
+
+    if [ -z "$decision" ]; then
+        emit_task deny "Policy hard-deny: unrecognised task payload shape (classifier error); fail-closed. Point the task command at a reviewed script under AF_TASK_SCRIPT_DIRS (default .github/scripts)."
+    fi
+
+    decision_word="${decision%%|*}"
+    decision_reason="${decision#*|}"
+    if [ "$decision_word" = "DENY" ]; then
+        emit_task deny "$decision_reason"
+    else
+        emit_task allow "$decision_reason"
+    fi
+fi
 
 command_str=$(echo "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_input',{}).get('command',''))" 2>/dev/null)
 

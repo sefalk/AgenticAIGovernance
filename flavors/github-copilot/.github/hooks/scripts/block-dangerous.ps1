@@ -1,14 +1,22 @@
-# PreToolUse hook: three-tier terminal command classifier (allow / ask / deny).
+# PreToolUse hook: three-tier terminal command classifier (allow / ask / deny),
+# plus an allowlist classifier for task-shaped createAndRunTask payloads.
 #
-# Tiers:
+# Tiers (runInTerminal shape):
 #   deny  -> hard-block destructive/irreversible commands (+ agent notice)
 #   allow -> auto-approve safe commands (read-only, tests, feature-branch git),
 #            gated by AUTONOMY_LEVEL / AUTONOMY_CAT_* in .github/af-env.conf
 #   ask   -> prompt for durable-change commands
 #   {}    -> defer to the user's approval settings (fail-safe default)
 #
+# createAndRunTask shape: the segment blocklist above does not apply. Instead,
+# task.command must resolve (after path normalisation) inside a directory
+# listed in AF_TASK_SCRIPT_DIRS -- a bare binary (git, ruff, pytest, ...) never
+# can, since it has no path segment to match, so the hard-deny tier is covered
+# as a consequence. See the $isTaskShaped block below.
+#
 # Fail-safe: on any parse ambiguity or unexpected shape the hook returns {}
-# (prompt) -- it never accidentally auto-approves.
+# (prompt) -- it never accidentally auto-approves. The task-shaped allowlist
+# is stricter still: any unrecognised task shape denies (fail closed).
 
 $ErrorActionPreference = 'SilentlyContinue'
 
@@ -21,14 +29,125 @@ try {
     exit 0
 }
 
-# Only inspect terminal tool calls
+# Only inspect terminal tool calls, or task-shaped createAndRunTask payloads.
 $toolName = $inputData.tool_name
-if ($toolName -notmatch 'terminal|Terminal') {
+$isTaskShaped = ($toolName -eq 'createAndRunTask')
+if ($toolName -notmatch 'terminal|Terminal' -and -not $isTaskShaped) {
     Write-Output '{}'
     exit 0
 }
 
-# Extract the command string
+if ($isTaskShaped) {
+    # -----------------------------------------------------------------------
+    # createAndRunTask allowlist. A task's `command` must resolve, after path
+    # normalisation, inside one of the AF_TASK_SCRIPT_DIRS directories -- a
+    # bare binary (git, ruff, pytest, databricks, ...) never can, since it has
+    # no path segment to match. An interpreter (powershell/cmd/bash/python/...)
+    # is checked by its PAYLOAD instead (-File / -c / a positional script
+    # path), because that is what actually runs and the interpreter binary
+    # itself is never inside the repo. Everything unrecognised fails closed.
+    # -----------------------------------------------------------------------
+    function Emit-Task([string]$decision, [string]$reason) {
+        @{
+            hookSpecificOutput = @{
+                hookEventName            = 'PreToolUse'
+                permissionDecision       = $decision
+                permissionDecisionReason = $reason
+            }
+        } | ConvertTo-Json -Depth 3 -Compress
+        exit 0
+    }
+
+    $sanctioned = "Point 'command' at a reviewed script under AF_TASK_SCRIPT_DIRS (default .github/scripts), e.g. .github/scripts/run-tests.ps1, or run the command yourself in the terminal."
+
+    # Whole-payload scan for interactive input variables -- these block on a
+    # prompt an unattended agent can never answer. Scanned against the raw
+    # stdin text (single-quoted match: a double-quoted literal containing
+    # ${input: would interpolate as a drive-scoped variable and throw).
+    if ($raw.Contains('${input:')) {
+        Emit-Task 'deny' ('Policy hard-deny: task payload contains an interactive ${input:...} variable, which blocks on a prompt an agent cannot answer. Remove it and pass the value as a literal argument instead. ' + $sanctioned)
+    }
+
+    $task = $inputData.tool_input.task
+    $taskCommand = if ($task) { [string]$task.command } else { '' }
+    if (-not $task -or -not $taskCommand) {
+        Emit-Task 'deny' ("Policy hard-deny: unrecognised task payload shape (no usable 'command' found); fail-closed. $sanctioned")
+    }
+
+    $taskRepo = (git rev-parse --show-toplevel 2>$null)
+    $taskConfLines = @()
+    if ($taskRepo) {
+        $taskConf = Join-Path $taskRepo '.github/af-env.conf'
+        if (Test-Path $taskConf) { $taskConfLines = Get-Content $taskConf }
+    }
+    function Get-AfEnvTask([string]$key, [string]$default) {
+        foreach ($l in $taskConfLines) {
+            if ($l -match "^\s*$([regex]::Escape($key))=(.*)$") { return $Matches[1].Trim() }
+        }
+        return $default
+    }
+    $allowedDirsRaw = @((Get-AfEnvTask 'AF_TASK_SCRIPT_DIRS' '.github/scripts') -split ',' |
+            ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($allowedDirsRaw.Count -eq 0) { $allowedDirsRaw = @('.github/scripts') }
+
+    function Resolve-TaskPath([string]$p) {
+        if (-not $taskRepo -or -not $p) { return $null }
+        $expanded = [System.Environment]::ExpandEnvironmentVariables($p)
+        try { return [System.IO.Path]::GetFullPath((Join-Path $taskRepo $expanded)) } catch { return $null }
+    }
+    $allowedDirsFull = @($allowedDirsRaw | ForEach-Object {
+            $r = Resolve-TaskPath $_
+            if ($r) { $r.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar }
+        } | Where-Object { $_ })
+    function Test-InAllowlist([string]$p) {
+        $full = Resolve-TaskPath $p
+        if (-not $full) { return $false }
+        foreach ($dir in $allowedDirsFull) {
+            if ($full.StartsWith($dir, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        }
+        return $false
+    }
+
+    # Interpreters are classified by their PAYLOAD, not their own path -- the
+    # binary itself (powershell, python, ...) is never inside the repo, so
+    # requiring it to resolve inside AF_TASK_SCRIPT_DIRS would be meaningless.
+    $interpreterNames = @('powershell', 'pwsh', 'cmd', 'bash', 'sh', 'zsh', 'python', 'python3', 'node', 'perl', 'ruby', 'wscript', 'cscript')
+    $cmdBase = ([System.IO.Path]::GetFileNameWithoutExtension($taskCommand)).ToLower()
+
+    if ($interpreterNames -contains $cmdBase) {
+        $taskArgs = @()
+        if ($task.args) { $taskArgs = @($task.args) }
+        $inlinePayload = $false
+        $fileTarget = $null
+        $sawFileFlag = $false
+        for ($i = 0; $i -lt $taskArgs.Count; $i++) {
+            $a = [string]$taskArgs[$i]
+            if ($a -match '(?i)^(-Command|-c|/c|-EncodedCommand)$') { $inlinePayload = $true; break }
+            if ($a -match '(?i)^-File$') {
+                $sawFileFlag = $true
+                if (($i + 1) -lt $taskArgs.Count) { $fileTarget = [string]$taskArgs[$i + 1] }
+                break
+            }
+        }
+        if ($inlinePayload) {
+            Emit-Task 'deny' ("Policy hard-deny: '$taskCommand' invoked with an inline command payload (-Command/-c/-EncodedCommand) that is not visible to the task classifier. $sanctioned")
+        }
+        if (-not $sawFileFlag) {
+            $fileTarget = $taskArgs | Where-Object { $_ -and -not ([string]$_).StartsWith('-') } | Select-Object -First 1
+        }
+        if (-not $fileTarget -or -not (Test-InAllowlist ([string]$fileTarget))) {
+            Emit-Task 'deny' ("Policy hard-deny: '$taskCommand' payload '$fileTarget' does not resolve inside an AF_TASK_SCRIPT_DIRS directory (unrecognised or external script). $sanctioned")
+        }
+        Emit-Task 'allow' 'Safe: interpreter payload resolves to a reviewed script under AF_TASK_SCRIPT_DIRS.'
+    }
+
+    if (-not (Test-InAllowlist $taskCommand)) {
+        Emit-Task 'deny' ("Policy hard-deny: task command '$taskCommand' does not resolve inside an AF_TASK_SCRIPT_DIRS directory. $sanctioned")
+    }
+    Emit-Task 'allow' 'Safe: task command resolves to a reviewed script under AF_TASK_SCRIPT_DIRS.'
+}
+
+# Extract the command string (runInTerminal / terminal shape only, from here).
 $command = [string]$inputData.tool_input.command
 if (-not $command) {
     Write-Output '{}'
