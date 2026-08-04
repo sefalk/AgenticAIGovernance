@@ -167,6 +167,12 @@ if ($mergeBase) {
     })
 }
 
+# The quality gate reports per changed function, not per changed file (issue
+# #45). It reuses the base resolved above rather than deriving its own, so the
+# framework keeps one base-branch resolver.
+$diffBaseArgs = @()
+if ($mergeBase) { $diffBaseArgs = @('--diff-base', $mergeBase) }
+
 # Resolve Python once -- Gate 3 and Gate 5 both need it. Gate 5 must still run
 # when only tests/ changed, so this cannot live inside the Gate 3 branch.
 $pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
@@ -204,7 +210,7 @@ if ($changedSrcPy.Count -gt 0) {
     }
 
     Push-Location $codeRoot
-    $qualityResult = & $pythonExe $qualityScript --files @($changedSrcPy) 2>&1
+    $qualityResult = & $pythonExe $qualityScript @diffBaseArgs --files @($changedSrcPy) 2>&1
     $qualityExit = $LASTEXITCODE
     Pop-Location
     if ($qualityExit -ne 0) {
@@ -244,7 +250,7 @@ if ($hygienePy.Count -gt 0) {
     }
 
     Push-Location $codeRoot
-    $hygieneResult = & $pythonExe $qualityScript --files @($hygienePy) --checks ignore-hygiene 2>&1
+    $hygieneResult = & $pythonExe $qualityScript @diffBaseArgs --checks ignore-hygiene --files @($hygienePy) 2>&1
     $hygieneExit = $LASTEXITCODE
     Pop-Location
     if ($hygieneExit -ne 0) {
