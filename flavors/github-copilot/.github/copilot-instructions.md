@@ -109,6 +109,8 @@ skills when their task falls within the skill's scope.
 | **secure-coding** | `skills/secure-coding/` | code-critic |
 | **static-analysis** | `skills/static-analysis/` | implementer, code-critic |
 | **task-decomposition** | `skills/task-decomposition/` | planner |
+| **test-execution** | `skills/test-execution/` | test-writer, test-critic, implementer, refactorer, code-critic |
+| **copilot-authoring** | `skills/copilot-authoring/` | any agent editing a `.agent.md` / `.prompt.md` / `.instructions.md` |
 | **unit-testing** | `skills/unit-testing/` | test-writer, test-critic |
 | **git-worktrees** | `skills/git-worktrees/` | coordinator |
 | **notebook-execution** | `skills/notebook-execution/` | coordinator, implementer, refactorer, code-critic, test-writer |
