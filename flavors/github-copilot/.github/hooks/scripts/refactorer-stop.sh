@@ -148,6 +148,12 @@ elif command -v python &>/dev/null; then
     python_exe="python"
 fi
 
+# The quality gate reports per changed function, not per changed file (issue
+# #45). It reuses the base resolved above rather than deriving its own, so the
+# framework keeps one base-branch resolver.
+diff_base_args=""
+[ -n "$merge_base" ] && diff_base_args="--diff-base $merge_base"
+
 # ---------- Gate 3: Python quality on changed source files ----------
 
 if [ -n "$changed_src_py" ]; then
@@ -162,7 +168,7 @@ if [ -n "$changed_src_py" ]; then
         exit 0
     fi
 
-    quality_output=$(echo "$changed_src_py" | xargs "$python_exe" "$quality_script" --files 2>&1)
+    quality_output=$(echo "$changed_src_py" | xargs "$python_exe" "$quality_script" $diff_base_args --files 2>&1)
     quality_exit=$?
     if [ "$quality_exit" -ne 0 ]; then
         summary=$(echo "$quality_output" | head -10 | tr '\n' ' ' | sed 's/"/\\"/g')
@@ -190,7 +196,7 @@ if [ -n "$hygiene_py" ]; then
         echo '{"hookSpecificOutput": {"hookEventName": "Stop", "decision": "block", "reason": "Ignore hygiene gate unavailable: check-python-quality.py or a Python executable is missing."}}'
         exit 0
     fi
-    hygiene_output=$(echo "$hygiene_py" | xargs "$python_exe" "$quality_script" --checks ignore-hygiene --files 2>&1)
+    hygiene_output=$(echo "$hygiene_py" | xargs "$python_exe" "$quality_script" $diff_base_args --checks ignore-hygiene --files 2>&1)
     hygiene_exit=$?
     if [ "$hygiene_exit" -ne 0 ]; then
         summary=$(echo "$hygiene_output" | head -10 | tr '\n' ' ' | sed 's/"/\\"/g')
