@@ -57,6 +57,7 @@ Consult these skills when relevant to the task:
 - **design-patterns** (`skills/design-patterns/SKILL.md`) — when to apply/avoid patterns
 - **hexagonal-architecture** (`skills/hexagonal-architecture/SKILL.md`) — layer boundaries for move-function decisions
 - **pydantic** (`skills/pydantic/SKILL.md`) — when converting dataclasses/dicts to Pydantic models
+- **test-execution** (`skills/test-execution/SKILL.md`) — task labels, scoping, test budget, test log
 - **human-escalation** (`skills/human-escalation/SKILL.md`) — halt protocol when blocked or uncertain
 - **notebook-execution** (`skills/notebook-execution/SKILL.md`) — use the notebook tools for `.ipynb`, never terminal scripts
 <!-- AF:MANAGED:curated-skills:START -->
