@@ -9,6 +9,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The task execution path was unclassified, and the instructions pointed at
+  it (issue #56).** `block-dangerous.*` filtered on the tool name before
+  anything else, so the entire hard-deny tier was unenforced through
+  `createAndRunTask`: `git push --force origin main` was denied as a terminal
+  command and allowed as a task. Meanwhile `coordinator.agent.md` rule 3 read
+  *"Prefer tasks over terminal"* and ordered the ladder
+  `run_task → createAndRunTask → terminal`. The framework was instructing
+  agents to prefer the one path no hook inspected.
+
+  Both halves are fixed, because either alone is worthless — closing the hook
+  leaves an instruction pushing agents at a locked door, and rewording the
+  instruction leaves the door unlocked.
+
+  - **Allowlist, not blocklist.** A task may invoke only a script under
+    `AF_TASK_SCRIPT_DIRS` (new in `af-env.conf`, default `.github/scripts`).
+    Bare binaries, inline interpreter payloads and unrecognised shapes deny.
+  - **The effective command is classified, not the declared one.** Reading the
+    VS Code tasks specification exposed three bypasses in the first
+    implementation, all of which its own green test suite had missed: an
+    OS-specific `windows`/`linux`/`osx` scope overrides `command`;
+    `options.shell` moves the payload into the shell's arguments; and a
+    `type: shell` `command` may be an entire command line, so
+    `…/run-tests.ps1; <anything>` matched the allowlisted prefix. It also
+    exposed one false deny — `${workspaceFolder}` substitution is legitimate.
+  - **`lint: changed files` / `-Scope changed`** fills the one capability gap
+    that made ad-hoc tasks genuinely necessary: agents can now lint the branch
+    delta the stop-hook gate actually evaluates.
+  - **The framing is corrected everywhere the tool is granted** — coordinator,
+    implementer, refactorer, code-critic, `TOOLS.md`,
+    `testing.instructions.md`, `tooling.instructions.md` and the
+    test-execution skill. Tasks and terminal are described as one reviewed
+    surface, not as rungs of a freedom ladder.
+  - **Scratch hygiene.** `createAndRunTask` writes every one-off invocation
+    into `.vscode/tasks.json`; `check-scratch-tasks.py` reports the leftovers
+    at workflow end (advisory), and the repo-root scratch file is now ignored.
+
+  Two pre-existing fail-opens in `block-dangerous.sh` surfaced only when the
+  hook was *executed* rather than inspected. On Windows hosts `command -v
+  python3` resolves the 0-byte App Execution Alias: non-empty, so it passed the
+  emptiness check, but it executes nothing — every classification failed
+  silently and the hook returned no opinion for **every** command, terminal
+  included. The whole hook was inert on that host class. Separately, the three
+  matcher helpers passed caller-supplied patterns to `grep` positionally, so a
+  pattern starting with a dash was parsed as an option and the
+  commit-hook-bypass deny rule never fired.
+
+  This is a stopgap for #60, not a resolution: it classifies a payload shape,
+  where the durable fix is to stop having two execution surfaces to keep in
+  sync.
+
 - **The context budget watched the always-on half and ignored the other one
   (issue #44).** `check-context-budget.py` gated `copilot-instructions.md`
   plus every `applyTo: '**'` instruction and reported `PASS`. The

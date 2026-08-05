@@ -6,7 +6,7 @@
 - **Issue:** [#56](https://github.com/sefalk/AgenticAIGovernance/issues/56)
 - **Branch:** `agent/56-task-path-classifier`
 - **Complexity tier:** Deep
-- **Status:** IN PROGRESS
+- **Status:** COMPLETED
 
 ## The measured defect
 
@@ -260,6 +260,10 @@ and none of them were assumptions before this:
 | 2026-08-04 | In-flight confirmation recorded. Subtask 4 widened beyond the coordinator; subtask 5 gained the `.gitignore` criterion. |
 | 2026-08-04 | Verification against the official VS Code tasks documentation found **three bypasses in the code committed at subtask 2** and one false deny. Specification corrected (see below). Fixed and verified at 90/0 plus an independent 11-payload probe set. |
 | 2026-08-04 | `.sh` port verified **by execution** after all: Git Bash is present on this host, contrary to the earlier assumption. Running it exposed two pre-existing fail-opens in the hook (interpreter detection, grep pattern passing) that inspection had not. |
+| 2026-08-04 | Two structural findings filed as their own issues rather than absorbed here: [#61](https://github.com/sefalk/AgenticAIGovernance/issues/61) (the framework never runs its own hooks) and [#62](https://github.com/sefalk/AgenticAIGovernance/issues/62) (deny patterns match inside quoted data). |
+| 2026-08-04 | Subtask 3 landed and verified by execution in a real Python repo — empty and non-empty changed sets, both shells. AAIG has no venv, so the scope could not be exercised in this repo. |
+| 2026-08-04 | Subtask 4 landed. Audit found four agents holding `createAndRunTask`; all four now carry the same framing, as do `TOOLS.md`, both instruction files and the test-execution skill. |
+| 2026-08-04 | Subtask 5 landed. The scratch audit is a shared Python checker called by both stop hooks — a second pair of parallel implementations was the risk this workflow had already been bitten by. |
 
 ## Correction: what the allowlist must actually check
 
@@ -294,3 +298,42 @@ fixed in the same commit as the port because they sit in the same file.
 |---|---|
 | `command -v python3` resolves the 0-byte App Execution Alias under `WindowsApps` on Windows hosts. It is non-empty, so it passed the emptiness check, but executes nothing. | Every `python` call failed silently, so the hook emitted no opinion for **every** command — terminal classification included. The whole hook was inert on that host class. Candidates are now probed for executability. |
 | The three matcher helpers passed a caller-supplied pattern to `grep` positionally, so a pattern beginning with a dash was parsed as an option. | The commit-hook-bypass deny rule never matched. The same defect made a negated guard in the branch-deletion auto-approve path always report "no match", weakening an allow rule. Patterns are now passed after `-e`. |
+
+## Outcome
+
+All five subtasks landed. Every acceptance criterion is met, with the one
+qualification recorded below.
+
+| # | Subtask | Commit | Evidence |
+|---|---|---|---|
+| 1 | Red — mirror the deny tier in task shape | `d1ccea1` | 82 assertions, 15 failing for the documented reason |
+| 2 | Green — allowlist classifier | `75f2dc4`, `127a026`, `a588d4d` | 90/0; independent probe sets 8/8 (`.ps1`) and 11/11 (`.sh`) |
+| 3 | Green — fill the one real gap | `78126a4` | Executed in a real Python repo, both shells |
+| 4 | Green — fix the incentive | `f117d83` | Four agents audited, not assumed |
+| 5 | Green — scratch hygiene | `ecb75ee` | Checker flags 4/4 real scratch labels, 0 false positives on the curated set |
+
+**Verification that matters more than the counts:** the tests written in
+subtask 1 all passed against the subtask 2 implementation, and three bypasses
+were still open. What found them was reading the VS Code tasks specification and
+deriving payloads from it. What found the two `.sh` fail-opens was executing the
+hook. Neither was found by the suite, and the suite was green throughout.
+
+**Qualification on subtask 3.** `-Scope changed` was exercised against the MP
+project, because AAIG has no virtual environment and the runner exits before
+file collection without one. Both the empty changed set (`files=0`, exit 0) and
+a seeded one (`files=1`, lint error surfaced, exit 2) were confirmed, in
+PowerShell and bash. The scope has never run inside this repository.
+
+**Not fixed here, deliberately.** The enforcement built in this workflow is live
+in deployed projects and inert in AAIG itself ([#61](https://github.com/sefalk/AgenticAIGovernance/issues/61)),
+and the deny tier still produces false denies on quoted data
+([#62](https://github.com/sefalk/AgenticAIGovernance/issues/62)) — one of which
+blocked a legitimate commit during this very workflow. This fix also remains a
+stopgap for [#60](https://github.com/sefalk/AgenticAIGovernance/issues/60):
+the hook classifies a payload shape, and the durable answer is to stop treating
+the two execution paths as different surfaces at all.
+
+**Open empirical questions**, carried rather than answered: whether
+`createAndRunTask` with a repeated label replaces or duplicates the entry, and
+whether `isBackground` / `problemMatcher` can carry a long-running invocation
+past the classifier's assumptions.
