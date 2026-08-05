@@ -142,6 +142,66 @@ All hooks can return JSON via stdout:
 }
 ```
 
+## Writing a New Hook
+
+A hook runs from wherever the agent process happens to sit — never reliably
+from the repo root. Anything a hook derives from the current working directory
+(`Join-Path (Get-Location) '.github/af-env.conf'`, `$(pwd)/.github/...`,
+`git rev-parse --show-toplevel`) therefore resolves to nothing on the majority
+of invocations, and an unread config is indistinguishable from an empty one:
+the hook silently reads its own defaults and stops gating what it was written
+to gate. The same shape applies to the interpreter — on Windows `python3` is
+an App Execution Alias that sits on PATH, runs nothing and exits non-zero, so
+a `command -v python3` hit hands the hook a corpse and it falls through to its
+fail-open branch.
+
+**Every new hook script must therefore source the shared preamble as its first
+real statement**, and take root, config and interpreter from it:
+
+```bash
+# bash
+_AF_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+. "$_AF_DIR/_common.sh"
+
+SRC_DIR=$(af_conf_get SRC_DIR src)
+[ -n "$AF_PYTHON" ] || { echo '{}'; exit 0; }
+"$AF_PYTHON" "$AF_MAIN_ROOT/.github/scripts/some-checker.py"
+```
+
+```powershell
+# PowerShell
+. "$PSScriptRoot/_common.ps1"
+
+$srcDir = Get-AfConfig -Key 'SRC_DIR' -Default 'src'
+if ($AfPython) { & $AfPython (Join-Path $AfMainRoot '.github/scripts/some-checker.py') }
+```
+
+What the preamble provides:
+
+| bash | PowerShell | Meaning |
+|---|---|---|
+| `AF_SCRIPT_DIR` | `$AfScriptDir` | Directory the hook scripts live in |
+| `AF_MAIN_ROOT` | `$AfMainRoot` | Checkout where `.github/` is deployed |
+| `AF_CODE_ROOT` | `$AfCodeRoot` | Active worktree if `.github/.active-worktree` points at one, else main root |
+| `AF_CONF` / `AF_CONF_FOUND` | `$AfConfPath` / `$AfConfFound` | Path to `af-env.conf` and whether it exists |
+| `AF_PYTHON` | `$AfPython` | An interpreter **proven to run**, or empty |
+| `af_conf_get KEY [DEFAULT]` | `Get-AfConfig -Key <name> [-Default <value>]` | Config lookup that never fails the hook |
+
+Use `AF_MAIN_ROOT` for framework assets (`.github/scripts/...`, logs, config)
+and `AF_CODE_ROOT` for the code under review — they differ whenever the work
+runs in a git worktree. Set `AF_PYTHON_OVERRIDE` to force a specific
+interpreter; the preamble probes it like any other candidate, so an override
+pointing at something broken is rejected rather than trusted.
+
+**The rule is enforced, not merely documented.**
+`.github/scripts/check-hook-resolution.py` scans `hooks/` for cwd-relative
+config reads, `git rev-parse --show-toplevel` root discovery, bare
+`command -v python` / `Get-Command python` lookups and command-position
+`python3`, and exits non-zero on a hit — `scripts/test-hooks.ps1` runs it over
+the whole `hooks/` tree, so a regression fails the suite. For the rare line
+where a finding is genuinely correct, append `af-resolution-ok` in a comment
+on that line and say why.
+
 ## Included Hooks
 
 ### `agent-hooks.json` — Active Hooks (ready to use)
