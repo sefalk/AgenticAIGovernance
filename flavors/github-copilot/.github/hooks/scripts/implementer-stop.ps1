@@ -15,27 +15,15 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-# Worktree-aware path resolution (see ideas/feature-git-worktrees.md §12).
-# $mainRoot: main checkout where .github/ is deployed (derived from script location).
-# $codeRoot: active worktree if .active-worktree sentinel exists, else $mainRoot.
-$mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
-$codeRoot = $mainRoot
-$sentinel = Join-Path $mainRoot '.github/.active-worktree'
-if (Test-Path $sentinel) {
-    $p = (Get-Content $sentinel -Raw -ErrorAction SilentlyContinue).Trim()
-    if ($p -and (Test-Path $p)) { $codeRoot = $p }
-}
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54). $mainRoot/$codeRoot keep
+# their names so the rest of the hook is untouched.
+. "$PSScriptRoot/_common.ps1"
+$mainRoot = $AfMainRoot
+$codeRoot = $AfCodeRoot
 
-# Load project config
-$SRC_DIR = 'src'
-$BASE_BRANCH = ''
-$confPath = Join-Path $mainRoot '.github/af-env.conf'
-if (Test-Path $confPath) {
-    $m = Select-String -Path $confPath -Pattern '^SRC_DIR=(.+)$'
-    if ($m) { $SRC_DIR = $m.Matches[0].Groups[1].Value.Trim() }
-    $b = Select-String -Path $confPath -Pattern '^BASE_BRANCH=(.+)$'
-    if ($b) { $BASE_BRANCH = $b.Matches[0].Groups[1].Value.Trim() }
-}
+$SRC_DIR = Get-AfConfig -Key 'SRC_DIR' -Default 'src'
+$BASE_BRANCH = Get-AfConfig -Key 'BASE_BRANCH' -Default ''
 
 # Linting scope is wider than the quality scope: type hints and NumPy
 # docstrings do not apply to test functions, but ruff violations in tests/ are
@@ -168,8 +156,7 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
     # Resolve Python once -- the quality gate and the linting gate both need it.
     $pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
     if (-not (Test-Path $pythonExe)) {
-        $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-        $pythonExe = if ($pythonCmd) { $pythonCmd.Source } else { $null }
+        $pythonExe = if ($AfPython) { $AfPython } else { $null }
     }
 
     if ($changedSrcPy.Count -gt 0) {

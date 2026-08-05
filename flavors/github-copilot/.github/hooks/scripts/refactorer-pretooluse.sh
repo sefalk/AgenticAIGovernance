@@ -13,19 +13,14 @@
 
 set -uo pipefail
 
-# Worktree-aware, script-relative path resolution (mirrors the .ps1 hook).
-# A bare `git` call resolves against the agent process's cwd, which silently
-# reports no branch whenever that cwd is not the repo.
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-MAIN_ROOT=$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")
-CODE_ROOT="$MAIN_ROOT"
-_sentinel="$MAIN_ROOT/.github/.active-worktree"
-if [ -f "$_sentinel" ]; then
-    _wt=$(tr -d '[:space:]' < "$_sentinel")
-    [ -n "$_wt" ] && [ -d "$_wt" ] && CODE_ROOT="$_wt"
-fi
-
-PYTHON=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo "")
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54). A bare `git` call resolves
+# against the agent process's cwd, which silently reports no branch whenever
+# that cwd is not the repo.
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+MAIN_ROOT="$AF_MAIN_ROOT"
+CODE_ROOT="$AF_CODE_ROOT"
+PYTHON="$AF_PYTHON"
 
 raw=$(cat)
 

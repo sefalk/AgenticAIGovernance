@@ -20,6 +20,10 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54).
+. "$PSScriptRoot/_common.ps1"
+
 # Read and parse stdin
 $raw = [Console]::In.ReadToEnd()
 try {
@@ -80,12 +84,9 @@ if ($isTaskShaped) {
         Emit-Task 'deny' ("Policy hard-deny: runOptions.runOn 'folderOpen' registers a task that runs automatically the next time the folder is opened, outside any hook's view. $sanctioned")
     }
 
-    $taskRepo = (git rev-parse --show-toplevel 2>$null)
+    $taskRepo = $AfCodeRoot
     $taskConfLines = @()
-    if ($taskRepo) {
-        $taskConf = Join-Path $taskRepo '.github/af-env.conf'
-        if (Test-Path $taskConf) { $taskConfLines = Get-Content $taskConf }
-    }
+    if ($AfConfFound) { $taskConfLines = Get-Content $AfConfPath }
     function Get-AfEnvTask([string]$key, [string]$default) {
         foreach ($l in $taskConfLines) {
             if ($l -match "^\s*$([regex]::Escape($key))=(.*)$") { return $Matches[1].Trim() }
@@ -201,14 +202,11 @@ if (-not $command) {
 }
 
 # ---------------------------------------------------------------------------
-# Load autonomy config from .github/af-env.conf (read once).
+# Load autonomy config (path resolved by the shared preamble, read once).
 # ---------------------------------------------------------------------------
-$repo = (git rev-parse --show-toplevel 2>$null)
+$repo = $AfMainRoot
 $confLines = @()
-if ($repo) {
-    $conf = Join-Path $repo '.github/af-env.conf'
-    if (Test-Path $conf) { $confLines = Get-Content $conf }
-}
+if ($AfConfFound) { $confLines = Get-Content $AfConfPath }
 function Get-AfEnv([string]$key, [string]$default) {
     foreach ($l in $confLines) {
         if ($l -match "^\s*$([regex]::Escape($key))=(.*)$") { return $Matches[1].Trim() }

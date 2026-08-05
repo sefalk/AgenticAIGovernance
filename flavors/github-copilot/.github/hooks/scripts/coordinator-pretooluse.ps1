@@ -15,6 +15,10 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54).
+. "$PSScriptRoot/_common.ps1"
+
 # Read and parse stdin
 $raw = [Console]::In.ReadToEnd()
 try {
@@ -41,24 +45,17 @@ if ($toolName -match 'terminal') {
     }
 
     # Config: PROJECT_LANGUAGE and PY_ENV_BOOTSTRAP from af-env.conf
-    $projectLanguage = 'python'
-    $bootstrapMode = 'ask'
-    $confPath = Join-Path (Get-Location) '.github/af-env.conf'
-    if (Test-Path $confPath) {
-        $m = Select-String -Path $confPath -Pattern '^PROJECT_LANGUAGE=(.+)$'
-        if ($m) { $projectLanguage = $m.Matches[0].Groups[1].Value.Trim().ToLower() }
-        $m = Select-String -Path $confPath -Pattern '^PY_ENV_BOOTSTRAP=(.+)$'
-        if ($m) { $bootstrapMode = $m.Matches[0].Groups[1].Value.Trim().ToLower() }
-    }
+    $projectLanguage = (Get-AfConfig -Key 'PROJECT_LANGUAGE' -Default 'python').ToLower()
+    $bootstrapMode = (Get-AfConfig -Key 'PY_ENV_BOOTSTRAP' -Default 'ask').ToLower()
 
     $isPyTerminalCommand = $command -match '(\.github/scripts/(run-tests|run-deps|run-metrics)\.ps1)|(\.venv/Scripts/python\.exe)|(^|\s)(python|pip|ruff|mypy)(\s|$)'
     $isPytestViaTerminal = $command -match '\bpytest\b|\bpy\.test\b'
-    $venvPython = Join-Path (Get-Location) '.venv/Scripts/python.exe'
+    $venvPython = Join-Path $AfCodeRoot '.venv/Scripts/python.exe'
 
     # Bootstrap only for non-pytest Python commands; pytest via terminal is denied below anyway.
     if ($projectLanguage -eq 'python' -and -not $isPytestViaTerminal -and $isPyTerminalCommand -and -not (Test-Path $venvPython)) {
         if ($bootstrapMode -eq 'always') {
-            $bootstrapScript = Join-Path (Get-Location) '.github/scripts/bootstrap-python-env.ps1'
+            $bootstrapScript = Join-Path $AfMainRoot '.github/scripts/bootstrap-python-env.ps1'
             if (-not (Test-Path $bootstrapScript)) {
                 @{
                     hookSpecificOutput = @{
@@ -104,12 +101,7 @@ if ($toolName -match 'terminal') {
     }
     # Validate git worktree add preconditions
     if ($command -match 'git\s+worktree\s+add') {
-        $WT_DIR = '../wt'
-        $confPath = Join-Path (Get-Location) '.github/af-env.conf'
-        if (Test-Path $confPath) {
-            $m = Select-String -Path $confPath -Pattern '^WORKTREE_DIR=(.+)$'
-            if ($m) { $WT_DIR = $m.Matches[0].Groups[1].Value.Trim() }
-        }
+        $WT_DIR = Get-AfConfig -Key 'WORKTREE_DIR' -Default '../wt'
         # Extract branch name: git worktree add <path> -b <branch> ...
         $branchMatch = $null
         if ($command -match '-b\s+(\S+)') { $branchMatch = $Matches[1] }

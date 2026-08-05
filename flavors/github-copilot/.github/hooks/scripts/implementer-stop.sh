@@ -16,16 +16,12 @@
 
 set -uo pipefail
 
-# Load project config
-SRC_DIR="src"
-BASE_BRANCH=""
-_conf=".github/af-env.conf"
-if [ -f "$_conf" ]; then
-    _val=$(grep -E '^SRC_DIR=' "$_conf" | head -1 | cut -d= -f2-)
-    [ -n "$_val" ] && SRC_DIR="$_val"
-    _val=$(grep -E '^BASE_BRANCH=' "$_conf" | head -1 | cut -d= -f2-)
-    [ -n "$_val" ] && BASE_BRANCH="$_val"
-fi
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54).
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
+SRC_DIR=$(af_conf_get SRC_DIR src)
+BASE_BRANCH=$(af_conf_get BASE_BRANCH '')
 
 # Read stdin (hook input JSON — required by protocol)
 cat > /dev/null
@@ -146,8 +142,8 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
         python_exe=".venv/bin/python"
     elif [ -x ".venv/Scripts/python.exe" ]; then
         python_exe=".venv/Scripts/python.exe"
-    elif command -v python &>/dev/null; then
-        python_exe="python"
+    else
+        python_exe="$AF_PYTHON"
     fi
 
     # The quality gate reports per changed function, not per changed file

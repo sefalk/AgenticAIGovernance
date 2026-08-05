@@ -9,6 +9,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Hooks resolved their roots, config and interpreter from wherever the agent
+  process happened to be standing (issue #54).** A hook is not guaranteed to
+  run from the repo root — under worktrees it routinely does not — yet six
+  `.sh` and two `.ps1` hooks read `.github/af-env.conf` through the cwd, and
+  three more discovered the root via `git rev-parse --show-toplevel`, which
+  misses whenever `.github/` is not at the top level. The read returns nothing
+  and nothing complains, because **an unread config is indistinguishable from
+  an empty one**: every setting silently falls back to its default and the
+  gate stops gating. Measured, not inferred — the same fixture returned
+  `BASE_BRANCH=trunk` from the root and `[]` from one directory down.
+
+  The interpreter lookup had the identical shape. `command -v python3` counts
+  as "found" when it returns a path, and on Windows that path is the 121-byte
+  WindowsApps App Execution Alias: on `PATH`, prints a Microsoft Store advert,
+  runs nothing, exits non-zero. Hooks then took their `[ -z "$PYTHON" ]`
+  fail-open branch and returned no opinion at all. #56 repaired two hooks by
+  hand; five more still carried it. That is the pattern this fix targets — the
+  preamble was copied per file, so each repair landed in one copy and the other
+  nine kept the defect, twice in a row.
+
+  - **One sourced preamble.** `hooks/scripts/_common.sh` and `_common.ps1`
+    derive `AF_MAIN_ROOT` / `AF_CODE_ROOT` from the script's own location,
+    honour the `.active-worktree` sentinel, expose `af_conf_get` /
+    `Get-AfConfig` that distinguish *file missing* from *key absent*, and
+    publish an interpreter that was **proven to run** rather than merely
+    resolved. The accessors always return 0, because a missing key is not an
+    error and callers run under `set -e`. Every hook now sources it.
+  - **A drift guard, because the helper alone would not stop the next hook
+    from being written the old way.** `scripts/check-hook-resolution.py` fails
+    the build on cwd-relative config reads, `--show-toplevel` root discovery,
+    bare `python` lookups and command-position `python3`; `test-hooks.ps1` runs
+    it over the whole tree. Deliberate exceptions carry `af-resolution-ok` and
+    a reason.
+  - **`set -e` abort hazard removed.** Several hooks gated on `A && B && exit 0`,
+    which kills the hook when `A` is simply false. Now explicit `if` blocks.
+  - **The test harness was concealing the defect it existed to catch.**
+    `test-hooks.sh` installed a `python3` shim into the fixture `PATH`, so the
+    bash hooks met a working interpreter under test and the broken alias in
+    production. The shim is gone.
+  - **A missing assertion, not a missing fix, let the interpreter bug survive
+    the helper commit.** Nothing asserted that the resolved interpreter *runs*.
+    The new assertion failed on first execution and exposed that PowerShell 5.1
+    silently drops empty-string arguments to native commands — the probe
+    `& python -c ''` degenerates to `python -c`, so `Find-AfPython` rejected
+    every working interpreter and took the lint gate from 21/21 to 2/21.
+    Probed with `-c 'pass'` now, and asserted both ways: a real interpreter
+    must run, a stub that resolves but exits non-zero must be rejected.
+  - **Findings print to stdout.** Under `$ErrorActionPreference = 'Stop'`,
+    native-command stderr becomes a terminating PowerShell error, so a checker
+    that reported on stderr killed the suite with its own output. The exit code
+    carries the verdict.
+
+  Two adjacent defects were deliberately left alone rather than folded in:
+  `coordinator-pretooluse.sh` and `session-mcp-readiness.sh` fail `bash -n` on
+  `HEAD` already, and `#64` (`researcher-pretooluse` dead on every path) gets
+  its own branch — it will consume this preamble instead of re-rolling the
+  interpreter logic a third time.
+
 - **The task execution path was unclassified, and the instructions pointed at
   it (issue #56).** `block-dangerous.*` filtered on the tool name before
   anything else, so the entire hard-deny tier was unenforced through

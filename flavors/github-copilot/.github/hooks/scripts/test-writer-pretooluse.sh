@@ -13,27 +13,15 @@
 
 set -uo pipefail
 
-# Worktree-aware, script-relative path resolution (mirrors the .ps1 hook).
-# Bare cwd-relative lookups silently read nothing whenever the agent process
-# is not sitting at the repo root.
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-MAIN_ROOT=$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")
-CODE_ROOT="$MAIN_ROOT"
-_sentinel="$MAIN_ROOT/.github/.active-worktree"
-if [ -f "$_sentinel" ]; then
-    _wt=$(tr -d '[:space:]' < "$_sentinel")
-    [ -n "$_wt" ] && [ -d "$_wt" ] && CODE_ROOT="$_wt"
-fi
-
-# Load project config
-SRC_DIR="src"
-_conf="$MAIN_ROOT/.github/af-env.conf"
-if [ -f "$_conf" ]; then
-    _val=$(grep -E '^SRC_DIR=' "$_conf" | head -1 | cut -d= -f2-)
-    [ -n "$_val" ] && SRC_DIR="$_val"
-fi
-
-PYTHON=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo "")
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54). Bare cwd-relative lookups
+# silently read nothing whenever the agent process is not sitting at the repo
+# root.
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+MAIN_ROOT="$AF_MAIN_ROOT"
+CODE_ROOT="$AF_CODE_ROOT"
+SRC_DIR=$(af_conf_get SRC_DIR src)
+PYTHON="$AF_PYTHON"
 
 raw=$(cat)
 

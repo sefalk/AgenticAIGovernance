@@ -8,10 +8,17 @@
 
 set -euo pipefail
 
-RAW=$(cat)
-[ -z "$RAW" ] && echo '{}' && exit 0
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54).
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 
-TOOL_NAME=$(echo "$RAW" | python3 -c "
+RAW=$(cat)
+# `A && B && exit` returns 1 when A is false, which under `set -e` aborts the
+# hook instead of falling through. Explicit `if` blocks do not.
+if [ -z "$RAW" ]; then echo '{}'; exit 0; fi
+if [ -z "$AF_PYTHON" ]; then echo '{}'; exit 0; fi
+
+TOOL_NAME=$(echo "$RAW" | "$AF_PYTHON" -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -26,7 +33,7 @@ case "$TOOL_NAME" in
     *) echo '{}'; exit 0 ;;
 esac
 
-URL=$(echo "$RAW" | python3 -c "
+URL=$(echo "$RAW" | "$AF_PYTHON" -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -64,18 +71,12 @@ else
 fi
 
 # --- Domain allowlist: auto-approve official docs; prompt (with seed-add offer) otherwise ---
-# Resolve config script-relative, as every other hook does. `git rev-parse
-# --show-toplevel` misses whenever .github/ is not at the repo top level, and
-# an unread allowlist is indistinguishable from an empty one.
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-MAIN_ROOT=$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")
-CONF="$MAIN_ROOT/.github/af-env.conf"
-ALLOW=""
-CONF_FOUND=0
-if [ -f "$CONF" ]; then
-    CONF_FOUND=1
-    ALLOW=$(grep -E '^[[:space:]]*WEB_FETCH_ALLOWLIST=' "$CONF" 2>/dev/null | head -n1 | sed -E 's/^[[:space:]]*WEB_FETCH_ALLOWLIST=//')
-fi
+# The config is resolved by the shared preamble. `git rev-parse --show-toplevel`
+# misses whenever .github/ is not at the repo top level, and an unread
+# allowlist is indistinguishable from an empty one.
+CONF="$AF_CONF"
+CONF_FOUND="$AF_CONF_FOUND"
+ALLOW=$(af_conf_get WEB_FETCH_ALLOWLIST '')
 
 FETCH_HOST=$(echo "$URL" | sed -E 's|^[a-zA-Z][a-zA-Z0-9+.-]*://([^/:?#]+).*|\1|' | tr '[:upper:]' '[:lower:]')
 
