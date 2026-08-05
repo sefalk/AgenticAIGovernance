@@ -258,3 +258,39 @@ and none of them were assumptions before this:
 | 2026-08-04 | Red phase measured: 82 assertions, 67 passed, 15 failed, every failure `output: {}` — the documented defect, not an incidental bug. |
 | 2026-08-04 | Green subtask 2 landed and independently verified at 82/0. The `.sh` port is unverified by execution (no bash on this host). |
 | 2026-08-04 | In-flight confirmation recorded. Subtask 4 widened beyond the coordinator; subtask 5 gained the `.gitignore` criterion. |
+| 2026-08-04 | Verification against the official VS Code tasks documentation found **three bypasses in the code committed at subtask 2** and one false deny. Specification corrected (see below). Fixed and verified at 90/0 plus an independent 11-payload probe set. |
+| 2026-08-04 | `.sh` port verified **by execution** after all: Git Bash is present on this host, contrary to the earlier assumption. Running it exposed two pre-existing fail-opens in the hook (interpreter detection, grep pattern passing) that inspection had not. |
+
+## Correction: what the allowlist must actually check
+
+The specification in *Design decision* above was too narrow. It said "allowlist
+`command`". `command` is not the executed thing.
+
+Per the tasks documentation, the executed command is a **resolution** over three
+inputs, and the classifier must check the result, not the declaration:
+
+| Mechanism | Documented behaviour | Consequence for the classifier |
+|---|---|---|
+| `windows` / `linux` / `osx` scope | "Properties defined in an operating system specific scope **override** properties defined in the task or global scope." | A benign `command` plus a `windows.command` decoy was classified on the decoy. Every scope present must be classified; one failure denies. |
+| `options.shell` | "you can override a task's shell with the `options.shell` property" | The payload moves into the shell's own arguments, invisible to the classifier. Presence denies. |
+| `command` in `type: shell` | "If a single command is provided, the task system passes the command **as is** to the underlying shell" (doc example: `chcp 866 && more russian.txt`) | `command` may be a whole command line. Shell metacharacters survive path normalisation, so `…/run-tests.ps1; <anything>` matched the allowlisted prefix. `command` must be a path, not a command line. |
+| `${workspaceFolder}` etc. | Variable substitution is supported in `command`, `args` and `options` | Was denied outright — a false deny. Substituted before normalisation; a rooted result is no longer re-joined onto the repo root. |
+
+The corrected rule: **allowlist the effective executable — the resolution over
+`command`, the OS override and `options.shell` — and require `command` to be a
+path rather than a command line.**
+
+Two of these were found by reading the specification, not by testing, and the
+tests that now cover them were written from the specification afterwards. Tests
+derived from an implementation can only confirm what the implementation already
+believes.
+
+## Defects found by executing the `.sh` hook
+
+Both pre-existing, both fail-open, neither visible by inspection. They are
+fixed in the same commit as the port because they sit in the same file.
+
+| Defect | Effect |
+|---|---|
+| `command -v python3` resolves the 0-byte App Execution Alias under `WindowsApps` on Windows hosts. It is non-empty, so it passed the emptiness check, but executes nothing. | Every `python` call failed silently, so the hook emitted no opinion for **every** command — terminal classification included. The whole hook was inert on that host class. Candidates are now probed for executability. |
+| The three matcher helpers passed a caller-supplied pattern to `grep` positionally, so a pattern beginning with a dash was parsed as an option. | The commit-hook-bypass deny rule never matched. The same defect made a negated guard in the branch-deletion auto-approve path always report "no match", weakening an allow rule. Patterns are now passed after `-e`. |
