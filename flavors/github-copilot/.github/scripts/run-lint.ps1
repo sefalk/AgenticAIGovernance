@@ -7,10 +7,14 @@
 # files. This script is the repo-wide counterpart: it is what you run to find
 # drift that accumulated before the gate existed, or after a bulk edit.
 #
+# -Scope changed reproduces the gate's own file set, so you can see what the
+# gate will say before it says it.
+#
 # Usage:
 #   .github/scripts/run-lint.ps1                    # Lint SRC_DIR/ and tests/
 #   .github/scripts/run-lint.ps1 -Scope src         # Lint SRC_DIR/ only
 #   .github/scripts/run-lint.ps1 -Scope tests       # Lint tests/ only
+#   .github/scripts/run-lint.ps1 -Scope changed     # Lint the branch delta + working tree
 #   .github/scripts/run-lint.ps1 -Fix               # Apply ruff's safe fixes
 #   .github/scripts/run-lint.ps1 -Strictness strict # Override af-env.conf
 #
@@ -20,7 +24,7 @@
 #   2 = lint violations found
 
 param(
-    [ValidateSet('all', 'src', 'tests')]
+    [ValidateSet('all', 'src', 'tests', 'changed')]
     [string]$Scope = 'all',
 
     [ValidateSet('minimal', 'standard', 'strict')]
@@ -35,9 +39,12 @@ $workspaceRoot = (Resolve-Path "$PSScriptRoot/../..").Path
 $confPath = Join-Path $workspaceRoot '.github/af-env.conf'
 
 $srcDir = 'src'
+$baseBranch = ''
 if (Test-Path $confPath) {
     $m = Select-String -Path $confPath -Pattern '^SRC_DIR=(.+)$'
     if ($m) { $srcDir = $m.Matches[0].Groups[1].Value.Trim() }
+    $b = Select-String -Path $confPath -Pattern '^BASE_BRANCH=(.+)$'
+    if ($b) { $baseBranch = $b.Matches[0].Groups[1].Value.Trim() }
 }
 
 # Resolve venv python (same contract as run-tests.ps1)
@@ -50,20 +57,72 @@ if (-not (Test-Path $python -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-# --- Collect target directories ---
-$targets = @()
-switch ($Scope) {
-    'all'   { $targets = @($srcDir, 'tests') }
-    'src'   { $targets = @($srcDir) }
-    'tests' { $targets = @('tests') }
+# --- Collect target files ---
+# Linting scope is wider than the quality scope: ruff violations in tests/ are
+# real violations, so both SRC_DIR and tests count.
+function Test-LintPath([string]$p) {
+    if (-not $p) { return $false }
+    $n = $p -replace '\\', '/'
+    return ($n -like "$srcDir/*") -or ($n -like 'tests/*')
 }
 
+# Deliberately the same set implementer-stop and refactorer-stop gate on:
+# uncommitted work plus everything this branch already committed. Files from an
+# earlier phase are invisible to a working-tree diff but still ship on merge.
+function Get-ChangedLintFile {
+    $changed = @()
+    $staged = @(git -C $workspaceRoot diff --name-only --cached --diff-filter=AM -- '*.py' 2>$null)
+    if ($staged) { $changed += $staged } else {
+        $changed += @(git -C $workspaceRoot diff --name-only HEAD --diff-filter=AM -- '*.py' 2>$null)
+    }
+
+    $mergeBase = $null
+    foreach ($ref in @($baseBranch, "origin/$baseBranch")) {
+        if (-not $baseBranch) { break }
+        $mergeBase = @(git -C $workspaceRoot merge-base HEAD $ref 2>$null)[0]
+        if ($mergeBase) { break }
+    }
+    if ($mergeBase) {
+        $changed += @(git -C $workspaceRoot diff --name-only --diff-filter=AM "$mergeBase..HEAD" -- '*.py' 2>$null)
+    }
+
+    $out = @()
+    foreach ($f in ($changed | Select-Object -Unique)) {
+        if (-not (Test-LintPath $f)) { continue }
+        $full = Join-Path $workspaceRoot $f
+        if (Test-Path $full) { $out += $full }
+    }
+    return $out
+}
+
+$targets = @()
 $files = @()
-foreach ($t in $targets) {
-    $full = Join-Path $workspaceRoot $t
-    if (Test-Path $full) {
-        $files += Get-ChildItem $full -Recurse -Filter '*.py' -File |
-            ForEach-Object { $_.FullName }
+
+if ($Scope -eq 'changed') {
+    git -C $workspaceRoot rev-parse --is-inside-work-tree *> $null
+    if ($LASTEXITCODE -ne 0) {
+        # "cannot determine the changed set" is not the same as "nothing changed";
+        # reporting clean here would silently weaken the gate this scope mirrors.
+        Write-Output "ERROR: -Scope changed needs a git repository at $workspaceRoot"
+        Write-Output "=== Exit Code: 1 ==="
+        exit 1
+    }
+    $base = if ($baseBranch) { $baseBranch } else { '(BASE_BRANCH unset -- working tree only)' }
+    $targets = @("changed vs $base")
+    $files = @(Get-ChangedLintFile)
+} else {
+    switch ($Scope) {
+        'all'   { $targets = @($srcDir, 'tests') }
+        'src'   { $targets = @($srcDir) }
+        'tests' { $targets = @('tests') }
+    }
+
+    foreach ($t in $targets) {
+        $full = Join-Path $workspaceRoot $t
+        if (Test-Path $full) {
+            $files += Get-ChildItem $full -Recurse -Filter '*.py' -File |
+                ForEach-Object { $_.FullName }
+        }
     }
 }
 

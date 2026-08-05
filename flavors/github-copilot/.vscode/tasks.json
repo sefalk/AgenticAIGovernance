@@ -194,6 +194,15 @@
       "runOptions": { "instanceLimit": 1 }
     },
     {
+      "label": "lint: changed files",
+      "type": "shell",
+      "command": ".github/scripts/run-lint.ps1",
+      "args": ["-Scope", "changed"],
+      "detail": "Lint the branch delta vs BASE_BRANCH + working tree — the same file set the stop-hook gate computes",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
       "label": "lint: ruff fix",
       "type": "shell",
       "command": ".github/scripts/run-lint.ps1",

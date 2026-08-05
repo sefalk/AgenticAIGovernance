@@ -37,6 +37,7 @@ Use `run_task` with the task label. Arguments are fixed — no dynamic params.
 | `lint: ruff check` | `-Scope all` | implementer, refactorer, code-critic |
 | `lint: ruff check src` | `-Scope src` | implementer, refactorer |
 | `lint: ruff check tests` | `-Scope tests` | test-writer, refactorer |
+| `lint: changed files` | `-Scope changed` | implementer, refactorer |
 | `lint: ruff fix` | `-Scope all -Fix` | refactorer |
 
 All `lint:` tasks call `.github/scripts/run-lint.ps1`, which resolves the venv
@@ -45,8 +46,22 @@ interpreter itself and derives the rule set from `LINTING_STRICTNESS` in
 the venv, so a bare `ruff` command fails with `CommandNotFoundException`, and a
 direct call would bypass the configured strictness.
 
-The stop-hook lint gate only sees *changed* files. Use these tasks to check the
-repository as a whole.
+### Checking the gate's own file set
+
+The stop-hook lint gate does not lint the repository — it lints the *branch
+delta*: everything changed between `merge-base(HEAD, BASE_BRANCH)` and `HEAD`,
+plus the staged or unstaged working tree. That is a different set from any
+directory scope, which is why a green `lint: ruff check` run has never been
+proof that the gate will pass.
+
+`lint: changed files` reproduces that set exactly, so you can see what the gate
+will say before it says it. Use it before handing off; use `lint: ruff check`
+when you want the repository as a whole instead.
+
+The scope reports `files=0` when the branch changes no Python — that is a pass,
+not a skipped run. It fails loudly only when the changed set cannot be computed
+at all (no git repository), because "I cannot tell" must never be reported as
+"nothing to do".
 
 ## Fallback: `runTests` or `createAndRunTask` (dynamic cases only)
 
