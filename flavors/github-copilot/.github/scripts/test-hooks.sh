@@ -175,6 +175,29 @@ PROBE
     rm -rf "$fx" "$elsewhere" "$stub"
 fi
 
+# --- Parse gate ------------------------------------------------------------
+#
+# A hook that dies at parse time produces no output, and no output is
+# indistinguishable from no objection -- the gate disarms itself silently.
+# Behavioural cases only cover hooks the harness happens to invoke, so assert
+# that every shipped script parses, invoked or not.
+
+echo "## parse gate"
+
+unparsable=""
+for f in "$HOOK_DIR"/*.sh; do
+    [ -f "$f" ] || continue
+    if ! bash -n "$f" 2>/dev/null; then
+        unparsable="$unparsable $(basename "$f")"
+    fi
+done
+
+if [ -z "$unparsable" ]; then
+    assert_true "every shipped bash hook parses" 1
+else
+    assert_true "every shipped bash hook parses" 0 "bash -n failed:$unparsable"
+fi
+
 echo ""
 echo "=== Summary ==="
 echo "  Passed: $pass"
