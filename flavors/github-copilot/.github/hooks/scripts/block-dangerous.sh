@@ -12,7 +12,20 @@
 # can, since it has no path segment to match, so the hard-deny tier is covered
 # as a consequence. Any unrecognised task shape denies (fail closed).
 
-PYTHON=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo "")
+# Presence is not executability: on Windows hosts, command -v python3 resolves
+# the 0-byte App Execution Alias under WindowsApps, which is non-empty but runs
+# nothing -- every python call would then fail silently and the hook would emit
+# no opinion for every command. Each candidate is probed before it is accepted.
+PYTHON=""
+for _py_candidate in python3 python py; do
+    _py_path=$(command -v "$_py_candidate" 2>/dev/null) || continue
+    [ -n "$_py_path" ] || continue
+    if "$_py_path" -c "pass" >/dev/null 2>&1; then
+        PYTHON="$_py_path"
+        break
+    fi
+done
+unset _py_candidate _py_path
 
 raw=$(cat)
 
@@ -50,9 +63,11 @@ EOF
         exit 0
     }
 
-    if printf '%s' "$raw" | grep -qF '${input:'; then
-        emit_task deny "Policy hard-deny: task payload contains an interactive \${input:...} variable, which blocks on a prompt an agent cannot answer. Remove it and pass the value as a literal argument instead. Point the task command at a reviewed script under AF_TASK_SCRIPT_DIRS (default .github/scripts), or run the command yourself in the terminal."
-    fi
+    for marker in '${input:' '${command:' '${config:'; do
+        if printf '%s' "$raw" | grep -qF "$marker"; then
+            emit_task deny "Policy hard-deny: task payload contains a $marker...} variable. Its value is produced elsewhere -- a prompt an agent cannot answer, a VS Code command that executes to yield it, or a setting -- so the payload cannot be classified. Pass a literal argument instead. Point the task command at a reviewed script under AF_TASK_SCRIPT_DIRS (default .github/scripts), or run the command yourself in the terminal."
+        fi
+    done
 
     task_repo=$(git rev-parse --show-toplevel 2>/dev/null)
     task_conf="$task_repo/.github/af-env.conf"
@@ -80,6 +95,11 @@ def resolve(p):
     if not repo or not p:
         return None
     p = os.path.expandvars(p)
+    p = p.replace("${workspaceFolder}", repo).replace("${workspaceRoot}", repo)
+    # Substitution and env expansion both yield absolute paths, which must not
+    # be joined onto the repo root again.
+    if os.path.isabs(p):
+        return os.path.normpath(p)
     return os.path.normpath(os.path.join(repo, p))
 
 allowed = []
@@ -104,50 +124,85 @@ except Exception:
     sys.exit(0)
 
 task = data.get("tool_input", {}).get("task")
-command = task.get("command", "") if isinstance(task, dict) else ""
-if not isinstance(task, dict) or not command:
-    print("DENY|Policy hard-deny: unrecognised task payload shape (no usable command found); fail-closed. " + sanctioned)
+if not isinstance(task, dict):
+    print("DENY|Policy hard-deny: unrecognised task payload shape (no task object); fail-closed. " + sanctioned)
     sys.exit(0)
 
-args = task.get("args", [])
-if not isinstance(args, list):
-    args = []
-args = [str(a) for a in args]
+run_opts = task.get("runOptions")
+if isinstance(run_opts, dict) and str(run_opts.get("runOn", "")) == "folderOpen":
+    print("DENY|Policy hard-deny: runOptions.runOn folderOpen registers a task that runs automatically the next time the folder is opened, outside any hook view. " + sanctioned)
+    sys.exit(0)
 
 interpreters = {"powershell", "pwsh", "cmd", "bash", "sh", "zsh", "python", "python3", "node", "perl", "ruby", "wscript", "cscript"}
-base = os.path.splitext(os.path.basename(command))[0].lower()
 
-if base in interpreters:
-    inline = False
-    file_target = None
-    saw_file_flag = False
-    for i, a in enumerate(args):
-        if a.lower() in ("-command", "-c", "/c", "-encodedcommand"):
-            inline = True
-            break
-        if a.lower() == "-file":
-            saw_file_flag = True
-            if i + 1 < len(args):
-                file_target = args[i + 1]
-            break
-    if inline:
-        print("DENY|Policy hard-deny: interpreter " + command + " invoked with an inline command payload (-Command/-c/-EncodedCommand) that is not visible to the task classifier. " + sanctioned)
-        sys.exit(0)
-    if not saw_file_flag:
-        for a in args:
-            if a and not a.startswith("-"):
-                file_target = a
+def deny_reason(command, args):
+    if not command:
+        return "Policy hard-deny: unrecognised task payload shape (no usable command found); fail-closed. " + sanctioned
+    # type: shell hands command to the shell verbatim, so it may be a whole
+    # command line. Metacharacters survive path normalisation, which would let
+    # anything ride along behind an allowlisted script name.
+    for ch in [";", "&", "|", "\n", "\r", "`"]:
+        if ch in command:
+            return "Policy hard-deny: task command " + command + " contains a shell metacharacter, so it is a command line rather than a path to a reviewed script. " + sanctioned
+    if "$(" in command:
+        return "Policy hard-deny: task command " + command + " contains a command substitution. " + sanctioned
+    if not isinstance(args, list):
+        args = []
+    args = [str(a) for a in args]
+    base = os.path.splitext(os.path.basename(command))[0].lower()
+
+    if base in interpreters:
+        inline = False
+        file_target = None
+        saw_file_flag = False
+        for i, a in enumerate(args):
+            if a.lower() in ("-command", "-c", "/c", "-encodedcommand"):
+                inline = True
                 break
-    if not file_target or not in_allowlist(file_target):
-        print("DENY|Policy hard-deny: interpreter " + command + " payload " + str(file_target) + " does not resolve inside an AF_TASK_SCRIPT_DIRS directory (unrecognised or external script). " + sanctioned)
-        sys.exit(0)
-    print("ALLOW|Safe: interpreter payload resolves to a reviewed script under AF_TASK_SCRIPT_DIRS.")
-    sys.exit(0)
+            if a.lower() == "-file":
+                saw_file_flag = True
+                if i + 1 < len(args):
+                    file_target = args[i + 1]
+                break
+        if inline:
+            return "Policy hard-deny: interpreter " + command + " invoked with an inline command payload (-Command/-c/-EncodedCommand) that is not visible to the task classifier. " + sanctioned
+        if not saw_file_flag:
+            for a in args:
+                if a and not a.startswith("-"):
+                    file_target = a
+                    break
+        if not file_target or not in_allowlist(file_target):
+            return "Policy hard-deny: interpreter " + command + " payload " + str(file_target) + " does not resolve inside an AF_TASK_SCRIPT_DIRS directory (unrecognised or external script). " + sanctioned
+        return None
 
-if not in_allowlist(command):
-    print("DENY|Policy hard-deny: task command " + command + " does not resolve inside an AF_TASK_SCRIPT_DIRS directory. " + sanctioned)
-    sys.exit(0)
-print("ALLOW|Safe: task command resolves to a reviewed script under AF_TASK_SCRIPT_DIRS.")
+    if not in_allowlist(command):
+        return "Policy hard-deny: task command " + command + " does not resolve inside an AF_TASK_SCRIPT_DIRS directory. " + sanctioned
+    return None
+
+# An OS-specific scope overrides the task scope, so every variant present must
+# clear the bar -- checking only command classifies a decoy.
+scopes = [("task", task)]
+for osname in ("windows", "linux", "osx"):
+    variant = task.get(osname)
+    if isinstance(variant, dict):
+        scopes.append((osname, variant))
+
+for name, scope in scopes:
+    opts = scope.get("options")
+    if isinstance(opts, dict) and opts.get("shell"):
+        print("DENY|Policy hard-deny: the " + name + " scope overrides options.shell, which moves the executed payload into the shell own arguments where the task classifier cannot see it. " + sanctioned)
+        sys.exit(0)
+    cmd = scope.get("command") or task.get("command", "")
+    cmd = str(cmd) if cmd else ""
+    scope_args = scope.get("args") if scope.get("args") is not None else task.get("args", [])
+    reason = deny_reason(cmd, scope_args)
+    if reason:
+        if name != "task":
+            reason = "[" + name + " override] " + reason
+        print("DENY|" + reason)
+        sys.exit(0)
+
+print("ALLOW|Safe: every task scope resolves to a reviewed script under AF_TASK_SCRIPT_DIRS.")
 ' "$task_repo" "$task_dirs_raw")
 
     if [ -z "$decision" ]; then
@@ -229,10 +284,13 @@ EOF
     exit 0
 }
 
-matches() { echo "$command_str" | grep -qEi "$1"; }
+# Patterns are passed after -e: a pattern starting with a dash (e.g.
+# --no-verify) would otherwise be parsed as a grep option, and the failing
+# call would silently report "no match" -- a fail-open deny rule.
+matches() { echo "$command_str" | grep -qEi -e "$1"; }
 # ASK-tier scan runs on the quote-stripped command (set later) so quoted
 # literals (e.g. a commit message) do not falsely trigger a rule.
-matches_stripped() { echo "$stripped_guard" | grep -qEi "$1"; }
+matches_stripped() { echo "$stripped_guard" | grep -qEi -e "$1"; }
 
 # ===================== TIER 1 -- DENY (hard) =====================
 deny_msg="Policy hard-deny. The agent will not run this. If genuinely required, either (a) run it yourself -- the agent can prepare the exact command for you to paste and execute -- or (b) make a conscious decision to relax the autonomy policy in .github/af-env.conf."
@@ -280,7 +338,7 @@ fi
 # scanned the whole string, so hidden dangerous segments are blocked above.
 # Command substitution ($( ) / backticks) and file-write redirects (> file)
 # are never auto-allowed.
-sm() { printf '%s' "$SEG" | grep -qEi "$1"; }
+sm() { printf '%s' "$SEG" | grep -qEi -e "$1"; }
 is_safe_segment() {
     SEG="$(printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
     [ -z "$SEG" ] && return 0
