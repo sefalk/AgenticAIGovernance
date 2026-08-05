@@ -22,9 +22,15 @@ Use `run_task` for these static metrics. No dynamic arguments needed.
 | `metrics: pip-audit` | Dependency CVE audit | `run_task` |
 | `lint: ruff check` | Lint violations (source + tests) | `run_task` |
 | `lint: ruff check tests` | Lint violations (tests only) | `run_task` |
+| `lint: changed files` | Lint violations (branch delta — the gate's own set) | `run_task` |
 
 For per-module coverage, use `runTests(mode="coverage", coverageFiles=[...])`.
 For mutation testing (dynamic module), use `createAndRunTask`.
+
+When you report a lint figure as gate evidence, take it from
+`lint: changed files`. The directory scopes measure the repository, not the
+delta the hard gate evaluates, so a number from `lint: ruff check` answers a
+different question than the one the gate asks.
 
 ## When to Use
 

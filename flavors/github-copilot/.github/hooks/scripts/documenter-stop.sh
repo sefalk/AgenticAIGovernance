@@ -82,8 +82,15 @@ if ! grep -q '^cost:' "$log_path" 2>/dev/null; then
             [ -x "$c" ] && python_exe="$c" && break
         done
         if [ -z "$python_exe" ]; then
+            # Validate, do not just resolve: on Windows `python3` is usually the
+            # Store stub -- present on PATH, executes nothing.
             for n in python3 python; do
-                command -v "$n" >/dev/null 2>&1 && python_exe="$n" && break
+                p=$(command -v "$n" 2>/dev/null) || continue
+                [ -n "$p" ] || continue
+                if "$p" -c "pass" >/dev/null 2>&1; then
+                    python_exe="$p"
+                    break
+                fi
             done
         fi
 
@@ -104,5 +111,38 @@ if ! grep -q '^cost:' "$log_path" 2>/dev/null; then
     fi
 fi
 
-echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS: workflow log and retro snippet exist for '${workflow_id}'${cost_note}\"}"
+# ---------- Scratch task audit (ADVISORY — never blocks) ----------
+#
+# createAndRunTask writes its payload into .vscode/tasks.json, so every one-off
+# invocation becomes a permanent entry. Report the leftovers at workflow end;
+# the human decides whether to keep or prune them.
+
+scratch_note=""
+checker=".github/hooks/scripts/check-scratch-tasks.py"
+if [ -f "$checker" ] && [ -f ".vscode/tasks.json" ]; then
+    scratch_py=""
+    for c in .venv/bin/python .venv/Scripts/python.exe; do
+        [ -x "$c" ] && scratch_py="$c" && break
+    done
+    if [ -z "$scratch_py" ]; then
+        for n in python3 python; do
+            p=$(command -v "$n" 2>/dev/null) || continue
+            [ -n "$p" ] || continue
+            if "$p" -c "pass" >/dev/null 2>&1; then
+                scratch_py="$p"
+                break
+            fi
+        done
+    fi
+    if [ -n "$scratch_py" ]; then
+        found=$("$scratch_py" "$checker" ".vscode/tasks.json" 2>/dev/null)
+        if [ -n "$found" ]; then
+            count=$(printf '%s\n' "$found" | grep -c .)
+            joined=$(printf '%s' "$found" | tr '\n' ';' | sed 's/;$//')
+            scratch_note=" + scratch tasks to prune (${count}): ${joined}"
+        fi
+    fi
+fi
+
+echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS: workflow log and retro snippet exist for '${workflow_id}'${cost_note}${scratch_note}\"}"
 exit 0

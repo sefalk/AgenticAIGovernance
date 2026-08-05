@@ -9,3 +9,8 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# Scratch task surface at the repo root. createAndRunTask writes every one-off
+# invocation here, so this file is a cache, not an artifact. Root-anchored on
+# purpose: the payload's own flavors/github-copilot/.vscode/ stays tracked.
+/.vscode/

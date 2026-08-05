@@ -134,8 +134,44 @@ catch {
     $costNote = ''
 }
 
+# ---------- Scratch task audit (ADVISORY -- never blocks) ----------
+#
+# createAndRunTask writes its payload into .vscode/tasks.json, so every one-off
+# invocation becomes a permanent entry. Report the leftovers at workflow end;
+# the human decides whether to keep or prune them.
+
+$scratchNote = ''
+try {
+    $checker = '.github/hooks/scripts/check-scratch-tasks.py'
+    if ((Test-Path $checker) -and (Test-Path '.vscode/tasks.json')) {
+        $scratchPy = $null
+        foreach ($c in @('.venv/Scripts/python.exe', '.venv/bin/python')) {
+            if (Test-Path $c) { $scratchPy = $c; break }
+        }
+        if (-not $scratchPy) {
+            # Validate, do not just resolve: on Windows `python3` is usually the
+            # Store stub, which executes nothing and would silently skip this.
+            foreach ($n in @('python3', 'python')) {
+                $cmd = Get-Command $n -ErrorAction SilentlyContinue
+                if (-not $cmd) { continue }
+                $v = & $cmd.Source --version 2>&1
+                if ($LASTEXITCODE -eq 0 -and "$v" -match 'Python 3') { $scratchPy = $cmd.Source; break }
+            }
+        }
+        if ($scratchPy) {
+            $found = @(& $scratchPy $checker '.vscode/tasks.json' 2>$null)
+            if ($found.Count -gt 0) {
+                $scratchNote = " + scratch tasks to prune ($($found.Count)): " + ($found -join '; ')
+            }
+        }
+    }
+}
+catch {
+    $scratchNote = ''
+}
+
 $output = @{
-    systemMessage = "documenter:Stop -- artifact gate PASS: workflow log and retro snippet exist for '$workflowId'$costNote"
+    systemMessage = "documenter:Stop -- artifact gate PASS: workflow log and retro snippet exist for '$workflowId'$costNote$scratchNote"
 } | ConvertTo-Json -Compress
 Write-Output $output
 exit 0

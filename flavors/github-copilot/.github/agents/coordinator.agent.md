@@ -91,16 +91,25 @@ These apply **always** — during workflows, conversations, and ad-hoc requests.
      *known* branch. Never let file creation happen without knowing where
      you are.
 
-3. **Prefer tasks over terminal.** Fallback chain:
-   `run_task` → `createAndRunTask` (run the script directly) → terminal.
-   Use `run_task` for any operation that has a predefined task (tests,
-   metrics, pip installs, git queries, lint). If `run_task` cannot find
-   a task, use `createAndRunTask` to run the underlying script
-   (e.g., `.github/scripts/run-deps.ps1 -Scope dev`). Reserve terminal
-   for git commands (`add`, `commit`, `status`, `diff`) and ad-hoc
-   investigation only. Never run raw `pip install` — use the
-   `pip: install dev` / `pip: install runtime` tasks or run
-   `.github/scripts/run-deps.ps1` via `createAndRunTask`.
+3. **One reviewed execution surface — not a freedom ladder.** `run_task` and
+   `createAndRunTask` are two ways to call the *same* thing, not escalating
+   degrees of permission. `run_task` runs a curated label with fixed arguments;
+   `createAndRunTask` calls a script under `AF_TASK_SCRIPT_DIRS` with arguments
+   no fixed label expresses. Neither is the lighter-scrutiny path: the same
+   PreToolUse classifier inspects both, and a task naming a bare binary or an
+   inline interpreter payload is denied exactly as the equivalent terminal
+   command would be.
+
+   Prefer a predefined task (tests, metrics, pip installs, git queries, lint)
+   because it is single-sourced and argument-stable — not because it avoids
+   review. If no label fits, call the underlying script directly
+   (e.g. `.github/scripts/run-deps.ps1 -Scope dev`).
+
+   **The terminal is reserved, not demoted.** Use it for git (`add`, `commit`,
+   `status`, `diff`) and ad-hoc investigation. Choosing a task *because it feels
+   less restricted* is the failure this rule exists to prevent — if an operation
+   belongs in the terminal, run it there. Never run raw `pip install`: use the
+   `pip: install dev` / `pip: install runtime` tasks or `run-deps.ps1`.
 
 4. **Delegate notebook work — always.** For any `.ipynb` notebook — running
    cells, editing/adding cells, or selecting a kernel — you hold only the

@@ -8,10 +8,14 @@
 # files. This script is the repo-wide counterpart: it is what you run to find
 # drift that accumulated before the gate existed, or after a bulk edit.
 #
+# -Scope changed reproduces the gate's own file set, so you can see what the
+# gate will say before it says it.
+#
 # Usage:
 #   .github/scripts/run-lint.sh                      # Lint SRC_DIR/ and tests/
 #   .github/scripts/run-lint.sh --scope src          # Lint SRC_DIR/ only
 #   .github/scripts/run-lint.sh --scope tests        # Lint tests/ only
+#   .github/scripts/run-lint.sh --scope changed      # Lint the branch delta + working tree
 #   .github/scripts/run-lint.sh --fix                # Apply ruff's safe fixes
 #   .github/scripts/run-lint.sh --strictness strict  # Override af-env.conf
 #
@@ -28,9 +32,12 @@ WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CONF="${WORKSPACE_ROOT}/.github/af-env.conf"
 
 SRC_DIR="src"
+BASE_BRANCH=""
 if [ -f "$CONF" ]; then
     _val=$(grep -E '^SRC_DIR=' "$CONF" | head -1 | cut -d= -f2-)
     [ -n "$_val" ] && SRC_DIR="$_val"
+    _val=$(grep -E '^BASE_BRANCH=' "$CONF" | head -1 | cut -d= -f2- | tr -d '[:space:]')
+    [ -n "$_val" ] && BASE_BRANCH="$_val"
 fi
 
 SCOPE="all"
@@ -47,10 +54,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$SCOPE" in
-    all)   TARGETS=("$SRC_DIR" "tests") ;;
-    src)   TARGETS=("$SRC_DIR") ;;
-    tests) TARGETS=("tests") ;;
-    *) echo "ERROR: invalid scope '$SCOPE'. Use: all|src|tests"; exit 1 ;;
+    all)     TARGETS=("$SRC_DIR" "tests") ;;
+    src)     TARGETS=("$SRC_DIR") ;;
+    tests)   TARGETS=("tests") ;;
+    changed) TARGETS=() ;;
+    *) echo "ERROR: invalid scope '$SCOPE'. Use: all|src|tests|changed"; exit 1 ;;
 esac
 
 # Resolve venv python (same contract as run-tests.sh)
@@ -65,14 +73,62 @@ fi
 
 cd "$WORKSPACE_ROOT"
 
+# Linting scope is wider than the quality scope: ruff violations in tests/ are
+# real violations, so both SRC_DIR and tests count.
+is_lint_path() {
+    case "$1" in
+        "$SRC_DIR"/*|tests/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 FILES=()
-for t in "${TARGETS[@]}"; do
-    if [ -d "$t" ]; then
-        while IFS= read -r f; do
-            FILES+=("$f")
-        done < <(find "$t" -type f -name '*.py')
+if [ "$SCOPE" = "changed" ]; then
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        # "cannot determine the changed set" is not the same as "nothing
+        # changed"; reporting clean would silently weaken the gate this mirrors.
+        echo "ERROR: --scope changed needs a git repository at $WORKSPACE_ROOT"
+        echo "=== Exit Code: 1 ==="
+        exit 1
     fi
-done
+
+    # Deliberately the same set implementer-stop and refactorer-stop gate on:
+    # uncommitted work plus everything this branch already committed. Files from
+    # an earlier phase are invisible to a working-tree diff but still ship.
+    CHANGED=$(git diff --name-only --cached --diff-filter=AM -- '*.py' 2>/dev/null)
+    [ -z "$CHANGED" ] && CHANGED=$(git diff --name-only HEAD --diff-filter=AM -- '*.py' 2>/dev/null)
+
+    MERGE_BASE=""
+    if [ -n "$BASE_BRANCH" ]; then
+        MERGE_BASE=$(git merge-base HEAD "$BASE_BRANCH" 2>/dev/null | head -1)
+        [ -z "$MERGE_BASE" ] && MERGE_BASE=$(git merge-base HEAD "origin/$BASE_BRANCH" 2>/dev/null | head -1)
+    fi
+    if [ -n "$MERGE_BASE" ]; then
+        CHANGED="$CHANGED
+$(git diff --name-only --diff-filter=AM "${MERGE_BASE}..HEAD" -- '*.py' 2>/dev/null)"
+    fi
+
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        is_lint_path "$f" || continue
+        [ -f "$f" ] || continue
+        FILES+=("$f")
+    done < <(printf '%s\n' "$CHANGED" | sort -u)
+
+    if [ -n "$BASE_BRANCH" ]; then
+        TARGETS=("changed vs $BASE_BRANCH")
+    else
+        TARGETS=("changed (BASE_BRANCH unset -- working tree only)")
+    fi
+else
+    for t in "${TARGETS[@]}"; do
+        if [ -d "$t" ]; then
+            while IFS= read -r f; do
+                FILES+=("$f")
+            done < <(find "$t" -type f -name '*.py')
+        fi
+    done
+fi
 
 echo "=== Lint Runner: scope=$SCOPE targets=${TARGETS[*]} files=${#FILES[@]} ==="
 

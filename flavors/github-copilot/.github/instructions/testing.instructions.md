@@ -87,7 +87,9 @@ are in `skills/test-execution/SKILL.md`. These rules bind regardless:
    refactorer stop hooks run the full suite and write the log.
 7. **`run_in_terminal` is reserved** for coordinator and code-critic. Other
    agents use `run_task`, `runTests` (file- or test-scoped), or
-   `createAndRunTask` (last resort, and only if no task or tool fits).
+   `createAndRunTask` when no label expresses the invocation. `createAndRunTask`
+   is not a quieter terminal: the same PreToolUse classifier inspects it, and it
+   may only invoke scripts under `AF_TASK_SCRIPT_DIRS`.
 8. **Never create temp output files** — the runner streams to stdout.
 9. **Task labels are a stable API** — do not rename one without updating
    every agent definition that uses it.
