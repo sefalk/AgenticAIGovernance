@@ -599,6 +599,10 @@ $fetchUrlsOk      = '{"tool_name":"fetch_webpage","tool_input":{"urls":["https:/
 $fetchUrlsUnknown = '{"tool_name":"fetch_webpage","tool_input":{"urls":["https://unlisted.example.com/x"],"query":"x"}}'
 $fetchUrlsMixed   = '{"tool_name":"fetch_webpage","tool_input":{"urls":["https://docs.python.org/3/library/os.html","https://unlisted.example.com/x"],"query":"x"}}'
 $fetchUrlsCred    = '{"tool_name":"fetch_webpage","tool_input":{"urls":["https://user:hunter2@docs.python.org/3/?token=abc123"],"query":"x"}}'
+# The host is what follows the last `@` in the authority, not what precedes the
+# first `:`. Reading the userinfo instead turns any allowlisted name into a
+# password on an arbitrary host.
+$fetchUrlsSpoof   = '{"tool_name":"fetch_webpage","tool_input":{"urls":["https://docs.python.org:x@evil.example.com/"],"query":"x"}}'
 
 function Get-FetchDecision([string]$Json) {
     $r = Invoke-Hook -Script 'researcher-pretooluse.ps1' -JsonInput $Json
@@ -624,6 +628,10 @@ $rCred = Get-FetchDecision $fetchUrlsCred
 Assert-True "credentialed url is reported without echoing the secret" `
     ($rCred.Output.Contains('***') -and -not $rCred.Output.Contains('hunter2')) `
     "got: $($rCred.Output)"
+
+$rSpoof = Get-FetchDecision $fetchUrlsSpoof
+Assert-True "userinfo cannot spoof an allowlisted host" ($rSpoof.Decision -eq 'ask') `
+    "expected ask, got: $($rSpoof.Output)"
 
 Write-Output ""
 

@@ -102,6 +102,10 @@ FETCH_URLS_OK='{"tool_name":"fetch_webpage","tool_input":{"urls":["https://docs.
 FETCH_URLS_UNKNOWN='{"tool_name":"fetch_webpage","tool_input":{"urls":["https://unlisted.example.com/x"],"query":"x"}}'
 FETCH_URLS_MIXED='{"tool_name":"fetch_webpage","tool_input":{"urls":["https://docs.python.org/3/library/os.html","https://unlisted.example.com/x"],"query":"x"}}'
 FETCH_URLS_CRED='{"tool_name":"fetch_webpage","tool_input":{"urls":["https://user:hunter2@docs.python.org/3/?token=abc123"],"query":"x"}}'
+# The host is what follows the last `@` in the authority, not what precedes
+# the first `:`. Reading the userinfo instead turns any allowlisted name into
+# a password on an arbitrary host.
+FETCH_URLS_SPOOF='{"tool_name":"fetch_webpage","tool_input":{"urls":["https://docs.python.org:x@evil.example.com/"],"query":"x"}}'
 CO_PYTEST='{"tool_name":"runInTerminal","tool_input":{"command":"pytest tests/ -q"}}'
 CO_MSG_BAD='{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"[agent:implementer] make tests pass\""}}'
 CO_MSG_OK='{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"[agent:implementer] make tests pass: extract the pure alignment step\""}}'
@@ -135,6 +139,7 @@ run_case "unlisted url in a urls array prompts" researcher-pretooluse.sh agent/f
 # One bad entry has to decide the batch: the tool fetches every URL in the
 # array, so allowing on the first match approves the rest unexamined.
 run_case "one unlisted entry decides the batch" researcher-pretooluse.sh agent/fixture  "$FETCH_URLS_MIXED"   ask
+run_case "userinfo cannot spoof an allowlisted host" researcher-pretooluse.sh agent/fixture "$FETCH_URLS_SPOOF" ask
 
 # The sanitiser is the one path that did something, and it aborted the hook:
 # its `sed` used `|` as both the s-delimiter and regex alternation.
