@@ -37,8 +37,10 @@ case "$TOOL_NAME" in
 esac
 
 # Intercept terminal tool calls -- block pytest, validate git commit message quality
+# `case` is case-sensitive: the real tool name is `runInTerminal`, so a
+# lowercase-only pattern matched nothing and this whole branch was dead.
 case "$TOOL_NAME" in
-    *terminal*)
+    *terminal*|*Terminal*)
         COMMAND=$(echo "$RAW" | "$AF_PYTHON" -c "
 import sys, json
 try:
@@ -103,22 +105,30 @@ except Exception:
             fi
             # Check repo health
             if ! git status --porcelain >/dev/null 2>&1; then
-                printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Main repository is not healthy (\'git status\' failed). Fix repository state before creating a worktree."}}'
+                printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Main repository is not healthy ('\''git status'\'' failed). Fix repository state before creating a worktree."}}'
                 exit 0
             fi
-        fi        # Validate git commit message quality -- reject generic phase-only messages
+        fi
+
+        # Validate git commit message quality -- reject generic phase-only messages
         # Required format: [agent:name] phase: {description >= 10 chars}
         if echo "$COMMAND" | grep -qE 'git[[:space:]]+commit'; then
-            MSG=$(echo "$COMMAND" | "$AF_PYTHON" << 'PYEOF'
-import sys, re
-cmd = sys.stdin.read()
-m = re.search(r'-m\s+["\']([^"\']+)["\']', cmd)
-print(m.group(1).strip() if m else '')
+            # The heredoc *is* python's stdin, so a pipe into it is discarded
+            # and the script always saw an empty command. Pass it in the
+            # environment instead, which leaves the quoted heredoc intact.
+            MSG=$(AF_RAW_COMMAND="$COMMAND" "$AF_PYTHON" << 'PYEOF'
+import os, re
+cmd = os.environ.get('AF_RAW_COMMAND', '')
+m = re.search(r'-m\s+(["\'])(.+?)\1', cmd)
+print(m.group(2).strip() if m else '')
 PYEOF
 )
             if [ -n "$MSG" ]; then
-                if ! echo "$MSG" | grep -qE '^\[agent:[^\]]+\][[:space:]]+(WIP checkpoint|task cancelled|justify ignore)'; then
-                    if ! echo "$MSG" | grep -qE '^\[agent:[^\]]+\][[:space:]]+[^:]+:[[:space:]]+.{10,}'; then
+                # A backslash is literal inside an ERE bracket list, so the
+                # former '[^\]]' demanded two closing brackets and never
+                # matched. A leading ']' after '^' is the portable spelling.
+                if ! echo "$MSG" | grep -qE '^\[agent:[^]]+\][[:space:]]+(WIP checkpoint|task cancelled|justify ignore)'; then
+                    if ! echo "$MSG" | grep -qE '^\[agent:[^]]+\][[:space:]]+[^:]+:[[:space:]]+.{10,}'; then
                         printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Commit message too generic. Required format: '\''[agent:name] phase: {description >= 10 chars}'\''. E.g.: '\''[agent:test-writer] failing tests: ColumnMeta validation -- null CRC and negative threshold edge cases'\''. See git-workflow.instructions.md Commit Rule 4."}}'
                         exit 0
                     fi
