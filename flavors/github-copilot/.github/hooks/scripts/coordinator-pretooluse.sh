@@ -9,10 +9,17 @@
 
 set -euo pipefail
 
-RAW=$(cat)
-[ -z "$RAW" ] && echo '{}' && exit 0
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54).
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 
-TOOL_NAME=$(echo "$RAW" | python3 -c "
+RAW=$(cat)
+# `A && B && exit` returns 1 when A is false, which under `set -e` aborts the
+# hook instead of falling through. Explicit `if` blocks do not.
+if [ -z "$RAW" ]; then echo '{}'; exit 0; fi
+if [ -z "$AF_PYTHON" ]; then echo '{}'; exit 0; fi
+
+TOOL_NAME=$(echo "$RAW" | "$AF_PYTHON" -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -32,7 +39,7 @@ esac
 # Intercept terminal tool calls -- block pytest, validate git commit message quality
 case "$TOOL_NAME" in
     *terminal*)
-        COMMAND=$(echo "$RAW" | python3 -c "
+        COMMAND=$(echo "$RAW" | "$AF_PYTHON" -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -43,10 +50,8 @@ except Exception:
     print('')
 " 2>/dev/null)
         # Config: PROJECT_LANGUAGE and PY_ENV_BOOTSTRAP from af-env.conf
-        PROJECT_LANGUAGE=$(grep '^PROJECT_LANGUAGE=' .github/af-env.conf 2>/dev/null | cut -d= -f2 | xargs)
-        BOOTSTRAP_MODE=$(grep '^PY_ENV_BOOTSTRAP=' .github/af-env.conf 2>/dev/null | cut -d= -f2 | xargs)
-        : "${PROJECT_LANGUAGE:=python}"
-        : "${BOOTSTRAP_MODE:=ask}"
+        PROJECT_LANGUAGE=$(af_conf_get PROJECT_LANGUAGE python)
+        BOOTSTRAP_MODE=$(af_conf_get PY_ENV_BOOTSTRAP ask)
 
         # Bootstrap env for non-pytest Python commands when .venv is missing
         IS_PYTEST=false
@@ -83,8 +88,7 @@ except Exception:
 
         # Validate git worktree add preconditions
         if echo "$COMMAND" | grep -qE 'git[[:space:]]+worktree[[:space:]]+add'; then
-            WT_DIR=$(grep '^WORKTREE_DIR=' .github/af-env.conf 2>/dev/null | cut -d= -f2 | xargs)
-            : "${WT_DIR:=../wt}"
+            WT_DIR=$(af_conf_get WORKTREE_DIR '../wt')
             # Extract branch name after -b flag
             BRANCH=$(echo "$COMMAND" | grep -oP '(?<=-b )\S+' || true)
             if [ -n "$BRANCH" ] && ! echo "$BRANCH" | grep -qE '^agent/[a-z0-9][a-z0-9-]*$'; then
@@ -105,7 +109,7 @@ except Exception:
         fi        # Validate git commit message quality -- reject generic phase-only messages
         # Required format: [agent:name] phase: {description >= 10 chars}
         if echo "$COMMAND" | grep -qE 'git[[:space:]]+commit'; then
-            MSG=$(echo "$COMMAND" | python3 << 'PYEOF'
+            MSG=$(echo "$COMMAND" | "$AF_PYTHON" << 'PYEOF'
 import sys, re
 cmd = sys.stdin.read()
 m = re.search(r'-m\s+["\']([^"\']+)["\']', cmd)

@@ -59,7 +59,10 @@ function Find-AfPython {
         if (-not $candidate) { continue }
         $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
         if (-not $cmd -or -not $cmd.Source) { continue }
-        & $cmd.Source -c '' *> $null
+        # 'pass', not '': PowerShell 5.1 silently drops empty-string arguments
+        # to native commands, so `-c ''` reaches python as a bare -c and every
+        # candidate would fail the probe -- including the working ones.
+        & $cmd.Source -c 'pass' *> $null
         if ($LASTEXITCODE -eq 0) { return $cmd.Source }
     }
     return ''

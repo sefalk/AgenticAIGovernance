@@ -296,6 +296,9 @@ function New-GateRepo {
     Copy-Item (Join-Path $ghRoot 'scripts/check-python-quality.py') (Join-Path $repo '.github/scripts/')
     Copy-Item (Join-Path $hookDir 'refactorer-stop.ps1') (Join-Path $repo '.github/hooks/scripts/')
     Copy-Item (Join-Path $hookDir 'implementer-stop.ps1') (Join-Path $repo '.github/hooks/scripts/')
+    # Both hooks dot-source the shared preamble; a deployed .github always ships
+    # it, so the fixture has to as well or they die before their first gate.
+    Copy-Item (Join-Path $hookDir '_common.ps1') (Join-Path $repo '.github/hooks/scripts/')
 
     # Stub test runner: the hooks call it for Gate 1, which is not under test.
     "param([string]`$Scope = 'all')`nWrite-Output '1 passed'`nexit 0" |

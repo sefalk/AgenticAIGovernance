@@ -11,6 +11,10 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54).
+. "$PSScriptRoot/_common.ps1"
+
 # Read stdin (hook input JSON -- required by protocol).
 # It carries session_id and transcript_path, which is how the cost block below
 # locates the debug log; both name the PARENT session even inside a subagent
@@ -31,12 +35,7 @@ if (-not $branch -or $branch -notmatch '^agent/(.+)$') {
 $workflowId = $Matches[1]
 $missing = @()
 
-$BASE_BRANCH = 'dev'
-$confPath = Join-Path (Get-Location) '.github/af-env.conf'
-if (Test-Path $confPath) {
-    $b = Select-String -Path $confPath -Pattern '^BASE_BRANCH=(.+)$'
-    if ($b) { $BASE_BRANCH = $b.Matches[0].Groups[1].Value.Trim() }
-}
+$BASE_BRANCH = Get-AfConfig -Key 'BASE_BRANCH' -Default 'dev'
 
 # ---------- Gate 1: Workflow log YAML ----------
 
@@ -99,14 +98,9 @@ try {
                 if (Test-Path $c) { $python = $c; break }
             }
             if (-not $python) {
-                # Validate, do not just resolve: on Windows `python3` is usually
-                # the Store stub, which prints an ad and exits non-zero.
-                foreach ($n in @('python3', 'python')) {
-                    $cmd = Get-Command $n -ErrorAction SilentlyContinue
-                    if (-not $cmd) { continue }
-                    $v = & $cmd.Source --version 2>&1
-                    if ($LASTEXITCODE -eq 0 -and "$v" -match 'Python 3') { $python = $cmd.Source; break }
-                }
+                # The shared preamble already validated the interpreter by
+                # running it -- a resolvable-but-dead stub never gets here.
+                $python = $AfPython
             }
 
             if ($python -and (Test-Path $collector)) {
@@ -149,14 +143,9 @@ try {
             if (Test-Path $c) { $scratchPy = $c; break }
         }
         if (-not $scratchPy) {
-            # Validate, do not just resolve: on Windows `python3` is usually the
-            # Store stub, which executes nothing and would silently skip this.
-            foreach ($n in @('python3', 'python')) {
-                $cmd = Get-Command $n -ErrorAction SilentlyContinue
-                if (-not $cmd) { continue }
-                $v = & $cmd.Source --version 2>&1
-                if ($LASTEXITCODE -eq 0 -and "$v" -match 'Python 3') { $scratchPy = $cmd.Source; break }
-            }
+            # The shared preamble already validated the interpreter by running
+            # it -- a resolvable-but-dead stub never gets here.
+            $scratchPy = $AfPython
         }
         if ($scratchPy) {
             $found = @(& $scratchPy $checker '.vscode/tasks.json' 2>$null)

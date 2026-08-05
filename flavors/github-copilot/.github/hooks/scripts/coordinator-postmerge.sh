@@ -10,12 +10,14 @@
 
 set -uo pipefail
 
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54).
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
 RAW=$(cat)
 [ -z "$RAW" ] && RAW='{}'
 
-# Read WORKTREE_DIR from af-env.conf
-WT_DIR=$(grep '^WORKTREE_DIR=' .github/af-env.conf 2>/dev/null | cut -d= -f2 | xargs)
-: "${WT_DIR:=../wt}"
+WT_DIR=$(af_conf_get WORKTREE_DIR '../wt')
 
 # Get worktree list
 wt_raw=$(git worktree list --porcelain 2>/dev/null || true)
@@ -32,7 +34,11 @@ if echo "$wt_raw" | grep -q "prunable"; then
 fi
 
 # Count and list active agent/* worktrees
-agent_worktrees=$(echo "$wt_raw" | python3 << 'PYEOF'
+if [ -z "$AF_PYTHON" ]; then
+    echo '{"systemMessage": "coordinator:PostMerge -- no usable python interpreter, worktree summary skipped"}'
+    exit 0
+fi
+agent_worktrees=$(echo "$wt_raw" | "$AF_PYTHON" << 'PYEOF'
 import sys
 lines = sys.stdin.read().splitlines()
 wts = []

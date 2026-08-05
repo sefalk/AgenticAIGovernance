@@ -21,22 +21,14 @@ HOOK_DIR="$GITHUB_DIR/hooks/scripts"
 pass=0
 fail=0
 
-# Some Windows hosts expose `python3` as a Microsoft Store execution alias:
-# `command -v python3` reports a path, but running it prints an install notice
-# and exits non-zero. The hooks would see that on Linux as a working
-# interpreter, so shim it away rather than letting it fake a hook failure.
-SHIM=""
-if ! printf '{}' | python3 -c 'import sys,json; json.load(sys.stdin)' >/dev/null 2>&1; then
-    if real_py=$(command -v python 2>/dev/null) && printf '{}' | "$real_py" -c 'import sys,json; json.load(sys.stdin)' >/dev/null 2>&1; then
-        SHIM=$(mktemp -d)
-        printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$real_py" > "$SHIM/python3"
-        chmod +x "$SHIM/python3"
-        export PATH="$SHIM:$PATH"
-        echo "note: shimmed a non-functional python3 with $real_py"
-    else
-        echo "SKIP: no usable python3 -- the bash hooks cannot parse tool input here."
-        exit 0
-    fi
+# The hooks resolve and probe their own interpreter (hooks/scripts/_common.sh),
+# so this harness deliberately does NOT shim a non-functional `python3` away --
+# that shim used to hide the very defect the probe exists for (issue #54).
+# It only refuses to run when no interpreter works at all, because then no hook
+# can parse its tool input and every verdict would be meaningless.
+if ! af_py=$(bash -c ". '$HOOK_DIR/_common.sh'; printf '%s' \"\$AF_PYTHON\"" 2>/dev/null) || [ -z "$af_py" ]; then
+    echo "SKIP: no usable Python interpreter -- the bash hooks cannot parse tool input here."
+    exit 0
 fi
 
 # run_case <name> <hook> <branch|--detach> <json> <deny|allow|ask|silent>
@@ -47,6 +39,9 @@ run_case() {
 
     mkdir -p "$fixture/.github/hooks/scripts"
     cp "$HOOK_DIR/$hook" "$fixture/.github/hooks/scripts/"
+    # Hooks source the shared preamble; a deployed .github always ships it,
+    # so the fixture has to as well or every hook dies before its first gate.
+    cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
     [ -f "$GITHUB_DIR/af-env.conf" ] && cp "$GITHUB_DIR/af-env.conf" "$fixture/.github/"
 
     (
@@ -179,8 +174,6 @@ PROBE
 
     rm -rf "$fx" "$elsewhere" "$stub"
 fi
-
-[ -n "$SHIM" ] && rm -rf "$SHIM"
 
 echo ""
 echo "=== Summary ==="

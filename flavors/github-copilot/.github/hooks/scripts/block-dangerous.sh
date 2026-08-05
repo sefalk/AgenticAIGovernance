@@ -12,20 +12,13 @@
 # can, since it has no path segment to match, so the hard-deny tier is covered
 # as a consequence. Any unrecognised task shape denies (fail closed).
 
-# Presence is not executability: on Windows hosts, command -v python3 resolves
-# the 0-byte App Execution Alias under WindowsApps, which is non-empty but runs
-# nothing -- every python call would then fail silently and the hook would emit
-# no opinion for every command. Each candidate is probed before it is accepted.
-PYTHON=""
-for _py_candidate in python3 python py; do
-    _py_path=$(command -v "$_py_candidate" 2>/dev/null) || continue
-    [ -n "$_py_path" ] || continue
-    if "$_py_path" -c "pass" >/dev/null 2>&1; then
-        PYTHON="$_py_path"
-        break
-    fi
-done
-unset _py_candidate _py_path
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54). AF_PYTHON is probed, not
+# merely resolved: on Windows `command -v python3` finds the App Execution
+# Alias, which is non-empty but runs nothing -- every python call would then
+# fail silently and the hook would emit no opinion for any command.
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+PYTHON="$AF_PYTHON"
 
 raw=$(cat)
 
@@ -69,13 +62,8 @@ EOF
         fi
     done
 
-    task_repo=$(git rev-parse --show-toplevel 2>/dev/null)
-    task_conf="$task_repo/.github/af-env.conf"
-    task_dirs_raw=""
-    if [ -f "$task_conf" ]; then
-        task_dirs_raw=$(grep -E '^[[:space:]]*AF_TASK_SCRIPT_DIRS=' "$task_conf" 2>/dev/null | head -n1 | sed -E 's/^[[:space:]]*AF_TASK_SCRIPT_DIRS=//')
-        task_dirs_raw=$(printf '%s' "$task_dirs_raw" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
-    fi
+    task_repo="$AF_CODE_ROOT"
+    task_dirs_raw=$(af_conf_get AF_TASK_SCRIPT_DIRS '')
     [ -z "$task_dirs_raw" ] && task_dirs_raw=".github/scripts"
 
     decision=$(printf '%s' "$raw" | "$PYTHON" -c '
@@ -225,17 +213,10 @@ if [ -z "$command_str" ]; then
     exit 0
 fi
 
-# --- Load autonomy config from .github/af-env.conf ---
-repo=$(git rev-parse --show-toplevel 2>/dev/null)
-conf="$repo/.github/af-env.conf"
+# --- Load autonomy config (resolved by the shared preamble) ---
 get_af_env() {
     # $1 = key, $2 = default
-    local val=""
-    if [ -f "$conf" ]; then
-        val=$(grep -E "^[[:space:]]*$1=" "$conf" 2>/dev/null | head -n1 | sed -E "s/^[[:space:]]*$1=//")
-        val=$(echo "$val" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
-    fi
-    if [ -z "$val" ]; then echo "$2"; else echo "$val"; fi
+    af_conf_get "$1" "${2:-}"
 }
 
 level=$(get_af_env AUTONOMY_LEVEL balanced | tr '[:upper:]' '[:lower:]')

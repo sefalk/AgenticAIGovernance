@@ -12,6 +12,9 @@
 
 set -uo pipefail
 
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54).
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 # Read stdin (hook input JSON — required by protocol).
 # It carries session_id and transcript_path, which is how the cost block below
 # locates the debug log; both name the PARENT session even inside a subagent
@@ -28,11 +31,7 @@ fi
 workflow_id="${BASH_REMATCH[1]}"
 missing=()
 
-BASE_BRANCH="dev"
-if [ -f ".github/af-env.conf" ]; then
-    conf_base=$(grep -E '^BASE_BRANCH=' .github/af-env.conf 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]')
-    [ -n "$conf_base" ] && BASE_BRANCH="$conf_base"
-fi
+BASE_BRANCH=$(af_conf_get BASE_BRANCH dev)
 
 # ---------- Gate 1: Workflow log YAML ----------
 
@@ -82,16 +81,9 @@ if ! grep -q '^cost:' "$log_path" 2>/dev/null; then
             [ -x "$c" ] && python_exe="$c" && break
         done
         if [ -z "$python_exe" ]; then
-            # Validate, do not just resolve: on Windows `python3` is usually the
-            # Store stub -- present on PATH, executes nothing.
-            for n in python3 python; do
-                p=$(command -v "$n" 2>/dev/null) || continue
-                [ -n "$p" ] || continue
-                if "$p" -c "pass" >/dev/null 2>&1; then
-                    python_exe="$p"
-                    break
-                fi
-            done
+            # AF_PYTHON is already validated, not merely resolved: on Windows
+            # `python3` is the Store stub -- present on PATH, executes nothing.
+            python_exe="$AF_PYTHON"
         fi
 
         if [ -n "$python_exe" ] && [ -f "$collector" ]; then
@@ -125,14 +117,7 @@ if [ -f "$checker" ] && [ -f ".vscode/tasks.json" ]; then
         [ -x "$c" ] && scratch_py="$c" && break
     done
     if [ -z "$scratch_py" ]; then
-        for n in python3 python; do
-            p=$(command -v "$n" 2>/dev/null) || continue
-            [ -n "$p" ] || continue
-            if "$p" -c "pass" >/dev/null 2>&1; then
-                scratch_py="$p"
-                break
-            fi
-        done
+        scratch_py="$AF_PYTHON"
     fi
     if [ -n "$scratch_py" ]; then
         found=$("$scratch_py" "$checker" ".vscode/tasks.json" 2>/dev/null)

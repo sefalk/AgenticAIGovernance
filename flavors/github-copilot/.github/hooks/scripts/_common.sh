@@ -55,6 +55,7 @@ af_conf_get() {
     if [ "$AF_CONF_FOUND" -eq 1 ]; then
         _val=$(grep -E "^${_key}=" "$AF_CONF" 2>/dev/null | head -1 | cut -d= -f2-)
         _val=${_val%$'\r'}
+        _val=$(printf '%s' "$_val" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
     fi
     if [ -n "$_val" ]; then
         printf '%s\n' "$_val"

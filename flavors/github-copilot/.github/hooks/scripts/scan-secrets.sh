@@ -6,15 +6,20 @@
 
 set -uo pipefail
 
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54).
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
 raw=$(cat)
-tool_name=$(echo "$raw" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tool_name',''))" 2>/dev/null || echo "")
+if [ -z "$AF_PYTHON" ]; then echo '{}'; exit 0; fi
+tool_name=$(echo "$raw" | "$AF_PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_name',''))" 2>/dev/null || echo "")
 
 if ! echo "$tool_name" | grep -qiE 'edit|create|write|file'; then
     echo '{}'
     exit 0
 fi
 
-file_path=$(echo "$raw" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tool_input',{}).get('filePath',''))" 2>/dev/null || echo "")
+file_path=$(echo "$raw" | "$AF_PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_input',{}).get('filePath',''))" 2>/dev/null || echo "")
 
 if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
     echo '{}'
