@@ -78,11 +78,35 @@ run_case() {
     rm -rf "$fixture"
 }
 
+# assert_true <name> <1|0> [detail] -- for cases run_case cannot express.
+assert_true() {
+    local name="$1" ok="$2" detail="${3:-}"
+    if [ "$ok" -eq 1 ]; then
+        echo "PASS  $name"
+        pass=$((pass + 1))
+    else
+        echo "FAIL  $name -- $detail"
+        fail=$((fail + 1))
+    fi
+}
+
 TEST_EDIT='{"tool_name":"editFiles","tool_input":{"filePath":"tests/test_x.py"}}'
 SRC_EDIT='{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}'
 SRC_CREATE='{"tool_name":"createFile","tool_input":{"filePath":"src/new.py"}}'
 FETCH_OK='{"tool_name":"fetch","tool_input":{"url":"https://docs.python.org/3/library/os.html"}}'
 FETCH_UNKNOWN='{"tool_name":"fetch","tool_input":{"url":"https://unlisted.example.com/x"}}'
+CO_PYTEST='{"tool_name":"runInTerminal","tool_input":{"command":"pytest tests/ -q"}}'
+CO_MSG_BAD='{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"[agent:implementer] make tests pass\""}}'
+CO_MSG_OK='{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"[agent:implementer] make tests pass: extract the pure alignment step\""}}'
+
+# The coordinator hook's whole purpose is delegation enforcement, and nothing
+# here exercised it -- which is how it stayed unparsable, and therefore silent,
+# without a single red test (issue #65).
+echo "## coordinator-pretooluse.sh"
+run_case "delegation gate denies a direct file edit"  coordinator-pretooluse.sh agent/fixture "$SRC_EDIT"   deny
+run_case "pytest via terminal is denied"              coordinator-pretooluse.sh agent/fixture "$CO_PYTEST"  deny
+run_case "phase-only commit message is denied"        coordinator-pretooluse.sh agent/fixture "$CO_MSG_BAD" deny
+run_case "described commit message passes"            coordinator-pretooluse.sh agent/fixture "$CO_MSG_OK"  silent
 
 echo "## test-writer-pretooluse.sh"
 run_case "branch gate denies on dev"            test-writer-pretooluse.sh dev           "$TEST_EDIT" deny
@@ -100,22 +124,23 @@ echo "## researcher-pretooluse.sh"
 run_case "allowlisted domain is allowed"        researcher-pretooluse.sh agent/fixture  "$FETCH_OK"      allow
 run_case "unlisted domain prompts"              researcher-pretooluse.sh agent/fixture  "$FETCH_UNKNOWN" ask
 
+# A SessionStart hook takes no branch context and emits context rather than a
+# verdict, so run_case cannot express it -- but it is exactly the file that
+# shipped an unterminated quote, so assert it produces its payload at all.
+echo "## session-mcp-readiness.sh"
+readiness_out=$(bash "$HOOK_DIR/session-mcp-readiness.sh" < /dev/null 2>/dev/null)
+case "$readiness_out" in
+    *'"hookEventName":"SessionStart"'*'"additionalContext"'*)
+        assert_true "readiness hook emits its session payload" 1 ;;
+    *)
+        assert_true "readiness hook emits its session payload" 0 "got: ${readiness_out:-<no output>}" ;;
+esac
+
 # --- Resolution invariants -------------------------------------------------
 #
 # run_case copies the hook into a fixture and runs it *from the fixture root*,
 # so a cwd-relative config read looks correct there. These cases run from
 # elsewhere, which is the shape production actually has.
-
-assert_true() {
-    local name="$1" ok="$2" detail="${3:-}"
-    if [ "$ok" -eq 1 ]; then
-        echo "PASS  $name"
-        pass=$((pass + 1))
-    else
-        echo "FAIL  $name -- $detail"
-        fail=$((fail + 1))
-    fi
-}
 
 echo "## resolution invariants"
 
@@ -173,6 +198,29 @@ PROBE
     fi
 
     rm -rf "$fx" "$elsewhere" "$stub"
+fi
+
+# --- Parse gate ------------------------------------------------------------
+#
+# A hook that dies at parse time produces no output, and no output is
+# indistinguishable from no objection -- the gate disarms itself silently.
+# Behavioural cases only cover hooks the harness happens to invoke, so assert
+# that every shipped script parses, invoked or not.
+
+echo "## parse gate"
+
+unparsable=""
+for f in "$HOOK_DIR"/*.sh; do
+    [ -f "$f" ] || continue
+    if ! bash -n "$f" 2>/dev/null; then
+        unparsable="$unparsable $(basename "$f")"
+    fi
+done
+
+if [ -z "$unparsable" ]; then
+    assert_true "every shipped bash hook parses" 1
+else
+    assert_true "every shipped bash hook parses" 0 "bash -n failed:$unparsable"
 fi
 
 echo ""

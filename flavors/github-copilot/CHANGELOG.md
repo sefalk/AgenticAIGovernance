@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Two shipped hooks died before their first statement, and nothing noticed
+  (issue #65).** `coordinator-pretooluse.sh` carried `\'git status\'` inside a
+  single-quoted string and `session-mcp-readiness.sh` an unterminated
+  `${msg//"/\"}`; both failed `bash -n`. A hook that cannot be parsed exits
+  non-zero without printing a decision, and **the absence of a decision is how
+  a hook says "no objection"** — so the coordinator's delegation gate, its
+  worktree-branch check and its commit-message rule had been permitting
+  everything, silently, for as long as the defect existed. No harness asserted
+  that the shipped hooks parse.
+
+  - **A parse gate in both harnesses.** `test-hooks.ps1` tokenizes every `.ps1`
+    via `PSParser::Tokenize` and shells out to `bash -n` for the `.sh` side when
+    bash is present; `test-hooks.sh` runs `bash -n` over every shipped hook.
+    Cheap, and it fails on the file that would otherwise fail in production.
+  - **Behavioural coverage found two further silent defects the parse gate
+    could not.** Once the coordinator hook parsed, tests written against what
+    it is supposed to *block* showed it still blocking nothing. Its outer
+    `case` matched `*terminal*` only, but VS Code sends `runInTerminal` — bash
+    `case` is case-sensitive, so the entire terminal branch was unreachable
+    (the inner `case`, one screen below, already spelled both). And the
+    commit-message parser read `sys.stdin` while being fed a quoted heredoc,
+    which *is* python's stdin: the pipe was discarded, the message always came
+    back empty, and the gate never fired. `coordinator-postmerge.sh` had the
+    same heredoc/stdin collision and always reported "No active agent/*
+    worktrees". Both now pass their payload through the environment.
+  - **A bracket list that could not match.** `^\[agent:[^\]]+\]` looks correct
+    and is not: a backslash is literal inside an ERE bracket expression, so the
+    pattern demanded two closing brackets. It rejected every well-formed commit
+    message — invisible while the hook was unparsable, immediate once it ran.
+  - **The harness tripped over the same `$ErrorActionPreference` trap as #54.**
+    `bash -n` writes its diagnostics to stderr, which under `Stop` becomes a
+    terminating PowerShell error; `*> $null` does not prevent it. The parse
+    gate saves and restores the preference around the loop.
+
+  The unifying lesson across #54 and #65: unparsable, unmatched and unfed all
+  fail identically — as silence. Only a test that asserts a hook *speaks* tells
+  them apart.
+
 - **Hooks resolved their roots, config and interpreter from wherever the agent
   process happened to be standing (issue #54).** A hook is not guaranteed to
   run from the repo root — under worktrees it routinely does not — yet six

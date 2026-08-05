@@ -123,7 +123,9 @@ if [[ -n "$wiki_identifier" ]]; then
     msg="$msg | wiki=$wiki_identifier"
 fi
 
-msg_escaped=${msg//"/\"}
+# Backslashes first -- escaping quotes before backslashes would re-escape the
+# backslash this step just introduced.
+msg_escaped=$(printf '%s' "$msg" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$msg_escaped"
 
 exit 0

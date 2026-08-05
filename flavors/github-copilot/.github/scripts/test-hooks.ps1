@@ -762,6 +762,49 @@ if ((Test-Path $resolveChecker) -and $pyExe) {
 
 Write-Output ""
 
+# ── 9. Parse gate ────────────────────────────────────────────────────────
+#
+# A hook that dies at parse time produces no output, and no output is
+# indistinguishable from no objection -- the gate disarms itself silently.
+# The behavioural cases above only cover hooks this harness invokes, so assert
+# that every shipped script parses, invoked or not.
+
+Write-Output "## parse gate"
+
+$badPs1 = @()
+foreach ($f in (Get-ChildItem -Path $scriptDir -Filter '*.ps1' -File)) {
+    $tokErrors = $null
+    [System.Management.Automation.PSParser]::Tokenize(
+        (Get-Content $f.FullName -Raw), [ref]$tokErrors) | Out-Null
+    if ($tokErrors -and $tokErrors.Count -gt 0) { $badPs1 += $f.Name }
+}
+Assert-True "every shipped PowerShell hook parses" ($badPs1.Count -eq 0) "tokenizer failed: $($badPs1 -join ', ')"
+
+# Git for Windows ships bash; without it the .sh half is left to test-hooks.sh.
+$bashExe = (Get-Command bash -ErrorAction SilentlyContinue).Source
+if (-not $bashExe -and (Test-Path 'C:/Program Files/Git/bin/bash.exe')) {
+    $bashExe = 'C:/Program Files/Git/bin/bash.exe'
+}
+if ($bashExe) {
+    # bash writes its syntax diagnostics to stderr, and under 'Stop' a native
+    # command's stderr is a terminating error -- the suite would die on the
+    # finding instead of recording it. Redirection does not help; the
+    # preference does.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $badSh = @()
+    foreach ($f in (Get-ChildItem -Path $scriptDir -Filter '*.sh' -File)) {
+        & $bashExe -n $f.FullName *> $null
+        if ($LASTEXITCODE -ne 0) { $badSh += $f.Name }
+    }
+    $ErrorActionPreference = $prevEap
+    Assert-True "every shipped bash hook parses" ($badSh.Count -eq 0) "bash -n failed: $($badSh -join ', ')"
+} else {
+    Write-Output "  SKIP  bash parse gate -- no bash on this host (covered by test-hooks.sh)"
+}
+
+Write-Output ""
+
 # ── Summary ──────────────────────────────────────────────────────────────
 
 Write-Output "=== Summary ==="
