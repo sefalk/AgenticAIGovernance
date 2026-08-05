@@ -95,6 +95,13 @@ SRC_EDIT='{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}'
 SRC_CREATE='{"tool_name":"createFile","tool_input":{"filePath":"src/new.py"}}'
 FETCH_OK='{"tool_name":"fetch","tool_input":{"url":"https://docs.python.org/3/library/os.html"}}'
 FETCH_UNKNOWN='{"tool_name":"fetch","tool_input":{"url":"https://unlisted.example.com/x"}}'
+# The shape VS Code's fetch tool actually sends: `urls` (an array) beside
+# `query`. The fixtures above encode what the hook believed instead, which is
+# how it stayed inert through a green suite (issue #64).
+FETCH_URLS_OK='{"tool_name":"fetch_webpage","tool_input":{"urls":["https://docs.python.org/3/library/os.html"],"query":"os.path"}}'
+FETCH_URLS_UNKNOWN='{"tool_name":"fetch_webpage","tool_input":{"urls":["https://unlisted.example.com/x"],"query":"x"}}'
+FETCH_URLS_MIXED='{"tool_name":"fetch_webpage","tool_input":{"urls":["https://docs.python.org/3/library/os.html","https://unlisted.example.com/x"],"query":"x"}}'
+FETCH_URLS_CRED='{"tool_name":"fetch_webpage","tool_input":{"urls":["https://user:hunter2@docs.python.org/3/?token=abc123"],"query":"x"}}'
 CO_PYTEST='{"tool_name":"runInTerminal","tool_input":{"command":"pytest tests/ -q"}}'
 CO_MSG_BAD='{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"[agent:implementer] make tests pass\""}}'
 CO_MSG_OK='{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"[agent:implementer] make tests pass: extract the pure alignment step\""}}'
@@ -123,6 +130,20 @@ run_case "file creation denied on agent branch" refactorer-pretooluse.sh agent/f
 echo "## researcher-pretooluse.sh"
 run_case "allowlisted domain is allowed"        researcher-pretooluse.sh agent/fixture  "$FETCH_OK"      allow
 run_case "unlisted domain prompts"              researcher-pretooluse.sh agent/fixture  "$FETCH_UNKNOWN" ask
+run_case "urls array reaches the allowlist"     researcher-pretooluse.sh agent/fixture  "$FETCH_URLS_OK"      allow
+run_case "unlisted url in a urls array prompts" researcher-pretooluse.sh agent/fixture  "$FETCH_URLS_UNKNOWN" ask
+# One bad entry has to decide the batch: the tool fetches every URL in the
+# array, so allowing on the first match approves the rest unexamined.
+run_case "one unlisted entry decides the batch" researcher-pretooluse.sh agent/fixture  "$FETCH_URLS_MIXED"   ask
+
+# The sanitiser is the one path that did something, and it aborted the hook:
+# its `sed` used `|` as both the s-delimiter and regex alternation.
+cred_out=$(printf '%s' "$FETCH_URLS_CRED" | bash "$HOOK_DIR/researcher-pretooluse.sh" 2>&1 || true)
+cred_ok=0
+case "$cred_out" in
+    *'***'*) case "$cred_out" in *hunter2*) cred_ok=0 ;; *) cred_ok=1 ;; esac ;;
+esac
+assert_true "credentialed url is sanitised rather than fatal" "$cred_ok" "got: ${cred_out:-<no output>}"
 
 # A SessionStart hook takes no branch context and emits context rather than a
 # verdict, so run_case cannot express it -- but it is exactly the file that

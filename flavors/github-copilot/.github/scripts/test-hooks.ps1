@@ -66,6 +66,9 @@ function Invoke-HookInFixture {
     $fixtureHooks = Join-Path $fixture '.github/hooks/scripts'
     New-Item -ItemType Directory -Path $fixtureHooks -Force | Out-Null
     Copy-Item $HookPath $fixtureHooks
+    # Hooks dot-source the shared preamble; a deployed .github always ships it.
+    $commonSrc = Join-Path (Split-Path $HookPath) '_common.ps1'
+    if (Test-Path $commonSrc) { Copy-Item $commonSrc $fixtureHooks }
     # Same config the hook would read in production, so SRC_DIR is not a guess.
     $confSrc = Join-Path $githubDir 'af-env.conf'
     if (Test-Path $confSrc) { Copy-Item $confSrc (Join-Path $fixture '.github') }
@@ -588,6 +591,39 @@ Assert-ExitCode "credential URL exits 0 (advisory)" `
 Assert-Allow "non-fetch tool ignored" `
     "researcher-pretooluse.ps1" `
     '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
+
+# The shape VS Code's fetch tool actually sends: `urls` (an array) beside
+# `query`. Assert-Allow cannot express these -- it counts '{}' as an allow,
+# which is exactly how an inert hook passed for as long as it did (issue #64).
+$fetchUrlsOk      = '{"tool_name":"fetch_webpage","tool_input":{"urls":["https://docs.python.org/3/library/os.html"],"query":"os.path"}}'
+$fetchUrlsUnknown = '{"tool_name":"fetch_webpage","tool_input":{"urls":["https://unlisted.example.com/x"],"query":"x"}}'
+$fetchUrlsMixed   = '{"tool_name":"fetch_webpage","tool_input":{"urls":["https://docs.python.org/3/library/os.html","https://unlisted.example.com/x"],"query":"x"}}'
+$fetchUrlsCred    = '{"tool_name":"fetch_webpage","tool_input":{"urls":["https://user:hunter2@docs.python.org/3/?token=abc123"],"query":"x"}}'
+
+function Get-FetchDecision([string]$Json) {
+    $r = Invoke-Hook -Script 'researcher-pretooluse.ps1' -JsonInput $Json
+    $parsed = $r.Output | ConvertFrom-Json -ErrorAction SilentlyContinue
+    return @{ Decision = $parsed.hookSpecificOutput.permissionDecision; Output = $r.Output }
+}
+
+$rOk = Get-FetchDecision $fetchUrlsOk
+Assert-True "urls array reaches the allowlist" ($rOk.Decision -eq 'allow') `
+    "expected an explicit allow, got: $($rOk.Output)"
+
+$rUnknown = Get-FetchDecision $fetchUrlsUnknown
+Assert-True "unlisted url in a urls array prompts" ($rUnknown.Decision -eq 'ask') `
+    "expected ask, got: $($rUnknown.Output)"
+
+# One bad entry has to decide the batch: the tool fetches every URL in the
+# array, so allowing on the first match approves the rest unexamined.
+$rMixed = Get-FetchDecision $fetchUrlsMixed
+Assert-True "one unlisted entry decides the batch" ($rMixed.Decision -eq 'ask') `
+    "expected ask, got: $($rMixed.Output)"
+
+$rCred = Get-FetchDecision $fetchUrlsCred
+Assert-True "credentialed url is reported without echoing the secret" `
+    ($rCred.Output.Contains('***') -and -not $rCred.Output.Contains('hunter2')) `
+    "got: $($rCred.Output)"
 
 Write-Output ""
 
