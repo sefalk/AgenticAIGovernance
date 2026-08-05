@@ -136,9 +136,11 @@ Consult the **human-escalation** skill for the full halt protocol.
    when you finish. Running it yourself wastes ~20 minutes.
 
 **Rule:** Use `run_task` for `tests: domain`. Use `runTests` for file-scoped
-runs. `createAndRunTask` is **last resort** — only when no pre-defined task or
-`runTests` covers the need. Accept the stop hook as your full-suite validation.
-You do NOT have terminal access.
+runs. `createAndRunTask` is for invocations a fixed label cannot express — not a
+lighter-scrutiny route around the terminal you do not have. The same PreToolUse
+classifier inspects it, and it may only invoke scripts under
+`AF_TASK_SCRIPT_DIRS`; a bare binary or an inline `-Command` payload is denied.
+Accept the stop hook as your full-suite validation.
 
 The SubagentStop hard gate also enforces Python quality on changed source files
 via `.github/scripts/check-python-quality.py`.

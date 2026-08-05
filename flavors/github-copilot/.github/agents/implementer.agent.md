@@ -162,9 +162,11 @@ changed). One `all` run at the very end only.
 
 **Rule:** Never call pytest directly. Use `run_task` for pre-defined scenarios.
 Use `runTests` with `files` or `testNames` args for file- or test-scoped runs.
-`createAndRunTask` is **last resort** — only when no pre-defined task or
-`runTests` covers the need. You do NOT have terminal access — use Pylance MCP
-for syntax/import checks.
+`createAndRunTask` is for invocations a fixed label cannot express — not a
+lighter-scrutiny route around the terminal you do not have. The same PreToolUse
+classifier inspects it, and it may only invoke scripts under
+`AF_TASK_SCRIPT_DIRS`; a bare binary or an inline `-Command` payload is denied.
+Use Pylance MCP for syntax/import checks.
 
 ## Return Format
 

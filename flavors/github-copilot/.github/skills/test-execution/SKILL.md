@@ -77,7 +77,15 @@ parse JSONC. When adding or editing tasks, follow
 `instructions/tooling.instructions.md`; a pre-commit guard enforces it.
 
 Before creating a task, check whether a pre-defined task already covers it, or
-whether `runTests` handles the case. `createAndRunTask` is the last resort.
+whether `runTests` handles the case. `createAndRunTask` is for invocations no
+fixed label expresses.
+
+It is **not** a quieter terminal. The same PreToolUse classifier inspects task
+payloads and terminal commands, and a task may only invoke scripts under
+`AF_TASK_SCRIPT_DIRS` — bare binaries (`git`, `ruff`, `pytest`), inline
+interpreter payloads (`powershell -Command …`), shell metacharacters and
+`options.shell` overrides are denied. If the thing you want to run has no
+reviewed script, the answer is to add one, not to phrase it as a task.
 
 ## Phase-Specific Test Strategy
 

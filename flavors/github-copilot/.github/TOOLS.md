@@ -65,7 +65,7 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 | `newWorkspace` | Not relevant to development workflows. | Scope creep |
 | `vscode/installExtension` | Extension management is a human decision. | Unreviewed extensions, supply-chain risk |
 | `vscode/runCommand` | Too broad — can invoke any VS Code command. | Bypasses tool restrictions |
-| `execute/runInTerminal` (workers) | Workers use `runTests` / `runTask` / `createAndRunTask`. Only coordinator has terminal. | Ad-hoc commands bypass quality gates |
+| `execute/runInTerminal` (workers) | Workers reach the same reviewed scripts through `runTests` / `runTask` / `createAndRunTask`. Only coordinator has terminal. | Ad-hoc commands are far harder to review than a named script |
 | `read/terminalLastCommand` | Only useful with terminal access (coordinator only). Not assigned to avoid encouraging terminal reliance. | — |
 | `read/terminalSelection` | Same as above. | — |
 
@@ -89,7 +89,11 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 ## Tool Assignment Principles
 
 1. **Least privilege** — agents get only tools needed for their role
-2. **Tasks over terminal** — predefined tasks (`run_task`) before ad-hoc terminal
+2. **One reviewed execution surface** — prefer a predefined `run_task` label
+   because it is single-sourced and argument-stable, not because it escapes
+   review. `run_task`, `createAndRunTask` and the terminal all pass the same
+   PreToolUse classifier, and the task path may only invoke scripts under
+   `AF_TASK_SCRIPT_DIRS`
 3. **Read before write** — critics and planners get read-only subsets
 4. **Dep-tracking integrity** — no tool that installs packages outside the spec file workflow
 5. **Kernel = venv** — kernel management happens via venv tools; notebook cell execution is sufficient
