@@ -85,8 +85,13 @@ sanitize_url() {
     printf '%s' "$1" | sed -E 's#://([^/@]+):([^/@]+)@#://***:***@#g; s#([?&])(token|access_token|api_key|apikey|auth|key|secret|password)=[^&]*#\1\2=***#gI'
 }
 
+# The host is what follows the last `@` in the authority. Stopping at the first
+# `:` reads the userinfo instead, so `https://docs.python.org:x@evil/` would
+# pass the allowlist as `docs.python.org`.
 url_host() {
-    printf '%s' "$1" | sed -E 's|^[a-zA-Z][a-zA-Z0-9+.-]*://([^/:?#]+).*|\1|' | tr '[:upper:]' '[:lower:]'
+    printf '%s' "$1" \
+        | sed -E 's|^[a-zA-Z][a-zA-Z0-9+.-]*://||; s|[/?#].*$||; s|^.*@||; s|:[0-9]*$||' \
+        | tr '[:upper:]' '[:lower:]'
 }
 
 # The config is resolved by the shared preamble. `git rev-parse --show-toplevel`

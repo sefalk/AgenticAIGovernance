@@ -83,8 +83,13 @@ foreach ($u in $urls) {
         $findings += "$($hits -join ', ') in $sanitized"
     }
 
+    # The host is what follows the last `@` in the authority. Stopping at the
+    # first `:` reads the userinfo instead, so `https://docs.python.org:x@evil/`
+    # would pass the allowlist as `docs.python.org`.
     $fetchHost = ''
-    if ($u -match '^[a-zA-Z][a-zA-Z0-9+.-]*://([^/:?#]+)') { $fetchHost = $Matches[1].ToLower() }
+    if ($u -match '^[a-zA-Z][a-zA-Z0-9+.-]*://([^/?#]+)') {
+        $fetchHost = ($Matches[1] -replace '^.*@', '' -replace ':\d*$', '').ToLower()
+    }
     if (-not $fetchHost) { continue }
 
     if ($domains | Where-Object { $fetchHost -eq $_ -or $fetchHost.EndsWith('.' + $_) }) {
