@@ -19,6 +19,8 @@ af-env.conf                                              [customizable]
 
 # Hooks
 hooks/
+hooks/scripts/_common.ps1
+hooks/scripts/_common.sh
 hooks/scripts/researcher-pretooluse.ps1
 hooks/scripts/researcher-pretooluse.sh
 hooks/scripts/coordinator-postmerge.ps1
@@ -44,6 +46,7 @@ scripts/test-hooks.ps1
 scripts/check-python-quality.py
 scripts/check-python-linting.py
 scripts/check-mcp-tool-ids.py
+scripts/check-hook-resolution.py
 scripts/setup-worktree.ps1
 scripts/setup-worktree.sh
 scripts/cleanup-worktree.ps1
