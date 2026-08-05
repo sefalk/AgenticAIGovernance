@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The researcher's fetch hook was reading a payload the fetch tool does not
+  send (issue #64).** It looked for `tool_input.url`; VS Code passes `urls` —
+  an array — beside `query`. So both of its gates were inert: the credential
+  scan never ran and the domain allowlist never ran, and the hook returned `{}`
+  on every real fetch. The suite was green throughout, because the fixtures
+  encoded the implementation's belief about the payload rather than a captured
+  one. The tests now use the real shape, and `Assert-Allow` was deliberately
+  not used for them — it counts `{}` as an allow, which is precisely how an
+  inert hook passes for a year.
+
+  - **Every URL in the array is judged, and one unlisted entry decides the
+    batch.** The tool fetches all of them, so approving on the first match
+    would wave the rest through unseen.
+  - **The sanitiser aborted the hook on exactly the URLs it exists for.** Its
+    `sed` used `|` as both the `s` delimiter and the regex alternation in the
+    same expression, so a credentialed URL exited 1 instead of producing a
+    warning. Delimiter changed; the interpreter resolution now comes from
+    #54's shared preamble on both sides rather than being re-rolled.
+  - **An allowlist bypass, found by probing rather than reading.** The host was
+    taken from before the first `:` in the authority, which is the *userinfo*
+    when one is present: `https://docs.python.org:x@evil.example.com/` was
+    approved as "allowlisted documentation domain". The host is now what
+    follows the last `@`, with the port stripped. This was not in the issue —
+    it surfaced the moment the credential path could run at all.
+  - **`Invoke-HookInFixture` now copies `_common.ps1`**, as the bash harness
+    already does, so a fixture-run hook does not die before its first gate.
+
 - **Two shipped hooks died before their first statement, and nothing noticed
   (issue #65).** `coordinator-pretooluse.sh` carried `\'git status\'` inside a
   single-quoted string and `session-mcp-readiness.sh` an unterminated
