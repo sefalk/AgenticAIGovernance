@@ -11,6 +11,10 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Root, config and interpreter come from this script's location, never from the
+# cwd the agent happens to run in (issue #54).
+. "$PSScriptRoot/_common.ps1"
+
 # Read and parse stdin
 $raw = [Console]::In.ReadToEnd()
 try {
@@ -27,12 +31,16 @@ if ($toolName -notmatch 'fetch') {
     exit 0
 }
 
-# Extract URL from tool input
-$url = $inputData.tool_input.url
-if (-not $url) {
-    $url = $inputData.tool_input.uri
-}
-if (-not $url) {
+# VS Code's fetch tool sends `urls` -- an array, beside `query`. The single
+# `url`/`uri` string this hook was written against is a legacy shape, so both
+# are read and every entry is examined (issue #64).
+$ti = $inputData.tool_input
+$urls = @()
+if ($ti.urls) { $urls += @($ti.urls) }
+if ($ti.url) { $urls += $ti.url }
+if ($ti.uri) { $urls += $ti.uri }
+$urls = @($urls | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+if ($urls.Count -eq 0) {
     Write-Output '{}'
     exit 0
 }
@@ -44,24 +52,6 @@ $credPatterns = @(
     @{ name = "Authorization query param"; pattern = '[?&]Authorization=' }
     @{ name = "Credential fragment"; pattern = '#(access_token|token)=' }
 )
-
-$findings = @()
-foreach ($p in $credPatterns) {
-    if ($url -match $p.pattern) {
-        $findings += $p.name
-    }
-}
-
-# Build a credential warning note (appended to whatever decision follows).
-# We do NOT short-circuit to 'allow' here: a credentialed URL to a
-# non-allowlisted domain must still go through the allowlist prompt below.
-$credNote = ''
-if ($findings.Count -gt 0) {
-    $sanitized = $url -replace '://([^/@]+):([^/@]+)@', '://***:***@'
-    $sanitized = $sanitized -replace '([?&])(token|access_token|api_key|apikey|auth|key|secret|password)=[^&]*', '$1$2=***'
-    $credNote = " WARNING: URL contains embedded credentials ($($findings -join ', ')). " +
-        "Strip them from your research brief output. Sanitized URL: $sanitized"
-}
 
 function Emit-Fetch([string]$decision, [string]$reason) {
     @{
@@ -78,34 +68,52 @@ function Emit-Fetch([string]$decision, [string]$reason) {
 # Domain allowlist: auto-approve official docs; prompt (with seed-add offer)
 # for everything else. Allowlist lives in .github/af-env.conf.
 # ---------------------------------------------------------------------------
-# Resolve config script-relative, as every other hook does. `git rev-parse
-# --show-toplevel` misses whenever .github/ is not at the repo top level, and
-# an unread allowlist is indistinguishable from an empty one.
-$allow = ''
-$mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
-$conf = Join-Path $mainRoot '.github/af-env.conf'
-$confFound = Test-Path $conf
-if ($confFound) {
-    $line = Select-String -Path $conf -Pattern '^\s*WEB_FETCH_ALLOWLIST=(.*)$' | Select-Object -First 1
-    if ($line) { $allow = $line.Matches[0].Groups[1].Value.Trim() }
+$allow = Get-AfConfig -Key 'WEB_FETCH_ALLOWLIST'
+$domains = @($allow -split ',' | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ })
+
+$findings = @()
+$unlisted = @()
+$matchedAny = $false
+
+foreach ($u in $urls) {
+    $hits = @($credPatterns | Where-Object { $u -match $_.pattern } | ForEach-Object { $_.name })
+    if ($hits.Count -gt 0) {
+        $sanitized = $u -replace '://([^/@]+):([^/@]+)@', '://***:***@'
+        $sanitized = $sanitized -replace '([?&])(token|access_token|api_key|apikey|auth|key|secret|password)=[^&]*', '$1$2=***'
+        $findings += "$($hits -join ', ') in $sanitized"
+    }
+
+    $fetchHost = ''
+    if ($u -match '^[a-zA-Z][a-zA-Z0-9+.-]*://([^/:?#]+)') { $fetchHost = $Matches[1].ToLower() }
+    if (-not $fetchHost) { continue }
+
+    if ($domains | Where-Object { $fetchHost -eq $_ -or $fetchHost.EndsWith('.' + $_) }) {
+        $matchedAny = $true
+    } else {
+        $unlisted += $fetchHost
+    }
 }
 
-$fetchHost = ''
-if ($url -match '^[a-zA-Z][a-zA-Z0-9+.-]*://([^/:?#]+)') { $fetchHost = $Matches[1].ToLower() }
+# Build a credential warning note (appended to whatever decision follows).
+# We do NOT short-circuit to 'allow' here: a credentialed URL to a
+# non-allowlisted domain must still go through the allowlist prompt below.
+$credNote = ''
+if ($findings.Count -gt 0) {
+    $credNote = " WARNING: URL contains embedded credentials ($($findings -join '; ')). " +
+        "Strip them from your research brief output."
+}
 
-if ($fetchHost) {
-    $domains = @($allow -split ',' | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ })
-    foreach ($d in $domains) {
-        if ($fetchHost -eq $d -or $fetchHost.EndsWith('.' + $d)) {
-            Emit-Fetch 'allow' "Allowlisted documentation domain ($d).$credNote"
-        }
-    }
-    $why = if ($confFound) { "Domain '$fetchHost' is not in WEB_FETCH_ALLOWLIST." }
-           else { "No allowlist available: .github/af-env.conf was not found at $conf." }
+# One unlisted entry decides the batch: the tool fetches every URL in the
+# array, so approving on the first match would wave the rest through unseen.
+if ($unlisted.Count -gt 0) {
+    $why = if ($AfConfFound) { "Not in WEB_FETCH_ALLOWLIST: $(($unlisted | Select-Object -Unique) -join ', ')." }
+           else { "No allowlist available: .github/af-env.conf was not found at $AfConfPath." }
     Emit-Fetch 'ask' ("$why Approve to fetch once. " +
-        "To auto-approve this domain in future, add '$fetchHost' to WEB_FETCH_ALLOWLIST in .github/af-env.conf " +
+        "To auto-approve in future, add the domain to WEB_FETCH_ALLOWLIST in .github/af-env.conf " +
         "(the agent can do this on your confirmation).$credNote")
 }
+
+if ($matchedAny) { Emit-Fetch 'allow' "Allowlisted documentation domain.$credNote" }
 
 # No parseable host: keep the fetch flowing but surface any credential warning.
 if ($credNote) { Emit-Fetch 'allow' "URL fetch.$credNote" }
