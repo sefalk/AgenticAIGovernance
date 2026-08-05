@@ -361,6 +361,55 @@ Assert-Allow "createAndRunTask: .github/scripts/run-deps.ps1 -Scope dev allows" 
     "block-dangerous.ps1" `
     '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"deps-dev","type":"shell","command":".github/scripts/run-deps.ps1","args":["-Scope","dev"]}}}'
 
+# ── createAndRunTask shape: the effective command is not always `command` ──
+# Per the VS Code task docs, executable content reaches a task through four
+# places, not one. An allowlist that reads only `command` is decorative.
+
+# "Properties defined in an operating system specific scope override
+# properties defined in the task or global scope" -- so `command` is a decoy.
+Assert-Deny "createAndRunTask: OS-specific command override is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"os-override","type":"shell","command":".github/scripts/run-tests.ps1","windows":{"command":"cmd.exe","args":["/c","echo pwned"]}}}}'
+
+# "you can override a task's shell with the options.shell property" -- the
+# payload then rides in the shell's own arguments.
+Assert-Deny "createAndRunTask: options.shell override is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"shell-override","type":"shell","command":".github/scripts/run-tests.ps1","options":{"shell":{"executable":"powershell","args":["-Command","echo pwned"]}}}}}'
+
+# "If a single command is provided, the task system passes the command as is
+# to the underlying shell" -- shell metacharacters survive path normalisation,
+# so a prefix match on the allowlisted script lets the rest ride along.
+Assert-Deny "createAndRunTask: shell metacharacter in command is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"chained","type":"shell","command":".github/scripts/run-tests.ps1; echo pwned"}}}'
+
+Assert-Deny "createAndRunTask: chained command operator is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"chained2","type":"shell","command":".github/scripts/run-tests.ps1 && echo pwned"}}}'
+
+# Indirection variables resolve somewhere the classifier cannot see; the
+# command: form additionally executes a VS Code command to produce its value.
+Assert-Deny "createAndRunTask: command-substitution variable is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"cmdvar","type":"process","command":"${command:python.interpreterPath}","args":["-c","print(1)"]}}}'
+
+Assert-Deny "createAndRunTask: settings-substitution variable is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"cfgvar","type":"process","command":"${config:python.defaultInterpreterPath}","args":["-c","print(1)"]}}}'
+
+# A task registered to run on folder open would execute later, outside any
+# hook's view.
+Assert-Deny "createAndRunTask: runOn folderOpen is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"autorun","type":"shell","command":".github/scripts/run-tests.ps1","runOptions":{"runOn":"folderOpen"}}}}'
+
+# False deny costs as much as a false allow: it pushes agents back to the
+# terminal. The workspace-folder variable is the documented portable form.
+Assert-Allow "createAndRunTask: workspace-folder path variable allows" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"wsvar","type":"shell","command":"${workspaceFolder}/.github/scripts/run-tests.ps1","args":["-Scope","domain"]}}}'
+
 Write-Output ""
 
 # ── 2. coordinator-pretooluse.ps1 ────────────────────────────────────────
