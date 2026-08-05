@@ -38,9 +38,11 @@ if [ -z "$AF_PYTHON" ]; then
     echo '{"systemMessage": "coordinator:PostMerge -- no usable python interpreter, worktree summary skipped"}'
     exit 0
 fi
-agent_worktrees=$(echo "$wt_raw" | "$AF_PYTHON" << 'PYEOF'
-import sys
-lines = sys.stdin.read().splitlines()
+# The heredoc is python's stdin, so the pipe would be discarded -- pass the
+# porcelain output in the environment instead.
+agent_worktrees=$(AF_WT_RAW="$wt_raw" "$AF_PYTHON" << 'PYEOF'
+import os
+lines = os.environ.get('AF_WT_RAW', '').splitlines()
 wts = []
 i = 0
 while i < len(lines):
