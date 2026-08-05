@@ -83,6 +83,11 @@ trail of what they did — the record of execution lives in the workflow log and
 the hook decisions, and leftover scratch labels should be cleaned up rather than
 read as history.
 
+The documenter stop hook reports the leftovers at workflow end
+(`.github/hooks/scripts/check-scratch-tasks.py`). It is advisory and never
+blocks: it lists entries that could not be created today — inline interpreter
+payloads and prompt-resolved variables — so a human can prune them.
+
 ## Only reviewed scripts are callable
 
 `AF_TASK_SCRIPT_DIRS` in `af-env.conf` lists the directories a task may invoke.
