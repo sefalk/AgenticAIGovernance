@@ -6,7 +6,7 @@
 - **Issue:** [#54](https://github.com/sefalk/AgenticAIGovernance/issues/54)
 - **Branch:** `agent/54-hook-path-resolution`
 - **Complexity tier:** Deep
-- **Status:** IN PROGRESS
+- **Status:** COMPLETED
 
 ## The measured defect
 
@@ -143,3 +143,53 @@ stays green.
   crash). Separate branch; it will consume this helper rather than re-roll the
   interpreter logic.
 - **#61** — this repo does not run its own hooks. Unchanged here.
+
+## Outcome
+
+All four subtasks landed. Every acceptance criterion was verified by running
+the suites, not by reading the diff.
+
+| Subtask | Result | Commit |
+|---|---|---|
+| 1. Shared preamble | `_common.sh` / `_common.ps1` — script-relative roots, worktree sentinel, `af_conf_get` / `Get-AfConfig`, execution-probed interpreter | `c73fc16` |
+| 2. Migrate every hook | 13 `.sh` and 7 `.ps1` hooks source the preamble; all `--show-toplevel`, `Join-Path (Get-Location)` and bare `command -v python*` lookups removed | `0ebf351` |
+| 3. Drift guard | `scripts/check-hook-resolution.py` (AF001–AF005), run over `hooks/` by `test-hooks.ps1` | `7c28ec4` |
+| 4. Manifest and docs | `_common.*` + the checker registered in `.af-manifest`; *Writing a New Hook* section in `hooks/README.md` | `fe8f60b`, `f3b3f10` |
+
+**Measured at completion:** `check-hook-resolution.py hooks` exit 0 ·
+`test-hooks.ps1` 103/103 · `test-hooks.sh` 17/17 · `test-lint-gate.ps1` 21/21 ·
+`test-deploy-flags.ps1`, `test-hooks-integration.ps1`,
+`test-worktree-scripts.ps1`, `test-quality-gate.ps1`, `test-session-cost.ps1`,
+`test-large-file-guard.ps1` all exit 0 · `ruff check` and `ruff format` clean.
+
+### What the work uncovered beyond the plan
+
+- **The harness was hiding the defect it should have caught.** `test-hooks.sh`
+  installed a `python3` shim into its fixture `PATH`, so the bash hooks always
+  saw a working `python3` under test and never under production. The shim is
+  gone; the suite now resolves the interpreter through `_common.sh` itself and
+  skips with a stated reason if none works.
+- **A missing assertion, not a missing fix, is why the interpreter bug
+  survived subtask 1.** The PowerShell side had no test that the resolved
+  interpreter *runs*. Adding one immediately failed and exposed that
+  PowerShell 5.1 silently drops empty-string arguments to native commands, so
+  the probe `& python -c ''` degenerated to `python -c` and `Find-AfPython`
+  rejected every working interpreter — which is what broke `test-lint-gate.ps1`
+  from 21/21 to 2/21. Probing with `-c 'pass'` fixes it; the assertion now
+  guards it, together with a stub that resolves but exits non-zero.
+- **`set -e` abort hazard.** Several migrated hooks used `A && B && exit 0`
+  chains, which abort the hook when `A` is merely false. Converted to explicit
+  `if` blocks.
+- **The checker must report on stdout.** With
+  `$ErrorActionPreference = 'Stop'`, any native-command stderr becomes a
+  terminating PowerShell error, which killed the suite on the checker's own
+  findings. Findings go to stdout; the exit code carries the verdict.
+
+### Deferred, with evidence
+
+- `coordinator-pretooluse.sh` and `session-mcp-readiness.sh` fail `bash -n`
+  **on `HEAD`** (escaped quote inside single quotes; unterminated quote).
+  Pre-existing, unrelated to this branch — filed separately rather than
+  smuggled into this fix.
+- `test-context-budget.ps1` → `J_real_payload_within_budget` fails on `HEAD`
+  too.
