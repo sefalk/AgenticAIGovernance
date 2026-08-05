@@ -64,14 +64,20 @@ if ($isTaskShaped) {
     # prompt an unattended agent can never answer. Scanned against the raw
     # stdin text (single-quoted match: a double-quoted literal containing
     # ${input: would interpolate as a drive-scoped variable and throw).
-    if ($raw.Contains('${input:')) {
-        Emit-Task 'deny' ('Policy hard-deny: task payload contains an interactive ${input:...} variable, which blocks on a prompt an agent cannot answer. Remove it and pass the value as a literal argument instead. ' + $sanctioned)
+    foreach ($v in @('${input:', '${command:', '${config:')) {
+        if ($raw.Contains($v)) {
+            Emit-Task 'deny' ("Policy hard-deny: task payload contains a '$v...}' variable. Its value is produced elsewhere -- a prompt an agent cannot answer, a VS Code command that executes to yield it, or a setting -- so the payload cannot be classified. Pass a literal argument instead. $sanctioned")
+        }
     }
 
     $task = $inputData.tool_input.task
-    $taskCommand = if ($task) { [string]$task.command } else { '' }
-    if (-not $task -or -not $taskCommand) {
-        Emit-Task 'deny' ("Policy hard-deny: unrecognised task payload shape (no usable 'command' found); fail-closed. $sanctioned")
+    if (-not $task) {
+        Emit-Task 'deny' ("Policy hard-deny: unrecognised task payload shape (no task object); fail-closed. $sanctioned")
+    }
+
+    # A folderOpen task executes later, outside any hook's view.
+    if ($task.runOptions -and ([string]$task.runOptions.runOn) -eq 'folderOpen') {
+        Emit-Task 'deny' ("Policy hard-deny: runOptions.runOn 'folderOpen' registers a task that runs automatically the next time the folder is opened, outside any hook's view. $sanctioned")
     }
 
     $taskRepo = (git rev-parse --show-toplevel 2>$null)
@@ -93,7 +99,14 @@ if ($isTaskShaped) {
     function Resolve-TaskPath([string]$p) {
         if (-not $taskRepo -or -not $p) { return $null }
         $expanded = [System.Environment]::ExpandEnvironmentVariables($p)
-        try { return [System.IO.Path]::GetFullPath((Join-Path $taskRepo $expanded)) } catch { return $null }
+        $expanded = $expanded.Replace('${workspaceFolder}', $taskRepo).Replace('${workspaceRoot}', $taskRepo)
+        try {
+            # Substitution and %VAR% expansion both yield absolute paths, which
+            # must not be joined onto the repo root again.
+            if ([System.IO.Path]::IsPathRooted($expanded)) { return [System.IO.Path]::GetFullPath($expanded) }
+            return [System.IO.Path]::GetFullPath((Join-Path $taskRepo $expanded))
+        }
+        catch { return $null }
     }
     $allowedDirsFull = @($allowedDirsRaw | ForEach-Object {
             $r = Resolve-TaskPath $_
@@ -112,39 +125,72 @@ if ($isTaskShaped) {
     # binary itself (powershell, python, ...) is never inside the repo, so
     # requiring it to resolve inside AF_TASK_SCRIPT_DIRS would be meaningless.
     $interpreterNames = @('powershell', 'pwsh', 'cmd', 'bash', 'sh', 'zsh', 'python', 'python3', 'node', 'perl', 'ruby', 'wscript', 'cscript')
-    $cmdBase = ([System.IO.Path]::GetFileNameWithoutExtension($taskCommand)).ToLower()
 
-    if ($interpreterNames -contains $cmdBase) {
+    # Returns a deny reason, or $null when the command/args pair is acceptable.
+    function Get-CommandDenyReason([string]$cmd, $argList) {
+        if (-not $cmd) {
+            return "Policy hard-deny: unrecognised task payload shape (no usable 'command' found); fail-closed. $sanctioned"
+        }
+        # `type: shell` hands `command` to the shell verbatim, so it may be a
+        # whole command line. Metacharacters survive path normalisation, which
+        # would let anything ride along behind an allowlisted script name.
+        if ($cmd -match '[;&|\r\n`]' -or $cmd.Contains('$(')) {
+            return "Policy hard-deny: task command '$cmd' contains a shell metacharacter, so it is a command line rather than a path to a reviewed script. $sanctioned"
+        }
         $taskArgs = @()
-        if ($task.args) { $taskArgs = @($task.args) }
-        $inlinePayload = $false
-        $fileTarget = $null
-        $sawFileFlag = $false
-        for ($i = 0; $i -lt $taskArgs.Count; $i++) {
-            $a = [string]$taskArgs[$i]
-            if ($a -match '(?i)^(-Command|-c|/c|-EncodedCommand)$') { $inlinePayload = $true; break }
-            if ($a -match '(?i)^-File$') {
-                $sawFileFlag = $true
-                if (($i + 1) -lt $taskArgs.Count) { $fileTarget = [string]$taskArgs[$i + 1] }
-                break
+        if ($argList) { $taskArgs = @($argList) }
+        $cmdBase = ([System.IO.Path]::GetFileNameWithoutExtension($cmd)).ToLower()
+
+        if ($interpreterNames -contains $cmdBase) {
+            $inlinePayload = $false
+            $fileTarget = $null
+            $sawFileFlag = $false
+            for ($i = 0; $i -lt $taskArgs.Count; $i++) {
+                $a = [string]$taskArgs[$i]
+                if ($a -match '(?i)^(-Command|-c|/c|-EncodedCommand)$') { $inlinePayload = $true; break }
+                if ($a -match '(?i)^-File$') {
+                    $sawFileFlag = $true
+                    if (($i + 1) -lt $taskArgs.Count) { $fileTarget = [string]$taskArgs[$i + 1] }
+                    break
+                }
             }
+            if ($inlinePayload) {
+                return "Policy hard-deny: '$cmd' invoked with an inline command payload (-Command/-c/-EncodedCommand) that is not visible to the task classifier. $sanctioned"
+            }
+            if (-not $sawFileFlag) {
+                $fileTarget = $taskArgs | Where-Object { $_ -and -not ([string]$_).StartsWith('-') } | Select-Object -First 1
+            }
+            if (-not $fileTarget -or -not (Test-InAllowlist ([string]$fileTarget))) {
+                return "Policy hard-deny: '$cmd' payload '$fileTarget' does not resolve inside an AF_TASK_SCRIPT_DIRS directory (unrecognised or external script). $sanctioned"
+            }
+            return $null
         }
-        if ($inlinePayload) {
-            Emit-Task 'deny' ("Policy hard-deny: '$taskCommand' invoked with an inline command payload (-Command/-c/-EncodedCommand) that is not visible to the task classifier. $sanctioned")
+        if (-not (Test-InAllowlist $cmd)) {
+            return "Policy hard-deny: task command '$cmd' does not resolve inside an AF_TASK_SCRIPT_DIRS directory. $sanctioned"
         }
-        if (-not $sawFileFlag) {
-            $fileTarget = $taskArgs | Where-Object { $_ -and -not ([string]$_).StartsWith('-') } | Select-Object -First 1
-        }
-        if (-not $fileTarget -or -not (Test-InAllowlist ([string]$fileTarget))) {
-            Emit-Task 'deny' ("Policy hard-deny: '$taskCommand' payload '$fileTarget' does not resolve inside an AF_TASK_SCRIPT_DIRS directory (unrecognised or external script). $sanctioned")
-        }
-        Emit-Task 'allow' 'Safe: interpreter payload resolves to a reviewed script under AF_TASK_SCRIPT_DIRS.'
+        return $null
     }
 
-    if (-not (Test-InAllowlist $taskCommand)) {
-        Emit-Task 'deny' ("Policy hard-deny: task command '$taskCommand' does not resolve inside an AF_TASK_SCRIPT_DIRS directory. $sanctioned")
+    # An OS-specific scope overrides the task scope, so every variant present
+    # must clear the bar -- checking only `command` classifies a decoy.
+    $scopes = @(@{ n = 'task'; o = $task })
+    foreach ($os in @('windows', 'linux', 'osx')) {
+        if ($task.$os) { $scopes += @{ n = $os; o = $task.$os } }
     }
-    Emit-Task 'allow' 'Safe: task command resolves to a reviewed script under AF_TASK_SCRIPT_DIRS.'
+    foreach ($s in $scopes) {
+        $o = $s.o
+        if ($o.options -and $o.options.shell) {
+            Emit-Task 'deny' ("Policy hard-deny: the '$($s.n)' scope overrides options.shell, which moves the executed payload into the shell's own arguments where the task classifier cannot see it. $sanctioned")
+        }
+        $effectiveCmd = if ($o.command) { [string]$o.command } else { [string]$task.command }
+        $effectiveArgs = if ($null -ne $o.args) { $o.args } else { $task.args }
+        $reason = Get-CommandDenyReason $effectiveCmd $effectiveArgs
+        if ($reason) {
+            if ($s.n -ne 'task') { $reason = "[$($s.n) override] $reason" }
+            Emit-Task 'deny' $reason
+        }
+    }
+    Emit-Task 'allow' 'Safe: every task scope resolves to a reviewed script under AF_TASK_SCRIPT_DIRS.'
 }
 
 # Extract the command string (runInTerminal / terminal shape only, from here).
