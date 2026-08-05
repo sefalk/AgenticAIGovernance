@@ -171,6 +171,17 @@ function Assert-ExitCode {
     }
 }
 
+function Assert-True {
+    param([string]$TestName, [bool]$Condition, [string]$Detail)
+    if ($Condition) {
+        $script:passed++
+        if ($Verbose) { Write-Output "  PASS  $TestName" }
+    } else {
+        $script:failed++
+        $script:errors += "FAIL  $TestName -- $Detail"
+    }
+}
+
 Write-Output "=== Hook Integration Tests ==="
 Write-Output ""
 
@@ -628,6 +639,90 @@ foreach ($hook in $hooks) {
         $hook '' 0
     Assert-ExitCode "$hook handles malformed JSON gracefully" `
         $hook 'not-json' 0
+}
+
+Write-Output ""
+
+# ── 8. Resolution invariants (roots, config, interpreter) ────────────────
+
+# The production failure these cover is silence: a config read from the wrong
+# place returns nothing, which is indistinguishable from "the setting is not
+# configured". Every case below therefore runs from a cwd that is *not* the
+# fixture root -- the shape the existing fixtures never exercised.
+
+Write-Output "## Resolution invariants"
+
+$commonPs1 = Join-Path $scriptDir '_common.ps1'
+$commonSh = Join-Path $scriptDir '_common.sh'
+Assert-True "shared preamble present (.ps1)" (Test-Path $commonPs1) "expected $commonPs1"
+Assert-True "shared preamble present (.sh)" (Test-Path $commonSh) "expected $commonSh"
+
+if (Test-Path $commonPs1) {
+    $fx = Join-Path ([System.IO.Path]::GetTempPath()) "af-resolve-$(Get-Random)"
+    $fxHooks = Join-Path $fx '.github/hooks/scripts'
+    New-Item -ItemType Directory -Path $fxHooks -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $fx 'docs/deep') -Force | Out-Null
+    Copy-Item $commonPs1 $fxHooks
+    Set-Content -Path (Join-Path $fx '.github/af-env.conf') -Value "SRC_DIR=lib`nBASE_BRANCH=trunk"
+
+    $probeBody = @'
+. "$PSScriptRoot/_common.ps1"
+$found = if ($AfConfFound) { 1 } else { 0 }
+$src = Get-AfConfig -Key 'SRC_DIR' -Default 'src'
+$absent = Get-AfConfig -Key 'NOPE' -Default 'fallback'
+Write-Output "found=$found src=$src absent=$absent"
+'@
+    $probePath = Join-Path $fxHooks 'probe.ps1'
+    Set-Content -Path $probePath -Value $probeBody
+
+    $seen = @()
+    foreach ($cwd in @($fx, (Join-Path $fx 'docs/deep'), ([System.IO.Path]::GetTempPath()))) {
+        Push-Location $cwd
+        $seen += (& powershell -NoProfile -ExecutionPolicy Bypass -File $probePath 2>&1 | Out-String).Trim()
+        Pop-Location
+    }
+    $distinct = @($seen | Select-Object -Unique)
+    $joined = $seen -join ' | '
+    Assert-True "config resolves identically from every cwd" ($distinct.Count -eq 1) "got: $joined"
+    Assert-True "configured value wins over the default" ($joined -like '*src=lib*') "got: $joined"
+    Assert-True "absent key falls back to the default" ($joined -like '*absent=fallback*') "got: $joined"
+    Assert-True "config presence is reported" ($joined -like '*found=1*') "got: $joined"
+
+    Remove-Item (Join-Path $fx '.github/af-env.conf') -Force -ErrorAction SilentlyContinue
+    Push-Location $fx
+    $noConf = (& powershell -NoProfile -ExecutionPolicy Bypass -File $probePath 2>&1 | Out-String).Trim()
+    Pop-Location
+    Assert-True "missing config is distinguishable from an unset key" `
+        (($noConf -like '*found=0*') -and ($noConf -like '*src=src*')) "got: $noConf"
+
+    Remove-Item $fx -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# A helper alone does not stop the next hook from being written the old way.
+$resolveChecker = Join-Path $PSScriptRoot 'check-hook-resolution.py'
+Assert-True "resolution drift checker present" (Test-Path $resolveChecker) "expected $resolveChecker"
+
+$pyExe = (Get-Command python -ErrorAction SilentlyContinue).Source
+if ((Test-Path $resolveChecker) -and $pyExe) {
+    & $pyExe $resolveChecker $scriptDir *> $null
+    Assert-True "no hook resolves config or interpreter the unsafe way" ($LASTEXITCODE -eq 0) "checker exit $LASTEXITCODE"
+
+    $seed = Join-Path ([System.IO.Path]::GetTempPath()) "af-drift-$(Get-Random)"
+    New-Item -ItemType Directory -Path $seed -Force | Out-Null
+    Set-Content -Path (Join-Path $seed 'seeded-hook.sh') `
+        -Value 'V=$(grep "^SRC_DIR=" .github/af-env.conf | cut -d= -f2)'
+    Set-Content -Path (Join-Path $seed 'seeded-hook.ps1') `
+        -Value '$c = Join-Path (Get-Location) ''.github/af-env.conf'''
+    & $pyExe $resolveChecker $seed *> $null
+    Assert-True "checker flags a reintroduced cwd-relative read" ($LASTEXITCODE -ne 0) "checker exit $LASTEXITCODE"
+
+    Set-Content -Path (Join-Path $seed 'seeded-hook.sh') `
+        -Value 'PYTHON=$(command -v python3 2>/dev/null || echo "")'
+    Remove-Item (Join-Path $seed 'seeded-hook.ps1') -Force -ErrorAction SilentlyContinue
+    & $pyExe $resolveChecker $seed *> $null
+    Assert-True "checker flags an unvalidated interpreter lookup" ($LASTEXITCODE -ne 0) "checker exit $LASTEXITCODE"
+
+    Remove-Item $seed -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 Write-Output ""
