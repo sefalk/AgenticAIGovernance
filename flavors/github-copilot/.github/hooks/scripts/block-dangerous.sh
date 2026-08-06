@@ -411,6 +411,86 @@ matches() { echo "$command_str" | grep -qEi -e "$1"; }
 # literals (e.g. a commit message) do not falsely trigger a rule.
 matches_stripped() { echo "$stripped_guard" | grep -qEi -e "$1"; }
 
+# ---------------------------------------------------------------------------
+# Scan units (issue #62)
+#
+# A command line is not one string to be pattern-matched -- it is a sequence of
+# statements, some of whose quoted arguments are data. Matching deny patterns
+# against the raw text blocked real work: a commit message containing
+# "--force", a probe whose JSON test data contained "Remove-Item -Recurse
+# -Force". Worse, `(\S+\s+)*` in the git rules matched across a `;`, so a
+# genuine `git add` in one statement joined up with prose in the next.
+#
+# Stripping quotes globally would be the wrong fix: the payload of
+# `bash -c "..."` lives inside quotes and IS executed. So each statement
+# becomes its own scan unit, quoted arguments that are themselves executed are
+# promoted to units of their own, and quoted text is dropped only where it is
+# unambiguously prose.
+#
+# Splitting and classification are delegated to Python (already a hard
+# dependency here) because both need quote-aware scanning. Mode "segments"
+# yields plain statements (TIER 2); mode "units" yields the deny-tier units.
+# ---------------------------------------------------------------------------
+SPLIT_PY='import sys, re
+mode = sys.argv[1] if len(sys.argv) > 1 else "segments"
+s = sys.stdin.read()
+
+def split_top(t):
+    out=[];cur=[];q=None;i=0
+    while i<len(t):
+        c=t[i]
+        if q:
+            cur.append(c)
+            if c==q:q=None
+            i+=1;continue
+        if c=="\"" or c=="\x27":
+            q=c;cur.append(c);i+=1;continue
+        n=t[i+1] if i+1<len(t) else ""
+        if (c=="&" and n=="&") or (c=="|" and n=="|"):
+            out.append("".join(cur));cur=[];i+=2;continue
+        if c==";" or c=="|" or c=="\n":
+            out.append("".join(cur));cur=[];i+=1;continue
+        cur.append(c);i+=1
+    out.append("".join(cur))
+    return [x.replace("\n"," ") for x in out]
+
+segs = split_top(s)
+if mode == "segments":
+    sys.stdout.write("\n".join(segs))
+    sys.exit(0)
+
+DATA = re.compile(r"^\s*(echo|printf|Write-Host|Write-Output|Write-Error|Write-Verbose|Write-Debug)\b|^\s*git\s+(commit|tag|notes|stash)\b", re.I)
+PAYLOAD = re.compile(r"(?:^|\s)(?:-c|--command|-Command|-e|--eval|-ScriptBlock|-ArgumentList|-Args|/c|/k|iex|Invoke-Expression|eval)\s+(?:\"([^\"]*)\"|\x27([^\x27]*)\x27)", re.I)
+BARE = re.compile(r"^\s*(\"[^\"]*\"|\x27[^\x27]*\x27)\s*$")
+
+def strip_quoted(seg):
+    if "$(" in seg or "`" in seg:
+        return seg
+    return re.sub(r"\x27[^\x27]*\x27", "", re.sub(r"\"[^\"]*\"", "", seg))
+
+units=[]
+for seg in segs:
+    if not seg.strip():
+        continue
+    units.append(strip_quoted(seg) if (BARE.match(seg) or DATA.search(seg)) else seg)
+    for m in PAYLOAD.finditer(seg):
+        payload = m.group(1) if m.group(1) is not None else m.group(2)
+        for p in split_top(payload):
+            if p.strip():
+                units.append(p)
+if not units:
+    units=[s]
+sys.stdout.write("\n".join(units))'
+
+split_command() { printf '%s' "$1" | "$PYTHON" -c "$SPLIT_PY" "$2"; }
+
+scan_units=$(split_command "$command_str" units)
+# Never let a splitter failure blind the deny tier: fall back to the raw string.
+[ -z "$(printf %s "$scan_units" | tr -d '[:space:]')" ] && scan_units="$command_str"
+# grep matches line by line, so a unit is exactly one line and `$` in a pattern
+# anchors to the end of that unit.
+matches_unit() { printf '%s\n' "$scan_units" | grep -qEi -e "$1"; }
+
 # ===================== TIER 1 -- DENY (hard) =====================
 deny_msg="Policy hard-deny. The agent will not run this. If genuinely required, either (a) run it yourself -- the agent can prepare the exact command for you to paste and execute -- or (b) make a conscious decision to relax the autonomy policy in .github/af-env.conf."
 deny_patterns=(
@@ -430,23 +510,32 @@ deny_patterns=(
     'mkfs\.'
     'format\s+[A-Za-z]:'
     'chmod\s+-R\s+777'
+)
+# Rules about structure or payload content that legitimately spans units, and
+# so stay scoped to the raw command line. Destructive SQL is deliberately here:
+# SQL clients take it as a quoted argument, and a false deny on a commit message
+# that mentions DROP TABLE is the lesser evil.
+deny_patterns_raw=(
     '\|\s*(bash|sh|iex|Invoke-Expression)\b'
     'DROP\s+(TABLE|DATABASE)'
     'TRUNCATE\s+TABLE'
 )
 for p in "${deny_patterns[@]}"; do
+    if matches_unit "$p"; then emit deny "$deny_msg"; fi
+done
+for p in "${deny_patterns_raw[@]}"; do
     if matches "$p"; then emit deny "$deny_msg"; fi
 done
 # Branch force-deletion (-D) needs a CASE-SENSITIVE check (grep without -i) so
 # that the safe lowercase -d (merged-only) is not denied.
-if printf '%s' "$command_str" | grep -qE 'git[[:space:]]+branch[[:space:]]+(\S+[[:space:]]+)*-D([[:space:]]|$)'; then
+if printf '%s\n' "$scan_units" | grep -qE 'git[[:space:]]+branch[[:space:]]+(\S+[[:space:]]+)*-D([[:space:]]|$)'; then
     emit deny "$deny_msg"
 fi
 # Category-scoped deny (when autonomy policy sets a category to 'deny').
-if [ "$cat_pkg" = "deny" ] && matches '\bpip3?\s+(install|uninstall)\b|\bconda\s+(install|remove)\b'; then
+if [ "$cat_pkg" = "deny" ] && matches_unit '\bpip3?\s+(install|uninstall)\b|\bconda\s+(install|remove)\b'; then
     emit deny "$deny_msg"
 fi
-if [ "$cat_databricks" = "deny" ] && matches '\bdatabricks\b'; then
+if [ "$cat_databricks" = "deny" ] && matches_unit '\bdatabricks\b'; then
     emit deny "$deny_msg"
 fi
 
@@ -554,25 +643,7 @@ is_safe_segment() {
 # so conventional-commit messages like "fix(scope): ..." are not falsely blocked.
 stripped_guard=$(printf '%s' "$command_str" | sed -E 's/"[^"]*"//g' | sed -E "s/'[^']*'//g")
 if ! printf '%s' "$stripped_guard" | grep -qE '[`({]'; then
-    seg_lines=$(printf '%s' "$command_str" | "$PYTHON" -c 'import sys
-s=sys.stdin.read()
-out=[];cur=[];q=None;i=0
-while i<len(s):
-    c=s[i]
-    if q:
-        cur.append(c)
-        if c==q:q=None
-        i+=1;continue
-    if c=="\"" or c=="\x27":
-        q=c;cur.append(c);i+=1;continue
-    n=s[i+1] if i+1<len(s) else ""
-    if (c=="&" and n=="&") or (c=="|" and n=="|"):
-        out.append("".join(cur));cur=[];i+=2;continue
-    if c==";" or c=="|" or c=="\n":
-        out.append("".join(cur));cur=[];i+=1;continue
-    cur.append(c);i+=1
-out.append("".join(cur))
-sys.stdout.write("\n".join(x.replace("\n"," ") for x in out))')
+    seg_lines=$(split_command "$command_str" segments)
     any=0; allsafe=1
     while IFS= read -r seg; do
         [ -z "$(printf '%s' "$seg" | tr -d '[:space:]')" ] && continue
