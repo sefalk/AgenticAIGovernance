@@ -97,9 +97,18 @@ assert_true() {
     fi
 }
 
-TEST_EDIT='{"tool_name":"editFiles","tool_input":{"filePath":"tests/test_x.py"}}'
-SRC_EDIT='{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}'
-SRC_CREATE='{"tool_name":"createFile","tool_input":{"filePath":"src/new.py"}}'
+# Tool names and field sets as VS Code actually sends them, read out of
+# captured PreToolUse payloads (issue #69). The gates below used to be fed
+# invented camelCase names, so a green suite said nothing about whether they
+# recognise a real write.
+TEST_EDIT='{"tool_name":"replace_string_in_file","tool_input":{"filePath":"tests/test_x.py","oldString":"a","newString":"b"}}'
+SRC_EDIT='{"tool_name":"replace_string_in_file","tool_input":{"filePath":"src/main.py","oldString":"a","newString":"b"}}'
+SRC_CREATE='{"tool_name":"create_file","tool_input":{"content":"x","filePath":"src/new.py"}}'
+# multi_replace_string_in_file has no top-level filePath: its paths sit in
+# replacements[]. A batch of test edits hiding one production path is still a
+# production edit.
+SRC_BATCH='{"tool_name":"multi_replace_string_in_file","tool_input":{"explanation":"e","replacements":[{"filePath":"tests/test_x.py","oldString":"a","newString":"b"},{"filePath":"src/main.py","oldString":"a","newString":"b"}]}}'
+READ_FILE='{"tool_name":"read_file","tool_input":{"endLine":40,"filePath":"src/main.py","startLine":1}}'
 FETCH_OK='{"tool_name":"fetch","tool_input":{"url":"https://docs.python.org/3/library/os.html"}}'
 FETCH_UNKNOWN='{"tool_name":"fetch","tool_input":{"url":"https://unlisted.example.com/x"}}'
 # The shape VS Code's fetch tool actually sends: `urls` (an array) beside
@@ -122,6 +131,8 @@ CO_MSG_OK='{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \
 # without a single red test (issue #65).
 echo "## coordinator-pretooluse.sh"
 run_case "delegation gate denies a direct file edit"  coordinator-pretooluse.sh agent/fixture "$SRC_EDIT"   deny
+run_case "delegation gate denies a batched edit"      coordinator-pretooluse.sh agent/fixture "$SRC_BATCH"  deny
+run_case "reading a file is not the gate's business"  coordinator-pretooluse.sh agent/fixture "$READ_FILE"  silent
 run_case "pytest via terminal is denied"              coordinator-pretooluse.sh agent/fixture "$CO_PYTEST"  deny
 run_case "phase-only commit message is denied"        coordinator-pretooluse.sh agent/fixture "$CO_MSG_BAD" deny
 run_case "described commit message passes"            coordinator-pretooluse.sh agent/fixture "$CO_MSG_OK"  silent
@@ -131,12 +142,33 @@ run_case "branch gate denies on dev"            test-writer-pretooluse.sh dev   
 run_case "branch gate denies on detached HEAD"  test-writer-pretooluse.sh --detach      "$TEST_EDIT" deny
 run_case "test file allowed on agent branch"    test-writer-pretooluse.sh agent/fixture "$TEST_EDIT" silent
 run_case "production edit denied on agent branch" test-writer-pretooluse.sh agent/fixture "$SRC_EDIT" deny
+run_case "production path inside a batch denied" test-writer-pretooluse.sh agent/fixture "$SRC_BATCH" deny
+run_case "reading production code is allowed"   test-writer-pretooluse.sh agent/fixture "$READ_FILE" silent
 
 echo "## refactorer-pretooluse.sh"
 run_case "branch gate denies on dev"            refactorer-pretooluse.sh dev            "$SRC_EDIT"   deny
 run_case "branch gate denies on detached HEAD"  refactorer-pretooluse.sh --detach       "$SRC_EDIT"   deny
 run_case "existing file allowed on agent branch" refactorer-pretooluse.sh agent/fixture "$SRC_EDIT"   silent
 run_case "file creation denied on agent branch" refactorer-pretooluse.sh agent/fixture  "$SRC_CREATE" deny
+run_case "running a task is not a file creation" refactorer-pretooluse.sh agent/fixture '{"tool_name":"run_task","tool_input":{"id":"shell: tests: all","workspaceFolder":"/repo"}}' silent
+
+# scan-secrets reports by exit code, which run_case treats as a crash, so the
+# two paths that matter are asserted directly. Both were dead: the hook never
+# matched a real write tool, and the fallback pattern used `\s` inside a
+# bracket expression, where a backslash is a literal -- so the generic secret
+# rule excluded the letter s instead of whitespace and never fired.
+echo "## scan-secrets.sh"
+secret_dir=$(mktemp -d)
+printf 'password = "SuperSecret123!"\n' > "$secret_dir/secret.py"
+secret_json="{\"tool_name\":\"multi_replace_string_in_file\",\"tool_input\":{\"explanation\":\"e\",\"replacements\":[{\"filePath\":\"$secret_dir/secret.py\",\"oldString\":\"a\",\"newString\":\"b\"}]}}"
+secret_rc=0
+printf '%s' "$secret_json" | bash "$HOOK_DIR/scan-secrets.sh" > /dev/null 2>&1 || secret_rc=$?
+assert_true "secret in a batched edit fails the gate" "$([ "$secret_rc" -eq 1 ] && echo 1 || echo 0)" "expected exit 1, got $secret_rc"
+
+read_rc=0
+read_out=$(printf '%s' "$READ_FILE" | bash "$HOOK_DIR/scan-secrets.sh" 2>/dev/null) || read_rc=$?
+assert_true "reading a file is outside the scan's remit" "$([ "$read_rc" -eq 0 ] && [ "$read_out" = '{}' ] && echo 1 || echo 0)" "expected {} and exit 0, got '${read_out}' (exit $read_rc)"
+rm -rf "$secret_dir"
 
 echo "## researcher-pretooluse.sh"
 run_case "allowlisted domain is allowed"        researcher-pretooluse.sh agent/fixture  "$FETCH_OK"      allow
