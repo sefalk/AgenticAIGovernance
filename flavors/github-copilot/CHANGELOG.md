@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The default test scope ran no tests, and reported it as green (issue #73).**
+  `$scopeMap['all']` was the only entry carrying a trailing separator.
+  `Join-Path` normalises `tests/` to `…\tests\`; because the workspace path
+  contains spaces PowerShell quotes the argument, and the CRT argv parser reads
+  the resulting `\"` as an escaped quote — it loses the closing quote and
+  swallows every following argument into `argv[1]`. pytest received one
+  nonsense path and collected nothing. Since `all` is the *default* scope, a
+  bare `run-tests.ps1` was broken, together with four shipped VS Code tasks.
+  It only reproduces from a path containing spaces, which is every default
+  OneDrive path — hence its long life.
+
+  The second half is the one that mattered. `2>$null` discarded pytest's usage
+  error; with empty stdout no summary line parsed, and the runner wrote
+  `"passed": 0, "failed": 0, "total": 0` to `test-log.json`. A consumer reading
+  `failed: 0` concludes green — and the test-execution skill tells agents that
+  log is the source of truth and that they may *skip* a run when it looks
+  current, so the entry did not merely misinform, it suppressed the run that
+  would have exposed it. This half was never Windows-specific: `run-tests.sh`
+  produced the identical entry, and any runner failure triggers it.
+
+  A run with no parseable summary and a non-zero exit is now recorded with
+  `passed`/`failed`/`errors` as `null` — never `0` — plus `status: "error"` and
+  the interpreter's own error text, which is no longer discarded but shown to
+  the caller. `null` is the point: a consumer testing `failed == 0` now gets a
+  false answer instead of a reassuring one. Both runners were fixed in
+  lockstep, and `test-run-tests.ps1` pins the no-trailing-separator invariant
+  for every scope, the argv survival, and the log's refusal to lie.
+
 - **Task launches were never classified (issue #74).** `block-dangerous`
   matched `createAndRunTask`; the tools VS Code actually sends are
   `create_and_run_task` and `run_task`. The creation allowlist built in #56 —
