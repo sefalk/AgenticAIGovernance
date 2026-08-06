@@ -389,8 +389,67 @@ if ($isTaskRun) {
     $command = $cmdLines -join "`n"
 }
 
+# ---------------------------------------------------------------------------
+# Scan units -- what the DENY tier matches against.
+#
+# The raw command string conflates two things: text that will be executed and
+# text that is merely data. Matching deny patterns against it blocked real work
+# (issue #62): a commit message containing "--force", a probe whose JSON test
+# data contained "Remove-Item -Recurse -Force". Worse, `(\S+\s+)*` in the git
+# rules matched across a `;`, so a genuine `git add` in one statement joined up
+# with prose in the next.
+#
+# Stripping quotes globally would be the wrong fix: the payload of `bash -c
+# "..."` lives inside quotes, and blinding the deny tier to it defeats its
+# purpose. So each statement becomes its own unit, quoted arguments that are
+# themselves executed are promoted to units of their own, and quoted text is
+# dropped only where it is unambiguously prose.
+# ---------------------------------------------------------------------------
+
+# Command words whose quoted arguments are prose, not commands.
+$dataCarrierRe = '^\s*(echo|printf|Write-Host|Write-Output|Write-Error|Write-Verbose|Write-Debug)\b|^\s*git\s+(commit|tag|notes|stash)\b'
+# Flags and commands whose quoted argument is executed.
+$payloadRe = '(?:^|\s)(?:-c|--command|-Command|-e|--eval|-ScriptBlock|-ArgumentList|-Args|/c|/k|iex|Invoke-Expression|eval)\s+(?:"([^"]*)"|''([^'']*)'')'
+
+function Remove-QuotedData([string]$seg) {
+    # An interpolation inside quotes still executes, so those quotes are not data.
+    if ($seg -match '\$\(' -or $seg -match '`') { return $seg }
+    return ($seg -replace '"[^"]*"', '' -replace "'[^']*'", '')
+}
+
+function Get-ScanUnits([string]$cmd) {
+    $units = New-Object System.Collections.Generic.List[string]
+    foreach ($seg in (Split-TopLevel $cmd)) {
+        if (-not $seg.Trim()) { continue }
+        $isBareLiteral = $seg -match '^\s*("[^"]*"|''[^'']*'')\s*$'
+        if ($isBareLiteral -or $seg -match $dataCarrierRe) {
+            $units.Add((Remove-QuotedData $seg))
+        } else {
+            $units.Add($seg)
+        }
+        foreach ($m in [regex]::Matches($seg, $payloadRe)) {
+            $payload = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
+            foreach ($p in (Split-TopLevel $payload)) { if ($p.Trim()) { $units.Add($p) } }
+        }
+    }
+    if ($units.Count -eq 0) { $units.Add($cmd) }
+    return , $units.ToArray()
+}
+
+$scanUnits = Get-ScanUnits $command
+
+function Test-AnyUnit([string]$pattern, [switch]$CaseSensitive) {
+    foreach ($u in $scanUnits) {
+        if ($CaseSensitive) { if ($u -cmatch $pattern) { return $true } }
+        elseif ($u -match $pattern) { return $true }
+    }
+    return $false
+}
+
 # ===========================================================================
 # TIER 1 -- DENY (hard, level-independent). Checked first.
+# Rules are matched per scan unit unless marked raw = $true, which is reserved
+# for rules about structure or payload content that legitimately spans units.
 # ===========================================================================
 $denyRules = @(
     @{ p = 'git\s+push\b.*(--force|-f)\b';            why = 'force push (remote history rewrite)' }
@@ -409,25 +468,26 @@ $denyRules = @(
     @{ p = 'mkfs\.';                                  why = 'filesystem format' }
     @{ p = 'format\s+[A-Za-z]:';                      why = 'drive format' }
     @{ p = 'chmod\s+-R\s+777';                        why = 'world-writable permissions' }
-    @{ p = '\|\s*(bash|sh|iex|Invoke-Expression)\b';  why = 'pipe-to-shell execution' }
-    @{ p = 'DROP\s+(TABLE|DATABASE)';                 why = 'destructive SQL' }
-    @{ p = 'TRUNCATE\s+TABLE';                        why = 'destructive SQL' }
+    @{ p = '\|\s*(bash|sh|iex|Invoke-Expression)\b';  why = 'pipe-to-shell execution'; raw = $true }
+    @{ p = 'DROP\s+(TABLE|DATABASE)';                 why = 'destructive SQL'; raw = $true }
+    @{ p = 'TRUNCATE\s+TABLE';                        why = 'destructive SQL'; raw = $true }
 )
 foreach ($r in $denyRules) {
-    if ($command -match $r.p) {
+    $hit = if ($r.raw) { $command -match $r.p } else { Test-AnyUnit $r.p }
+    if ($hit) {
         Emit 'deny' ("Policy hard-deny: $($r.why). $denyTail")
     }
 }
 # Branch force-deletion (-D) needs a CASE-SENSITIVE check so that the safe
 # lowercase -d (which git only allows for already-merged branches) is not denied.
-if ($command -cmatch 'git\s+branch\s+(\S+\s+)*-D(\s|$)') {
+if (Test-AnyUnit 'git\s+branch\s+(\S+\s+)*-D(\s|$)' -CaseSensitive) {
     Emit 'deny' ("Policy hard-deny: force branch deletion (-D deletes unmerged commits). $denyTail")
 }
 # Category-scoped deny (when autonomy policy sets a category to 'deny').
-if ($catPkg -eq 'deny' -and ($command -match '(?i)\bpip3?\s+(install|uninstall)\b' -or $command -match '(?i)\bconda\s+(install|remove)\b')) {
+if ($catPkg -eq 'deny' -and (Test-AnyUnit '(?i)\bpip3?\s+(install|uninstall)\b|(?i)\bconda\s+(install|remove)\b')) {
     Emit 'deny' ("Policy hard-deny: package management (AUTONOMY_CAT_PKG_INSTALL=deny). $denyTail")
 }
-if ($catDatabricks -eq 'deny' -and $command -match '(?i)\bdatabricks\b') {
+if ($catDatabricks -eq 'deny' -and (Test-AnyUnit '(?i)\bdatabricks\b')) {
     Emit 'deny' ("Policy hard-deny: Databricks CLI (AUTONOMY_CAT_DATABRICKS=deny). $denyTail")
 }
 
