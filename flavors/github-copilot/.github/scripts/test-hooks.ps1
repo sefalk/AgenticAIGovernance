@@ -159,6 +159,30 @@ function Assert-Silent {
     Assert-Decision -TestName $TestName -Expected 'silent' -Script $Script -Json $Json -Branch $Branch -Detached:$Detached
 }
 
+# The verdict is only half of what a gate owes the human: an 'ask' whose reason
+# does not name the rule or the command cannot be answered, only waved through.
+function Assert-AskReason {
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Pattern, [string]$Branch)
+    try {
+        $result = Invoke-Hook -Script $Script -JsonInput $Json -Branch $Branch
+        $decision = Resolve-Decision $result.Output $result.ExitCode
+        $reason = ''
+        if ($decision -eq 'ask') {
+            $reason = ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecisionReason
+        }
+        if ($decision -eq 'ask' -and $reason -match $Pattern) {
+            $script:passed++
+            if ($Verbose) { Write-Output "  PASS  $TestName" }
+        } else {
+            $script:failed++
+            $script:errors += "FAIL  $TestName -- expected ask whose reason matches '$Pattern', got '$decision' reason '$reason'"
+        }
+    } catch {
+        $script:failed++
+        $script:errors += "ERROR $TestName -- $($_.Exception.Message)"
+    }
+}
+
 function Assert-ExitCode {
     param([string]$TestName, [string]$Script, [string]$Json, [int]$Expected)
     try {
@@ -298,6 +322,46 @@ Assert-Ask "single-file delete asks by default (FS_WRITE opt-in)" `
 Assert-Ask "recursive (no force) delete asks" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./build -Recurse"}}'
+
+# ── ASK reasons are specific and echo the command (issue #78) ────────────
+# One sentence shared by eleven rules told the human neither what fired nor
+# what it fired on, while the deny tier next door has always been specific.
+Assert-AskReason "delete ask names the deleting command" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}' `
+    "Remove-Item.*deletes files"
+
+Assert-AskReason "delete ask echoes the command it is asking about" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}' `
+    "Command: Remove-Item \./scratch\.tmp"
+
+Assert-AskReason "package-install ask explains the environment-wide effect" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"pip install requests"}}' `
+    "environment"
+
+Assert-AskReason "cloud ask explains that the effect leaves the repository" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"databricks jobs submit --json @job.json"}}' `
+    "outside this repository"
+
+# The reason must not be the same string for every rule -- that was the defect.
+Assert-True "two different ask rules give two different reasons" `
+    ((( Invoke-Hook -Script "block-dangerous.ps1" -JsonInput '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}' ).Output) -ne
+     (( Invoke-Hook -Script "block-dangerous.ps1" -JsonInput '{"tool_name":"runInTerminal","tool_input":{"command":"pip install requests"}}' ).Output)) `
+    "both rules returned the identical payload"
+
+# A reason carrying the command line carries the command's quotes with it.
+Assert-Ask "a command containing quotes still produces parsable JSON" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item \"C:\\tmp\\a b\\file.txt\""}}'
+
+# The task branch quotes the offending task command back into its deny reason,
+# and a task command is a path -- on Windows a backslash path.
+Assert-Deny "a task command with backslashes and quotes still produces parsable JSON" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"x","type":"shell","command":"C:\\evil\\run \"it\".ps1"},"workspaceFolder":"/repo"}}'
 
 # ── ALLOW: safe under balanced defaults ──────────────────────────────────
 Assert-Allow "git status is safe" `
