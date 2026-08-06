@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every confirmation prompt asked the same unanswerable question (issue
+  #78, part b).** All eleven ask-tier rules shared one sentence — *"This
+  command makes a durable change. Please confirm it is intentional."* — which
+  named neither the rule that fired nor the command it fired on. `git merge`,
+  `pip install`, `Remove-Item`, `databricks … deploy` and `mkdir` all produced
+  the identical prompt, while the deny tier next door has always said exactly
+  what it objected to and why. A question that does not say what it is about
+  cannot be answered; it can only be waved through, which turns a confirmation
+  into a keystroke and the gate into noise.
+
+  Each rule now states its actual effect — `'Remove-Item' deletes files or
+  directories`, `pip install/uninstall changes the environment for everything
+  that uses it, not just this task`, `this Databricks CLI call acts on a remote
+  workspace, where the effect is outside this repository and outside git` — and
+  the command line itself is echoed (whitespace-collapsed, capped at 300
+  characters), so the human answers about the command rather than the category.
+
+  Carrying the command into the reason meant carrying its quotes and
+  backslashes, so `block-dangerous.sh` now escapes the reason before
+  interpolating it into its hand-built JSON. It did not before; it had simply
+  never been handed a string that needed it. An unparsable verdict is
+  indistinguishable from no verdict, so this would have disarmed the gate at
+  exactly the moment it had something to say. PowerShell goes through
+  `ConvertTo-Json` and was never exposed.
+
+  The same question applied to the file's other emitter turned up a second,
+  older instance: `emit_task` also hand-built its JSON, and its deny reasons
+  quote the offending task command back at the reader — a path, on Windows a
+  backslash path, where `\e` is not a valid JSON escape. The task tier could
+  therefore silence its own deny without any wording change at all. Both
+  emitters now escape, and both are pinned by mutation-tested cases.
+
+  Part (a) of the issue — deciding, rule by rule, which confirmations to hand
+  back to Copilot's own assessment by returning `{}` — is deliberately not in
+  this change: that is a policy decision about auto-approval, not a wording fix.
+
 - **The default test scope ran no tests, and reported it as green (issue #73).**
   `$scopeMap['all']` was the only entry carrying a trailing separator.
   `Join-Path` normalises `tests/` to `…\tests\`; because the workspace path
