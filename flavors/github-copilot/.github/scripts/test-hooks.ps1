@@ -220,6 +220,31 @@ Assert-True "a crashing hook is not an approval" `
     ((Resolve-Decision 'bash: line 3: syntax error near unexpected token' 0) -eq 'error') `
     "got: $(Resolve-Decision 'bash: line 3: syntax error near unexpected token' 0)"
 
+# Classifying a string is half the instrument. The verdict only reaches it if
+# the runner carries the exit code out of a real hook process, so the two
+# failure shapes are also exercised end to end, as processes.
+$stubDir = Join-Path ([System.IO.Path]::GetTempPath()) "af-harness-stub-$(Get-Random)"
+New-Item -ItemType Directory -Path $stubDir -Force | Out-Null
+try {
+    $stubPayload = '{"tool_name":"runInTerminal","tool_input":{"command":"git push --force origin main"}}'
+
+    $stubInert = Join-Path $stubDir 'inert.ps1'
+    Set-Content -Path $stubInert -Value "`$null = [Console]::In.ReadToEnd()`r`nWrite-Output '{}'`r`nexit 0"
+    $rInert = Invoke-HookScript -HookPath $stubInert -JsonInput $stubPayload
+    Assert-True "a hook that ignores the request does not pass as an approval" `
+        ((Resolve-Decision $rInert.Output $rInert.ExitCode) -eq 'silent') `
+        "got: '$($rInert.Output)' (exit $($rInert.ExitCode))"
+
+    $stubCrash = Join-Path $stubDir 'crash.ps1'
+    Set-Content -Path $stubCrash -Value "`$null = [Console]::In.ReadToEnd()`r`nWrite-Output '{}'`r`nexit 2"
+    $rCrash = Invoke-HookScript -HookPath $stubCrash -JsonInput $stubPayload
+    Assert-True "a non-zero exit survives the runner and voids the verdict" `
+        ((Resolve-Decision $rCrash.Output $rCrash.ExitCode) -eq 'error') `
+        "got: '$($rCrash.Output)' (exit $($rCrash.ExitCode))"
+} finally {
+    Remove-Item $stubDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Write-Output ""
 
 # ── 1. block-dangerous.ps1 ──────────────────────────────────────────────
