@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The hook harness read silence as consent (issue #68).** `Assert-Allow` in
+  `test-hooks.ps1` treated `{}` and empty output as an approval, so a hook that
+  examined a request and approved it was indistinguishable from one that never
+  ran, crashed, or read a field the tool does not send. That is not a testing
+  nicety — it is the mechanism by which #65 (unparsable, exited non-zero,
+  printed nothing) and #64 (wrong payload field, returned `{}` on every real
+  fetch) both stayed green while shipping.
+
+  - **One classifier, five outcomes.** `Resolve-Decision` replaces the parse-
+    and-compare copied into each assertion and returns `allow`, `deny`, `ask`,
+    `silent` or `error`. A non-zero exit or unparsable output is `error`: a
+    hook that crashed is credited with no opinion, whatever it printed on the
+    way out.
+  - **`Assert-Silent` states the other claim.** 15 of the 30 `Assert-Allow`
+    sites never meant "approved" — the delegation gate, the branch gates and
+    every "not my tool" case return `{}` by design. They now say so, and the
+    other 15 must produce an explicit `allow`.
+  - **The bash harness judges the exit status too.** `run_case` captured only
+    stdout, so a perfectly formed deny followed by a crash counted as a deny.
+  - Verified by mutation rather than by a green run: making
+    `block-dangerous.ps1`'s auto-approval tier inert turns 9 previously passing
+    cases red, and a bash hook that prints a deny then exits 3 no longer
+    passes. No hook changed behaviour — the blindness was entirely in the
+    instrument.
+
 - **The researcher's fetch hook was reading a payload the fetch tool does not
   send (issue #64).** It looked for `tool_input.url`; VS Code passes `urls` —
   an array — beside `query`. So both of its gates were inert: the credential

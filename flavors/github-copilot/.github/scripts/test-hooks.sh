@@ -34,7 +34,7 @@ fi
 # run_case <name> <hook> <branch|--detach> <json> <deny|allow|ask|silent>
 run_case() {
     local name="$1" hook="$2" mode="$3" json="$4" expect="$5"
-    local fixture out err ok=0
+    local fixture out err rc=0 ok=0
     fixture=$(mktemp -d)
 
     mkdir -p "$fixture/.github/hooks/scripts"
@@ -55,23 +55,30 @@ run_case() {
             git checkout -q -b "$mode"
         fi
         printf '%s' "$json" | bash ".github/hooks/scripts/$hook"
-    ) > "$fixture/out.txt" 2> "$fixture/err.txt"
+    ) > "$fixture/out.txt" 2> "$fixture/err.txt" || rc=$?
 
     out=$(cat "$fixture/out.txt")
     err=$(cat "$fixture/err.txt")
 
-    case "$expect" in
-        deny)   [[ "$out" == *'"deny"'*   ]] && ok=1 ;;
-        allow)  [[ "$out" == *'"allow"'*  ]] && ok=1 ;;
-        ask)    [[ "$out" == *'"ask"'*    ]] && ok=1 ;;
-        silent) [[ "$out" == '{}'         ]] && ok=1 ;;
-    esac
+    # A hook that exits non-zero never reached a verdict, whatever it printed
+    # on the way out. Judging its stdout alone would credit a crash with an
+    # opinion it never formed.
+    if [ "$rc" -ne 0 ]; then
+        ok=0
+    else
+        case "$expect" in
+            deny)   [[ "$out" == *'"deny"'*   ]] && ok=1 ;;
+            allow)  [[ "$out" == *'"allow"'*  ]] && ok=1 ;;
+            ask)    [[ "$out" == *'"ask"'*    ]] && ok=1 ;;
+            silent) [[ "$out" == '{}'         ]] && ok=1 ;;
+        esac
+    fi
 
     if [ $ok -eq 1 ]; then
         echo "PASS  $name"
         pass=$((pass + 1))
     else
-        echo "FAIL  $name -- expected $expect, got: ${out:-<no output>} ${err}"
+        echo "FAIL  $name -- expected $expect, got: ${out:-<no output>} (exit $rc) ${err}"
         fail=$((fail + 1))
     fi
 

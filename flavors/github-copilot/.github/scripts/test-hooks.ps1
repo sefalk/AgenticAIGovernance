@@ -28,6 +28,13 @@ $script:passed = 0
 $script:failed = 0
 $script:errors = @()
 
+function Invoke-HookScript {
+    param([string]$HookPath, [string]$JsonInput)
+    $output = $JsonInput | powershell -NoProfile -ExecutionPolicy Bypass -File $HookPath 2>&1
+    $exitCode = $LASTEXITCODE
+    return @{ Output = ($output | Out-String).Trim(); ExitCode = $exitCode }
+}
+
 function Invoke-Hook {
     param(
         [string]$Script,
@@ -40,12 +47,7 @@ function Invoke-Hook {
         throw "Hook not found: $hookPath"
     }
     if (-not $Branch -and -not $Detached) {
-        # Pipe JSON to the hook script via stdin
-        $output = $JsonInput | powershell -NoProfile -ExecutionPolicy Bypass -File $hookPath 2>&1
-        $exitCode = $LASTEXITCODE
-        # Parse output
-        $text = ($output | Out-String).Trim()
-        return @{ Output = $text; ExitCode = $exitCode }
+        return (Invoke-HookScript -HookPath $hookPath -JsonInput $JsonInput)
     }
     return (Invoke-HookInFixture -HookPath $hookPath -Script $Script -JsonInput $JsonInput -Branch $Branch -Detached:$Detached)
 }
@@ -90,71 +92,71 @@ function Invoke-HookInFixture {
     }
 }
 
-function Assert-Deny {
-    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch, [switch]$Detached)
+# The single place that decides what a hook answered. 'silent' is deliberately
+# not 'allow': on the wire they are the same bytes, but only one of them means
+# the hook looked at the request. A non-zero exit or unparsable output means it
+# never reached a verdict, whatever else it printed.
+function Resolve-Decision {
+    param([string]$Text, [int]$ExitCode = 0)
+    if ($ExitCode -ne 0) { return 'error' }
+    $t = if ($null -eq $Text) { '' } else { $Text.Trim() }
+    if ($t -eq '' -or $t -eq '{}') { return 'silent' }
+    try {
+        $parsed = $t | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        return 'error'
+    }
+    $decision = $parsed.hookSpecificOutput.permissionDecision
+    if ([string]::IsNullOrWhiteSpace($decision)) { return 'silent' }
+    return [string]$decision
+}
+
+function Assert-Decision {
+    param(
+        [string]$TestName,
+        [string]$Expected,
+        [string]$Script,
+        [string]$Json,
+        [string]$Branch,
+        [switch]$Detached
+    )
     try {
         $result = Invoke-Hook -Script $Script -JsonInput $Json -Branch $Branch -Detached:$Detached
-        $parsed = $result.Output | ConvertFrom-Json -ErrorAction SilentlyContinue
-        $decision = $parsed.hookSpecificOutput.permissionDecision
-        if ($decision -eq 'deny') {
+        $decision = Resolve-Decision $result.Output $result.ExitCode
+        if ($decision -eq $Expected) {
             $script:passed++
             if ($Verbose) { Write-Output "  PASS  $TestName" }
         } else {
             $script:failed++
-            $script:errors += "FAIL  $TestName -- expected deny, got '$decision' (output: $($result.Output))"
+            $script:errors += "FAIL  $TestName -- expected $Expected, got '$decision' (exit $($result.ExitCode), output: $($result.Output))"
         }
     } catch {
         $script:failed++
         $script:errors += "ERROR $TestName -- $($_.Exception.Message)"
     }
+}
+
+function Assert-Deny {
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch, [switch]$Detached)
+    Assert-Decision -TestName $TestName -Expected 'deny' -Script $Script -Json $Json -Branch $Branch -Detached:$Detached
 }
 
 function Assert-Ask {
-    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch)
-    try {
-        $result = Invoke-Hook -Script $Script -JsonInput $Json -Branch $Branch
-        $parsed = $result.Output | ConvertFrom-Json -ErrorAction SilentlyContinue
-        $decision = $parsed.hookSpecificOutput.permissionDecision
-        if ($decision -eq 'ask') {
-            $script:passed++
-            if ($Verbose) { Write-Output "  PASS  $TestName" }
-        } else {
-            $script:failed++
-            $script:errors += "FAIL  $TestName -- expected ask, got '$decision' (output: $($result.Output))"
-        }
-    } catch {
-        $script:failed++
-        $script:errors += "ERROR $TestName -- $($_.Exception.Message)"
-    }
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch, [switch]$Detached)
+    Assert-Decision -TestName $TestName -Expected 'ask' -Script $Script -Json $Json -Branch $Branch -Detached:$Detached
 }
 
+# The hook examined the request and approved it.
 function Assert-Allow {
-    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch)
-    try {
-        $result = Invoke-Hook -Script $Script -JsonInput $Json -Branch $Branch
-        $text = $result.Output
-        # Allow = empty JSON or no hookSpecificOutput or no permissionDecision
-        $isAllow = ($text -eq '{}' -or $text -eq '' -or $null -eq $text)
-        if (-not $isAllow) {
-            $parsed = $text | ConvertFrom-Json -ErrorAction SilentlyContinue
-            if ($parsed -and $parsed.hookSpecificOutput -and $parsed.hookSpecificOutput.permissionDecision) {
-                $decision = $parsed.hookSpecificOutput.permissionDecision
-                $isAllow = ($decision -notin @('deny', 'ask'))
-            } else {
-                $isAllow = $true
-            }
-        }
-        if ($isAllow) {
-            $script:passed++
-            if ($Verbose) { Write-Output "  PASS  $TestName" }
-        } else {
-            $script:failed++
-            $script:errors += "FAIL  $TestName -- expected allow, got: $text"
-        }
-    } catch {
-        $script:failed++
-        $script:errors += "ERROR $TestName -- $($_.Exception.Message)"
-    }
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch, [switch]$Detached)
+    Assert-Decision -TestName $TestName -Expected 'allow' -Script $Script -Json $Json -Branch $Branch -Detached:$Detached
+}
+
+# The hook had no opinion and said so. Distinct from Assert-Allow: it does not
+# claim the request was approved, only that this gate was not the one to judge.
+function Assert-Silent {
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch, [switch]$Detached)
+    Assert-Decision -TestName $TestName -Expected 'silent' -Script $Script -Json $Json -Branch $Branch -Detached:$Detached
 }
 
 function Assert-ExitCode {
@@ -186,6 +188,65 @@ function Assert-True {
 }
 
 Write-Output "=== Hook Integration Tests ==="
+Write-Output ""
+
+# ── 0. Harness self-check ────────────────────────────────────────────────
+#
+# A gate that cannot run and a gate with nothing to say produce the same
+# output: nothing. A harness that reads that silence as approval cannot fail
+# on an inert hook -- which is how #64 (wrong payload field, returned {} on
+# every real fetch) and #65 (unparsable, exited non-zero, printed nothing)
+# stayed green. Verify the instrument before trusting it to judge the hooks.
+
+Write-Output "## harness self-check"
+
+$decAllow = '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"safe"}}'
+$decDeny  = '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"blocked"}}'
+$decAsk   = '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"confirm"}}'
+
+Assert-True "explicit allow is an allow" `
+    ((Resolve-Decision $decAllow 0) -eq 'allow') "got: $(Resolve-Decision $decAllow 0)"
+Assert-True "deny is a deny" `
+    ((Resolve-Decision $decDeny 0) -eq 'deny') "got: $(Resolve-Decision $decDeny 0)"
+Assert-True "ask is an ask" `
+    ((Resolve-Decision $decAsk 0) -eq 'ask') "got: $(Resolve-Decision $decAsk 0)"
+
+# The three that used to be indistinguishable from an approval.
+Assert-True "an empty verdict is silence, not approval" `
+    ((Resolve-Decision '{}' 0) -eq 'silent') "got: $(Resolve-Decision '{}' 0)"
+Assert-True "no output at all is silence, not approval" `
+    ((Resolve-Decision '' 0) -eq 'silent') "got: $(Resolve-Decision '' 0)"
+Assert-True "a hook that exits non-zero has made no decision" `
+    ((Resolve-Decision '{}' 1) -eq 'error') "got: $(Resolve-Decision '{}' 1)"
+Assert-True "a crashing hook is not an approval" `
+    ((Resolve-Decision 'bash: line 3: syntax error near unexpected token' 0) -eq 'error') `
+    "got: $(Resolve-Decision 'bash: line 3: syntax error near unexpected token' 0)"
+
+# Classifying a string is half the instrument. The verdict only reaches it if
+# the runner carries the exit code out of a real hook process, so the two
+# failure shapes are also exercised end to end, as processes.
+$stubDir = Join-Path ([System.IO.Path]::GetTempPath()) "af-harness-stub-$(Get-Random)"
+New-Item -ItemType Directory -Path $stubDir -Force | Out-Null
+try {
+    $stubPayload = '{"tool_name":"runInTerminal","tool_input":{"command":"git push --force origin main"}}'
+
+    $stubInert = Join-Path $stubDir 'inert.ps1'
+    Set-Content -Path $stubInert -Value "`$null = [Console]::In.ReadToEnd()`r`nWrite-Output '{}'`r`nexit 0"
+    $rInert = Invoke-HookScript -HookPath $stubInert -JsonInput $stubPayload
+    Assert-True "a hook that ignores the request does not pass as an approval" `
+        ((Resolve-Decision $rInert.Output $rInert.ExitCode) -eq 'silent') `
+        "got: '$($rInert.Output)' (exit $($rInert.ExitCode))"
+
+    $stubCrash = Join-Path $stubDir 'crash.ps1'
+    Set-Content -Path $stubCrash -Value "`$null = [Console]::In.ReadToEnd()`r`nWrite-Output '{}'`r`nexit 2"
+    $rCrash = Invoke-HookScript -HookPath $stubCrash -JsonInput $stubPayload
+    Assert-True "a non-zero exit survives the runner and voids the verdict" `
+        ((Resolve-Decision $rCrash.Output $rCrash.ExitCode) -eq 'error') `
+        "got: '$($rCrash.Output)' (exit $($rCrash.ExitCode))"
+} finally {
+    Remove-Item $stubDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Write-Output ""
 
 # ── 1. block-dangerous.ps1 ──────────────────────────────────────────────
@@ -279,7 +340,7 @@ Assert-Allow "separators inside quotes do not split" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"fix: a; b | c\""}}'
 
-Assert-Allow "non-terminal tool ignored" `
+Assert-Silent "non-terminal tool ignored" `
     "block-dangerous.ps1" `
     '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
 
@@ -357,8 +418,9 @@ Assert-Deny 'createAndRunTask: interactive input variable is denied' `
     '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"user-input","type":"shell","command":"echo","args":["${input:promptUser}"]}}}'
 
 # ── createAndRunTask shape: regression - legitimate curated invocations ────
-# These four scripts are the framework-approved entry points. They must ALLOW
-# (or defer to user, i.e. return {} which is allow-like).
+# These four scripts are the framework-approved entry points. The classifier
+# must recognise them and say so; falling through to {} would mean it never
+# reached a verdict on them.
 Assert-Allow "createAndRunTask: .github/scripts/run-tests.ps1 -Scope domain allows" `
     "block-dangerous.ps1" `
     '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"test-domain","type":"shell","command":".github/scripts/run-tests.ps1","args":["-Scope","domain"]}}}'
@@ -439,24 +501,26 @@ Assert-Deny "coordinator cannot createFile" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"createFile","tool_input":{"filePath":"src/new.py"}}'
 
-# Should ALLOW read/search/terminal
-Assert-Allow "coordinator can readFile" `
+# The delegation gate only ever objects; on anything it permits it returns {}
+# and the tool call proceeds under VS Code's own rules. Assert that silence
+# explicitly, so a hook that dies before reaching the gate cannot pass here.
+Assert-Silent "coordinator can readFile" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
 
-Assert-Allow "coordinator can searchCodebase" `
+Assert-Silent "coordinator can searchCodebase" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"searchCodebase","tool_input":{"query":"hello"}}'
 
-Assert-Allow "coordinator can listDirectory" `
+Assert-Silent "coordinator can listDirectory" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"listDirectory","tool_input":{"path":"src/"}}'
 
-Assert-Allow "coordinator can runInTerminal (git)" `
+Assert-Silent "coordinator can runInTerminal (git)" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"run_in_terminal","tool_input":{"command":"git status"}}'
 
-Assert-Allow "coordinator can getProblems" `
+Assert-Silent "coordinator can getProblems" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"problems","tool_input":{}}'
 
@@ -473,11 +537,11 @@ Assert-Deny "coordinator cannot py.test via terminal" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"run_in_terminal","tool_input":{"command":"py.test tests/domain/"}}'
 
-Assert-Allow "coordinator can run git via terminal" `
+Assert-Silent "coordinator can run git via terminal" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"run_in_terminal","tool_input":{"command":"git diff --stat"}}'
 
-Assert-Allow "coordinator can run non-test scripts via terminal" `
+Assert-Silent "coordinator can run non-test scripts via terminal" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"run_in_terminal","tool_input":{"command":".github/scripts/audit-tools.ps1"}}'
 
@@ -520,7 +584,7 @@ $testCreate = @{ tool_name = "createFile"; tool_input = @{ filePath = "tests/tes
 Assert-Deny "test-writer denied on non-agent branch (test file create)" `
     "test-writer-pretooluse.ps1" $testCreate -Branch 'dev'
 
-Assert-Allow "test-writer may edit a test file on an agent branch" `
+Assert-Silent "test-writer may edit a test file on an agent branch" `
     "test-writer-pretooluse.ps1" $testJson -Branch $agentBranch
 
 # A detached worktree is the documented way to rehearse merges, and it is not
@@ -528,8 +592,8 @@ Assert-Allow "test-writer may edit a test file on an agent branch" `
 Assert-Deny "test-writer denied on detached HEAD" `
     "test-writer-pretooluse.ps1" $testJson -Detached
 
-# Should ALLOW read tools
-Assert-Allow "test-writer can readFile" `
+# Read tools are outside the gate's remit
+Assert-Silent "test-writer can readFile" `
     "test-writer-pretooluse.ps1" `
     '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
 
@@ -554,7 +618,7 @@ Assert-Deny "refactorer denied on non-agent branch (file edit)" `
     "refactorer-pretooluse.ps1" `
     '{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}' -Branch 'dev'
 
-Assert-Allow "refactorer may edit an existing file on an agent branch" `
+Assert-Silent "refactorer may edit an existing file on an agent branch" `
     "refactorer-pretooluse.ps1" `
     '{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}' -Branch $agentBranch
 
@@ -562,12 +626,12 @@ Assert-Deny "refactorer denied on detached HEAD" `
     "refactorer-pretooluse.ps1" `
     '{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}' -Detached
 
-Assert-Allow "refactorer can readFile" `
+Assert-Silent "refactorer can readFile" `
     "refactorer-pretooluse.ps1" `
     '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
 
 # createAndRunTask is not a file creation
-Assert-Allow "refactorer can createAndRunTask" `
+Assert-Silent "refactorer can createAndRunTask" `
     "refactorer-pretooluse.ps1" `
     '{"tool_name":"createAndRunTask","tool_input":{"label":"test"}}'
 
@@ -588,13 +652,14 @@ Assert-ExitCode "credential URL exits 0 (advisory)" `
     '{"tool_name":"fetch","tool_input":{"url":"https://user:pass@example.com/api"}}' `
     0
 
-Assert-Allow "non-fetch tool ignored" `
+Assert-Silent "non-fetch tool ignored" `
     "researcher-pretooluse.ps1" `
     '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
 
 # The shape VS Code's fetch tool actually sends: `urls` (an array) beside
-# `query`. Assert-Allow cannot express these -- it counts '{}' as an allow,
-# which is exactly how an inert hook passed for as long as it did (issue #64).
+# `query`. These assert the explicit decision, because '{}' here would mean the
+# hook never examined the URLs -- which is how it stayed green for as long as
+# it did (issue #64).
 $fetchUrlsOk      = '{"tool_name":"fetch_webpage","tool_input":{"urls":["https://docs.python.org/3/library/os.html"],"query":"os.path"}}'
 $fetchUrlsUnknown = '{"tool_name":"fetch_webpage","tool_input":{"urls":["https://unlisted.example.com/x"],"query":"x"}}'
 $fetchUrlsMixed   = '{"tool_name":"fetch_webpage","tool_input":{"urls":["https://docs.python.org/3/library/os.html","https://unlisted.example.com/x"],"query":"x"}}'
@@ -657,7 +722,7 @@ Assert-ExitCode "clean file passes (exit 0)" `
     "scan-secrets.ps1" $cleanJson 0
 
 # Non-edit tool should be ignored
-Assert-Allow "non-edit tool ignored" `
+Assert-Silent "non-edit tool ignored" `
     "scan-secrets.ps1" `
     '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
 
