@@ -188,6 +188,40 @@ function Assert-True {
 Write-Output "=== Hook Integration Tests ==="
 Write-Output ""
 
+# ── 0. Harness self-check ────────────────────────────────────────────────
+#
+# A gate that cannot run and a gate with nothing to say produce the same
+# output: nothing. A harness that reads that silence as approval cannot fail
+# on an inert hook -- which is how #64 (wrong payload field, returned {} on
+# every real fetch) and #65 (unparsable, exited non-zero, printed nothing)
+# stayed green. Verify the instrument before trusting it to judge the hooks.
+
+Write-Output "## harness self-check"
+
+$decAllow = '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"safe"}}'
+$decDeny  = '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"blocked"}}'
+$decAsk   = '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"confirm"}}'
+
+Assert-True "explicit allow is an allow" `
+    ((Resolve-Decision $decAllow 0) -eq 'allow') "got: $(Resolve-Decision $decAllow 0)"
+Assert-True "deny is a deny" `
+    ((Resolve-Decision $decDeny 0) -eq 'deny') "got: $(Resolve-Decision $decDeny 0)"
+Assert-True "ask is an ask" `
+    ((Resolve-Decision $decAsk 0) -eq 'ask') "got: $(Resolve-Decision $decAsk 0)"
+
+# The three that used to be indistinguishable from an approval.
+Assert-True "an empty verdict is silence, not approval" `
+    ((Resolve-Decision '{}' 0) -eq 'silent') "got: $(Resolve-Decision '{}' 0)"
+Assert-True "no output at all is silence, not approval" `
+    ((Resolve-Decision '' 0) -eq 'silent') "got: $(Resolve-Decision '' 0)"
+Assert-True "a hook that exits non-zero has made no decision" `
+    ((Resolve-Decision '{}' 1) -eq 'error') "got: $(Resolve-Decision '{}' 1)"
+Assert-True "a crashing hook is not an approval" `
+    ((Resolve-Decision 'bash: line 3: syntax error near unexpected token' 0) -eq 'error') `
+    "got: $(Resolve-Decision 'bash: line 3: syntax error near unexpected token' 0)"
+
+Write-Output ""
+
 # ── 1. block-dangerous.ps1 ──────────────────────────────────────────────
 
 Write-Output "## block-dangerous.ps1"
@@ -279,7 +313,7 @@ Assert-Allow "separators inside quotes do not split" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"fix: a; b | c\""}}'
 
-Assert-Allow "non-terminal tool ignored" `
+Assert-Silent "non-terminal tool ignored" `
     "block-dangerous.ps1" `
     '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
 
@@ -357,8 +391,9 @@ Assert-Deny 'createAndRunTask: interactive input variable is denied' `
     '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"user-input","type":"shell","command":"echo","args":["${input:promptUser}"]}}}'
 
 # ── createAndRunTask shape: regression - legitimate curated invocations ────
-# These four scripts are the framework-approved entry points. They must ALLOW
-# (or defer to user, i.e. return {} which is allow-like).
+# These four scripts are the framework-approved entry points. The classifier
+# must recognise them and say so; falling through to {} would mean it never
+# reached a verdict on them.
 Assert-Allow "createAndRunTask: .github/scripts/run-tests.ps1 -Scope domain allows" `
     "block-dangerous.ps1" `
     '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"test-domain","type":"shell","command":".github/scripts/run-tests.ps1","args":["-Scope","domain"]}}}'
@@ -439,24 +474,26 @@ Assert-Deny "coordinator cannot createFile" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"createFile","tool_input":{"filePath":"src/new.py"}}'
 
-# Should ALLOW read/search/terminal
-Assert-Allow "coordinator can readFile" `
+# The delegation gate only ever objects; on anything it permits it returns {}
+# and the tool call proceeds under VS Code's own rules. Assert that silence
+# explicitly, so a hook that dies before reaching the gate cannot pass here.
+Assert-Silent "coordinator can readFile" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
 
-Assert-Allow "coordinator can searchCodebase" `
+Assert-Silent "coordinator can searchCodebase" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"searchCodebase","tool_input":{"query":"hello"}}'
 
-Assert-Allow "coordinator can listDirectory" `
+Assert-Silent "coordinator can listDirectory" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"listDirectory","tool_input":{"path":"src/"}}'
 
-Assert-Allow "coordinator can runInTerminal (git)" `
+Assert-Silent "coordinator can runInTerminal (git)" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"run_in_terminal","tool_input":{"command":"git status"}}'
 
-Assert-Allow "coordinator can getProblems" `
+Assert-Silent "coordinator can getProblems" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"problems","tool_input":{}}'
 
@@ -473,11 +510,11 @@ Assert-Deny "coordinator cannot py.test via terminal" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"run_in_terminal","tool_input":{"command":"py.test tests/domain/"}}'
 
-Assert-Allow "coordinator can run git via terminal" `
+Assert-Silent "coordinator can run git via terminal" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"run_in_terminal","tool_input":{"command":"git diff --stat"}}'
 
-Assert-Allow "coordinator can run non-test scripts via terminal" `
+Assert-Silent "coordinator can run non-test scripts via terminal" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"run_in_terminal","tool_input":{"command":".github/scripts/audit-tools.ps1"}}'
 
@@ -520,7 +557,7 @@ $testCreate = @{ tool_name = "createFile"; tool_input = @{ filePath = "tests/tes
 Assert-Deny "test-writer denied on non-agent branch (test file create)" `
     "test-writer-pretooluse.ps1" $testCreate -Branch 'dev'
 
-Assert-Allow "test-writer may edit a test file on an agent branch" `
+Assert-Silent "test-writer may edit a test file on an agent branch" `
     "test-writer-pretooluse.ps1" $testJson -Branch $agentBranch
 
 # A detached worktree is the documented way to rehearse merges, and it is not
@@ -528,8 +565,8 @@ Assert-Allow "test-writer may edit a test file on an agent branch" `
 Assert-Deny "test-writer denied on detached HEAD" `
     "test-writer-pretooluse.ps1" $testJson -Detached
 
-# Should ALLOW read tools
-Assert-Allow "test-writer can readFile" `
+# Read tools are outside the gate's remit
+Assert-Silent "test-writer can readFile" `
     "test-writer-pretooluse.ps1" `
     '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
 
@@ -554,7 +591,7 @@ Assert-Deny "refactorer denied on non-agent branch (file edit)" `
     "refactorer-pretooluse.ps1" `
     '{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}' -Branch 'dev'
 
-Assert-Allow "refactorer may edit an existing file on an agent branch" `
+Assert-Silent "refactorer may edit an existing file on an agent branch" `
     "refactorer-pretooluse.ps1" `
     '{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}' -Branch $agentBranch
 
@@ -562,12 +599,12 @@ Assert-Deny "refactorer denied on detached HEAD" `
     "refactorer-pretooluse.ps1" `
     '{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}' -Detached
 
-Assert-Allow "refactorer can readFile" `
+Assert-Silent "refactorer can readFile" `
     "refactorer-pretooluse.ps1" `
     '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
 
 # createAndRunTask is not a file creation
-Assert-Allow "refactorer can createAndRunTask" `
+Assert-Silent "refactorer can createAndRunTask" `
     "refactorer-pretooluse.ps1" `
     '{"tool_name":"createAndRunTask","tool_input":{"label":"test"}}'
 
@@ -588,7 +625,7 @@ Assert-ExitCode "credential URL exits 0 (advisory)" `
     '{"tool_name":"fetch","tool_input":{"url":"https://user:pass@example.com/api"}}' `
     0
 
-Assert-Allow "non-fetch tool ignored" `
+Assert-Silent "non-fetch tool ignored" `
     "researcher-pretooluse.ps1" `
     '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
 
@@ -657,7 +694,7 @@ Assert-ExitCode "clean file passes (exit 0)" `
     "scan-secrets.ps1" $cleanJson 0
 
 # Non-edit tool should be ignored
-Assert-Allow "non-edit tool ignored" `
+Assert-Silent "non-edit tool ignored" `
     "scan-secrets.ps1" `
     '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
 
