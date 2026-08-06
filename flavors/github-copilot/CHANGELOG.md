@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Task launches were never classified (issue #74).** `block-dangerous`
+  matched `createAndRunTask`; the tools VS Code actually sends are
+  `create_and_run_task` and `run_task`. The creation allowlist built in #56 —
+  bare binaries denied, interpreters checked by payload, OS-scope decoys
+  caught — had therefore never once run in production. It now matches the real
+  name, and its 25 existing cases are joined by three asserting the same
+  verdicts under it.
+
+  `run_task` was worse than misnamed: it was not classified at all. Its
+  payload is `{id, workspaceFolder}` — a name, and a name is not a command.
+  The command lives in the project's `.vscode/tasks.json`, so a task doing
+  `git push --force` launched with the classifier none the wiser. The gate now
+  reads the task back out of `tasks.json`, reconstructs a command line for
+  every scope (including `windows`/`linux`/`osx` overrides, which otherwise
+  let `command` stand as a decoy) and puts it through the same three tiers as
+  a terminal command.
+
+  The two checks are deliberately different in kind. **Creation** keeps the
+  allowlist: the agent is authoring the task, so it must point at a reviewed
+  script. **Execution** uses the blocklist: `tasks.json` is human-authored and
+  legitimately calls `git`, `pytest` and `databricks` directly, so an
+  allowlist there would deny nearly every real task. Both are checked because
+  the danger can enter at either point — a task can be smuggled into
+  `tasks.json` by a file edit that never touches the creation gate, and a task
+  that was acceptable when written may not be acceptable now, since policy,
+  protected branches and autonomy categories all move underneath it.
+
+  Anything unresolvable — no `tasks.json`, JSONC rather than strict JSON, an
+  unknown label, an `${input:}` variable, an `options.shell` override —
+  answers `ask` rather than staying silent. Per #68, silence is what a gate
+  that cannot judge and a gate with no objection have in common.
+
+  Residual gap, deliberately not closed here: a task carrying
+  `runOptions.runOn: folderOpen` that is written straight into `tasks.json` by
+  a file edit runs on the next folder open without passing either gate.
+  Guarding that means classifying partial edits to `tasks.json`, which is a
+  separate problem.
+
 - **The parse gate walked past a stray CR (issue #70).** `bash -n` accepts one:
   the script parses, and the `\r` becomes part of the last token on every line.
   On Linux `#!/usr/bin/env bash\r` is `bad interpreter` — the hook exits

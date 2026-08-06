@@ -1,5 +1,5 @@
 # PreToolUse hook: three-tier terminal command classifier (allow / ask / deny),
-# plus an allowlist classifier for task-shaped createAndRunTask payloads.
+# plus two task-launch classifiers (creation and execution).
 #
 # Tiers (runInTerminal shape):
 #   deny  -> hard-block destructive/irreversible commands (+ agent notice)
@@ -8,15 +8,29 @@
 #   ask   -> prompt for durable-change commands
 #   {}    -> defer to the user's approval settings (fail-safe default)
 #
-# createAndRunTask shape: the segment blocklist above does not apply. Instead,
-# task.command must resolve (after path normalisation) inside a directory
-# listed in AF_TASK_SCRIPT_DIRS -- a bare binary (git, ruff, pytest, ...) never
-# can, since it has no path segment to match, so the hard-deny tier is covered
-# as a consequence. See the $isTaskShaped block below.
+# A task is a second way to execute a command line, so it is classified twice,
+# at both points where the danger can enter (issue #74):
+#
+#   CREATION -- `create_and_run_task` (the agent authors the task). Allowlist:
+#     task.command must resolve (after path normalisation) inside a directory
+#     listed in AF_TASK_SCRIPT_DIRS -- a bare binary (git, ruff, pytest, ...)
+#     never can, since it has no path segment to match, so the hard-deny tier
+#     is covered as a consequence. See the $isTaskShaped block below.
+#
+#   EXECUTION -- `run_task` (a task already in .vscode/tasks.json runs). The
+#     payload carries only {id, workspaceFolder}: a name, not a command. The
+#     task is resolved out of tasks.json and its reconstructed command line is
+#     put through the SAME three tiers as a terminal command -- blocklist, not
+#     the creation allowlist, because tasks.json is human-authored and
+#     legitimately calls bare binaries. Checked separately from creation
+#     because a task that was acceptable when written may not be acceptable
+#     now: policy, protected branches and categories all move underneath it.
 #
 # Fail-safe: on any parse ambiguity or unexpected shape the hook returns {}
-# (prompt) -- it never accidentally auto-approves. The task-shaped allowlist
-# is stricter still: any unrecognised task shape denies (fail closed).
+# (prompt) -- it never accidentally auto-approves. The creation allowlist is
+# stricter still: any unrecognised task shape denies (fail closed). An
+# unresolvable run_task answers 'ask', never silence: silence is what a gate
+# that cannot run and a gate with nothing to say have in common (issue #68).
 
 $ErrorActionPreference = 'SilentlyContinue'
 
@@ -33,10 +47,14 @@ try {
     exit 0
 }
 
-# Only inspect terminal tool calls, or task-shaped createAndRunTask payloads.
+# Only inspect terminal tool calls, or the two task-launch tools.
+# `create_and_run_task` and `run_task` are the names VS Code actually sends;
+# the camelCase spellings never occur in a captured payload and are kept only
+# so a rename upstream degrades to a stale alias rather than to an inert gate.
 $toolName = $inputData.tool_name
-$isTaskShaped = ($toolName -eq 'createAndRunTask')
-if ($toolName -notmatch 'terminal|Terminal' -and -not $isTaskShaped) {
+$isTaskShaped = ($toolName -eq 'create_and_run_task' -or $toolName -eq 'createAndRunTask')
+$isTaskRun = ($toolName -eq 'run_task' -or $toolName -eq 'runTask')
+if ($toolName -notmatch 'terminal|Terminal' -and -not $isTaskShaped -and -not $isTaskRun) {
     Write-Output '{}'
     exit 0
 }
@@ -195,8 +213,10 @@ if ($isTaskShaped) {
 }
 
 # Extract the command string (runInTerminal / terminal shape only, from here).
+# For run_task the command is not in the payload at all -- it is resolved from
+# tasks.json further down, once Emit is defined.
 $command = [string]$inputData.tool_input.command
-if (-not $command) {
+if (-not $command -and -not $isTaskRun) {
     Write-Output '{}'
     exit 0
 }
@@ -290,6 +310,84 @@ function Emit([string]$decision, [string]$reason) {
 $denyTail = "The agent will not run this. If it is genuinely required, either (a) run it yourself " +
     "-- the agent can prepare the exact command for you to paste and execute -- or (b) make a conscious " +
     "decision to relax the autonomy policy in .github/af-env.conf."
+
+# ===========================================================================
+# run_task -- resolve the launch into a command line before classifying it.
+#
+# The payload names a task; a name is not a command. The command lives in the
+# project's .vscode/tasks.json, so it is read back here and every scope is
+# reconstructed into a command line. From that point on a task launch is
+# classified by exactly the same tiers as a terminal command -- which is the
+# point: `run_task` was a hole straight through the classifier.
+#
+# Anything that cannot be resolved answers 'ask', never silence. The gate says
+# "I could not judge this" instead of producing the same bytes as consent.
+# ===========================================================================
+if ($isTaskRun) {
+    $askTail = "The task launch could not be classified, so this needs a human decision. Check what the task runs in .vscode/tasks.json."
+    $wsFolder = [string]$inputData.tool_input.workspaceFolder
+    $taskId = [string]$inputData.tool_input.id
+    if (-not $wsFolder -or -not $taskId) {
+        Emit 'ask' "Unclassified task launch: the payload carries no workspaceFolder/id, so the task cannot be looked up. $askTail"
+    }
+    $tasksPath = Join-Path $wsFolder '.vscode/tasks.json'
+    if (-not (Test-Path $tasksPath)) {
+        Emit 'ask' "Unclassified task launch: no .vscode/tasks.json under '$wsFolder', so task '$taskId' cannot be resolved to a command. $askTail"
+    }
+    $tasksDoc = $null
+    try {
+        $tasksDoc = (Get-Content $tasksPath -Raw -ErrorAction Stop) | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        # tasks.json accepts JSONC in VS Code, so a comment or trailing comma
+        # parses here as nothing at all. Unreadable is not the same as safe.
+        Emit 'ask' "Unclassified task launch: .vscode/tasks.json is not strict JSON (comments or trailing commas), so task '$taskId' cannot be resolved. $askTail"
+    }
+    # VS Code addresses a task as '{type}: {label}' -- captured ids look like
+    # 'shell: tests: all'. Only the first type prefix is stripped; the label
+    # itself may contain a colon.
+    $bareId = $taskId -replace '^[A-Za-z]+:\s+', ''
+    $taskDef = $null
+    foreach ($t in @($tasksDoc.tasks)) {
+        if (-not $t) { continue }
+        $lbl = [string]$t.label
+        if ($lbl -and ($lbl -eq $taskId -or $lbl -eq $bareId)) { $taskDef = $t; break }
+    }
+    if (-not $taskDef) {
+        Emit 'ask' "Unclassified task launch: no task labelled '$bareId' in .vscode/tasks.json. $askTail"
+    }
+    # Variables whose value is produced elsewhere (a prompt, a VS Code command,
+    # a setting) hide the payload from the classifier.
+    $taskText = $taskDef | ConvertTo-Json -Depth 10 -Compress
+    foreach ($v in @('${input:', '${command:', '${config:')) {
+        if ($taskText.Contains($v)) {
+            Emit 'ask' "Unclassified task launch: task '$bareId' contains a '$v...}' variable, so its effective command line is not visible here. $askTail"
+        }
+    }
+    # An OS-specific scope overrides the task scope, so every variant present
+    # must be classified -- reading only `command` classifies a decoy.
+    $runScopes = @($taskDef)
+    foreach ($os in @('windows', 'linux', 'osx')) {
+        if ($taskDef.$os) { $runScopes += $taskDef.$os }
+    }
+    $cmdLines = @()
+    foreach ($o in $runScopes) {
+        if ($o.options -and $o.options.shell) {
+            Emit 'ask' "Unclassified task launch: task '$bareId' overrides options.shell, which moves the executed payload into the shell's own arguments where it cannot be classified. $askTail"
+        }
+        $c = if ($o.command) { [string]$o.command } else { [string]$taskDef.command }
+        $a = if ($null -ne $o.args) { $o.args } else { $taskDef.args }
+        if (-not $c) { continue }
+        $line = if ($a) { ($c + ' ' + ((@($a) | ForEach-Object { [string]$_ }) -join ' ')) } else { $c }
+        $cmdLines += $line.Trim()
+    }
+    $cmdLines = @($cmdLines | Where-Object { $_ })
+    if ($cmdLines.Count -eq 0) {
+        Emit 'ask' "Unclassified task launch: task '$bareId' declares no command (composite or extension-provided task). $askTail"
+    }
+    # Newline-joined: the deny tier scans the whole string and the allow tier
+    # splits on newlines, so every scope must clear the bar independently.
+    $command = $cmdLines -join "`n"
+}
 
 # ===========================================================================
 # TIER 1 -- DENY (hard, level-independent). Checked first.
