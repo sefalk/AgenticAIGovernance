@@ -486,6 +486,86 @@ Assert-Allow "createAndRunTask: workspace-folder path variable allows" `
     "block-dangerous.ps1" `
     '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"wsvar","type":"shell","command":"${workspaceFolder}/.github/scripts/run-tests.ps1","args":["-Scope","domain"]}}}'
 
+# ── the real creation tool name (issue #74) ────────────────────────────────
+# Every case above uses `createAndRunTask`, a name VS Code never sends: the
+# tool is `create_and_run_task`. The gate above was therefore inert in
+# production -- the same defect as issue #69, in a different gate.
+Assert-Deny "create_and_run_task: force push is denied (real tool name)" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"push","type":"shell","command":"git","args":["push","--force","origin","main"]},"workspaceFolder":"/repo"}}'
+
+Assert-Deny "create_and_run_task: bare binary is denied (real tool name)" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"lint","type":"shell","command":"ruff","args":["check","src/"]},"workspaceFolder":"/repo"}}'
+
+Assert-Allow "create_and_run_task: reviewed script allows (real tool name)" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"test","type":"shell","command":".github/scripts/run-tests.ps1","args":["-Scope","domain"]},"workspaceFolder":"/repo"}}'
+
+# ── run_task: classification at EXECUTION time (issue #74) ─────────────────
+# `run_task` carries only {id, workspaceFolder} -- the command lives in the
+# project's .vscode/tasks.json. Without resolving it the launch is unclassified:
+# the payload names a task, and a name is not a command. Execution is checked
+# separately from creation because a task that was acceptable when it was
+# written may not be acceptable now (policy, protected branches, categories).
+#
+# Blocklist semantics here, not the creation allowlist: tasks.json is
+# human-authored and legitimately calls bare binaries (git, pytest, databricks).
+function New-TasksFixture {
+    param([string]$TasksJson)
+    $dir = Join-Path ([System.IO.Path]::GetTempPath()) "af-tasks-$(Get-Random)"
+    New-Item -ItemType Directory -Path (Join-Path $dir '.vscode') -Force | Out-Null
+    Set-Content -Path (Join-Path $dir '.vscode/tasks.json') -Value $TasksJson -Encoding UTF8
+    return $dir
+}
+
+function Assert-RunTask {
+    param([string]$TestName, [string]$Expected, [string]$TasksJson, [string]$Id, [switch]$NoTasksFile)
+    $dir = Join-Path ([System.IO.Path]::GetTempPath()) "af-tasks-$(Get-Random)"
+    if ($NoTasksFile) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    else { $dir = New-TasksFixture $TasksJson }
+    try {
+        $payload = @{
+            tool_name  = 'run_task'
+            tool_input = @{ id = $Id; workspaceFolder = $dir }
+        } | ConvertTo-Json -Depth 5 -Compress
+        Assert-Decision -TestName $TestName -Expected $Expected -Script 'block-dangerous.ps1' -Json $payload
+    } finally {
+        Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+$tasksForcePush = '{"version":"2.0.0","tasks":[{"label":"push it","type":"shell","command":"git","args":["push","--force","origin","main"]}]}'
+$tasksStatus    = '{"version":"2.0.0","tasks":[{"label":"git: status","type":"shell","command":"git","args":["status"]}]}'
+$tasksRemove    = '{"version":"2.0.0","tasks":[{"label":"clean","type":"shell","command":"rm","args":["-rf","/tmp/data"]}]}'
+$tasksOverride  = '{"version":"2.0.0","tasks":[{"label":"build","type":"shell","command":"git","args":["status"],"windows":{"command":"git","args":["reset","--hard","HEAD~1"]}}]}'
+
+Assert-RunTask "run_task: task whose command force-pushes is denied" `
+    'deny' $tasksForcePush 'push it'
+
+# VS Code addresses a task as '{type}: {label}', not by the bare label -- the
+# captured ids look like 'shell: tests: all'. Matching only the bare label
+# would leave every real launch unresolved.
+Assert-RunTask "run_task: 'shell: ' id prefix still resolves the task" `
+    'deny' $tasksRemove 'shell: clean'
+
+# The effective command is not always `command`: an OS scope overrides it.
+Assert-RunTask "run_task: dangerous OS-scope override is denied" `
+    'deny' $tasksOverride 'shell: build'
+
+# False deny costs as much as a false allow. A read-only task must still run.
+Assert-RunTask "run_task: read-only git task is allowed" `
+    'allow' $tasksStatus 'shell: git: status'
+
+# Unresolvable is not safe -- but it is not proof of danger either. `ask` is
+# the honest verdict: the gate says it could not judge, rather than staying
+# silent and letting that silence read as approval (issue #68).
+Assert-RunTask "run_task: unknown task id asks" `
+    'ask' $tasksStatus 'shell: does-not-exist'
+
+Assert-RunTask "run_task: missing tasks.json asks" `
+    'ask' '' 'shell: anything' -NoTasksFile
+
 Write-Output ""
 
 # ── 2. coordinator-pretooluse.ps1 ────────────────────────────────────────
