@@ -28,6 +28,13 @@ $script:passed = 0
 $script:failed = 0
 $script:errors = @()
 
+function Invoke-HookScript {
+    param([string]$HookPath, [string]$JsonInput)
+    $output = $JsonInput | powershell -NoProfile -ExecutionPolicy Bypass -File $HookPath 2>&1
+    $exitCode = $LASTEXITCODE
+    return @{ Output = ($output | Out-String).Trim(); ExitCode = $exitCode }
+}
+
 function Invoke-Hook {
     param(
         [string]$Script,
@@ -40,12 +47,7 @@ function Invoke-Hook {
         throw "Hook not found: $hookPath"
     }
     if (-not $Branch -and -not $Detached) {
-        # Pipe JSON to the hook script via stdin
-        $output = $JsonInput | powershell -NoProfile -ExecutionPolicy Bypass -File $hookPath 2>&1
-        $exitCode = $LASTEXITCODE
-        # Parse output
-        $text = ($output | Out-String).Trim()
-        return @{ Output = $text; ExitCode = $exitCode }
+        return (Invoke-HookScript -HookPath $hookPath -JsonInput $JsonInput)
     }
     return (Invoke-HookInFixture -HookPath $hookPath -Script $Script -JsonInput $JsonInput -Branch $Branch -Detached:$Detached)
 }
