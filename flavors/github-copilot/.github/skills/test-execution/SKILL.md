@@ -139,6 +139,14 @@ other scope data is preserved.
 
 The test log is the source of truth for cross-agent test visibility.
 
+**Never accept an entry with `"status": "error"` as evidence.** That status
+means the runner itself failed — wrong interpreter, missing dependency, usage
+error, nothing collected — and no test was executed. Such an entry carries
+`passed`/`failed`/`errors` as `null`, never `0`, precisely so that a run which
+never happened cannot be read as a green one. Its `error_message` field holds
+the interpreter's own words. Fix the runner and re-run the scope; do not report
+the scope as passing and do not skip the run.
+
 ## Direct Invocation (terminal-capable agents only)
 
 ```bash

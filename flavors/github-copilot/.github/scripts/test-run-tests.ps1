@@ -199,9 +199,73 @@ for a in sys.argv[1:]:
         $details['E_failed_run_marked_as_error'] = "status=$($entry.status)"
 
         # F: the underlying cause is visible to the caller instead of being
-        #    swallowed by the stderr redirect.
-        $results['F_runner_failure_surfaced_to_console'] = ($runnerTxt -match 'pytest' -and $runnerTxt -match 'ERROR')
+        #    swallowed by the stderr redirect. Asserting the interpreter's own
+        #    words, not just "an error happened" -- a generic match would also
+        #    pass if stderr were still discarded.
+        $results['F_runner_failure_surfaced_to_console'] =
+            ($runnerTxt -match 'ERROR: pytest did not run') -and ($runnerTxt -match 'No module named')
         $details['F_runner_failure_surfaced_to_console'] = ($runnerTxt -replace '\s+', ' ').Trim()
+    }
+
+    # ---------------------------------------------------------------------
+    # G: end-to-end success path through the real script. A fake pytest module
+    #    inside the fixture venv records the argument vector it received and
+    #    prints a summary line. This proves three things at once that the
+    #    isolated checks above cannot: the scope path arrives intact through
+    #    the production code, the new stderr redirect did not break stdout
+    #    capture, and a genuine run is still recorded as status=ok.
+    # ---------------------------------------------------------------------
+    $ws2 = New-SpacedFixture 'ok'; $fixtures += $ws2
+    New-Item -ItemType Directory -Path (Join-Path $ws2 '.github/scripts') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $ws2 'tests') -Force | Out-Null
+    Copy-Item $runTestsPs1 (Join-Path $ws2 '.github/scripts/run-tests.ps1')
+    Invoke-Py @('-m', 'venv', '--without-pip', (Join-Path $ws2 '.venv')) *> $null
+    $fxPython2 = Join-Path $ws2 '.venv/Scripts/python.exe'
+    if (-not (Test-Path $fxPython2)) { $fxPython2 = Join-Path $ws2 '.venv/bin/python' }
+
+    $sitePkgs = $null
+    if (Test-Path $fxPython2) {
+        $sitePkgs = (& $fxPython2 -c "import sysconfig; print(sysconfig.get_paths()['purelib'])" 2>$null)
+    }
+    if (-not $sitePkgs -or -not (Test-Path $sitePkgs)) {
+        foreach ($k in @('G_success_path_argv_intact', 'G_success_path_recorded_as_ok')) {
+            $results[$k] = $false; $details[$k] = 'fake-pytest fixture could not be created'
+        }
+    } else {
+        $fakePkg = Join-Path $sitePkgs 'pytest'
+        New-Item -ItemType Directory -Path $fakePkg -Force | Out-Null
+        Set-Content -Path (Join-Path $fakePkg '__init__.py') -Value '' -Encoding ascii
+        Set-Content -Path (Join-Path $fakePkg '__main__.py') -Encoding ascii -Value @'
+import json, os, sys
+with open(os.environ['AF_FAKE_PYTEST_ARGV'], 'w') as fh:
+    json.dump(sys.argv[1:], fh)
+print('3 passed in 0.42s')
+'@
+        $argvOut = Join-Path $ws2 'received-argv.json'
+        $env:AF_FAKE_PYTEST_ARGV = $argvOut
+        try {
+            & (Join-Path $ws2 '.github/scripts/run-tests.ps1') -Scope all *> $null
+        } finally {
+            Remove-Item Env:AF_FAKE_PYTEST_ARGV -ErrorAction SilentlyContinue
+        }
+
+        # Explicit cast: ConvertFrom-Json emits a JSON array as a single object
+        # in PS 5.1, so @(...) would wrap it instead of unrolling it.
+        $recv = @()
+        if (Test-Path $argvOut) { $recv = [string[]](Get-Content $argvOut -Raw | ConvertFrom-Json) }
+        $wantPath = (Join-Path $ws2 'tests')
+        $results['G_success_path_argv_intact'] =
+            ($recv.Count -ge 4) -and ($recv[0] -eq $wantPath) -and ($recv -contains '--no-header')
+        $details['G_success_path_argv_intact'] = "received=[$($recv -join ' | ')]"
+
+        $entry2 = $null
+        $log2 = Join-Path $ws2 '.github/test-log.json'
+        if (Test-Path $log2) {
+            try { $entry2 = (Get-Content $log2 -Raw | ConvertFrom-Json).all } catch { $entry2 = $null }
+        }
+        $results['G_success_path_recorded_as_ok'] =
+            ($null -ne $entry2) -and ($entry2.status -eq 'ok') -and ($entry2.passed -eq 3) -and ($entry2.exit_code -eq 0)
+        $details['G_success_path_recorded_as_ok'] = "status=$($entry2.status) passed=$($entry2.passed) exit_code=$($entry2.exit_code)"
     }
 }
 finally {
