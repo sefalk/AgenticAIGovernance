@@ -69,3 +69,79 @@ function Find-AfPython {
 }
 
 $script:AfPython = Find-AfPython
+
+# ── Write-tool classification ────────────────────────────────────────────
+#
+# Which tool calls write to the workspace, and where they keep their paths.
+#
+# The names below were read out of captured PreToolUse payloads, not out of
+# tool documentation (issue #69). Every file gate in this directory used to
+# match camelCase names -- editFiles, createFile, createDirectory -- that no
+# client has ever sent. The gates therefore returned {} on every write and
+# nobody noticed, because {} is also what a gate says when it approves.
+#
+# Observed names: create_file, replace_string_in_file,
+# multi_replace_string_in_file. The camelCase spellings are kept so a client
+# that does send them is still judged rather than waved through.
+$script:AfWriteToolNames = @(
+    'create_file'
+    'replace_string_in_file'
+    'multi_replace_string_in_file'
+    'create_directory'
+    'edit_notebook_file'
+    'create_new_jupyter_notebook'
+    'editFiles', 'editFile', 'createFile', 'createDirectory', 'createDir'
+    'editNotebook', 'writeFile', 'applyPatch', 'insertEdit'
+)
+
+function Test-AfWriteTool {
+    <#
+    .SYNOPSIS
+        True if the tool call modifies files or directories in the workspace.
+    #>
+    param([string]$ToolName)
+
+    if (-not $ToolName) { return $false }
+    if ($script:AfWriteToolNames -contains $ToolName) { return $true }
+
+    # An exact list cannot recognise a tool that does not exist yet, and a
+    # gate that has never heard of a tool fails open -- the #69 defect again.
+    # A verb that denotes writing plus a noun that denotes a file is enough
+    # to take the call seriously. `read_file` carries no verb and
+    # `create_and_run_task` carries no file noun, so neither is caught here.
+    if ($ToolName -match '(create|write|edit|insert|apply|replace)' -and
+        $ToolName -match '(file|notebook|dir)') {
+        return $true
+    }
+    return $false
+}
+
+function Get-AfWritePaths {
+    <#
+    .SYNOPSIS
+        Every workspace path a write-tool payload refers to.
+    .DESCRIPTION
+        Flat payloads keep their path in `filePath`. `multi_replace_string_in_file`
+        keeps none at the top level -- its paths sit in `replacements[].filePath`,
+        the same one-level-down shape that made the researcher's URL gate inert
+        in #64. A gate that only reads the flat key sees an empty batch edit.
+    #>
+    param($ToolInput)
+
+    $paths = New-Object System.Collections.Generic.List[string]
+    if (-not $ToolInput) { return @() }
+
+    foreach ($key in @('filePath', 'path', 'dirPath', 'notebookUri', 'uri')) {
+        $value = $ToolInput.$key
+        if ($value -is [string] -and $value) { $paths.Add($value) }
+    }
+
+    if ($ToolInput.replacements) {
+        foreach ($replacement in @($ToolInput.replacements)) {
+            $value = $replacement.filePath
+            if ($value -is [string] -and $value) { $paths.Add($value) }
+        }
+    }
+
+    return @($paths | Select-Object -Unique)
+}
