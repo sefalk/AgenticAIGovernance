@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The deny gate read quoted data as commands (issue #62).** Deny rules were
+  matched against the raw command line, so text an agent was merely *passing*
+  became text the gate believed it was *running*. Three false denies in one
+  session: a read-only probe whose JSON test data contained
+  `Remove-Item -Recurse -Force`, the same harness carrying a force-push string
+  as a fixture, and — the one that cost real work — `git add <file> ;
+  git commit -m "…the negated guard sm --force…"`. That last one is the worst
+  shape of the bug: `(\S+\s+)*` in the `git add --force` rule happily matched
+  across the `;`, joining a genuine `git add` in one statement to prose in the
+  next. The commit message had to be reworded to get past a gate that was
+  objecting to a description of itself.
+
+  A false deny is not a harmless over-reaction. It teaches the agent that the
+  gate is noise, and it pushes work back to the human for no security gain —
+  the same currency a false allow spends, paid in the other direction.
+
+  The fix is a change of unit, not of thresholds: the command line is split
+  into statements, and each statement is scanned on its own, so no rule can
+  span a separator. Quoted text is dropped only where it is unambiguously
+  prose — the arguments of `echo`/`printf`/`Write-*` and of
+  `git commit|tag|notes|stash`, and a segment that is nothing but a quoted
+  literal (the JSON-on-stdin case). Stripping quotes globally would have been
+  the wrong fix, because the payload of `bash -c "…"` lives inside quotes and
+  *is* executed: those payloads are instead promoted to scan units of their
+  own, which also closes an evasion the raw scan had all along —
+  `powershell -Command "git add -A"` never matched `-A(\s|$)` while the closing
+  quote was still glued to the argument. Quotes lose their protection entirely
+  once they contain `$(` or a backtick, since the shell executes inside them.
+  Three rules stay scoped to the whole line because they are about structure
+  rather than a statement: pipe-to-shell, `DROP TABLE`, `TRUNCATE TABLE`.
+
+  Both hooks were changed in lockstep, and twelve cases in each harness pin the
+  three reported false denies alongside the payload promotions. Mutation runs
+  confirm they bind to the gate: reverting to a raw scan reddens the four
+  false-deny cases, disabling payload promotion reddens the two promotion cases.
+
 - **The default test scope ran no tests, and reported it as green (issue #73).**
   `$scopeMap['all']` was the only entry carrying a trailing separator.
   `Join-Path` normalises `tests/` to `…\tests\`; because the workspace path
