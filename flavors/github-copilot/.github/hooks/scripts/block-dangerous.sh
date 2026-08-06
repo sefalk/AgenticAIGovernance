@@ -1,16 +1,29 @@
 #!/usr/bin/env bash
 # PreToolUse hook: three-tier terminal command classifier (allow / ask / deny),
-# plus an allowlist classifier for task-shaped createAndRunTask payloads.
+# plus two task-launch classifiers (creation and execution).
 #
 # Tiers (runInTerminal shape): deny (hard-block), allow (auto-approve safe),
 # ask (confirm durable change), {} (defer to user settings -- fail-safe
 # default).
 #
-# createAndRunTask shape: the segment blocklist above does not apply. Instead,
-# task.command must resolve (after path normalisation) inside a directory
-# listed in AF_TASK_SCRIPT_DIRS -- a bare binary (git, ruff, pytest, ...) never
-# can, since it has no path segment to match, so the hard-deny tier is covered
-# as a consequence. Any unrecognised task shape denies (fail closed).
+# A task is a second way to execute a command line, so it is classified twice,
+# at both points where the danger can enter (issue #74):
+#
+#   CREATION -- create_and_run_task (the agent authors the task). Allowlist:
+#     task.command must resolve (after path normalisation) inside a directory
+#     listed in AF_TASK_SCRIPT_DIRS -- a bare binary (git, ruff, pytest, ...)
+#     never can, since it has no path segment to match, so the hard-deny tier
+#     is covered as a consequence. Any unrecognised task shape denies.
+#
+#   EXECUTION -- run_task (a task already in .vscode/tasks.json runs). The
+#     payload carries only {id, workspaceFolder}: a name, not a command. The
+#     task is resolved out of tasks.json and its reconstructed command line is
+#     put through the SAME three tiers as a terminal command -- blocklist, not
+#     the creation allowlist, because tasks.json is human-authored and
+#     legitimately calls bare binaries. Checked separately from creation
+#     because a task that was acceptable when written may not be acceptable
+#     now: policy, protected branches and categories all move underneath it.
+#     Anything unresolvable answers ask, never silence (issue #68).
 
 # Root, config and interpreter come from this script's location, never from
 # the cwd the agent happens to run in (issue #54). AF_PYTHON is probed, not
@@ -29,13 +42,17 @@ fi
 
 tool_name=$(echo "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_name',''))" 2>/dev/null)
 
+# create_and_run_task and run_task are the names VS Code actually sends; the
+# camelCase spellings never occur in a captured payload and are kept only so a
+# rename upstream degrades to a stale alias rather than to an inert gate.
 case "$tool_name" in
     *terminal*|*Terminal*) ;;
-    createAndRunTask) ;;
+    create_and_run_task|createAndRunTask) ;;
+    run_task|runTask) ;;
     *) echo '{}'; exit 0 ;;
 esac
 
-if [ "$tool_name" = "createAndRunTask" ]; then
+if [ "$tool_name" = "createAndRunTask" ] || [ "$tool_name" = "create_and_run_task" ]; then
     # ------------------------------------------------------------------
     # createAndRunTask allowlist -- mirrors block-dangerous.ps1. A task's
     # `command` must resolve, after path normalisation, inside one of the
@@ -208,7 +225,12 @@ fi
 
 command_str=$(echo "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_input',{}).get('command',''))" 2>/dev/null)
 
-if [ -z "$command_str" ]; then
+# For run_task the command is not in the payload at all -- it is resolved from
+# tasks.json further down, once emit() is defined.
+is_task_run=0
+case "$tool_name" in run_task|runTask) is_task_run=1 ;; esac
+
+if [ -z "$command_str" ] && [ "$is_task_run" -eq 0 ]; then
     echo '{}'
     exit 0
 fi
@@ -264,6 +286,114 @@ emit() {
 EOF
     exit 0
 }
+
+# ===================== run_task -- resolve before classifying ===============
+# The payload names a task; a name is not a command. The command lives in the
+# project .vscode/tasks.json, so it is read back here and every scope is
+# reconstructed into a command line. From that point on a task launch is
+# classified by exactly the same tiers as a terminal command -- which is the
+# point: run_task was a hole straight through the classifier. Anything that
+# cannot be resolved answers ask, never silence: the gate says it could not
+# judge instead of producing the same bytes as consent (issue #68).
+# The JSON walk is delegated to Python (already a hard dependency here).
+if [ "$is_task_run" -eq 1 ]; then
+    task_run_out=$(printf '%s' "$raw" | "$PYTHON" -c '
+import sys, json, os, re
+
+tail = "The task launch could not be classified, so this needs a human decision. Check what the task runs in .vscode/tasks.json."
+
+def ask(msg):
+    print("ASK|Unclassified task launch: " + msg + " " + tail)
+    sys.exit(0)
+
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    ask("the payload is not valid JSON, so the task cannot be looked up.")
+
+ti = data.get("tool_input") or {}
+ws = str(ti.get("workspaceFolder") or "")
+tid = str(ti.get("id") or "")
+if not ws or not tid:
+    ask("the payload carries no workspaceFolder/id, so the task cannot be looked up.")
+
+path = os.path.join(ws, ".vscode", "tasks.json")
+if not os.path.isfile(path):
+    ask("no .vscode/tasks.json under " + ws + ", so task " + tid + " cannot be resolved to a command.")
+try:
+    fh = open(path, "r", encoding="utf-8-sig")
+    doc = json.load(fh)
+    fh.close()
+except Exception:
+    # tasks.json accepts JSONC in VS Code, so a comment or trailing comma
+    # parses here as nothing at all. Unreadable is not the same as safe.
+    ask(".vscode/tasks.json is not strict JSON (comments or trailing commas), so task " + tid + " cannot be resolved.")
+
+# VS Code addresses a task as {type}: {label} -- captured ids look like
+# shell: tests: all. Only the first type prefix is stripped; the label itself
+# may contain a colon.
+bare = re.sub(r"^[A-Za-z]+:\s+", "", tid)
+task = None
+for t in (doc.get("tasks") or []):
+    if isinstance(t, dict) and str(t.get("label", "")) in (tid, bare):
+        task = t
+        break
+if task is None:
+    ask("no task labelled " + bare + " in .vscode/tasks.json.")
+
+# Variables whose value is produced elsewhere (a prompt, a VS Code command, a
+# setting) hide the payload from the classifier.
+text = json.dumps(task)
+for v in ("${input:", "${command:", "${config:"):
+    if v in text:
+        ask("task " + bare + " contains a " + v + "...} variable, so its effective command line is not visible here.")
+
+# An OS-specific scope overrides the task scope, so every variant present must
+# be classified -- reading only command classifies a decoy.
+scopes = [task]
+for o in ("windows", "linux", "osx"):
+    if isinstance(task.get(o), dict):
+        scopes.append(task[o])
+
+lines = []
+for o in scopes:
+    opts = o.get("options")
+    if isinstance(opts, dict) and opts.get("shell"):
+        ask("task " + bare + " overrides options.shell, which moves the executed payload into the shell arguments where it cannot be classified.")
+    c = o.get("command") or task.get("command")
+    a = o.get("args") if o.get("args") is not None else task.get("args")
+    if not c:
+        continue
+    line = str(c)
+    if a:
+        line = line + " " + " ".join([str(x) for x in a])
+    line = line.strip()
+    if line:
+        lines.append(line)
+if not lines:
+    ask("task " + bare + " declares no command (composite or extension-provided task).")
+
+# Newline-joined: the deny tier scans line by line and the allow tier splits on
+# newlines, so every scope must clear the bar independently.
+print("CMD")
+print("\n".join(lines))
+' 2>/dev/null)
+    task_run_head=$(printf '%s\n' "$task_run_out" | head -n 1)
+    case "$task_run_head" in
+        CMD)
+            command_str=$(printf '%s\n' "$task_run_out" | tail -n +2)
+            ;;
+        ASK*)
+            emit ask "${task_run_head#ASK|}"
+            ;;
+        *)
+            emit ask "Unclassified task launch: the task could not be resolved to a command line. This needs a human decision. Check what the task runs in .vscode/tasks.json."
+            ;;
+    esac
+    if [ -z "$command_str" ]; then
+        emit ask "Unclassified task launch: the resolved task command line is empty. This needs a human decision. Check what the task runs in .vscode/tasks.json."
+    fi
+fi
 
 # Patterns are passed after -e: a pattern starting with a dash (e.g.
 # --no-verify) would otherwise be parsed as a grep option, and the failing

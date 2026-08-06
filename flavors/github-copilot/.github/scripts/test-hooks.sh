@@ -265,6 +265,72 @@ PROBE
     rm -rf "$fx" "$elsewhere" "$stub"
 fi
 
+# --- Task launch classification (issue #74) --------------------------------
+#
+# A task is a second way to execute a command line. The gate used to match
+# `createAndRunTask`, a name VS Code never sends, and `run_task` was not
+# classified at all -- its payload carries only {id, workspaceFolder}, and a
+# name is not a command.
+
+echo "## block-dangerous.sh task launches"
+
+# The tool name VS Code actually sends for task creation.
+run_case "create_and_run_task: force push is denied (real tool name)" \
+    block-dangerous.sh agent/x \
+    '{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"push","type":"shell","command":"git","args":["push","--force","origin","main"]},"workspaceFolder":"/repo"}}' \
+    deny
+
+# Under Git Bash the hook's Python is a Windows interpreter, which cannot
+# resolve a /tmp-style path. Handing it the native spelling keeps the fixture
+# path an input of the test rather than a platform accident.
+ws_native() {
+    if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
+}
+
+make_tasks_ws() {
+    # $1 = tasks.json content; echoes the native workspace-folder path
+    local d
+    d=$(mktemp -d)
+    mkdir -p "$d/.vscode"
+    printf '%s' "$1" > "$d/.vscode/tasks.json"
+    printf '%s' "$d"
+}
+
+TASKS_FORCE_PUSH='{"version":"2.0.0","tasks":[{"label":"push it","type":"shell","command":"git","args":["push","--force","origin","main"]}]}'
+TASKS_STATUS='{"version":"2.0.0","tasks":[{"label":"git: status","type":"shell","command":"git","args":["status"]}]}'
+
+# VS Code addresses a task as '{type}: {label}' -- captured ids look like
+# 'shell: tests: all'. Matching only the bare label would leave every real
+# launch unresolved.
+ws_dir=$(make_tasks_ws "$TASKS_FORCE_PUSH")
+run_case "run_task: task whose command force-pushes is denied" \
+    block-dangerous.sh agent/x \
+    "{\"tool_name\":\"run_task\",\"tool_input\":{\"id\":\"shell: push it\",\"workspaceFolder\":\"$(ws_native "$ws_dir")\"}}" \
+    deny
+rm -rf "$ws_dir"
+
+# False deny costs as much as a false allow: it pushes agents back to the
+# terminal, which is the surface the gate exists to keep them off.
+ws_dir=$(make_tasks_ws "$TASKS_STATUS")
+run_case "run_task: read-only git task is allowed" \
+    block-dangerous.sh agent/x \
+    "{\"tool_name\":\"run_task\",\"tool_input\":{\"id\":\"shell: git: status\",\"workspaceFolder\":\"$(ws_native "$ws_dir")\"}}" \
+    allow
+
+# Unresolvable is not safe -- but it is not proof of danger either. 'ask' is
+# the honest verdict: the gate says it could not judge, rather than staying
+# silent and letting that silence read as approval (issue #68).
+run_case "run_task: unknown task id asks" \
+    block-dangerous.sh agent/x \
+    "{\"tool_name\":\"run_task\",\"tool_input\":{\"id\":\"shell: does-not-exist\",\"workspaceFolder\":\"$(ws_native "$ws_dir")\"}}" \
+    ask
+rm -rf "$ws_dir"
+
+run_case "run_task: missing tasks.json asks" \
+    block-dangerous.sh agent/x \
+    '{"tool_name":"run_task","tool_input":{"id":"shell: anything","workspaceFolder":"/nonexistent-workspace-af"}}' \
+    ask
+
 # --- Parse gate ------------------------------------------------------------
 #
 # A hook that dies at parse time produces no output, and no output is
