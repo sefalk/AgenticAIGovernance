@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The parse gate walked past a stray CR (issue #70).** `bash -n` accepts one:
+  the script parses, and the `\r` becomes part of the last token on every line.
+  On Linux `#!/usr/bin/env bash\r` is `bad interpreter` — the hook exits
+  non-zero having printed nothing, which per #68 is indistinguishable from
+  approval. Both harnesses now assert that no shipped shell script carries a
+  CR, across `hooks/scripts/*.sh`, `scripts/*.sh` and the extensionless
+  `hooks/git/pre-commit` shim; four of the five drifted files sat outside
+  `hooks/scripts/`, which is all the parse gate had been looking at.
+
+  The issue's other two asks turned out to be already satisfied, which was
+  worth testing rather than accepting: the git blobs were always LF,
+  `.gitattributes` already pinned `*.sh text eol=lf`, and `deploy.ps1` stopped
+  copying bytes for text files when EOL/BOM parity landed — `Copy-Item`
+  survives only where UTF-8 decoding fails, i.e. binary assets. A real deploy
+  from a checkout containing five CRLF sources emitted 22 `.sh` files with zero
+  CRs. The deployed copy was already protected twice over; what was missing was
+  anything that made the drift visible.
+
 - **Every write gate matched tool names VS Code never sends (issue #69).** #64
   was one hook reading `url` where the tool sends `urls`. This asked whether
   that was a mistake or a habit, against 1935 hook invocations recorded in the

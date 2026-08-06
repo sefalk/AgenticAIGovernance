@@ -288,6 +288,25 @@ else
     assert_true "every shipped bash hook parses" 0 "bash -n failed:$unparsable"
 fi
 
+# `bash -n` accepts a stray CR: it parses, then carries the \r into the last
+# token of every line. On Linux `#!/usr/bin/env bash\r` is `bad interpreter` and
+# the hook exits non-zero having printed nothing -- silence, which reads as
+# consent. The deploy paths canonicalize to LF on write; this guards the source
+# before that safety net rather than instead of it.
+crlf_files=""
+for f in "$HOOK_DIR"/*.sh "$SCRIPT_DIR"/*.sh "$GITHUB_DIR"/hooks/git/pre-commit; do
+    [ -f "$f" ] || continue
+    if grep -qU $'\r' "$f" 2>/dev/null; then
+        crlf_files="$crlf_files $(basename "$f")"
+    fi
+done
+
+if [ -z "$crlf_files" ]; then
+    assert_true "no shipped shell script carries a CR" 1
+else
+    assert_true "no shipped shell script carries a CR" 0 "CRLF in:$crlf_files"
+fi
+
 echo ""
 echo "=== Summary ==="
 echo "  Passed: $pass"
