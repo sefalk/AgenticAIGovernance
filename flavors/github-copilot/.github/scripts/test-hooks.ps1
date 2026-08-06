@@ -90,71 +90,71 @@ function Invoke-HookInFixture {
     }
 }
 
-function Assert-Deny {
-    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch, [switch]$Detached)
+# The single place that decides what a hook answered. 'silent' is deliberately
+# not 'allow': on the wire they are the same bytes, but only one of them means
+# the hook looked at the request. A non-zero exit or unparsable output means it
+# never reached a verdict, whatever else it printed.
+function Resolve-Decision {
+    param([string]$Text, [int]$ExitCode = 0)
+    if ($ExitCode -ne 0) { return 'error' }
+    $t = if ($null -eq $Text) { '' } else { $Text.Trim() }
+    if ($t -eq '' -or $t -eq '{}') { return 'silent' }
+    try {
+        $parsed = $t | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        return 'error'
+    }
+    $decision = $parsed.hookSpecificOutput.permissionDecision
+    if ([string]::IsNullOrWhiteSpace($decision)) { return 'silent' }
+    return [string]$decision
+}
+
+function Assert-Decision {
+    param(
+        [string]$TestName,
+        [string]$Expected,
+        [string]$Script,
+        [string]$Json,
+        [string]$Branch,
+        [switch]$Detached
+    )
     try {
         $result = Invoke-Hook -Script $Script -JsonInput $Json -Branch $Branch -Detached:$Detached
-        $parsed = $result.Output | ConvertFrom-Json -ErrorAction SilentlyContinue
-        $decision = $parsed.hookSpecificOutput.permissionDecision
-        if ($decision -eq 'deny') {
+        $decision = Resolve-Decision $result.Output $result.ExitCode
+        if ($decision -eq $Expected) {
             $script:passed++
             if ($Verbose) { Write-Output "  PASS  $TestName" }
         } else {
             $script:failed++
-            $script:errors += "FAIL  $TestName -- expected deny, got '$decision' (output: $($result.Output))"
+            $script:errors += "FAIL  $TestName -- expected $Expected, got '$decision' (exit $($result.ExitCode), output: $($result.Output))"
         }
     } catch {
         $script:failed++
         $script:errors += "ERROR $TestName -- $($_.Exception.Message)"
     }
+}
+
+function Assert-Deny {
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch, [switch]$Detached)
+    Assert-Decision -TestName $TestName -Expected 'deny' -Script $Script -Json $Json -Branch $Branch -Detached:$Detached
 }
 
 function Assert-Ask {
-    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch)
-    try {
-        $result = Invoke-Hook -Script $Script -JsonInput $Json -Branch $Branch
-        $parsed = $result.Output | ConvertFrom-Json -ErrorAction SilentlyContinue
-        $decision = $parsed.hookSpecificOutput.permissionDecision
-        if ($decision -eq 'ask') {
-            $script:passed++
-            if ($Verbose) { Write-Output "  PASS  $TestName" }
-        } else {
-            $script:failed++
-            $script:errors += "FAIL  $TestName -- expected ask, got '$decision' (output: $($result.Output))"
-        }
-    } catch {
-        $script:failed++
-        $script:errors += "ERROR $TestName -- $($_.Exception.Message)"
-    }
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch, [switch]$Detached)
+    Assert-Decision -TestName $TestName -Expected 'ask' -Script $Script -Json $Json -Branch $Branch -Detached:$Detached
 }
 
+# The hook examined the request and approved it.
 function Assert-Allow {
-    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch)
-    try {
-        $result = Invoke-Hook -Script $Script -JsonInput $Json -Branch $Branch
-        $text = $result.Output
-        # Allow = empty JSON or no hookSpecificOutput or no permissionDecision
-        $isAllow = ($text -eq '{}' -or $text -eq '' -or $null -eq $text)
-        if (-not $isAllow) {
-            $parsed = $text | ConvertFrom-Json -ErrorAction SilentlyContinue
-            if ($parsed -and $parsed.hookSpecificOutput -and $parsed.hookSpecificOutput.permissionDecision) {
-                $decision = $parsed.hookSpecificOutput.permissionDecision
-                $isAllow = ($decision -notin @('deny', 'ask'))
-            } else {
-                $isAllow = $true
-            }
-        }
-        if ($isAllow) {
-            $script:passed++
-            if ($Verbose) { Write-Output "  PASS  $TestName" }
-        } else {
-            $script:failed++
-            $script:errors += "FAIL  $TestName -- expected allow, got: $text"
-        }
-    } catch {
-        $script:failed++
-        $script:errors += "ERROR $TestName -- $($_.Exception.Message)"
-    }
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch, [switch]$Detached)
+    Assert-Decision -TestName $TestName -Expected 'allow' -Script $Script -Json $Json -Branch $Branch -Detached:$Detached
+}
+
+# The hook had no opinion and said so. Distinct from Assert-Allow: it does not
+# claim the request was approved, only that this gate was not the one to judge.
+function Assert-Silent {
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch, [switch]$Detached)
+    Assert-Decision -TestName $TestName -Expected 'silent' -Script $Script -Json $Json -Branch $Branch -Detached:$Detached
 }
 
 function Assert-ExitCode {
@@ -630,8 +630,9 @@ Assert-Silent "non-fetch tool ignored" `
     '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
 
 # The shape VS Code's fetch tool actually sends: `urls` (an array) beside
-# `query`. Assert-Allow cannot express these -- it counts '{}' as an allow,
-# which is exactly how an inert hook passed for as long as it did (issue #64).
+# `query`. These assert the explicit decision, because '{}' here would mean the
+# hook never examined the URLs -- which is how it stayed green for as long as
+# it did (issue #64).
 $fetchUrlsOk      = '{"tool_name":"fetch_webpage","tool_input":{"urls":["https://docs.python.org/3/library/os.html"],"query":"os.path"}}'
 $fetchUrlsUnknown = '{"tool_name":"fetch_webpage","tool_input":{"urls":["https://unlisted.example.com/x"],"query":"x"}}'
 $fetchUrlsMixed   = '{"tool_name":"fetch_webpage","tool_input":{"urls":["https://docs.python.org/3/library/os.html","https://unlisted.example.com/x"],"query":"x"}}'
