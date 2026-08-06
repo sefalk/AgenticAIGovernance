@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every write gate matched tool names VS Code never sends (issue #69).** #64
+  was one hook reading `url` where the tool sends `urls`. This asked whether
+  that was a mistake or a habit, against 1935 hook invocations recorded in the
+  chat debug log. It was a habit: `editFiles`, `createFile`, `createDirectory`,
+  `editNotebook` and `writeFile` do not occur once in the corpus, and four
+  hooks were matching on them.
+
+  - **Four gates were inert on every file edit ever made.** The coordinator's
+    delegation gate, the test-writer's TDD isolation gate, the refactorer's
+    no-new-files gate and the secret scan returned `{}` for
+    `replace_string_in_file` (37x), `multi_replace_string_in_file` (25x),
+    `create_file` (10x) and `run_task` (14x). The refactorer's creation deny
+    worked only by accident — `create_file` happens to contain `create` and
+    `file`, which is what its substring heuristic looked for.
+  - **The two platforms failed in opposite directions.** PowerShell matched
+    camelCase and never fired; bash matched `*edit*|*create*|*write*|*file*`
+    and would have **denied `read_file`** on a non-agent branch. Neither
+    surfaced, because the fixtures encoded the same guesses as the code.
+  - **`multi_replace_string_in_file` carries no top-level `filePath`.** The
+    paths are one level down in `replacements[]` — the same nesting that hid
+    #64's `urls`. A batched edit of twenty production files passed every gate
+    without an opinion. One `Test-AfWriteTool` / `af_is_write_tool` and one
+    `Get-AfWritePaths` / `af_write_paths` in `_common` now serve all four
+    gates, on both platforms.
+  - **Two further bugs in the bash secret scan**, found while restructuring it
+    for multiple paths: `result=$(gitleaks ...) || true; if [ $? -ne 0 ]` tests
+    `true`'s exit code, so a detection was always reported as a pass; and the
+    fallback regex `[^\s"']{8,}` excluded the letter *s* rather than
+    whitespace — inside a bracket expression `\` is literal — so the generic
+    secret rule never matched. With gitleaks absent, the fallback is the live
+    path.
+  - Verified by the Red phase (14 gates returning `{}` where a deny was due)
+    and by mutation: disabling the shared classifier turns 9 bash cases red, so
+    the newly written cases test the gate rather than the fixture.
+  - Task launches are a separate problem and were split out as #74:
+    `run_task` sends only `{id, workspaceFolder}`, so classifying it means
+    judging a project's existing `.vscode/tasks.json` — a policy decision, not
+    a name repair.
+
 - **The hook harness read silence as consent (issue #68).** `Assert-Allow` in
   `test-hooks.ps1` treated `{}` and empty output as an approval, so a hook that
   examined a request and approved it was indistinguishable from one that never
