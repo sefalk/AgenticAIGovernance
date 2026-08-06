@@ -74,9 +74,14 @@ if ($Force -and -not $OutputFile) {
     Write-Output "WARNING: -Force has no effect without -OutputFile"
 }
 
-# Map scope to test directory
+# Map scope to test directory.
+# INVARIANT: no value may carry a trailing separator. Join-Path normalises
+# 'tests/' to '...\tests\'; when the workspace path contains spaces PowerShell
+# quotes the argument and the CRT argv parser reads the resulting \" as an
+# escaped quote, swallowing every following argument into argv[1]. pytest then
+# collects nothing. Pinned by .github/scripts/test-run-tests.ps1.
 $scopeMap = @{
-    'all'        = 'tests/'
+    'all'        = 'tests'
     'domain'     = 'tests/domain'
     'adapters'   = 'tests/adapters'
     'properties' = 'tests/properties'
@@ -88,7 +93,8 @@ $pytestArgs = @('-m', 'pytest')
 if ($File) {
     $pytestArgs += $fullFile
 } else {
-    $pytestArgs += (Join-Path $workspaceRoot $scopeMap[$Scope])
+    # TrimEnd is defensive belt-and-braces for the invariant above.
+    $pytestArgs += (Join-Path $workspaceRoot $scopeMap[$Scope]).TrimEnd('\', '/')
 }
 
 $pytestArgs += "--tb=$Traceback", '-q', '--no-header'
@@ -112,13 +118,21 @@ if ($File) {
 $filterDisplay = if ($Filter) { $Filter } else { 'none' }
 Write-Output "=== Test Runner: $targetDisplay filter=$filterDisplay ==="
 
-# Run pytest, suppress stderr (PySpark noise), capture stdout
+# Run pytest. stderr is captured to a file rather than discarded: it is noise
+# on a successful run (PySpark), but it is the ONLY diagnosis when the runner
+# itself fails, and discarding it is what made this failure mode silent.
+$stderrPath = Join-Path ([IO.Path]::GetTempPath()) ("af-run-tests-$PID.err")
 Push-Location $workspaceRoot
 try {
-    $stdout = & $python $pytestArgs 2>$null
+    $stdout = & $python $pytestArgs 2>$stderrPath
     $pytestExit = $LASTEXITCODE
 } finally {
     Pop-Location
+}
+$stderrText = ''
+if (Test-Path $stderrPath) {
+    $stderrText = (Get-Content $stderrPath -Raw -ErrorAction SilentlyContinue)
+    Remove-Item $stderrPath -ErrorAction SilentlyContinue
 }
 
 # ---------- Update test log (.github/test-log.json) ----------
@@ -126,6 +140,7 @@ $testLogPath = Join-Path $workspaceRoot '.github/test-log.json'
 
 # Parse pytest summary line: "619 passed in 5.33s" or "617 passed, 2 failed in 5.33s"
 $passed = 0; $failed = 0; $errors = 0; $runtime = 0
+$summaryLine = $null
 if ($stdout) {
     $summaryLine = ($stdout -split "`n" | Where-Object { $_ -match '\d+ passed' -or $_ -match '\d+ failed' -or $_ -match '\d+ error' } | Select-Object -Last 1)
     if ($summaryLine) {
@@ -136,6 +151,12 @@ if ($stdout) {
     }
 }
 $total = $passed + $failed + $errors
+
+# A run that produced no parseable summary AND exited non-zero never executed a
+# test: wrong interpreter, missing dependency, usage error, nothing collected.
+# Reporting that as "0 failed" is indistinguishable from a clean green run, so
+# the counters are recorded as null and the entry is labelled an error instead.
+$runnerFailed = ((-not $summaryLine) -and $pytestExit -ne 0)
 
 # Read existing log (cumulative merge)
 $testLog = @{}
@@ -158,6 +179,19 @@ $entry = @{
     run_by          = 'run-tests.ps1'
     exit_code       = $pytestExit
     coverage_percent = $null
+    status          = 'ok'
+}
+
+if ($runnerFailed) {
+    $entry.status = 'error'
+    $entry.passed = $null
+    $entry.failed = $null
+    $entry.errors = $null
+    $entry.error_message = if ($stderrText) {
+        (($stderrText -split "`n" | Where-Object { $_.Trim() } | Select-Object -Last 3) -join ' | ').Trim()
+    } else {
+        "pytest produced no output and exited with code $pytestExit"
+    }
 }
 
 # If coverage was requested and output contains coverage %, extract it
@@ -209,6 +243,15 @@ if ($stdout) {
     $lines[$startIdx..($lines.Count - 1)] | ForEach-Object { Write-Output $_ }
 } else {
     Write-Output "(no pytest output)"
+}
+
+# Surface the runner failure instead of leaving the caller with a bare exit code.
+if ($runnerFailed) {
+    Write-Output "ERROR: pytest did not run -- no test results were produced."
+    if ($stderrText) {
+        $stderrText -split "`n" | Where-Object { $_.Trim() } | Select-Object -Last 10 | ForEach-Object { Write-Output "  $_" }
+    }
+    Write-Output "(test-log.json entry recorded as status=error, not as a passing run)"
 }
 
 # Footer

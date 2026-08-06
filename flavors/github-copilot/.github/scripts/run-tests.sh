@@ -114,9 +114,12 @@ if [[ "$FORCE" == true ]] && [[ "$DO_OUTPUT_FILE" != true ]]; then
     echo "WARNING: --force has no effect without --output-file"
 fi
 
-# Map scope to test directory
+# Map scope to test directory.
+# INVARIANT: no scope path may carry a trailing separator (kept in lockstep with
+# run-tests.ps1, where a trailing separator corrupts the argument vector).
+# Pinned by .github/scripts/test-run-tests.ps1.
 case "$SCOPE" in
-    all)        TEST_PATH="$WORKSPACE_ROOT/tests/" ;;
+    all)        TEST_PATH="$WORKSPACE_ROOT/tests" ;;
     domain)     TEST_PATH="$WORKSPACE_ROOT/tests/domain" ;;
     adapters)   TEST_PATH="$WORKSPACE_ROOT/tests/adapters" ;;
     properties) TEST_PATH="$WORKSPACE_ROOT/tests/properties" ;;
@@ -164,10 +167,15 @@ fi
 FILTER_DISPLAY="${FILTER:-none}"
 echo "=== Test Runner: $TARGET_DISPLAY filter=$FILTER_DISPLAY ==="
 
-# Run pytest, suppress stderr (PySpark noise), capture stdout
+# Run pytest. stderr is captured to a file rather than discarded: it is noise on
+# a successful run (PySpark), but it is the ONLY diagnosis when the runner itself
+# fails, and discarding it is what made this failure mode silent.
 cd "$WORKSPACE_ROOT"
-STDOUT=$("$PYTHON" "${PYTEST_ARGS[@]}" 2>/dev/null)
+STDERR_PATH="$(mktemp "${TMPDIR:-/tmp}/af-run-tests.XXXXXX")"
+STDOUT=$("$PYTHON" "${PYTEST_ARGS[@]}" 2>"$STDERR_PATH")
 PYTEST_EXIT=$?
+STDERR_TEXT="$(cat "$STDERR_PATH" 2>/dev/null)"
+rm -f "$STDERR_PATH"
 
 # ---------- Update test log (.github/test-log.json) ----------
 TEST_LOG_PATH="$WORKSPACE_ROOT/.github/test-log.json"
@@ -189,6 +197,15 @@ if [[ -n "$STDOUT" ]]; then
 fi
 TOTAL=$((PASSED + FAILED + ERRORS))
 
+# A run that produced no parseable summary AND exited non-zero never executed a
+# test: wrong interpreter, missing dependency, usage error, nothing collected.
+# Reporting that as "0 failed" is indistinguishable from a clean green run, so
+# the counters are recorded as null and the entry is labelled an error instead.
+RUNNER_FAILED=false
+if [[ -z "$SUMMARY_LINE" ]] && [[ "$PYTEST_EXIT" -ne 0 ]]; then
+    RUNNER_FAILED=true
+fi
+
 # Extract coverage % if requested
 COV_PCT="null"
 if [[ "$COVERAGE" == true ]] && [[ -n "$STDOUT" ]]; then
@@ -202,10 +219,21 @@ fi
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Build JSON entry
-ENTRY=$(cat <<ENTRY_EOF
-{"last_run":"$NOW","passed":$PASSED,"failed":$FAILED,"errors":$ERRORS,"total":$TOTAL,"runtime_seconds":$RUNTIME,"run_by":"run-tests.sh","exit_code":$PYTEST_EXIT,"coverage_percent":$COV_PCT}
+if [[ "$RUNNER_FAILED" == true ]]; then
+    ERR_MSG="$(echo "$STDERR_TEXT" | grep -v '^[[:space:]]*$' | tail -3 | tr '\n' '|' | sed 's/|$//')"
+    [[ -z "$ERR_MSG" ]] && ERR_MSG="pytest produced no output and exited with code $PYTEST_EXIT"
+    # Escape for JSON embedding (backslash, quote, control chars).
+    ERR_MSG="$(printf '%s' "$ERR_MSG" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/ /g')"
+    ENTRY=$(cat <<ENTRY_EOF
+{"last_run":"$NOW","passed":null,"failed":null,"errors":null,"total":0,"runtime_seconds":0,"run_by":"run-tests.sh","exit_code":$PYTEST_EXIT,"coverage_percent":null,"status":"error","error_message":"$ERR_MSG"}
 ENTRY_EOF
 )
+else
+    ENTRY=$(cat <<ENTRY_EOF
+{"last_run":"$NOW","passed":$PASSED,"failed":$FAILED,"errors":$ERRORS,"total":$TOTAL,"runtime_seconds":$RUNTIME,"run_by":"run-tests.sh","exit_code":$PYTEST_EXIT,"coverage_percent":$COV_PCT,"status":"ok"}
+ENTRY_EOF
+)
+fi
 
 # Determine scope key
 if [[ -n "$FILE" ]]; then
@@ -288,6 +316,15 @@ if [[ -n "$STDOUT" ]]; then
     echo "$STDOUT" | tail -5
 else
     echo "(no pytest output)"
+fi
+
+# Surface the runner failure instead of leaving the caller with a bare exit code.
+if [[ "$RUNNER_FAILED" == true ]]; then
+    echo "ERROR: pytest did not run -- no test results were produced."
+    if [[ -n "$STDERR_TEXT" ]]; then
+        echo "$STDERR_TEXT" | grep -v '^[[:space:]]*$' | tail -10 | sed 's/^/  /'
+    fi
+    echo "(test-log.json entry recorded as status=error, not as a passing run)"
 fi
 
 # Footer
