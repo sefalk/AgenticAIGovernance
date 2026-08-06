@@ -952,6 +952,23 @@ if ($bashExe) {
     Write-Output "  SKIP  bash parse gate -- no bash on this host (covered by test-hooks.sh)"
 }
 
+# `bash -n` accepts a stray CR: it parses, then carries the \r into the last
+# token of every line. On Linux `#!/usr/bin/env bash\r` is `bad interpreter` and
+# the hook exits non-zero having printed nothing -- silence, which reads as
+# consent. The deploy paths canonicalize to LF on write, so this guards the
+# source before that safety net rather than instead of it.
+$shellSources = @()
+$shellSources += Get-ChildItem -Path $scriptDir -Filter '*.sh' -File
+$shellSources += Get-ChildItem -Path (Join-Path $githubDir 'scripts') -Filter '*.sh' -File
+$gitShim = Join-Path $githubDir 'hooks/git/pre-commit'
+if (Test-Path $gitShim) { $shellSources += Get-Item $gitShim }
+
+$crFiles = @()
+foreach ($f in $shellSources) {
+    if ([System.IO.File]::ReadAllBytes($f.FullName) -contains 13) { $crFiles += $f.Name }
+}
+Assert-True "no shipped shell script carries a CR" ($crFiles.Count -eq 0) "CRLF in: $($crFiles -join ', ')"
+
 Write-Output ""
 
 # ── Summary ──────────────────────────────────────────────────────────────
