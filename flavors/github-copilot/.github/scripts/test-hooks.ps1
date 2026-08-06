@@ -342,7 +342,7 @@ Assert-Allow "separators inside quotes do not split" `
 
 Assert-Silent "non-terminal tool ignored" `
     "block-dangerous.ps1" `
-    '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
+    '{"tool_name":"read_file","tool_input":{"endLine":40,"filePath":"src/main.py","startLine":1}}'
 
 # ── createAndRunTask shape: hard-deny tier (mirrored from runInTerminal) ───
 # The dangerous commands must also be denied when wrapped in createAndRunTask.
@@ -492,29 +492,37 @@ Write-Output ""
 
 Write-Output "## coordinator-pretooluse.ps1"
 
-# Should DENY file modification
-Assert-Deny "coordinator cannot editFiles" `
+# Should DENY file modification. Every payload below is a tool name and field
+# set taken from a captured PreToolUse record, not an invented one -- see
+# issue #69: the gate spent its life matching names VS Code never sends.
+Assert-Deny "coordinator cannot replace_string_in_file" `
     "coordinator-pretooluse.ps1" `
-    '{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}'
+    '{"tool_name":"replace_string_in_file","tool_input":{"filePath":"src/main.py","oldString":"a","newString":"b"}}'
 
-Assert-Deny "coordinator cannot createFile" `
+Assert-Deny "coordinator cannot create_file" `
     "coordinator-pretooluse.ps1" `
-    '{"tool_name":"createFile","tool_input":{"filePath":"src/new.py"}}'
+    '{"tool_name":"create_file","tool_input":{"content":"x","filePath":"src/new.py"}}'
+
+# multi_replace_string_in_file carries no top-level filePath -- the paths sit
+# in replacements[]. A gate that only knows the flat shape reads nothing.
+Assert-Deny "coordinator cannot multi_replace_string_in_file" `
+    "coordinator-pretooluse.ps1" `
+    '{"tool_name":"multi_replace_string_in_file","tool_input":{"explanation":"edit","replacements":[{"filePath":"src/main.py","oldString":"a","newString":"b"}]}}'
 
 # The delegation gate only ever objects; on anything it permits it returns {}
 # and the tool call proceeds under VS Code's own rules. Assert that silence
 # explicitly, so a hook that dies before reaching the gate cannot pass here.
-Assert-Silent "coordinator can readFile" `
+Assert-Silent "coordinator can read_file" `
     "coordinator-pretooluse.ps1" `
-    '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
+    '{"tool_name":"read_file","tool_input":{"endLine":40,"filePath":"src/main.py","startLine":1}}'
 
-Assert-Silent "coordinator can searchCodebase" `
+Assert-Silent "coordinator can grep_search" `
     "coordinator-pretooluse.ps1" `
-    '{"tool_name":"searchCodebase","tool_input":{"query":"hello"}}'
+    '{"tool_name":"grep_search","tool_input":{"isRegexp":false,"query":"hello"}}'
 
-Assert-Silent "coordinator can listDirectory" `
+Assert-Silent "coordinator can file_search" `
     "coordinator-pretooluse.ps1" `
-    '{"tool_name":"listDirectory","tool_input":{"path":"src/"}}'
+    '{"tool_name":"file_search","tool_input":{"query":"src/**"}}'
 
 Assert-Silent "coordinator can runInTerminal (git)" `
     "coordinator-pretooluse.ps1" `
@@ -565,22 +573,38 @@ $agentBranch = 'agent/fixture-37'
 
 # SRC_DIR gate -- asserted on an agent/* branch so the branch gate, which is
 # evaluated first, cannot answer in its place.
-$prodJson = @{ tool_name = "editFiles"; tool_input = @{ filePath = "$srcDir/main.py" } } | ConvertTo-Json -Compress
+$prodJson = @{ tool_name = "replace_string_in_file"; tool_input = @{ filePath = "$srcDir/main.py"; oldString = 'a'; newString = 'b' } } | ConvertTo-Json -Compress
 Assert-Deny "test-writer cannot edit production code" `
     "test-writer-pretooluse.ps1" $prodJson -Branch $agentBranch
 
-$prodCreate = @{ tool_name = "createFile"; tool_input = @{ filePath = "$srcDir/new_module.py" } } | ConvertTo-Json -Compress
+$prodCreate = @{ tool_name = "create_file"; tool_input = @{ content = 'x'; filePath = "$srcDir/new_module.py" } } | ConvertTo-Json -Compress
 Assert-Deny "test-writer cannot create production file" `
     "test-writer-pretooluse.ps1" $prodCreate -Branch $agentBranch
+
+# One production path buried in a batch of test-file edits is still a
+# production edit. The gate has to look inside replacements[], not just at the
+# top level, or a batched write walks straight past the Red-phase isolation.
+$prodBatch = @{
+    tool_name  = "multi_replace_string_in_file"
+    tool_input = @{
+        explanation  = 'batch edit'
+        replacements = @(
+            @{ filePath = 'tests/test_example.py'; oldString = 'a'; newString = 'b' },
+            @{ filePath = "$srcDir/main.py"; oldString = 'a'; newString = 'b' }
+        )
+    }
+} | ConvertTo-Json -Depth 5 -Compress
+Assert-Deny "test-writer cannot batch-edit production code" `
+    "test-writer-pretooluse.ps1" $prodBatch -Branch $agentBranch
 
 # Branch-context gate (v1.18.10+), both directions. test-writer must run inside
 # a worktree checked out to agent/*; on any other branch a test file edit is a
 # hard block, and on an agent branch it must go through.
-$testJson = @{ tool_name = "editFiles"; tool_input = @{ filePath = "tests/test_example.py" } } | ConvertTo-Json -Compress
+$testJson = @{ tool_name = "replace_string_in_file"; tool_input = @{ filePath = "tests/test_example.py"; oldString = 'a'; newString = 'b' } } | ConvertTo-Json -Compress
 Assert-Deny "test-writer denied on non-agent branch (test file edit)" `
     "test-writer-pretooluse.ps1" $testJson -Branch 'dev'
 
-$testCreate = @{ tool_name = "createFile"; tool_input = @{ filePath = "tests/test_new.py" } } | ConvertTo-Json -Compress
+$testCreate = @{ tool_name = "create_file"; tool_input = @{ content = 'x'; filePath = "tests/test_new.py" } } | ConvertTo-Json -Compress
 Assert-Deny "test-writer denied on non-agent branch (test file create)" `
     "test-writer-pretooluse.ps1" $testCreate -Branch 'dev'
 
@@ -593,9 +617,9 @@ Assert-Deny "test-writer denied on detached HEAD" `
     "test-writer-pretooluse.ps1" $testJson -Detached
 
 # Read tools are outside the gate's remit
-Assert-Silent "test-writer can readFile" `
+Assert-Silent "test-writer can read_file" `
     "test-writer-pretooluse.ps1" `
-    '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
+    '{"tool_name":"read_file","tool_input":{"endLine":40,"filePath":"src/main.py","startLine":1}}'
 
 Write-Output ""
 
@@ -605,35 +629,39 @@ Write-Output "## refactorer-pretooluse.ps1"
 
 # No-new-files gate -- asserted on an agent/* branch so the branch gate, which
 # is evaluated first, cannot answer in its place.
-Assert-Deny "refactorer cannot createFile" `
+Assert-Deny "refactorer cannot create_file" `
     "refactorer-pretooluse.ps1" `
-    '{"tool_name":"createFile","tool_input":{"filePath":"src/new.py"}}' -Branch $agentBranch
+    '{"tool_name":"create_file","tool_input":{"content":"x","filePath":"src/new.py"}}' -Branch $agentBranch
 
-Assert-Deny "refactorer cannot createDirectory" `
+Assert-Deny "refactorer cannot create_directory" `
     "refactorer-pretooluse.ps1" `
-    '{"tool_name":"createDirectory","tool_input":{"path":"src/new_dir/"}}' -Branch $agentBranch
+    '{"tool_name":"create_directory","tool_input":{"dirPath":"src/new_dir/"}}' -Branch $agentBranch
 
 # Branch-context gate (v1.18.10+), both directions
 Assert-Deny "refactorer denied on non-agent branch (file edit)" `
     "refactorer-pretooluse.ps1" `
-    '{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}' -Branch 'dev'
+    '{"tool_name":"replace_string_in_file","tool_input":{"filePath":"src/main.py","oldString":"a","newString":"b"}}' -Branch 'dev'
+
+Assert-Deny "refactorer denied on non-agent branch (batch edit)" `
+    "refactorer-pretooluse.ps1" `
+    '{"tool_name":"multi_replace_string_in_file","tool_input":{"explanation":"e","replacements":[{"filePath":"src/main.py","oldString":"a","newString":"b"}]}}' -Branch 'dev'
 
 Assert-Silent "refactorer may edit an existing file on an agent branch" `
     "refactorer-pretooluse.ps1" `
-    '{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}' -Branch $agentBranch
+    '{"tool_name":"replace_string_in_file","tool_input":{"filePath":"src/main.py","oldString":"a","newString":"b"}}' -Branch $agentBranch
 
 Assert-Deny "refactorer denied on detached HEAD" `
     "refactorer-pretooluse.ps1" `
-    '{"tool_name":"editFiles","tool_input":{"filePath":"src/main.py"}}' -Detached
+    '{"tool_name":"replace_string_in_file","tool_input":{"filePath":"src/main.py","oldString":"a","newString":"b"}}' -Detached
 
-Assert-Silent "refactorer can readFile" `
+Assert-Silent "refactorer can read_file" `
     "refactorer-pretooluse.ps1" `
-    '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
+    '{"tool_name":"read_file","tool_input":{"endLine":40,"filePath":"src/main.py","startLine":1}}'
 
-# createAndRunTask is not a file creation
-Assert-Silent "refactorer can createAndRunTask" `
+# Running a task is not a file creation
+Assert-Silent "refactorer can run_task" `
     "refactorer-pretooluse.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"label":"test"}}'
+    '{"tool_name":"run_task","tool_input":{"id":"shell: tests: all","workspaceFolder":"/repo"}}'
 
 Write-Output ""
 
@@ -713,18 +741,30 @@ Set-Content -Path $secretFile -Value 'password = "SuperSecret123!"'
 
 $cleanFile = Join-Path $tempDir "clean.py"
 
-$secretJson = @{ tool_name = "editFiles"; tool_input = @{ filePath = $secretFile } } | ConvertTo-Json -Compress
+$secretJson = @{ tool_name = "replace_string_in_file"; tool_input = @{ filePath = $secretFile; oldString = 'a'; newString = 'b' } } | ConvertTo-Json -Compress
 Assert-ExitCode "secret pattern detected (exit 1)" `
     "scan-secrets.ps1" $secretJson 1
 
-$cleanJson = @{ tool_name = "editFiles"; tool_input = @{ filePath = $cleanFile } } | ConvertTo-Json -Compress
+# A secret written through a batched edit is the same secret. The scan has to
+# reach into replacements[] or the cheapest way past it is to write in bulk.
+$secretBatch = @{
+    tool_name  = "multi_replace_string_in_file"
+    tool_input = @{
+        explanation  = 'batch edit'
+        replacements = @(@{ filePath = $secretFile; oldString = 'a'; newString = 'b' })
+    }
+} | ConvertTo-Json -Depth 5 -Compress
+Assert-ExitCode "secret detected in a batched edit (exit 1)" `
+    "scan-secrets.ps1" $secretBatch 1
+
+$cleanJson = @{ tool_name = "replace_string_in_file"; tool_input = @{ filePath = $cleanFile; oldString = 'a'; newString = 'b' } } | ConvertTo-Json -Compress
 Assert-ExitCode "clean file passes (exit 0)" `
     "scan-secrets.ps1" $cleanJson 0
 
 # Non-edit tool should be ignored
 Assert-Silent "non-edit tool ignored" `
     "scan-secrets.ps1" `
-    '{"tool_name":"readFile","tool_input":{"filePath":"src/main.py"}}'
+    '{"tool_name":"read_file","tool_input":{"endLine":40,"filePath":"src/main.py","startLine":1}}'
 
 # Cleanup
 Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue

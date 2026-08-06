@@ -34,10 +34,10 @@ fi
 tool_name=$(echo "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_name',''))" 2>/dev/null)
 
 # Only inspect file-modifying tools
-case "$tool_name" in
-    *edit*|*create*|*write*|*file*|*Edit*|*Create*|*Write*|*File*) ;;
-    *) echo '{}'; exit 0 ;;
-esac
+if ! af_is_write_tool "$tool_name"; then
+    echo '{}'
+    exit 0
+fi
 
 # Branch context proof -- block file edits if not on agent/* branch
 current_branch=$(git -C "$CODE_ROOT" branch --show-current 2>/dev/null || true)
@@ -49,27 +49,26 @@ if [ -n "$current_branch" ] && ! echo "$current_branch" | grep -qE '^agent/'; th
     exit 0
 fi
 
-# Extract file path
-file_path=$(echo "$raw" | "$PYTHON" -c "
-import sys, json
-d = json.load(sys.stdin)
-ti = d.get('tool_input', {})
-print(ti.get('filePath', ti.get('path', '')))
-" 2>/dev/null)
+# Extract every file path the call refers to. A batched edit names several,
+# and one production path among them is still a production edit.
+file_paths=$(printf '%s' "$raw" | af_write_paths)
 
-if [ -z "$file_path" ]; then
+if [ -z "$file_paths" ]; then
     echo '{}'
     exit 0
 fi
 
 # Resolve and check against production source directory
-resolved=$(realpath -m "$file_path" 2>/dev/null || echo "$file_path")
 prod_root=$(realpath -m "${SRC_DIR}" 2>/dev/null || echo "${SRC_DIR}")
 
-if [[ "$resolved" == "$prod_root"* ]]; then
-    echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "TDD phase isolation: test-writer cannot modify production code under '"${SRC_DIR}"'/. Only test files should be created or edited during the Red phase."}}'
-    exit 0
-fi
+while IFS= read -r file_path; do
+    [ -n "$file_path" ] || continue
+    resolved=$(realpath -m "$file_path" 2>/dev/null || echo "$file_path")
+    if [[ "$resolved" == "$prod_root"* ]]; then
+        echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "TDD phase isolation: test-writer cannot modify production code under '"${SRC_DIR}"'/ (offending path: '"${file_path}"'). Only test files should be created or edited during the Red phase."}}'
+        exit 0
+    fi
+done <<< "$file_paths"
 
 # Not a production file — allow
 echo '{}'

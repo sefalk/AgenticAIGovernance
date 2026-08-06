@@ -86,3 +86,69 @@ af_find_python() {
 }
 
 AF_PYTHON=$(af_find_python "${AF_PYTHON_OVERRIDE:-}" python3 python py)
+
+# af_is_write_tool TOOL_NAME
+#
+# True if the tool call modifies files or directories in the workspace.
+#
+# The names below were read out of captured PreToolUse payloads, not out of
+# tool documentation (issue #69). The PowerShell gates used to match camelCase
+# names -- editFiles, createFile -- that no client has ever sent, and the bash
+# gates matched `*file*`, which caught every read as well. Both failure modes
+# are invisible: a gate that never fires and a gate that approves look alike.
+#
+# Observed: create_file, replace_string_in_file, multi_replace_string_in_file.
+# The camelCase spellings stay so a client that does send them is still judged.
+af_is_write_tool() {
+    case "$1" in
+        create_file|replace_string_in_file|multi_replace_string_in_file) return 0 ;;
+        create_directory|edit_notebook_file|create_new_jupyter_notebook) return 0 ;;
+        editFiles|editFile|createFile|createDirectory|createDir) return 0 ;;
+        editNotebook|writeFile|applyPatch|insertEdit) return 0 ;;
+    esac
+    # An exact list cannot recognise a tool that does not exist yet, and a gate
+    # that has never heard of a tool fails open. A writing verb plus a file
+    # noun is enough to take the call seriously: `read_file` carries no verb,
+    # `create_and_run_task` carries no file noun, so neither is caught here.
+    case "$1" in
+        *create*|*write*|*edit*|*insert*|*apply*|*replace*|\
+        *Create*|*Write*|*Edit*|*Insert*|*Apply*|*Replace*)
+            case "$1" in
+                *file*|*File*|*notebook*|*Notebook*|*dir*|*Dir*) return 0 ;;
+            esac
+            ;;
+    esac
+    return 1
+}
+
+# af_write_paths -- reads a raw hook payload on stdin, prints one path per line.
+#
+# Flat payloads keep their path in `filePath`. `multi_replace_string_in_file`
+# keeps none at the top level: its paths sit in `replacements[].filePath`, the
+# same one-level-down shape that made the researcher's URL gate inert in #64.
+af_write_paths() {
+    [ -n "$AF_PYTHON" ] || return 0
+    "$AF_PYTHON" -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+tool_input = data.get("tool_input") or {}
+found = []
+for key in ("filePath", "path", "dirPath", "notebookUri", "uri"):
+    value = tool_input.get(key)
+    if isinstance(value, str) and value:
+        found.append(value)
+for entry in tool_input.get("replacements") or []:
+    if isinstance(entry, dict):
+        value = entry.get("filePath")
+        if isinstance(value, str) and value:
+            found.append(value)
+seen = set()
+for path in found:
+    if path not in seen:
+        seen.add(path)
+        print(path)
+' 2>/dev/null
+}

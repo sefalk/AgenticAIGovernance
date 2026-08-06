@@ -175,7 +175,7 @@ if ($toolName -match 'terminal') {
 }
 
 # Only inspect file-modifying tools — everything else passes
-if ($toolName -notmatch 'editFile|createFile|createDir|editNotebook|writeFile') {
+if (-not (Test-AfWriteTool $toolName)) {
     Write-Output '{}'
     exit 0
 }

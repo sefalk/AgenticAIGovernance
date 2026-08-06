@@ -139,15 +139,10 @@ PYEOF
 esac
 
 # Only inspect file-modifying tools
-case "$TOOL_NAME" in
-    *edit*|*create*|*write*|*file*|*Edit*|*Create*|*Write*|*File*)
-        # Allow createTerminal (not a file operation)
-        case "$TOOL_NAME" in
-            *terminal*|*Terminal*) echo '{}'; exit 0 ;;
-        esac
-        ;;
-    *) echo '{}'; exit 0 ;;
-esac
+if ! af_is_write_tool "$TOOL_NAME"; then
+    echo '{}'
+    exit 0
+fi
 
 # Block: coordinator must not edit or create files directly
 cat <<'EOF'
