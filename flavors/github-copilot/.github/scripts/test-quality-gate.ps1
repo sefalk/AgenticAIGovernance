@@ -308,6 +308,184 @@ Set-RepoFile $repo 'src/app.py' (New-Module $DOCUMENTED_TOUCHED_EDITED)
 Assert-GateFail 'file committed in an earlier phase is still in scope' `
     (Invoke-Quality -Repo $repo -Files @('src/phase1.py') -DiffBase 'dev') 'early'
 
+# ===================================================================
+# Authored change vs mechanical change (issue #86)
+# ===================================================================
+#
+# Diff scope answers "did the branch touch these lines". A formatter touches
+# every line, so the answer is yes for a file the agent never wrote a word of.
+# In WIT #3121 -- `ruff format` across 80 files -- that turned a mechanical
+# commit into 72 provenance markers, 35 authored docstring sections and 9
+# suppression justifications, none of them reviewed, all of them added purely
+# to get past a gate. The question the docstring and provenance gates need
+# answered is not "did these lines move" but "did the agent author anything".
+#
+# `ruff format` cannot change an AST. So a file whose AST -- modulo docstring
+# whitespace, which the formatter does re-indent -- matches the base is
+# mechanical, and the authorship-scoped gates have nothing to say about it.
+#
+# Two things this must NOT become: an excuse to skip linting (a violation is
+# real no matter who wrote it), and an excuse to skip suppression hygiene
+# (comments are absent from the AST, so a smuggled `# noqa` looks mechanical).
+
+Write-Host ''
+Write-Host 'Authored vs mechanical change (issue #86)'
+Write-Host '========================================='
+
+function Invoke-Authored {
+    param([string]$Repo, [string[]]$Files, [string]$DiffBase)
+    $argv = @($checker, '--list-authored', '--files') + $Files
+    if ($DiffBase) { $argv += @('--diff-base', $DiffBase) }
+
+    Push-Location $Repo
+    $out = & $python @argv 2>&1 | Out-String
+    $code = $LASTEXITCODE
+    Pop-Location
+    return [pscustomobject]@{ Output = $out; Exit = $code }
+}
+
+# A non-zero exit means the query itself failed -- an unimplemented flag makes
+# argparse exit 2 -- so every case demands 0. Without that, "the path is not in
+# the output" would pass against a checker that produces no output at all.
+function Assert-Authored {
+    param([string]$Name, $Result, [string]$Path)
+    Assert-Case $Name (($Result.Exit -eq 0) -and ($Result.Output -match [regex]::Escape($Path))) $Result.Output
+}
+
+function Assert-Mechanical {
+    param([string]$Name, $Result, [string]$Path)
+    Assert-Case $Name (($Result.Exit -eq 0) -and ($Result.Output -notmatch [regex]::Escape($Path))) $Result.Output
+}
+
+# Undocumented, unannotated, and formatted onto one line: exactly the shape the
+# docstring gate objects to, so any file it stays in scope for will fail loudly.
+$WIDGET_TIGHT = @'
+def widget(x, y):
+    return {"a": x, "b": y}
+'@
+
+# The same function as a formatter would leave it: exploded across lines with a
+# magic trailing comma. Different text, identical AST.
+$WIDGET_REFLOWED = @'
+def widget(x, y):
+    return {
+        "a": x,
+        "b": y,
+    }
+'@
+
+$SPUN_DOC = @'
+def spun(a: int) -> int:
+    """Do a thing with the operand.
+
+    Parameters
+    ----------
+    a : int
+        Operand.
+
+    Returns
+    -------
+    int
+        Result.
+    """
+    return a
+'@
+
+# 16. The formatter case itself: text differs on every line of the function,
+#     yet nothing was authored.
+$repo = New-QualityRepo @{ 'src/app.py' = ($MODULE_HEADER + $WIDGET_TIGHT + "`n") }
+Set-RepoFile $repo 'src/app.py' ($MODULE_HEADER + $WIDGET_REFLOWED + "`n")
+Assert-Mechanical 'a reformatted file is not authored' `
+    (Invoke-Authored -Repo $repo -Files @('src/app.py') -DiffBase 'dev') 'src/app.py'
+
+# 17. A docstring lives in the AST as a string constant, so re-indenting one
+#     shifts the tree. Formatters do exactly that, hence "modulo whitespace".
+$repo = New-QualityRepo @{ 'src/app.py' = ($MODULE_HEADER + $SPUN_DOC + "`n") }
+$reindented = $SPUN_DOC -replace '(?m)^    (?=\S|$)', '        ' -replace '(?m)^        def ', 'def '
+Set-RepoFile $repo 'src/app.py' ($MODULE_HEADER + $reindented + "`n")
+Assert-Mechanical 'docstring re-indentation alone is not authored' `
+    (Invoke-Authored -Repo $repo -Files @('src/app.py') -DiffBase 'dev') 'src/app.py'
+
+# 18. Docstring *content* is the thing the incident smuggled through. Normalising
+#     whitespace must not normalise away the words.
+$repo = New-QualityRepo @{ 'src/app.py' = ($MODULE_HEADER + $SPUN_DOC + "`n") }
+Set-RepoFile $repo 'src/app.py' ($MODULE_HEADER + ($SPUN_DOC -replace 'Do a thing with the operand\.', 'Do a thing with the operand. Never returns zero.') + "`n")
+Assert-Authored 'a docstring content change is authored' `
+    (Invoke-Authored -Repo $repo -Files @('src/app.py') -DiffBase 'dev') 'src/app.py'
+
+# 19. The obvious direction, asserted so the filter cannot quietly become a
+#     blanket bypass.
+$repo = New-QualityRepo @{ 'src/app.py' = ($MODULE_HEADER + $WIDGET_TIGHT + "`n") }
+Set-RepoFile $repo 'src/app.py' ($MODULE_HEADER + ($WIDGET_TIGHT -replace '"b": y', '"b": y + 1') + "`n")
+Assert-Authored 'a code change is authored' `
+    (Invoke-Authored -Repo $repo -Files @('src/app.py') -DiffBase 'dev') 'src/app.py'
+
+# 20. No base blob means nothing to compare against. A new file is authored.
+$repo = New-QualityRepo @{ 'src/app.py' = ($MODULE_HEADER + $WIDGET_TIGHT + "`n") }
+Set-RepoFile $repo 'src/fresh.py' ($MODULE_HEADER + $WIDGET_TIGHT + "`n")
+Assert-Authored 'a file absent from the base is authored' `
+    (Invoke-Authored -Repo $repo -Files @('src/fresh.py') -DiffBase 'dev') 'src/fresh.py'
+
+# 21. An unparseable file has no AST to compare. Undecidable must mean authored:
+#     a filter that fails open would hand every gate an off switch.
+$repo = New-QualityRepo @{ 'src/app.py' = ($MODULE_HEADER + $WIDGET_TIGHT + "`n") }
+Set-RepoFile $repo 'src/app.py' ($MODULE_HEADER + "def widget(x, y:`n")
+Assert-Authored 'an unparseable file is authored' `
+    (Invoke-Authored -Repo $repo -Files @('src/app.py') -DiffBase 'dev') 'src/app.py'
+
+# 22. Without a base there is no mechanical/authored distinction to draw.
+$repo = New-QualityRepo @{ 'src/app.py' = ($MODULE_HEADER + $WIDGET_TIGHT + "`n") }
+Set-RepoFile $repo 'src/app.py' ($MODULE_HEADER + $WIDGET_REFLOWED + "`n")
+Assert-Authored 'without --diff-base every file is authored' `
+    (Invoke-Authored -Repo $repo -Files @('src/app.py')) 'src/app.py'
+
+# 23. The gate itself. `widget` has no docstring and no annotations and the
+#     reformat puts it squarely in the changed ranges -- diff scope alone
+#     cannot save it, only authorship can.
+$repo = New-QualityRepo @{ 'src/app.py' = ($MODULE_HEADER + $WIDGET_TIGHT + "`n") }
+Set-RepoFile $repo 'src/app.py' ($MODULE_HEADER + $WIDGET_REFLOWED + "`n")
+Assert-GatePass 'a reformatted file is out of scope for the docstring gate' `
+    (Invoke-Quality -Repo $repo -Files @('src/app.py') -DiffBase 'dev')
+
+# 24. Same file, same function, one authored character: the gate is back.
+$repo = New-QualityRepo @{ 'src/app.py' = ($MODULE_HEADER + $WIDGET_TIGHT + "`n") }
+Set-RepoFile $repo 'src/app.py' ($MODULE_HEADER + ($WIDGET_REFLOWED -replace '"b": y', '"b": y + 1') + "`n")
+Assert-GateFail 'a reformat carrying one real edit is still in scope' `
+    (Invoke-Quality -Repo $repo -Files @('src/app.py') -DiffBase 'dev') 'widget'
+
+# 25. The hole the AST filter opens if it is applied indiscriminately: comments
+#     are not in the tree, so a suppression smuggled into a "formatting only"
+#     commit would read as mechanical. Hygiene must not consult authorship.
+$repo = New-QualityRepo @{ 'src/app.py' = ($MODULE_HEADER + $WIDGET_TIGHT + "`n") }
+Set-RepoFile $repo 'src/app.py' ($MODULE_HEADER + ($WIDGET_REFLOWED -replace 'return \{', 'return {  # noqa') + "`n")
+Assert-GateFail 'a suppression added to a mechanical change still fails' `
+    (Invoke-Quality -Repo $repo -Files @('src/app.py') -DiffBase 'dev') 'noqa'
+
+# 26. And the converse, which is what made hygiene misfire in the incident: a
+#     reformat rewrites the line an inherited suppression sits on, so line-range
+#     scoping calls it branch-owned. Inheritance is about the suppression, not
+#     about which lines moved.
+$inheritedNoqa = @'
+"""Sample module."""
+# copilot:generated | tester | 2026-08-04
+
+import  os  # noqa
+
+
+'@
+$repo = New-QualityRepo @{ 'src/app.py' = ($inheritedNoqa + $WIDGET_TIGHT + "`n") }
+Set-RepoFile $repo 'src/app.py' (($inheritedNoqa -replace 'import  os', 'import os') + $WIDGET_TIGHT + "`n")
+$r = Invoke-Quality -Repo $repo -Files @('src/app.py') -DiffBase 'dev'
+Assert-Case 'a reformatted inherited suppression stays ADVISORY' `
+    (($r.Exit -eq 0) -and ($r.Output -match 'ADVISORY') -and ($r.Output -match 'noqa')) $r.Output
+
+# 27. Same rule on the tests/ path, which runs hygiene on its own.
+$repo = New-QualityRepo @{ 'tests/test_app.py' = ($inheritedNoqa + $WIDGET_TIGHT + "`n") }
+Set-RepoFile $repo 'tests/test_app.py' (($inheritedNoqa -replace 'import  os', 'import os') + $WIDGET_REFLOWED + "`n")
+$r = Invoke-Quality -Repo $repo -Files @('tests/test_app.py') -DiffBase 'dev' -Checks 'ignore-hygiene'
+Assert-Case 'ignore-hygiene keeps a reformatted inherited suppression advisory' `
+    (($r.Exit -eq 0) -and ($r.Output -match 'ADVISORY')) $r.Output
+
 # ------------------------------------------------------------------ report --
 
 Write-Host ''

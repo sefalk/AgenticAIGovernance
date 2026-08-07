@@ -1294,6 +1294,38 @@ Assert-True "compliance-checker states the same detection rule as the hooks" `
 
 Write-Output ""
 
+# ── 6c. Provenance gate scope (issue #86) ────────────────────────────────
+
+Write-Output "## Provenance gate scope (issue #86)"
+
+# #81 fixed where the marker may sit. This is the other half: which files may
+# be asked for one. The gate takes the whole diff, so `ruff format` across a
+# repo demanded a provenance marker per reformatted file -- 72 of them in WIT
+# #3121, every one a false claim of authorship. The list must come from the
+# authorship query, not from `git diff`.
+$implPs1 = Get-Content (Join-Path $scriptDir 'implementer-stop.ps1') -Raw
+$implSh  = Get-Content (Join-Path $scriptDir 'implementer-stop.sh') -Raw
+
+Assert-True "implementer-stop.ps1 scopes the provenance gate to authored files" `
+    ($implPs1 -match '--list-authored') `
+    "provenance gate still takes the raw diff"
+
+Assert-True "implementer-stop.sh scopes the provenance gate to authored files" `
+    ($implSh -match '--list-authored') `
+    "provenance gate still takes the raw diff"
+
+# The filter belongs to authorship gates only. A lint violation is real whoever
+# produced it, so scoping the lint gate this way would be a genuine bypass --
+# the one thing this change must not become.
+foreach ($pair in @(@{ n = 'implementer-stop.ps1'; t = $implPs1 }, @{ n = 'implementer-stop.sh'; t = $implSh })) {
+    $lintLines = ($pair.t -split "`r?`n") | Where-Object { $_ -match 'check-python-linting\.py' }
+    Assert-True "$($pair.n) does not scope the lint gate to authored files" `
+        (-not ($lintLines -match 'authored')) `
+        "lint invocation references the authorship filter: $lintLines"
+}
+
+Write-Output ""
+
 # ── 7. Edge cases ────────────────────────────────────────────────────────
 
 Write-Output "## Edge cases"

@@ -434,6 +434,26 @@ for site in implementer-stop.sh test-writer-stop.sh scan-secrets.sh; do
     fi
 done
 
+# --- Provenance gate scope (issue #86) -------------------------------------
+#
+# #81 fixed where a marker may sit; this is which files may be asked for one.
+# The gate took the whole diff, so a repo-wide `ruff format` demanded a marker
+# per reformatted file -- 72 false authorship claims in WIT #3121.
+
+echo "## provenance gate scope"
+
+impl_text=$(cat "$HOOK_DIR/implementer-stop.sh" 2>/dev/null || true)
+case "$impl_text" in *--list-authored*) assert_true "implementer-stop.sh scopes the provenance gate to authored files" 1 ;;
+    *) assert_true "implementer-stop.sh scopes the provenance gate to authored files" 0 "provenance gate still takes the raw diff" ;; esac
+
+# Authorship scoping belongs to authorship gates. A lint violation is real
+# whoever produced it, so scoping the lint gate would be a real bypass.
+if echo "$impl_text" | grep 'check-python-linting\.py' | grep -q 'authored'; then
+    assert_true "implementer-stop.sh does not scope the lint gate to authored files" 0 "lint invocation references the authorship filter"
+else
+    assert_true "implementer-stop.sh does not scope the lint gate to authored files" 1
+fi
+
 # --- Resolution invariants -------------------------------------------------
 #
 # run_case copies the hook into a fixture and runs it *from the fixture root*,
