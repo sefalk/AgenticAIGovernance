@@ -666,32 +666,37 @@ fi
 # the command it fired on, while the deny tier next door has been specific all
 # along (issue #78). Each rule now says what it will actually do, and the
 # command is echoed so the answer is about the command rather than the category.
+#
+# Emitting 'ask' also preempts Copilot's own assessment, which categorises the
+# command and describes in plain language what it will do -- better than any
+# fixed sentence we can write here. So the tier is scoped to what we know that
+# VS Code cannot: repository and branch state, autonomy policy, effects that
+# land outside git. Four rules were handed back on that basis (issue #78a):
+# pip, conda, ruff format, and filesystem create/move/copy -- an ordinary
+# environment change or a repo-local rewrite git can undo.
+#
+# Handing a rule back is not approving it. Returning {} defers to the user's
+# chat.tools.terminal.autoApprove settings; where those do not cover the
+# command the result is a *better* prompt, not a missing one, and where they do
+# the user had already said what he wants.
 ask_patterns=(
     'git\s+merge\b'
     'git\s+(checkout|switch)\b'
     'git\s+tag\b'
-    '\bpip3?\s+(install|uninstall)\b'
-    '\bconda\s+(install|remove)\b'
-    '\bruff\s+format\b'
     '\bdatabricks\b.*\b(submit|run|create|update|delete|import|export|deploy)\b'
     '\baz\b.*\b(create|set|delete|update|deploy)\b'
     'Remove-Item\b'
     '(^|\s)rm\b'
-    '(Move-Item|Copy-Item|New-Item|mkdir|mv|cp)\b'
 )
 # Index-aligned with ask_patterns.
 ask_reasons=(
     "'git merge' rewrites the working tree and may leave conflict markers in tracked files"
     "'git checkout'/'git switch' changes the checked-out branch, and with a path argument it discards uncommitted changes to that path"
     "'git tag' creates or moves a tag, which is a release marker others may already rely on"
-    'pip install/uninstall changes the environment for everything that uses it, not just this task'
-    'conda install/remove changes the environment for everything that uses it, not just this task'
-    "'ruff format' rewrites source files in place"
     'this Databricks CLI call acts on a remote workspace, where the effect is outside this repository and outside git'
     'this Azure CLI call changes cloud resources, where the effect is outside this repository and may cost money'
     "'Remove-Item' deletes files or directories"
     "'rm' deletes files or directories"
-    'this writes to the filesystem (creates, moves or copies files)'
 )
 # Echoing the command is the point of the prompt, but an unbounded string in a
 # dialog is its own way of hiding information.

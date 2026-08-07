@@ -428,10 +428,10 @@ Assert-AskReason "delete ask echoes the command it is asking about" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}' `
     "Command: Remove-Item \./scratch\.tmp"
 
-Assert-AskReason "package-install ask explains the environment-wide effect" `
+Assert-AskReason "tag ask explains that others may rely on the marker" `
     "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"pip install requests"}}' `
-    "environment"
+    '{"tool_name":"runInTerminal","tool_input":{"command":"git tag v1.4.0"}}' `
+    "release marker"
 
 Assert-AskReason "cloud ask explains that the effect leaves the repository" `
     "block-dangerous.ps1" `
@@ -441,8 +441,80 @@ Assert-AskReason "cloud ask explains that the effect leaves the repository" `
 # The reason must not be the same string for every rule -- that was the defect.
 Assert-True "two different ask rules give two different reasons" `
     ((( Invoke-Hook -Script "block-dangerous.ps1" -JsonInput '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}' ).Output) -ne
-     (( Invoke-Hook -Script "block-dangerous.ps1" -JsonInput '{"tool_name":"runInTerminal","tool_input":{"command":"pip install requests"}}' ).Output)) `
+     (( Invoke-Hook -Script "block-dangerous.ps1" -JsonInput '{"tool_name":"runInTerminal","tool_input":{"command":"git tag v1.4.0"}}' ).Output)) `
     "both rules returned the identical payload"
+
+# ── ASK tier scope: what we own, what we hand back (issue #78a) ──────────
+#
+# Emitting 'ask' preempts Copilot's own assessment, which categorises the
+# command and says in plain language what it will do -- better than any fixed
+# sentence we can write. So the tier is now split by what we know that VS Code
+# cannot: repository state, autonomy policy, effects outside git. For the rest
+# we stay silent and let the better prompt through.
+#
+# Silence here is deferral, not approval: Assert-Silent asserts '{}', which
+# hands the decision to the user's approval settings -- it never asserts allow.
+
+Assert-Silent "package installs defer to the native assessment" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"pip install requests"}}'
+
+Assert-Silent "conda environment changes defer to the native assessment" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"conda install numpy"}}'
+
+# The operation issue #86 was about: mechanical, repo-local, reversible by git.
+Assert-Silent "a formatter run defers to the native assessment" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"ruff format ."}}'
+
+Assert-Silent "creating a directory defers to the native assessment" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"mkdir build"}}'
+
+Assert-Silent "copying a file defers to the native assessment" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"Copy-Item a.txt b.txt"}}'
+
+# What we keep, and why we keep it. Deletion is the one durable change whose
+# consequence git cannot undo, so it stays ours regardless of who asks better.
+Assert-Ask "deletion is still ours to ask about" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"rm ./scratch.tmp"}}'
+
+Assert-Ask "tagging is still ours to ask about" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"git tag v1.4.0"}}'
+
+Assert-Ask "a cloud resource change is still ours to ask about" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"az group create --name rg-x"}}'
+
+# The path form of checkout discards uncommitted work, and the allow tier
+# deliberately does not cover it. It must not fall through to silence: on this
+# machine 'git checkout' is a prefix in chat.tools.terminal.autoApprove, so
+# deferring would auto-approve the destructive form with no prompt at all.
+Assert-Ask "checkout of a path is still ours to ask about" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"git checkout -- src/foo.py"}}'
+
+# A deferred rule must not consume the command: the retained rule next to it
+# still has to fire.
+Assert-Ask "a deferred rule does not silence a retained one in the same command" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"mkdir build; Remove-Item ./scratch.tmp"}}'
+
+# The two harnesses must retain the same rules. A rule kept in one and handed
+# back in the other is a confirmation that appears on one platform only.
+$bdPs1Text = Get-Content (Join-Path $scriptDir 'block-dangerous.ps1') -Raw
+$bdShText  = Get-Content (Join-Path $scriptDir 'block-dangerous.sh') -Raw
+$psAskCount = (( [regex]::Match($bdPs1Text, '(?s)\$askRules = @\((.*?)\r?\n\)') ).Groups[1].Value `
+                -split "`n" | Where-Object { $_ -match '^\s+@\{ p = ' }).Count
+$shAskCount = (( [regex]::Match($bdShText, '(?s)ask_patterns=\((.*?)\r?\n\)') ).Groups[1].Value `
+                -split "`n" | Where-Object { $_ -match "^\s+'" }).Count
+Assert-True "both harnesses retain the same number of ask rules" `
+    ($psAskCount -gt 0 -and $psAskCount -eq $shAskCount) `
+    "ps1 has $psAskCount ask rules, sh has $shAskCount"
 
 # A reason carrying the command line carries the command's quotes with it.
 Assert-Ask "a command containing quotes still produces parsable JSON" `

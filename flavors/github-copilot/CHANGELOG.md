@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The ask tier was scoped to what the framework knows and VS Code does not
+  (issue #78a).** Returning `permissionDecision: "ask"` renders our reason
+  verbatim and suppresses Copilot's own assessment — the one that categorises
+  the command and describes in plain language what it will do. For a generic
+  durable change our fixed sentence is simply the worse of the two prompts, and
+  emitting it cost the user the better one. Four rules now return `{}` instead:
+  `pip install/uninstall`, `conda install/remove`, `ruff format`, and the
+  filesystem create/move/copy rule (`New-Item`, `mkdir`, `Copy-Item`,
+  `Move-Item`, `mv`, `cp`). All of them are ordinary environment changes or
+  repo-local rewrites git can undo, and none carry repository context the
+  native assessment lacks.
+
+  Deferring is not approving. `{}` hands the decision to
+  `chat.tools.terminal.autoApprove`; where that setting does not cover the
+  command — the normal case — the result is a *better* prompt, not a missing
+  one, and where it does cover it the user had already said what he wants.
+
+  Seven rules stay ours, each for a reason the native assessment cannot reach:
+  `git merge` and `git checkout`/`switch` (branch and worktree state — and the
+  path form of checkout discards uncommitted work while `git checkout` is a
+  plausible auto-approve prefix), `git tag` (a release marker others rely on),
+  `databricks` and `az` (effects outside this repository), `Remove-Item` and
+  `rm` (the one durable change git cannot undo). The task-launch asks are
+  untouched: they fire precisely when the command cannot be resolved at all,
+  which is the case that must never go quiet.
+
+  A cross-harness assertion now fails if the PowerShell and bash classifiers
+  retain a different number of rules — a rule kept in one and handed back in
+  the other is a confirmation that appears on one platform only.
+
 ### Fixed
 
 - **Gates were scoped to the diff, so a formatter run looked like authorship
