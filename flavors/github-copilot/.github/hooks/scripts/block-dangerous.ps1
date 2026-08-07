@@ -622,19 +622,36 @@ if ($strippedForGuard -notmatch '[`({]') {
 # along (issue #78). Each rule now says what it will actually do, and the
 # command is echoed so the answer is about the command rather than about the
 # category.
+#
+# Emitting 'ask' also preempts Copilot's own assessment, which categorises the
+# command and describes in plain language what it will do -- better than any
+# fixed sentence we can write here. So the tier is scoped to what we know that
+# VS Code cannot: repository and branch state, autonomy policy, effects that
+# land outside git. Four rules were handed back on that basis (issue #78a):
+#
+#   pip install/uninstall, conda install/remove   an ordinary environment
+#   ruff format                                   change, or a repo-local
+#   New-Item / mkdir / Copy-Item / Move-Item      rewrite git can undo
+#
+# Handing a rule back is not the same as approving it. Returning {} defers to
+# the user's chat.tools.terminal.autoApprove settings; where those do not cover
+# the command -- which is the normal case -- the result is a *better* prompt,
+# not a missing one. Where they do cover it, the user has already said what he
+# wants and our sentence was overriding him.
+#
+# Deletion stays ours because git cannot undo it; checkout/switch stays because
+# its path form discards uncommitted work and 'git checkout' is a plausible
+# autoApprove prefix; tag, databricks and az stay because their effect reaches
+# past this working tree.
 # ===========================================================================
 $askRules = @(
     @{ p = 'git\s+merge\b';      why = "'git merge' rewrites the working tree and may leave conflict markers in tracked files" }
     @{ p = 'git\s+(checkout|switch)\b'; why = "'git checkout'/'git switch' changes the checked-out branch, and with a path argument it discards uncommitted changes to that path" }
     @{ p = 'git\s+tag\b';        why = "'git tag' creates or moves a tag, which is a release marker others may already rely on" }
-    @{ p = '(?i)\bpip3?\s+(install|uninstall)\b'; why = 'pip install/uninstall changes the environment for everything that uses it, not just this task' }
-    @{ p = '(?i)\bconda\s+(install|remove)\b';    why = 'conda install/remove changes the environment for everything that uses it, not just this task' }
-    @{ p = '(?i)\bruff\s+format\b'; why = "'ruff format' rewrites source files in place" }
     @{ p = '(?i)\bdatabricks\b.*\b(submit|run|create|update|delete|import|export|deploy)\b'; why = 'this Databricks CLI call acts on a remote workspace, where the effect is outside this repository and outside git' }
     @{ p = '(?i)\baz\b.*\b(create|set|delete|update|deploy)\b'; why = 'this Azure CLI call changes cloud resources, where the effect is outside this repository and may cost money' }
     @{ p = '(?i)Remove-Item\b';  why = "'Remove-Item' deletes files or directories" }
     @{ p = '(?i)(^|\s)rm\b';     why = "'rm' deletes files or directories" }
-    @{ p = '(?i)(Move-Item|Copy-Item|New-Item|mkdir|mv|cp)\b'; why = 'this writes to the filesystem (creates, moves or copies files)' }
 )
 # Echoing the command is the point of the prompt, but an unbounded string in a
 # dialog is its own way of hiding information.
