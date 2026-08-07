@@ -485,9 +485,13 @@ case "$compliance_text" in *"MISSING: not found at"*) assert_true "post-flight r
     *) assert_true "post-flight reports the path it probed" 0 "the MISSING line still carries no resolved path" ;; esac
 
 tdd_text=$(cat "$GITHUB_DIR/skills/tdd-orchestration/SKILL.md" 2>/dev/null || true)
-case "$tdd_text" in *"genuinely absent"*) assert_true "Step 7b confirms absence on disk before recreating anything" 1 ;;
+# The PowerShell pendant matches with -match, which is case-insensitive. `case`
+# is not, so lowercase the haystack or the two harnesses disagree on casing
+# alone and this one fails on prose that satisfies the rule.
+tdd_lower=$(printf '%s' "$tdd_text" | tr '[:upper:]' '[:lower:]')
+case "$tdd_lower" in *"genuinely absent"*) assert_true "Step 7b confirms absence on disk before recreating anything" 1 ;;
     *) assert_true "Step 7b confirms absence on disk before recreating anything" 0 "remediation still trusts the verdict" ;; esac
-case "$tdd_text" in *"never overwrite an existing"*) assert_true "Step 7b never overwrites an existing artifact" 1 ;;
+case "$tdd_lower" in *"never overwrite an existing"*) assert_true "Step 7b never overwrites an existing artifact" 1 ;;
     *) assert_true "Step 7b never overwrites an existing artifact" 0 "recreate can still replace verified content" ;; esac
 
 # --- Resolution invariants -------------------------------------------------
