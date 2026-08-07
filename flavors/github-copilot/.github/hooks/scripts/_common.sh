@@ -87,6 +87,66 @@ af_find_python() {
 
 AF_PYTHON=$(af_find_python "${AF_PYTHON_OVERRIDE:-}" python3 python py)
 
+# af_plan_lifecycle WORKFLOW_ID [ROOT]
+#
+# Prints "FOUND|STATUS|PATH" for the plan file belonging to this workflow:
+# FOUND is 1 or 0, STATUS is upper-cased or empty, PATH is empty when not found.
+# Always returns 0 -- "no plan" is an answer, not an error.
+#
+# Why a plan file: a Stop hook receives session_id and transcript_path, never
+# the delegation prompt. Whether an agent was called mid-workflow or to
+# finalise is therefore not knowable from stdin -- it has to be read off the
+# repository. The plan file is the honest signal, because setting its status
+# to COMPLETED IS the documenter's declaration that it finalised (issue #72).
+#
+# Two things this deliberately does not do:
+#   * It does not match the raw text. templates/PLAN.md ships
+#     `**Status:** <!-- DRAFT | APPROVED | IN_PROGRESS | COMPLETED -->`, so a
+#     grep for COMPLETED calls an untouched template a finished workflow.
+#     HTML comments are stripped first (awk, because sed has no non-greedy
+#     match and `<!--[^>]*-->` stops at the first `>` inside a comment).
+#   * It does not accept any plan in the directory. A plan speaks for one
+#     workflow only, the one whose branch it names.
+af_plan_lifecycle() {
+    local wid="$1" root="${2:-.}" dir f text status esc
+    dir="$root/docs/plans"
+    [ -d "$dir" ] || dir="$root/docs"
+    [ -d "$dir" ] || { printf '0||\n'; return 0; }
+
+    esc=$(printf '%s' "$wid" | sed 's/[][\.^$*+?(){}|/]/\\&/g')
+
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        [ "$(basename "$f")" = "WIP.md" ] && continue
+
+        text=$(awk '{ buf = buf $0 "\n" }
+            END {
+                while ((i = index(buf, "<!--")) > 0) {
+                    rest = substr(buf, i + 4)
+                    j = index(rest, "-->")
+                    if (j == 0) { buf = substr(buf, 1, i - 1); break }
+                    buf = substr(buf, 1, i - 1) substr(rest, j + 3)
+                }
+                printf "%s", buf
+            }' "$f" 2>/dev/null)
+
+        # `agent/72-x` must not be satisfied by `agent/72-x-followup`.
+        printf '%s' "$text" | grep -Eq "agent/${esc}([^[:alnum:]_-]|\$)" || continue
+
+        status=$(printf '%s' "$text" \
+            | grep -iEm1 '^[[:space:]]*[*_# ]*status[*_ ]*:' \
+            | sed -E 's/^[^:]*:[[:space:]]*[*_`[:space:]]*//' \
+            | grep -oE '^[A-Za-z_]+' \
+            | tr '[:lower:]' '[:upper:]')
+
+        printf '1|%s|%s\n' "$status" "$f"
+        return 0
+    done < <(find "$dir" -type f -name '*.md' 2>/dev/null | sort)
+
+    printf '0||\n'
+    return 0
+}
+
 # af_is_write_tool TOOL_NAME
 #
 # True if the tool call modifies files or directories in the workspace.

@@ -70,6 +70,62 @@ function Find-AfPython {
 
 $script:AfPython = Find-AfPython
 
+# ── Workflow lifecycle ───────────────────────────────────────────────────
+#
+# Get-AfPlanLifecycle -WorkflowId <id> [-Root <path>]
+#
+# Returns @{ Found = <bool>; Status = <string>; Path = <string> } for the plan
+# file that belongs to this workflow.
+#
+# Why a plan file: a Stop hook receives session_id and transcript_path, never
+# the delegation prompt. Whether an agent was called mid-workflow or to
+# finalise is therefore not knowable from stdin -- it has to be read off the
+# repository. The plan file is the honest signal, because setting its status
+# to COMPLETED IS the documenter's declaration that it finalised (issue #72).
+#
+# Two things this deliberately does not do:
+#   * It does not match the raw text. `templates/PLAN.md` ships
+#     `**Status:** <!-- DRAFT | APPROVED | IN_PROGRESS | COMPLETED -->`, so a
+#     grep for COMPLETED calls an untouched template a finished workflow.
+#     HTML comments are stripped before anything is matched.
+#   * It does not accept any plan in the directory. A plan speaks for one
+#     workflow only, the one whose branch it names.
+function Get-AfPlanLifecycle {
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkflowId,
+        [string]$Root = '.'
+    )
+
+    $result = @{ Found = $false; Status = ''; Path = '' }
+
+    $planDir = Join-Path $Root 'docs/plans'
+    if (-not (Test-Path $planDir)) { $planDir = Join-Path $Root 'docs' }
+    if (-not (Test-Path $planDir)) { return $result }
+
+    $files = Get-ChildItem -Path $planDir -Filter '*.md' -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne 'WIP.md' }
+    if (-not $files) { return $result }
+
+    # `agent/72-x` must not be satisfied by `agent/72-x-followup`.
+    $branchPattern = 'agent/{0}(?![\w-])' -f [regex]::Escape($WorkflowId)
+
+    foreach ($f in $files) {
+        $raw = Get-Content $f.FullName -Raw -ErrorAction SilentlyContinue
+        if (-not $raw) { continue }
+        $text = [regex]::Replace($raw, '(?s)<!--.*?-->', '')
+        if ($text -notmatch $branchPattern) { continue }
+
+        $result.Found = $true
+        $result.Path = $f.FullName
+        if ($text -match '(?im)^[^\S\r\n]*[*_#\s]*status[*_\s]*:\s*[*_`\s]*([A-Za-z_]+)') {
+            $result.Status = $Matches[1].ToUpperInvariant()
+        }
+        return $result
+    }
+
+    return $result
+}
+
 # ── Write-tool classification ────────────────────────────────────────────
 #
 # Which tool calls write to the workspace, and where they keep their paths.
