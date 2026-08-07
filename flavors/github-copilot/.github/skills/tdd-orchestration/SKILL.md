@@ -341,10 +341,18 @@ and provenance markers exist. It is **read-only** — detects gaps only.
 **On PASS:** Proceed to final report and commit.
 
 **On FAIL (missing artifacts):** The coordinator remediates:
-1. If documenter never ran → invoke it now with the Step 7 prompt.
-2. If documenter produced incomplete output → re-invoke for missing items only.
-3. Optionally re-invoke compliance-checker to confirm.
-4. If remediation fails after 1 retry → escalate to human.
+1. **Confirm each reported path is genuinely absent on disk** — you have a
+   terminal, the compliance-checker does not. `Test-Path` / `test -f` the
+   resolved path. If the file is there and non-empty, the verdict was a false
+   negative: record that in the final report and skip the rest.
+   **Never overwrite an existing, non-empty artifact** in the name of
+   recreating it — the documenter cannot tell "write fresh" from "replace
+   verified content", so remediating a false negative destroys evidence
+   rather than restoring it (issue #87).
+2. If documenter never ran → invoke it now with the Step 7 prompt.
+3. If documenter produced incomplete output → re-invoke for missing items only.
+4. Optionally re-invoke compliance-checker to confirm.
+5. If remediation fails after 1 retry → escalate to human.
 
 This is a **mandatory bookend**. The Stop hook provides a third safety net
 at session end.

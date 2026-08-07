@@ -4,9 +4,6 @@ model: __AF_TIER_EFFICIENT__
 description: 'Workflow compliance watchdog. Invoked as mandatory bookend (pre-flight and post-flight) by the coordinator to verify process gates that drift under context pressure.'
 user-invocable: false
 tools:
-  - search/codebase
-  - search/textSearch
-  - search/fileSearch
   - search/listDirectory
   - search/changes
   - read/readFile
@@ -41,6 +38,34 @@ context only exists in the coordinator's conversation history. The
 compliance-checker runs in an isolated context window and cannot provide
 what the documenter needs. Therefore: detect here, remediate there.
 
+## How You Establish That a File Exists
+
+Existence is a filesystem question, and you must answer it with a filesystem
+read. **Open the file** (`read/readFile`) at the path derived from the
+workflow id. A successful read is the proof; a failed read is the absence.
+
+You are not given any search tool for this, and the omission is deliberate.
+Search tools honour `.gitignore`, so in the many projects that gitignore
+`.github/` — the normal setup for a project consuming a deployed payload
+rather than versioning it — a search finds nothing whatever is on disk. That
+produced a systematic false negative: a 2922-byte workflow log, two hours
+old and valid, reported as MISSING and the whole post-flight returned
+BLOCKED (issue #87). A warning in the invoking prompt did not prevent it,
+which is why the capability is gone rather than discouraged.
+
+Two rules follow:
+
+- **Never conclude absence from a search that found nothing.** Not finding a
+  file and there being no file are different facts.
+- **Every MISSING you report names the path you probed.** Write
+  `MISSING: not found at {resolved path}`. A bare MISSING cannot be told
+  apart from a false negative by anyone downstream — and downstream is where
+  a file gets recreated over content that was already correct.
+
+You need no search to do your job: every artifact you check sits at a path
+derived from the workflow id, and the files changed during the workflow are
+given to you in the prompt.
+
 ## Mode: Pre-Flight
 
 The coordinator invokes you with `mode=pre-flight` and provides:
@@ -54,7 +79,7 @@ The coordinator invokes you with `mode=pre-flight` and provides:
 | Check | How to Verify | Severity |
 |---|---|---|
 | Branch is not `main`/`master` | Compare branch name | **BLOCKING** — abort workflow |
-| Plan directory resolved | Path is non-empty, directory exists | **WARNING** — coordinator must fix |
+| Plan directory resolved | Path is non-empty and the directory lists | **WARNING** — coordinator must fix |
 | WIP.md state is consistent | If found, status is valid (`IN_PROGRESS`, `PAUSED`, `CANCELLED`) | **WARNING** |
 | Retro directory scanned | `.github/retros/auto/` was checked for lessons | **ADVISORY** |
 | Branch relates to task description | Compare branch slug semantics to task | **ADVISORY** |
@@ -98,10 +123,10 @@ The coordinator invokes you with `mode=post-flight` and provides:
 
 | Check | How to Verify | Severity |
 |---|---|---|
-| Plan file status = COMPLETED | Read plan file, check status field | **MISSING** |
-| Workflow log YAML exists | Check `.github/logs/{workflow-id}.yaml` | **MISSING** |
-| Retro snippet exists | Check `.github/retros/auto/{workflow-id}.md` | **MISSING** |
-| Provenance markers on new files | Search each new file for `copilot:generated`, wherever `instructions/provenance.instructions.md` places it | **WARNING** |
+| Plan file status = COMPLETED | Read the plan file, check status field | **MISSING** |
+| Workflow log YAML exists | Read `.github/logs/{workflow-id}.yaml` | **MISSING** |
+| Retro snippet exists | Read `.github/retros/auto/{workflow-id}.md` | **MISSING** |
+| Provenance markers on new files | Read each new file and look for `copilot:generated`, wherever `instructions/provenance.instructions.md` places it | **WARNING** |
 | Provenance markers on modified files | Check for `copilot:modified` in substantially changed files | **ADVISORY** |
 | Integration path matches capability mode | Read `ADO_CAPABILITY_MODE` from `af-env.conf`: if `required`, a PR must have been opened (request-based); if `off`, no PR worker ran (pure git). Mismatch = wrong integration path | **MISSING** for request-based |
 | Branch-to-work-item association (R-SD-08) | If `ADO_CAPABILITY_MODE != off`: the branch-slug work item id **equals** the work item id linked by the PR (no cross-attribution), the work item was **Active** at work start, and it links the branch + plan path. If `off`: a local traceability artifact (plan/log) references the change instead. | **MISSING** when tracker active |
@@ -124,8 +149,8 @@ names, not a count:
 
 ### Artifact Verification
 - **Plan file:** {OK: status=COMPLETED | MISSING: status not updated}
-- **Workflow log:** {OK: exists at {path} | MISSING: not found}
-- **Retro snippet:** {OK: exists at {path} | MISSING: not found}
+- **Workflow log:** {OK: read {path} | MISSING: not found at {path}}
+- **Retro snippet:** {OK: read {path} | MISSING: not found at {path}}
 - **Integration path:** {OK: matches mode | MISSING: required PR not opened | N/A: pure git}
 - **Work-item association (R-SD-08):** {OK: branch id + work-item links | MISSING: no work-item link/branch id | N/A: tracker off, local traceability used}
 
@@ -136,10 +161,11 @@ names, not a count:
 
 ### Post-Flight Verdict: FAIL
 
-**Missing artifacts:** {list}
+**Missing artifacts:** {list — each one names the path that was probed}
 
-"Coordinator must invoke the documenter with full workflow context to create
-the missing artifacts, then re-run post-flight."
+"Coordinator must confirm each path is genuinely absent, then invoke the
+documenter with full workflow context to create the missing artifacts, and
+re-run post-flight."
 ```
 
 ## Complexity Tier Behaviour
@@ -153,6 +179,7 @@ the missing artifacts, then re-run post-flight."
 ## Constraints
 
 - Do NOT modify production code or test code
+- Do NOT infer that a file is absent from a search that found nothing
 - Do NOT run tests or check coverage
 - Do NOT create any files — you are strictly read-only
 - Do NOT invoke the documenter — only the coordinator has the context it needs
@@ -180,8 +207,8 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Pre-flight: plan directory resolved | HARD | Verify directory exists | Standard+ |
 | Pre-flight: work-item first (tracker active) | HARD | When `ADO_CAPABILITY_MODE != off`: a resolved work item exists, is Active, and its id prefixes the branch slug | Standard+ |
 | Post-flight: plan file status = COMPLETED | HARD | Read plan file, check status field | Standard+ |
-| Post-flight: workflow log YAML is complete | HARD | Check `.github/logs/{workflow-id}.yaml` exists AND its `status:` is `COMPLETED` AND `workflow_id`, `git_branch`, `completed:` and a non-empty `steps:` list are present. Existence alone is not the gate: a log written mid-workflow to satisfy a hook is a file, not a record (issue #72). | Standard+ |
-| Post-flight: retro snippet is substantive | HARD | Check `.github/retros/auto/{workflow-id}.md` exists AND carries at least one concrete lesson — not an empty file, not the unfilled template, not placeholder text | Standard+ |
+| Post-flight: workflow log YAML is complete | HARD | **Read** `.github/logs/{workflow-id}.yaml` — a successful read is the existence proof, never a search hit — AND check its `status:` is `COMPLETED` AND `workflow_id`, `git_branch`, `completed:` and a non-empty `steps:` list are present. Existence alone is not the gate: a log written mid-workflow to satisfy a hook is a file, not a record (issue #72). | Standard+ |
+| Post-flight: retro snippet is substantive | HARD | **Read** `.github/retros/auto/{workflow-id}.md` AND check it carries at least one concrete lesson — not an empty file, not the unfilled template, not placeholder text | Standard+ |
 | Post-flight: integration path matches capability mode | HARD | If `ADO_CAPABILITY_MODE=required`, a PR was opened; if `off`, no PR worker ran | Standard+ |
 | Post-flight: branch-to-work-item association (R-SD-08) | HARD | When tracker capability is active (`ADO_CAPABILITY_MODE != off`): the branch-slug work item id equals the PR-linked work item id (no cross-attribution), the item was Active at work start, and it links the branch + plan path. Tracker off ⇒ local traceability artifact instead. | Standard+ |
-| Post-flight: provenance markers on new files | SOFT | Search new files for a `copilot:generated` marker | Standard+ |
+| Post-flight: provenance markers on new files | SOFT | Read each new file and look for a `copilot:generated` marker | Standard+ |
