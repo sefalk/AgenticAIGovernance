@@ -9,6 +9,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The documenter's Stop gate knew only one question, so it compelled a false
+  answer (issue #72).** The documenter has two chartered jobs: persist plan
+  files mid-workflow (Responsibility 1, Step 1 of Full TDD) and finalise at the
+  end (Responsibilities 2-6). `documenter-stop` fired on both, and blocked
+  unless `.github/logs/{id}.yaml` and `retros/auto/{id}.md` already existed. Its
+  only escape was "not on an `agent/` branch", which never applies during a
+  workflow. So a mid-workflow documenter call had exactly one way to terminate:
+  write a workflow log marked COMPLETED, and a retro, for a workflow still
+  running. The gate mechanically produced the fabrication it existed to
+  prevent — observed three times in a consumer project, most recently with two
+  subtasks still open.
+
+  The damage did not stop at the file. The compliance-checker's post-flight
+  HARD gate checked that those artifacts *exist*, so the premature ones
+  satisfied it vacuously; the artifacts are invisible in review because
+  `.github/` is gitignored in target projects and the documenter is forbidden
+  to stage them; and the premature retro enters the coordinator's retro
+  feedback loop as if it were a lesson.
+
+  A Stop hook receives `session_id` and `transcript_path` and nothing else, so
+  the invocation's intent is not knowable from stdin — it has to be read off
+  the repository. The honest signal is the plan file, because setting its
+  status to COMPLETED *is* the documenter's declaration that it finalised. New
+  shared reader `Get-AfPlanLifecycle` / `af_plan_lifecycle` finds the plan that
+  names `agent/{workflow-id}` and reports its status; the gate now applies only
+  when that status is COMPLETED.
+
+  Two things the reader deliberately refuses to do. It does not match raw
+  text: `templates/PLAN.md` ships `**Status:** <!-- DRAFT | APPROVED |
+  IN_PROGRESS | COMPLETED -->`, so a grep calls an untouched template a
+  finished workflow — HTML comments are stripped first. And it does not accept
+  any plan in the directory: a plan speaks for the one workflow whose branch it
+  names. `stop-tests` had both defects in a worse form, passing if *any* file
+  in `docs/plans/` mentioned COMPLETED anywhere.
+
+  When no plan names the branch, the hook cannot classify the call. It says so
+  and names the enforcement point rather than passing in silence — silence
+  reading as consent is the defect this whole family is about.
+
+  Aligned with it: `stop-tests` now shares the same reader and judges the same
+  condition, differing in force rather than in what it considers wrong
+  (PENDING while the workflow is open, WARNING when a COMPLETED plan is missing
+  its closing artifacts). The compliance-checker's post-flight gates moved from
+  existence to content — the log's `status:` must be COMPLETED with its
+  mandatory fields and a non-empty `steps:` list, the retro must carry an
+  actual lesson. And `documenter.agent.md` now states which responsibilities
+  are mid-workflow and that a plan-persistence call must stop there.
+
 - **Every confirmation prompt asked the same unanswerable question (issue
   #78, part b).** All eleven ask-tier rules shared one sentence — *"This
   command makes a durable change. Please confirm it is intentional."* — which

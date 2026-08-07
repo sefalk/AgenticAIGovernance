@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # Agent-scoped Stop hook for the documenter agent.
 #
-# DOCUMENTATION ARTIFACT GATE (HARD — blocks documenter if required artifacts missing)
+# DOCUMENTATION ARTIFACT GATE (HARD — blocks documenter FINALISATION if
+# required artifacts are missing)
 #
 # Verifies the documenter has produced the required workflow artifacts:
 #   1. YAML workflow log in .github/logs/{workflow-id}.yaml
 #   2. Retro snippet in retros/auto/{workflow-id}.md or .github/retros/auto/
+#
+# The gate applies only to finalisation, which is recognised by the plan file
+# being marked COMPLETED. A mid-workflow documenter call (plan persistence,
+# Step 1 of Full TDD) terminates without these artifacts — see Gate 0.
 #
 # Fires as SubagentStop when the documenter is invoked by the coordinator.
 # Requires chat.useCustomAgentHooks = true in .vscode/settings.json.
@@ -32,6 +37,36 @@ workflow_id="${BASH_REMATCH[1]}"
 missing=()
 
 BASE_BRANCH=$(af_conf_get BASE_BRANCH dev)
+
+# ---------- Gate 0: Which lifecycle is this? ----------
+#
+# The documenter has two chartered jobs: persist plan files mid-workflow, and
+# finalise at the end. This gate used to fire on both, so a mid-workflow call
+# could only terminate by inventing a COMPLETED workflow log and retro for a
+# workflow still running — the hook mechanically compelled the false artifact
+# it existed to guarantee (issue #72).
+#
+# Intent is not on stdin, so it is read off the plan file: a plan marked
+# COMPLETED is the documenter's own claim that it finalised, and that claim is
+# what this gate holds it to.
+
+plan_info=$(af_plan_lifecycle "$workflow_id" "$AF_CODE_ROOT")
+plan_found="${plan_info%%|*}"
+plan_rest="${plan_info#*|}"
+plan_status="${plan_rest%%|*}"
+
+if [ "$plan_found" != "1" ]; then
+    # Unclassifiable is not the same as fine, and saying nothing would repeat
+    # the defect this gate is meant to prevent. Completeness is still enforced
+    # once, by the compliance-checker post-flight gate.
+    echo "{\"systemMessage\": \"documenter:Stop — no plan file names 'agent/${workflow_id}', so a mid-workflow call cannot be told from finalisation; artifact gate not applied. Completeness is enforced by the compliance-checker post-flight gate.\"}"
+    exit 0
+fi
+
+if [ "$plan_status" != "COMPLETED" ]; then
+    echo "{\"systemMessage\": \"documenter:Stop — plan status is ${plan_status:-unset}, not COMPLETED: treated as a mid-workflow documenter call, artifact gate not applied.\"}"
+    exit 0
+fi
 
 # ---------- Gate 1: Workflow log YAML ----------
 

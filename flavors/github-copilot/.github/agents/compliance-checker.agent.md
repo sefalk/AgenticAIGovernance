@@ -180,8 +180,8 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Pre-flight: plan directory resolved | HARD | Verify directory exists | Standard+ |
 | Pre-flight: work-item first (tracker active) | HARD | When `ADO_CAPABILITY_MODE != off`: a resolved work item exists, is Active, and its id prefixes the branch slug | Standard+ |
 | Post-flight: plan file status = COMPLETED | HARD | Read plan file, check status field | Standard+ |
-| Post-flight: workflow log YAML exists | HARD | Check `.github/logs/{workflow-id}.yaml` | Standard+ |
-| Post-flight: retro snippet exists | HARD | Check `.github/retros/auto/{workflow-id}.md` | Standard+ |
+| Post-flight: workflow log YAML is complete | HARD | Check `.github/logs/{workflow-id}.yaml` exists AND its `status:` is `COMPLETED` AND `workflow_id`, `git_branch`, `completed:` and a non-empty `steps:` list are present. Existence alone is not the gate: a log written mid-workflow to satisfy a hook is a file, not a record (issue #72). | Standard+ |
+| Post-flight: retro snippet is substantive | HARD | Check `.github/retros/auto/{workflow-id}.md` exists AND carries at least one concrete lesson — not an empty file, not the unfilled template, not placeholder text | Standard+ |
 | Post-flight: integration path matches capability mode | HARD | If `ADO_CAPABILITY_MODE=required`, a PR was opened; if `off`, no PR worker ran | Standard+ |
 | Post-flight: branch-to-work-item association (R-SD-08) | HARD | When tracker capability is active (`ADO_CAPABILITY_MODE != off`): the branch-slug work item id equals the PR-linked work item id (no cross-attribution), the item was Active at work start, and it links the branch + plan path. Tracker off ⇒ local traceability artifact instead. | Standard+ |
 | Post-flight: provenance markers on new files | SOFT | Read first 5 lines of new files | Standard+ |
