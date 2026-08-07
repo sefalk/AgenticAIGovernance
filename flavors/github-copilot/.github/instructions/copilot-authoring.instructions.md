@@ -92,7 +92,7 @@ Before saving any `.agent.md`, `.prompt.md`, or `.instructions.md` file:
 - [ ] `applyTo` globs use forward slashes and `**` patterns
 - [ ] `infer` not used (deprecated — use `user-invocable` + `disable-model-invocation`)
 - [ ] Model arrays use exact model names with vendor suffix: `Model Name (copilot)`
-- [ ] Context budget still holds: `pwsh .github/scripts/check-context-budget.py`
+- [ ] Context budget still holds: `python .github/scripts/check-context-budget.py`
 
 ### Before widening an `applyTo` to `**`
 

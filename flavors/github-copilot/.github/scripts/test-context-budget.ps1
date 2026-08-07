@@ -39,13 +39,20 @@ if (-not $python) {
 }
 
 # Builds a synthetic .github tree. Sizes are expressed in tokens; the checker
-# estimates bytes/4, so a token count is written as 4x that many bytes.
+# estimates characters/4, so a token count is written as 4x that many ASCII
+# characters (for which bytes and characters coincide).
+#
+# -RootBytes writes copilot-instructions.md byte-for-byte instead, so a test can
+# control line endings, encoding and BOM -- the things the estimator must be
+# blind to (issue #59).
 function New-Fixture {
     param(
         [int]$RootTokens = 100,
+        [byte[]]$RootBytes = $null,
         [hashtable]$Instructions = @{},   # name -> @{ Tokens; ApplyTo }  (ApplyTo $null = omit)
         [hashtable]$Agents = @{},         # name -> tokens
         [string]$Conf = $null,
+        [byte[]]$ConfBytes = $null,
         [switch]$NoInstructionsDir,
         [switch]$NoRootInstructions,
         [switch]$NoAgentsDir
@@ -55,7 +62,11 @@ function New-Fixture {
     New-Item -ItemType Directory -Path $gh -Force | Out-Null
 
     if (-not $NoRootInstructions) {
-        [IO.File]::WriteAllText((Join-Path $gh 'copilot-instructions.md'), ('x' * ($RootTokens * 4)))
+        if ($null -ne $RootBytes) {
+            [IO.File]::WriteAllBytes((Join-Path $gh 'copilot-instructions.md'), $RootBytes)
+        } else {
+            [IO.File]::WriteAllText((Join-Path $gh 'copilot-instructions.md'), ('x' * ($RootTokens * 4)))
+        }
     }
     if (-not $NoInstructionsDir) {
         $instDir = Join-Path $gh 'instructions'
@@ -76,7 +87,9 @@ function New-Fixture {
             [IO.File]::WriteAllText((Join-Path $agentDir "$name.agent.md"), ('x' * ($Agents[$name] * 4)))
         }
     }
-    if ($null -ne $Conf) {
+    if ($null -ne $ConfBytes) {
+        [IO.File]::WriteAllBytes((Join-Path $gh 'af-env.conf'), $ConfBytes)
+    } elseif ($null -ne $Conf) {
         [IO.File]::WriteAllText((Join-Path $gh 'af-env.conf'), $Conf)
     }
     return $gh
@@ -252,6 +265,83 @@ try {
     $r = Invoke-Checker $gh @('--verbose')
     $results['R_no_conditional_files_passes'] = ($r.Code -eq 0)
     $results['R_no_conditional_files_reports_zero'] = ($r.Output -match 'conditional 0')
+
+    # --- Estimator invariance (issue #59) --------------------------------
+    # A drift gate must be blind to transformations that leave the content the
+    # model reads identical. The old estimator was bytes-on-disk/4, so it moved
+    # when `core.autocrlf` flipped, when an author typed an em dash, or when an
+    # editor added a BOM -- none of which change a single character of content.
+    $invConf = "AF_CONTEXT_BUDGET_TOKENS=1000`nAF_AGENT_CONTEXT_BUDGET_TOKENS=5000`nAF_CONDITIONAL_BUDGET_TOKENS=2000`n"
+
+    # Pulls the always-on total off the PASS line, so a case asserts a number
+    # rather than the presence of a substring.
+    function Get-AlwaysOn([string]$out) {
+        if ($out -match 'always-on ([\d,]+)/') { return [int](($Matches[1]) -replace ',', '') }
+        return -1
+    }
+
+    # 100 lines of 19 characters + newline = 2,000 characters = 500 tok.
+    # As CRLF the same content is 2,100 bytes on disk = 525 tok by the old rule.
+    $line = ('x' * 19)
+    $lfText   = ((@($line) * 100) -join "`n") + "`n"
+    $crlfText = ((@($line) * 100) -join "`r`n") + "`r`n"
+    $utf8 = [Text.UTF8Encoding]::new($false)
+
+    $ghLf = New-Fixture -RootBytes ($utf8.GetBytes($lfText)) -Conf $invConf
+    $fixtures += $ghLf
+    $ghCrlf = New-Fixture -RootBytes ($utf8.GetBytes($crlfText)) -Conf $invConf
+    $fixtures += $ghCrlf
+    $lfTotal   = Get-AlwaysOn (Invoke-Checker $ghLf).Output
+    $crlfTotal = Get-AlwaysOn (Invoke-Checker $ghCrlf).Output
+    $results['S_crlf_matches_lf'] = ($lfTotal -eq $crlfTotal -and $lfTotal -gt 0)
+    # Guards against "equal because both are wrong": 2,000 characters / 4.
+    $results['S_line_endings_counted_as_characters'] = ($lfTotal -eq 500)
+
+    # Typographic punctuation costs three bytes and one character. AF
+    # instruction files are full of it, so this was a standing 20% inflation.
+    $asciiText = ('-' * 400)
+    $emDashText = ([string][char]0x2014) * 400
+    $ghAscii = New-Fixture -RootBytes ($utf8.GetBytes($asciiText)) -Conf $invConf
+    $fixtures += $ghAscii
+    $ghEmDash = New-Fixture -RootBytes ($utf8.GetBytes($emDashText)) -Conf $invConf
+    $fixtures += $ghEmDash
+    $asciiTotal  = Get-AlwaysOn (Invoke-Checker $ghAscii).Output
+    $emDashTotal = Get-AlwaysOn (Invoke-Checker $ghEmDash).Output
+    $results['T_typographic_punctuation_matches_ascii'] = ($asciiTotal -eq $emDashTotal -and $asciiTotal -gt 0)
+    $results['T_punctuation_counted_as_characters'] = ($asciiTotal -eq 100)
+
+    # A BOM is bytes the model never sees. 2,003 characters is chosen so that
+    # one extra character crosses a token boundary (2,003/4 = 500, 2,004/4 =
+    # 501): at a round length integer division swallows the BOM and the case
+    # would pass without ever exercising anything.
+    $bom = [byte[]](0xEF, 0xBB, 0xBF)
+    $bomBase = $utf8.GetBytes('x' * 2003)
+    $ghNoBom = New-Fixture -RootBytes $bomBase -Conf $invConf
+    $fixtures += $ghNoBom
+    $ghBom = New-Fixture -RootBytes ($bom + $bomBase) -Conf $invConf
+    $fixtures += $ghBom
+    $noBomTotal = Get-AlwaysOn (Invoke-Checker $ghNoBom).Output
+    $results['U_bom_does_not_change_total'] = ((Get-AlwaysOn (Invoke-Checker $ghBom).Output) -eq $noBomTotal -and $noBomTotal -eq 500)
+
+    # ...and a BOM on af-env.conf must not make the first budget unreadable.
+    # Budget 1 fails a 100-token payload; a swallowed budget falls back to the
+    # documented default and passes, so the exit code separates the two outright.
+    $ghBomConf = New-Fixture -RootTokens 100 -ConfBytes ($bom + $utf8.GetBytes("AF_CONTEXT_BUDGET_TOKENS=1`n"))
+    $fixtures += $ghBomConf
+    $results['U_bom_in_conf_still_read'] = ((Invoke-Checker $ghBomConf).Code -eq 1)
+
+    # Invariance is not blindness: content that really differs must still move
+    # the number. Without this, `return 0` would pass every case above.
+    $ghMore = New-Fixture -RootBytes ($utf8.GetBytes($lfText + ('y' * 400))) -Conf $invConf
+    $fixtures += $ghMore
+    $results['V_added_text_still_counts'] = ((Get-AlwaysOn (Invoke-Checker $ghMore).Output) -eq ($lfTotal + 100))
+
+    # Counting characters means decoding, and decoding can fail. A file that is
+    # not valid UTF-8 must BLOCK: letting the decode error escape would exit 1,
+    # which reads as "over budget" -- a wrong verdict dressed as a real one.
+    $ghBad = New-Fixture -RootBytes ([byte[]](0x80, 0x81, 0x82, 0x83)) -Conf $invConf
+    $fixtures += $ghBad
+    $results['W_invalid_utf8_blocked'] = ((Invoke-Checker $ghBad).Code -eq 2)
 }
 finally {
     foreach ($f in $fixtures) {
