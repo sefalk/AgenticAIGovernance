@@ -98,8 +98,7 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
     $missingMarkers = @()
     foreach ($f in $changedPy) {
         if ($f -and (Test-Path (Join-Path $codeRoot $f))) {
-            $firstLines = Get-Content (Join-Path $codeRoot $f) -TotalCount 5 -ErrorAction SilentlyContinue | Out-String
-            if ($firstLines -and $firstLines -notmatch 'copilot:(generated|modified)') {
+            if (-not (Test-AfProvenanceMarker -Path (Join-Path $codeRoot $f))) {
                 $missingMarkers += $f
             }
         }
@@ -111,7 +110,7 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
             hookSpecificOutput = @{
                 hookEventName = "Stop"
                 decision = "block"
-                reason = "Provenance gate: these changed .py files lack copilot:generated or copilot:modified markers in their first 5 lines: $fileList. Add provenance markers per instructions/provenance.instructions.md before completing."
+                reason = "Provenance gate: these changed .py files carry no copilot:generated or copilot:modified marker anywhere: $fileList. Add a marker in the position instructions/provenance.instructions.md prescribes before completing."
             }
         } | ConvertTo-Json -Compress -Depth 3
         Write-Output $output

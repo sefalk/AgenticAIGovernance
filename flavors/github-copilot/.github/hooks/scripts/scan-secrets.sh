@@ -71,10 +71,9 @@ while IFS= read -r file_path; do
     # --- Provenance marker check (SOFT advisory -- Idea 37a) ---
     case "$file_path" in
         *.py)
-            if [ -z "$provenance_advisory" ]; then
-                first_lines=$(head -n 5 "$file_path" 2>/dev/null || true)
-                if [ -n "$first_lines" ] && ! echo "$first_lines" | grep -qE 'copilot:(generated|modified)'; then
-                    provenance_advisory="{\"gate\": \"provenance-check\", \"status\": \"WARN\", \"file\": \"$file_path\", \"detail\": \"No copilot:generated or copilot:modified marker found in first 5 lines. If this file was created or substantially modified by an agent, add a provenance marker. See instructions/provenance.instructions.md.\"}"
+            if [ -z "$provenance_advisory" ] && [ -f "$file_path" ]; then
+                if ! af_has_provenance_marker "$file_path"; then
+                    provenance_advisory="{\"gate\": \"provenance-check\", \"status\": \"WARN\", \"file\": \"$file_path\", \"detail\": \"No copilot:generated or copilot:modified marker found anywhere in this file. If this file was created or substantially modified by an agent, add a provenance marker. See instructions/provenance.instructions.md.\"}"
                 fi
             fi
             ;;

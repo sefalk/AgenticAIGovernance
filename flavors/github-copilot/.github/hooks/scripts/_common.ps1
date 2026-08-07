@@ -201,3 +201,53 @@ function Get-AfWritePaths {
 
     return @($paths | Select-Object -Unique)
 }
+
+# ── Provenance marker detection ──────────────────────────────────────────
+#
+# `instructions/provenance.instructions.md` puts a Python marker *after* the
+# module docstring, and the marker for a modified function *inside that
+# function's docstring*. Every gate here used to read the first five lines,
+# so a module docstring of four lines or more put the instructed placement
+# out of reach, and the function-level placement was unreachable by
+# construction (issue #81). The block message quoted the instruction it
+# contradicted, which left an agent no move that satisfied both.
+#
+# Two things this deliberately does not do:
+#   * It does not judge *where* the marker sits. A marker's job is to be
+#     found; prescribing its position is the instruction's job and checking
+#     it is a reviewer's. A boolean gate that answers "is this file
+#     attributed?" should not also be answering "is it attributed in the
+#     spot I expected?" -- those are different questions and only the first
+#     one has a defensible automatic answer.
+#   * It does not tighten what counts as a marker. `-Kind generated` narrows
+#     which marker kinds satisfy the caller, because test-writer's gate is
+#     about authorship of a *new* file and `copilot:modified` must not
+#     satisfy it. It does not additionally demand the full
+#     `kind | agent | date` triple: widening where we look must not quietly
+#     start blocking work that the old window would have passed.
+function Test-AfProvenanceMarker {
+    <#
+    .SYNOPSIS
+        Whether a file carries a Copilot provenance marker anywhere in it.
+    .PARAMETER Path
+        File to inspect. A path that does not exist, or cannot be read, is
+        reported as unmarked rather than raising -- a gate must not turn an
+        unreadable file into a crash.
+    .PARAMETER Kind
+        'any' accepts copilot:generated or copilot:modified (default).
+        'generated' accepts only copilot:generated.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [ValidateSet('any', 'generated')][string]$Kind = 'any'
+    )
+
+    if (-not $Path) { return $false }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+
+    $text = Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue
+    if (-not $text) { return $false }
+
+    $pattern = if ($Kind -eq 'generated') { 'copilot:generated' } else { 'copilot:(generated|modified)' }
+    return [bool]($text -match $pattern)
+}

@@ -101,7 +101,7 @@ The coordinator invokes you with `mode=post-flight` and provides:
 | Plan file status = COMPLETED | Read plan file, check status field | **MISSING** |
 | Workflow log YAML exists | Check `.github/logs/{workflow-id}.yaml` | **MISSING** |
 | Retro snippet exists | Check `.github/retros/auto/{workflow-id}.md` | **MISSING** |
-| Provenance markers on new files | Read first 5 lines of each new file, check for `copilot:generated` | **WARNING** |
+| Provenance markers on new files | Search each new file for `copilot:generated`, wherever `instructions/provenance.instructions.md` places it | **WARNING** |
 | Provenance markers on modified files | Check for `copilot:modified` in substantially changed files | **ADVISORY** |
 | Integration path matches capability mode | Read `ADO_CAPABILITY_MODE` from `af-env.conf`: if `required`, a PR must have been opened (request-based); if `off`, no PR worker ran (pure git). Mismatch = wrong integration path | **MISSING** for request-based |
 | Branch-to-work-item association (R-SD-08) | If `ADO_CAPABILITY_MODE != off`: the branch-slug work item id **equals** the work item id linked by the PR (no cross-attribution), the work item was **Active** at work start, and it links the branch + plan path. If `off`: a local traceability artifact (plan/log) references the change instead. | **MISSING** when tracker active |
@@ -184,4 +184,4 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Post-flight: retro snippet is substantive | HARD | Check `.github/retros/auto/{workflow-id}.md` exists AND carries at least one concrete lesson — not an empty file, not the unfilled template, not placeholder text | Standard+ |
 | Post-flight: integration path matches capability mode | HARD | If `ADO_CAPABILITY_MODE=required`, a PR was opened; if `off`, no PR worker ran | Standard+ |
 | Post-flight: branch-to-work-item association (R-SD-08) | HARD | When tracker capability is active (`ADO_CAPABILITY_MODE != off`): the branch-slug work item id equals the PR-linked work item id (no cross-attribution), the item was Active at work start, and it links the branch + plan path. Tracker off ⇒ local traceability artifact instead. | Standard+ |
-| Post-flight: provenance markers on new files | SOFT | Read first 5 lines of new files | Standard+ |
+| Post-flight: provenance markers on new files | SOFT | Search new files for a `copilot:generated` marker | Standard+ |

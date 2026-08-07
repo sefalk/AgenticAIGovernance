@@ -1205,15 +1205,17 @@ function Get-MarkerVerdicts {
         }
         $paths += (Join-Path $fx 'does-not-exist.py')
         $probeBody = @'
-param([string]$Kind, [string[]]$Paths)
+param([string]$Kind, [string]$Paths)
 . "$PSScriptRoot/_common.ps1"
+# -File passes every argument as one string, so the list arrives joined.
+$pathList = $Paths -split ','
 # An absent detector must not be indistinguishable from a False verdict --
 # that is the very confusion this issue is about.
 if (-not (Get-Command Test-AfProvenanceMarker -ErrorAction SilentlyContinue)) {
-    foreach ($p in $Paths) { Write-Output ("{0}=MISSING-DETECTOR" -f (Split-Path $p -Leaf)) }
+    foreach ($p in $pathList) { Write-Output ("{0}=MISSING-DETECTOR" -f (Split-Path $p -Leaf)) }
     exit 0
 }
-foreach ($p in $Paths) {
+foreach ($p in $pathList) {
     $v = Test-AfProvenanceMarker -Path $p -Kind $Kind
     Write-Output ("{0}={1}" -f (Split-Path $p -Leaf), [bool]$v)
 }

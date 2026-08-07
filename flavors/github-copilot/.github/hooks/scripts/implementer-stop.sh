@@ -84,8 +84,7 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
     if [ -n "$changed_py" ]; then
         while IFS= read -r f; do
             if [ -f "$f" ]; then
-                first_lines=$(head -n 5 "$f" 2>/dev/null || true)
-                if [ -n "$first_lines" ] && ! echo "$first_lines" | grep -qE 'copilot:(generated|modified)'; then
+                if ! af_has_provenance_marker "$f"; then
                     missing="${missing:+$missing, }$f"
                 fi
             fi
@@ -93,7 +92,7 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
     fi
 
     if [ -n "$missing" ]; then
-        echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Provenance gate: these changed .py files lack copilot:generated or copilot:modified markers in their first 5 lines: ${missing}. Add provenance markers per instructions/provenance.instructions.md before completing.\"}}"
+        echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Provenance gate: these changed .py files carry no copilot:generated or copilot:modified marker anywhere: ${missing}. Add a marker in the position instructions/provenance.instructions.md prescribes before completing.\"}}"
         exit 0
     fi
 
