@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Artifact existence is now a filesystem question, not a search result
+  (issue #87).** The compliance-checker post-flight verified that the workflow
+  log and retro snippet exist by searching for them. Search tools honour
+  `.gitignore`, so in any project that gitignores `.github/` — the normal setup
+  for a project consuming a deployed payload rather than versioning it — every
+  post-flight reported both artifacts MISSING and returned BLOCKED, whatever
+  was on disk. Measured in a consumer repo: a 2922-byte workflow log, two hours
+  old and independently validated afterwards, reported as missing.
+
+  The fix is a capability removal, not a warning. The invoking prompt had
+  already warned the agent that `.github/` was gitignored there and that it had
+  to verify on the filesystem; it reached for the ignore-aware tool anyway. The
+  compliance-checker therefore no longer holds `search/codebase`,
+  `search/textSearch` or `search/fileSearch` at all — it never needed them,
+  because every artifact it checks sits at a path derived from the workflow id
+  and the changed files are handed to it in the prompt. Opening the file is now
+  the existence proof, and a failed read is the absence.
+
+  Every MISSING it reports must name the path it probed. A bare MISSING cannot
+  be told apart from a false negative by anyone downstream — and downstream is
+  where files get recreated.
+
+  The remediation path is guarded independently of the cause. Step 7b now
+  requires the coordinator, which has a terminal the checker deliberately does
+  not, to confirm each reported path is genuinely absent before recreating
+  anything, and never to overwrite an existing non-empty artifact. This matters
+  because the documenter cannot distinguish "write fresh" from "replace
+  verified content": applied to a false negative, the documented remediation
+  destroyed correct evidence instead of restoring missing evidence. Any future
+  false negative is now a no-op.
+
 ### Changed
 
 - **The ask tier was scoped to what the framework knows and VS Code does not
