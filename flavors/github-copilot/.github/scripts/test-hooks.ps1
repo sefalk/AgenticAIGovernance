@@ -40,16 +40,17 @@ function Invoke-Hook {
         [string]$Script,
         [string]$JsonInput,
         [string]$Branch,
-        [switch]$Detached
+        [switch]$Detached,
+        [hashtable]$Files
     )
     $hookPath = Join-Path $scriptDir $Script
     if (-not (Test-Path $hookPath)) {
         throw "Hook not found: $hookPath"
     }
-    if (-not $Branch -and -not $Detached) {
+    if (-not $Branch -and -not $Detached -and -not $Files) {
         return (Invoke-HookScript -HookPath $hookPath -JsonInput $JsonInput)
     }
-    return (Invoke-HookInFixture -HookPath $hookPath -Script $Script -JsonInput $JsonInput -Branch $Branch -Detached:$Detached)
+    return (Invoke-HookInFixture -HookPath $hookPath -Script $Script -JsonInput $JsonInput -Branch $Branch -Detached:$Detached -Files $Files)
 }
 
 # Branch-context gates read the branch of the repo the hook sits in, resolved
@@ -62,7 +63,8 @@ function Invoke-HookInFixture {
         [string]$Script,
         [string]$JsonInput,
         [string]$Branch,
-        [switch]$Detached
+        [switch]$Detached,
+        [hashtable]$Files
     )
     $fixture = Join-Path ([System.IO.Path]::GetTempPath()) "af-hook-branch-$(Get-Random)"
     $fixtureHooks = Join-Path $fixture '.github/hooks/scripts'
@@ -82,6 +84,16 @@ function Invoke-HookInFixture {
             git checkout -q --detach 2>&1 | Out-Null
         } else {
             git checkout -q -b $Branch 2>&1 | Out-Null
+        }
+        # Lifecycle gates read the repository, not the prompt. Seeding the plan
+        # file, log and retro is the only way to make the lifecycle an input of
+        # the test rather than whatever the developer's checkout happens to hold.
+        if ($Files) {
+            foreach ($rel in $Files.Keys) {
+                $dest = Join-Path $fixture $rel
+                New-Item -ItemType Directory -Path (Split-Path $dest) -Force | Out-Null
+                Set-Content -Path $dest -Value $Files[$rel] -Encoding UTF8
+            }
         }
         $output = $JsonInput | powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fixtureHooks $Script) 2>&1
         $exitCode = $LASTEXITCODE
@@ -992,6 +1004,122 @@ Assert-Silent "non-edit tool ignored" `
 
 # Cleanup
 Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+
+Write-Output ""
+
+# ── documenter-stop.ps1 — one agent, two lifecycles (issue #72) ──────────
+#
+# The documenter is chartered to persist plan files mid-workflow AND to
+# finalise at the end. The gate used to fire on both, so a mid-workflow call
+# could only terminate by writing a COMPLETED log for a workflow still running
+# — the hook compelled the false artifact it was meant to guarantee.
+#
+# The lifecycle is not in the prompt; the hook only ever sees stdin and the
+# repository. So it is read off the plan file, which is where the documenter
+# declares finalisation by setting the status.
+
+Write-Output "## documenter-stop.ps1 lifecycle"
+
+$STOP_JSON = '{"session_id":"s1","transcript_path":"/none"}'
+$PLAN_RUNNING = @"
+# Implementation Plan
+
+**Workflow:** Bug Fix
+**Branch:** ``agent/72-x``
+**Status:** IN_PROGRESS
+"@
+$PLAN_DONE = $PLAN_RUNNING -replace 'IN_PROGRESS', 'COMPLETED'
+# The template ships its status as an HTML comment listing every value,
+# COMPLETED among them. A gate that greps the raw text calls an untouched
+# template a finished workflow.
+$PLAN_TEMPLATE = @"
+# Implementation Plan
+
+**Branch:** ``agent/72-x``
+**Status:** <!-- DRAFT | APPROVED | IN_PROGRESS | COMPLETED -->
+"@
+# A commented-out example of the finished line, on its own line inside a
+# guidance block. Reading the file as raw text finds it before the live status
+# and calls the workflow done.
+$PLAN_COMMENTED = @"
+# Implementation Plan
+
+<!--
+Fill this in when the workflow finishes:
+**Status:** COMPLETED
+-->
+**Branch:** ``agent/72-x``
+**Status:** IN_PROGRESS
+"@
+$LOG_YAML = "workflow_id: `"72-x`"`nstatus: `"COMPLETED`"`n"
+$RETRO_MD = "# Retro 72-x`n`n- lesson`n"
+
+function Get-StopDecision {
+    param([hashtable]$Files, [string]$Branch = 'agent/72-x')
+    $r = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch $Branch -Files $Files
+    if ($r.ExitCode -ne 0) { return "error(exit $($r.ExitCode)): $($r.Output)" }
+    try { $p = $r.Output | ConvertFrom-Json -ErrorAction Stop } catch { return "unparsable: $($r.Output)" }
+    if ($p.hookSpecificOutput.decision) { return [string]$p.hookSpecificOutput.decision }
+    return 'pass'
+}
+
+Assert-True "mid-workflow documenter call is not forced to write a COMPLETED log" `
+    ((Get-StopDecision @{ 'docs/plans/fix-2026-08-07-x.md' = $PLAN_RUNNING }) -eq 'pass') `
+    "a plan still IN_PROGRESS means this call is not finalisation"
+
+Assert-True "finalisation without the artifacts is still blocked" `
+    ((Get-StopDecision @{ 'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE }) -eq 'block') `
+    "a plan marked COMPLETED is the documenter's own claim that it finalised"
+
+Assert-True "finalisation with both artifacts passes" `
+    ((Get-StopDecision @{
+        'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+        '.github/logs/72-x.yaml'         = $LOG_YAML
+        '.github/retros/auto/72-x.md'    = $RETRO_MD
+    }) -eq 'pass') `
+    "both artifacts present"
+
+Assert-True "an untouched plan template does not count as COMPLETED" `
+    ((Get-StopDecision @{ 'docs/plans/fix-2026-08-07-x.md' = $PLAN_TEMPLATE }) -eq 'pass') `
+    "the template's status comment lists COMPLETED as one of its options"
+
+Assert-True "a commented-out status line does not count as the status" `
+    ((Get-StopDecision @{ 'docs/plans/fix-2026-08-07-x.md' = $PLAN_COMMENTED }) -eq 'pass') `
+    "the live status is IN_PROGRESS; only the comment says COMPLETED"
+
+Assert-True "another workflow's COMPLETED plan does not finalise this one" `
+    ((Get-StopDecision @{ 'docs/plans/fix-2026-01-01-other.md' = ($PLAN_DONE -replace '72-x', '99-other') }) -eq 'pass') `
+    "the plan must name this branch to speak for this workflow"
+
+# Unclassifiable is not the same as fine. The gate says which one it is rather
+# than passing in silence -- the failure mode this whole issue family is about.
+$noPlan = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{ 'README.md' = 'x' }
+Assert-True "with no plan file the gate says it could not classify the call" `
+    ($noPlan.Output -match 'no plan file' -and $noPlan.Output -notmatch '"block"') `
+    "got: $($noPlan.Output)"
+
+# stop-tests judges the same condition with less force (AC4). It used to warn
+# about missing closing artifacts for a workflow that had not claimed to be
+# finished -- pressure to write them early, from the other direction.
+function Get-StopTestsOutput {
+    param([hashtable]$Files)
+    (Invoke-Hook -Script 'stop-tests.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files $Files).Output
+}
+
+$stOpen = Get-StopTestsOutput @{ 'docs/plans/fix-2026-08-07-x.md' = $PLAN_RUNNING }
+Assert-True "stop-tests treats an open workflow as pending, not as missing artifacts" `
+    ($stOpen -match 'PENDING' -and $stOpen -notmatch 'WARNING') `
+    "got: $stOpen"
+
+$stDone = Get-StopTestsOutput @{ 'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE }
+Assert-True "stop-tests warns on the condition documenter-stop blocks on" `
+    ($stDone -match 'WARNING') `
+    "got: $stDone"
+
+$stOther = Get-StopTestsOutput @{ 'docs/plans/fix-2026-01-01-other.md' = ($PLAN_DONE -replace '72-x', '99-other') }
+Assert-True "stop-tests does not accept another workflow's COMPLETED plan" `
+    ($stOther -match 'WARNING') `
+    "got: $stOther"
 
 Write-Output ""
 

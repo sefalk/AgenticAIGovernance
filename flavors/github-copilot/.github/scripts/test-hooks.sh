@@ -204,6 +204,129 @@ case "$readiness_out" in
         assert_true "readiness hook emits its session payload" 0 "got: ${readiness_out:-<no output>}" ;;
 esac
 
+# --- documenter-stop.sh — one agent, two lifecycles (issue #72) ------------
+#
+# The documenter is chartered to persist plan files mid-workflow AND to
+# finalise at the end. The gate used to fire on both, so a mid-workflow call
+# could only terminate by writing a COMPLETED log for a workflow still running
+# — the hook compelled the false artifact it was meant to guarantee.
+#
+# The lifecycle is not in the prompt; the hook only ever sees stdin and the
+# repository. So it is read off the plan file, where the documenter declares
+# finalisation by setting the status.
+
+echo "## documenter-stop.sh lifecycle"
+
+PLAN_RUNNING='# Implementation Plan\n\n**Branch:** `agent/72-x`\n**Status:** IN_PROGRESS\n'
+PLAN_DONE='# Implementation Plan\n\n**Branch:** `agent/72-x`\n**Status:** COMPLETED\n'
+# The template ships its status as an HTML comment listing every value,
+# COMPLETED among them. A gate that greps the raw text calls an untouched
+# template a finished workflow.
+PLAN_TEMPLATE='# Implementation Plan\n\n**Branch:** `agent/72-x`\n**Status:** <!-- DRAFT | APPROVED | IN_PROGRESS | COMPLETED -->\n'
+# A commented-out example of the finished line, on its own line inside a
+# guidance block. Reading the file as raw text finds it before the live status
+# and calls the workflow done.
+PLAN_COMMENTED='# Implementation Plan\n\n<!--\nFill this in when the workflow finishes:\n**Status:** COMPLETED\n-->\n**Branch:** `agent/72-x`\n**Status:** IN_PROGRESS\n'
+PLAN_OTHER='# Implementation Plan\n\n**Branch:** `agent/99-other`\n**Status:** COMPLETED\n'
+
+# stop_case NAME HOOK EXPECT FILESPEC...
+#   EXPECT   = block | pass | unclassified | pending | warning
+#   FILESPEC = relative/path=content   (content goes through printf %b)
+stop_case() {
+    local name="$1" hook="$2" expect="$3"; shift 3
+    local fixture rc=0 out ok=0 spec path content
+
+    fixture=$(mktemp -d)
+    mkdir -p "$fixture/.github/hooks/scripts"
+    cp "$HOOK_DIR/$hook" "$fixture/.github/hooks/scripts/"
+    cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
+
+    # Lifecycle state lives on disk, so seeding it is the only way to make it
+    # an input of the test rather than whatever the checkout happens to hold.
+    for spec in "$@"; do
+        path="${spec%%=*}"
+        content="${spec#*=}"
+        mkdir -p "$fixture/$(dirname "$path")"
+        printf '%b' "$content" > "$fixture/$path"
+    done
+
+    (
+        cd "$fixture" || exit 1
+        git init -q .
+        git checkout -q -b agent/72-x
+        printf '%s' '{"session_id":"s1","transcript_path":"/none"}' \
+            | bash ".github/hooks/scripts/$hook"
+    ) > "$fixture/out.txt" 2> "$fixture/err.txt" || rc=$?
+
+    out=$(cat "$fixture/out.txt")
+
+    if [ "$rc" -ne 0 ]; then
+        ok=0
+    else
+        case "$expect" in
+            block) [[ "$out" == *'"block"'* ]] && ok=1 ;;
+            pass)  [[ "$out" != *'"block"'* && -n "$out" ]] && ok=1 ;;
+            unclassified)
+                [[ "$out" != *'"block"'* && "$out" == *'no plan file'* ]] && ok=1 ;;
+            pending) [[ "$out" == *'PENDING'* && "$out" != *'WARNING'* ]] && ok=1 ;;
+            warning) [[ "$out" == *'WARNING'* ]] && ok=1 ;;
+        esac
+    fi
+
+    if [ $ok -eq 1 ]; then
+        echo "PASS  $name"
+        pass=$((pass + 1))
+    else
+        echo "FAIL  $name -- expected $expect, got: ${out:-<no output>} (exit $rc)"
+        fail=$((fail + 1))
+    fi
+
+    rm -rf "$fixture"
+}
+
+# doc_stop_case NAME EXPECT FILESPEC...  -- stop_case pinned to documenter-stop
+doc_stop_case() {
+    local name="$1" expect="$2"; shift 2
+    stop_case "$name" documenter-stop.sh "$expect" "$@"
+}
+
+doc_stop_case "mid-workflow documenter call is not forced to write a COMPLETED log" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING"
+
+doc_stop_case "finalisation without the artifacts is still blocked" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE"
+
+doc_stop_case "finalisation with both artifacts passes" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    '.github/logs/72-x.yaml=workflow_id: "72-x"\nstatus: "COMPLETED"\n' \
+    '.github/retros/auto/72-x.md=# Retro 72-x\n\n- lesson\n'
+
+doc_stop_case "an untouched plan template does not count as COMPLETED" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_TEMPLATE"
+
+doc_stop_case "a commented-out status line does not count as the status" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_COMMENTED"
+
+doc_stop_case "another workflow's COMPLETED plan does not finalise this one" \
+    pass "docs/plans/fix-2026-01-01-other.md=$PLAN_OTHER"
+
+# Unclassifiable is not the same as fine. The gate says which one it is rather
+# than passing in silence -- the failure mode this whole issue family is about.
+doc_stop_case "with no plan file the gate says it could not classify the call" \
+    unclassified 'README.md=x\n'
+
+# stop-tests judges the same condition with less force (AC4). It used to warn
+# about missing closing artifacts for a workflow that had not claimed to be
+# finished -- pressure to write them early, from the other direction.
+stop_case "stop-tests treats an open workflow as pending, not as missing artifacts" \
+    stop-tests.sh pending "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING"
+
+stop_case "stop-tests warns on the condition documenter-stop blocks on" \
+    stop-tests.sh warning "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE"
+
+stop_case "stop-tests does not accept another workflow's COMPLETED plan" \
+    stop-tests.sh warning "docs/plans/fix-2026-01-01-other.md=$PLAN_OTHER"
+
 # --- Resolution invariants -------------------------------------------------
 #
 # run_case copies the hook into a fixture and runs it *from the fixture root*,

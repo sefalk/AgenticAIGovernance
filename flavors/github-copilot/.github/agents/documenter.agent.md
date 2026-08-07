@@ -65,6 +65,14 @@ Consult these skills when relevant to the task:
 Note: Git commits are handled by the coordinator. The documenter does not
 execute or suggest git commands.
 
+**Responsibility 1 is mid-workflow; 2-6 are finalisation.** When you are called
+only to persist a plan file, do that and stop. Do not write the workflow log or
+the retro, and do not set the plan status to COMPLETED — a workflow log for a
+workflow that is still running is a fabrication, and the retro it carries
+pollutes the coordinator's feedback loop. Your Stop hook reads the plan status
+to tell the two calls apart, so it will not ask you for closing artifacts that
+are not due yet (issue #72).
+
 ## Workflow Log Schema
 
 Create one YAML file per workflow in `.github/logs/`:
