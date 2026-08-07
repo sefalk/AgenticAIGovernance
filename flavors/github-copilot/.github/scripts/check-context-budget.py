@@ -24,6 +24,9 @@ Budgets come from ``.github/af-env.conf``:
   AF_AGENT_CONTEXT_BUDGET_TOKENS  -- agent file + always-on set, per agent
   AF_CONDITIONAL_BUDGET_TOKENS    -- all narrowly-scoped instruction files
 
+Token figures are estimated as characters/4 and are used for drift detection
+only; they are not a tokenizer-derived or billed count.
+
 Exit codes: 0 pass, 1 over budget, 2 blocked (required input missing/unreadable).
 """
 from __future__ import annotations
@@ -33,17 +36,28 @@ import re
 import sys
 from pathlib import Path
 
-# Rough estimate. Good enough for a drift gate: we care about a 20% regression,
-# not about a 3% tokenizer discrepancy. Deliberately dependency-free -- adding a
-# real tokenizer would make this gate unrunnable wherever that package is absent.
-BYTES_PER_TOKEN = 4
+# Rough estimate, and deliberately dependency-free: a real tokenizer would make
+# this gate unrunnable wherever that package is absent, and this is a drift gate
+# -- it has to be invariant, not accurate.
+#
+# Characters, not bytes on disk. Bytes move when `core.autocrlf` flips, when an
+# author types an em dash instead of a hyphen, or when an editor leaves a BOM --
+# none of which change a single character the model reads. A gate whose whole
+# job is detecting real change must not react to those (issue #59).
+#
+# The divisor is the "~4 characters per token" rule of thumb for English prose.
+# It has not been calibrated against a tokenizer for this payload, which is
+# denser markdown; the budgets are calibrated against this estimator's own
+# scale, so the gate is internally consistent, but the figures it prints are
+# estimates and not a billed token count.
+CHARS_PER_TOKEN = 4
 
 # applyTo globs that match every file. An author writing any of these means
 # "always on"; anything narrower is conditional and not part of the budget.
 UNIVERSAL_GLOBS = {"**", "**/*", "**/**", "*"}
 
-DEFAULT_CONTEXT_BUDGET = 5000
-DEFAULT_AGENT_BUDGET = 11000
+DEFAULT_CONTEXT_BUDGET = 4950
+DEFAULT_AGENT_BUDGET = 10900
 DEFAULT_CONDITIONAL_BUDGET = 5500
 
 TAG = "[context-budget]"
@@ -57,17 +71,24 @@ class Blocked(Exception):
 
 
 def _read_text(path: Path) -> str:
+    """Read a file as text: universal newlines, BOM stripped.
+
+    Both are deliberate. Text mode folds CRLF and lone CR to a single ``\\n``,
+    and ``utf-8-sig`` drops a leading BOM, so the returned string is the content
+    itself rather than an artefact of how it was checked out or saved.
+    """
     try:
-        return path.read_text(encoding="utf-8").replace("\r\n", "\n")
+        return path.read_text(encoding="utf-8-sig")
     except OSError as exc:
         raise Blocked(f"cannot read {path}: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        # Measuring it as bytes would be a guess, and letting the exception
+        # escape would exit 1 -- indistinguishable from "over budget".
+        raise Blocked(f"{path} is not valid UTF-8: {exc}") from exc
 
 
 def _tokens(path: Path) -> int:
-    try:
-        return path.stat().st_size // BYTES_PER_TOKEN
-    except OSError as exc:
-        raise Blocked(f"cannot stat {path}: {exc}") from exc
+    return len(_read_text(path)) // CHARS_PER_TOKEN
 
 
 def _frontmatter(text: str) -> str | None:
