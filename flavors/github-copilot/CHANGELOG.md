@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The context budget measured the disk, not the content (issue #59).**
+  `check-context-budget.py` estimated tokens as `st_size // 4` — bytes on disk.
+  Bytes move for reasons that leave the content the model reads completely
+  unchanged: CRLF adds one byte per line, so flipping `core.autocrlf` shifted a
+  350-line instruction file by ~87 tokens; `—`, `→` and `≥` cost three bytes and
+  one character, and AF instruction files are full of them; a stray BOM added
+  three more. `architecture.instructions.md` measured **1,966** by bytes and
+  **1,617** by characters — a 20% spread on one file, and enough to put the
+  whole conditional set 273 tokens "over budget" without a single character
+  having been added. A gate whose entire job is detecting real change must not
+  react to changes that are not real.
+
+  The estimator now counts characters read in text mode, with universal
+  newlines and `utf-8-sig`, so line endings, typographic punctuation and BOMs
+  are invisible to it. Counting characters means decoding, and decoding can
+  fail, so a file that is not valid UTF-8 now BLOCKS (exit 2) instead of letting
+  a `UnicodeDecodeError` escape as exit 1 — which would have been
+  indistinguishable from "over budget".
+
+  All three budgets are re-derived against the new scale in the same change —
+  a mixed-estimator state would be worse than either alone. Measured on the
+  character scale: always-on 4,865, conditional 5,387, largest agent 10,753;
+  each budget is that figure plus the headroom it previously had, rounded down
+  to the nearest 50: `AF_CONTEXT_BUDGET_TOKENS` 5000 → **4950**,
+  `AF_AGENT_CONTEXT_BUDGET_TOKENS` 11000 → **10900**,
+  `AF_CONDITIONAL_BUDGET_TOKENS` unchanged at **5500**.
+
+  What the divisor is *not* is now stated where the budgets live: `4` is the
+  rule of thumb for English prose, not a measurement of this payload. These
+  figures are a drift scale, and the budgets are calibrated against that same
+  scale — they are not a tokenizer-derived or billed token count. Calibrating
+  the divisor against a real tokenizer remains open under issue #59.
+
+  Also fixed: the authoring checklist told the reader to run a Python script
+  with `pwsh`.
+
 - **Every confirmation prompt asked the same unanswerable question (issue
   #78, part b).** All eleven ask-tier rules shared one sentence — *"This
   command makes a durable change. Please confirm it is intentional."* — which
