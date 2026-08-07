@@ -613,25 +613,38 @@ if ($strippedForGuard -notmatch '[`({]') {
 
 # ===========================================================================
 # TIER 3 -- ASK (durable change, confirm).
+#
+# A confirmation prompt is a question put to a human, and a question that does
+# not say what it is about cannot be answered -- it can only be waved through.
+# The whole tier used to share one sentence ("This command makes a durable
+# change") for eleven different rules, naming neither the rule that fired nor
+# the command it fired on, while the deny tier next door has been specific all
+# along (issue #78). Each rule now says what it will actually do, and the
+# command is echoed so the answer is about the command rather than about the
+# category.
 # ===========================================================================
 $askRules = @(
-    'git\s+merge\b'
-    'git\s+(checkout|switch)\b'
-    'git\s+tag\b'
-    '(?i)\bpip3?\s+(install|uninstall)\b'
-    '(?i)\bconda\s+(install|remove)\b'
-    '(?i)\bruff\s+format\b'
-    '(?i)\bdatabricks\b.*\b(submit|run|create|update|delete|import|export|deploy)\b'
-    '(?i)\baz\b.*\b(create|set|delete|update|deploy)\b'
-    '(?i)Remove-Item\b'
-    '(?i)(^|\s)rm\b'
-    '(?i)(Move-Item|Copy-Item|New-Item|mkdir|mv|cp)\b'
+    @{ p = 'git\s+merge\b';      why = "'git merge' rewrites the working tree and may leave conflict markers in tracked files" }
+    @{ p = 'git\s+(checkout|switch)\b'; why = "'git checkout'/'git switch' changes the checked-out branch, and with a path argument it discards uncommitted changes to that path" }
+    @{ p = 'git\s+tag\b';        why = "'git tag' creates or moves a tag, which is a release marker others may already rely on" }
+    @{ p = '(?i)\bpip3?\s+(install|uninstall)\b'; why = 'pip install/uninstall changes the environment for everything that uses it, not just this task' }
+    @{ p = '(?i)\bconda\s+(install|remove)\b';    why = 'conda install/remove changes the environment for everything that uses it, not just this task' }
+    @{ p = '(?i)\bruff\s+format\b'; why = "'ruff format' rewrites source files in place" }
+    @{ p = '(?i)\bdatabricks\b.*\b(submit|run|create|update|delete|import|export|deploy)\b'; why = 'this Databricks CLI call acts on a remote workspace, where the effect is outside this repository and outside git' }
+    @{ p = '(?i)\baz\b.*\b(create|set|delete|update|deploy)\b'; why = 'this Azure CLI call changes cloud resources, where the effect is outside this repository and may cost money' }
+    @{ p = '(?i)Remove-Item\b';  why = "'Remove-Item' deletes files or directories" }
+    @{ p = '(?i)(^|\s)rm\b';     why = "'rm' deletes files or directories" }
+    @{ p = '(?i)(Move-Item|Copy-Item|New-Item|mkdir|mv|cp)\b'; why = 'this writes to the filesystem (creates, moves or copies files)' }
 )
+# Echoing the command is the point of the prompt, but an unbounded string in a
+# dialog is its own way of hiding information.
+$shown = $command -replace '\s+', ' '
+if ($shown.Length -gt 300) { $shown = $shown.Substring(0, 297) + '...' }
 # Scan the quote-stripped command so quoted literals (e.g. a commit message
 # mentioning "databricks ... export") do not falsely trigger an ASK rule.
-foreach ($p in $askRules) {
-    if ($strippedForGuard -match $p) {
-        Emit 'ask' 'This command makes a durable change. Please confirm it is intentional.'
+foreach ($r in $askRules) {
+    if ($strippedForGuard -match $r.p) {
+        Emit 'ask' ("Durable change: $($r.why). Confirm it is intentional. Command: $shown")
     }
 }
 

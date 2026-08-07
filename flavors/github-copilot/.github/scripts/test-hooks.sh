@@ -399,6 +399,75 @@ run_case "run_task: missing tasks.json asks" \
     '{"tool_name":"run_task","tool_input":{"id":"shell: anything","workspaceFolder":"/nonexistent-workspace-af"}}' \
     ask
 
+# --- ASK reasons are specific and echo the command (issue #78) --------------
+#
+# A confirmation prompt that names neither the rule nor the command cannot be
+# answered, only waved through. These cases assert the reason text, so they run
+# the hook directly: the ask tier's verdict does not depend on repository state,
+# and building a git fixture per case buys nothing here.
+
+echo "## block-dangerous.sh ask reasons"
+
+ask_reason() { # <name> <json> <ere-pattern>
+    local name="$1" json="$2" pattern="$3" out
+    out=$(printf '%s' "$json" | bash "$HOOK_DIR/block-dangerous.sh" 2>&1)
+    if printf '%s' "$out" | grep -q '"ask"' && printf '%s' "$out" | grep -qE "$pattern"; then
+        echo "PASS  $name"; pass=$((pass + 1))
+    else
+        echo "FAIL  $name -- expected ask matching '$pattern', got: ${out:-<no output>}"; fail=$((fail + 1))
+    fi
+}
+
+ask_reason "delete ask names the deleting command" \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}' \
+    "Remove-Item.*deletes files"
+
+ask_reason "delete ask echoes the command it is asking about" \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}' \
+    "Command: Remove-Item \./scratch\.tmp"
+
+ask_reason "package-install ask explains the environment-wide effect" \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"pip install requests"}}' \
+    "environment"
+
+ask_reason "cloud ask explains that the effect leaves the repository" \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"databricks jobs submit --json @job.json"}}' \
+    "outside this repository"
+
+# The reason must not be the same string for every rule -- that was the defect.
+ask_a=$(printf '%s' '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}' | bash "$HOOK_DIR/block-dangerous.sh" 2>&1)
+ask_b=$(printf '%s' '{"tool_name":"runInTerminal","tool_input":{"command":"pip install requests"}}' | bash "$HOOK_DIR/block-dangerous.sh" 2>&1)
+assert_true "two different ask rules give two different reasons" \
+    "$([ "$ask_a" != "$ask_b" ] && echo 1 || echo 0)" "both returned: $ask_a"
+
+# A reason carrying the command line carries the command's quotes and
+# backslashes with it. Unescaped, they produce invalid JSON -- and an
+# unparsable verdict is indistinguishable from no verdict (issue #68).
+quoted_out=$(printf '%s' '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item \"C:\\tmp\\a b\\file.txt\""}}' | bash "$HOOK_DIR/block-dangerous.sh" 2>&1)
+quoted_dec=$(printf '%s' "$quoted_out" | "$af_py" -c 'import json,sys
+try: print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecision"])
+except Exception: print("unparsable")' 2>/dev/null)
+assert_true "a command containing quotes still produces parsable JSON" \
+    "$([ "$quoted_dec" = "ask" ] && echo 1 || echo 0)" "got '$quoted_dec' from: $quoted_out"
+
+# The task branch has its own emitter, and its deny reasons quote the offending
+# task command back -- a path, on Windows a backslash path. '\s' is not a valid
+# JSON escape, so raw interpolation would silence the deny it just decided.
+task_out=$(printf '%s' '{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"x","type":"shell","command":"C:\\evil\\run \"it\".ps1"},"workspaceFolder":"/repo"}}' | bash "$HOOK_DIR/block-dangerous.sh" 2>&1)
+task_dec=$(printf '%s' "$task_out" | "$af_py" -c 'import json,sys
+try: print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecision"])
+except Exception: print("unparsable")' 2>/dev/null)
+assert_true "a task command with backslashes and quotes still produces parsable JSON" \
+    "$([ "$task_dec" = "deny" ] && echo 1 || echo 0)" "got '$task_dec' from: $task_out"
+
+# The reasons live in an array index-aligned with the patterns, which is only
+# safe while the two stay the same length.
+n_pat=$(sed -n '/^ask_patterns=(/,/^)/p' "$HOOK_DIR/block-dangerous.sh" | grep -cE "^    ['\"]")
+n_rea=$(sed -n '/^ask_reasons=(/,/^)/p' "$HOOK_DIR/block-dangerous.sh" | grep -cE "^    ['\"]")
+assert_true "every ask pattern has a reason" \
+    "$([ "$n_pat" -eq "$n_rea" ] && [ "$n_pat" -gt 0 ] && echo 1 || echo 0)" \
+    "$n_pat patterns vs $n_rea reasons"
+
 # --- Parse gate ------------------------------------------------------------
 #
 # A hook that dies at parse time produces no output, and no output is

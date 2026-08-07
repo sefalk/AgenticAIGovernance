@@ -67,9 +67,13 @@ if [ "$tool_name" = "createAndRunTask" ] || [ "$tool_name" = "create_and_run_tas
     # ------------------------------------------------------------------
     emit_task() {
         # $1 = decision, $2 = reason
-        cat <<EOF
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"$1","permissionDecisionReason":"$2"}}
-EOF
+        # The deny reasons quote the offending task command back at the reader,
+        # and a task command is a path -- on Windows a backslash path. Raw
+        # interpolation would emit \s, an invalid JSON escape, and an
+        # unparsable verdict reads exactly like no verdict at all.
+        local reason
+        reason=$(printf '%s' "$2" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\r' | tr '\n' ' ')
+        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$1" "$reason"
         exit 0
     }
 
@@ -281,9 +285,13 @@ cat_fs_write=$(resolve_cat fs_write AUTONOMY_CAT_FS_WRITE)
 
 emit() {
     # $1 = decision, $2 = reason
-    cat <<EOF
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"$1","permissionDecisionReason":"$2"}}
-EOF
+    # The reason now carries the command line itself, which routinely contains
+    # quotes and backslashes. Interpolating those raw would produce invalid
+    # JSON, and an unparsable verdict is indistinguishable from no verdict --
+    # the gate would disarm itself precisely when it had something to say.
+    local reason
+    reason=$(printf '%s' "$2" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\r' | tr '\n' ' ')
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$1" "$reason"
     exit 0
 }
 
@@ -650,6 +658,14 @@ SEGEOF
 fi
 
 # ===================== TIER 3 -- ASK (durable change) =====================
+#
+# A confirmation prompt is a question put to a human, and a question that does
+# not say what it is about cannot be answered -- it can only be waved through.
+# The whole tier used to share one sentence ("This command makes a durable
+# change") for eleven different rules, naming neither the rule that fired nor
+# the command it fired on, while the deny tier next door has been specific all
+# along (issue #78). Each rule now says what it will actually do, and the
+# command is echoed so the answer is about the command rather than the category.
 ask_patterns=(
     'git\s+merge\b'
     'git\s+(checkout|switch)\b'
@@ -663,9 +679,27 @@ ask_patterns=(
     '(^|\s)rm\b'
     '(Move-Item|Copy-Item|New-Item|mkdir|mv|cp)\b'
 )
-for p in "${ask_patterns[@]}"; do
-    if matches_stripped "$p"; then
-        emit ask 'This command makes a durable change. Please confirm it is intentional.'
+# Index-aligned with ask_patterns.
+ask_reasons=(
+    "'git merge' rewrites the working tree and may leave conflict markers in tracked files"
+    "'git checkout'/'git switch' changes the checked-out branch, and with a path argument it discards uncommitted changes to that path"
+    "'git tag' creates or moves a tag, which is a release marker others may already rely on"
+    'pip install/uninstall changes the environment for everything that uses it, not just this task'
+    'conda install/remove changes the environment for everything that uses it, not just this task'
+    "'ruff format' rewrites source files in place"
+    'this Databricks CLI call acts on a remote workspace, where the effect is outside this repository and outside git'
+    'this Azure CLI call changes cloud resources, where the effect is outside this repository and may cost money'
+    "'Remove-Item' deletes files or directories"
+    "'rm' deletes files or directories"
+    'this writes to the filesystem (creates, moves or copies files)'
+)
+# Echoing the command is the point of the prompt, but an unbounded string in a
+# dialog is its own way of hiding information.
+shown=$(printf '%s' "$command_str" | tr '\n\t' '  ' | sed -E 's/[[:space:]]+/ /g')
+if [ "${#shown}" -gt 300 ]; then shown="${shown:0:297}..."; fi
+for i in "${!ask_patterns[@]}"; do
+    if matches_stripped "${ask_patterns[$i]}"; then
+        emit ask "Durable change: ${ask_reasons[$i]}. Confirm it is intentional. Command: $shown"
     fi
 done
 
