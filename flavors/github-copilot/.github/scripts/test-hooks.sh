@@ -676,9 +676,9 @@ ask_reason "delete ask echoes the command it is asking about" \
     '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}' \
     "Command: Remove-Item \./scratch\.tmp"
 
-ask_reason "package-install ask explains the environment-wide effect" \
-    '{"tool_name":"runInTerminal","tool_input":{"command":"pip install requests"}}' \
-    "environment"
+ask_reason "tag ask explains that others may rely on the marker" \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"git tag v1.4.0"}}' \
+    "release marker"
 
 ask_reason "cloud ask explains that the effect leaves the repository" \
     '{"tool_name":"runInTerminal","tool_input":{"command":"databricks jobs submit --json @job.json"}}' \
@@ -686,9 +686,54 @@ ask_reason "cloud ask explains that the effect leaves the repository" \
 
 # The reason must not be the same string for every rule -- that was the defect.
 ask_a=$(printf '%s' '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}' | bash "$HOOK_DIR/block-dangerous.sh" 2>&1)
-ask_b=$(printf '%s' '{"tool_name":"runInTerminal","tool_input":{"command":"pip install requests"}}' | bash "$HOOK_DIR/block-dangerous.sh" 2>&1)
+ask_b=$(printf '%s' '{"tool_name":"runInTerminal","tool_input":{"command":"git tag v1.4.0"}}' | bash "$HOOK_DIR/block-dangerous.sh" 2>&1)
 assert_true "two different ask rules give two different reasons" \
     "$([ "$ask_a" != "$ask_b" ] && echo 1 || echo 0)" "both returned: $ask_a"
+
+# --- ASK tier scope: what we own, what we hand back (issue #78a) ------------
+#
+# Emitting 'ask' preempts Copilot's own assessment, which categorises the
+# command and says in plain language what it will do. The tier is now split by
+# what we know that VS Code cannot; for the rest we stay silent and let the
+# better prompt through. Silence is deferral, not approval.
+
+defers() { # <name> <json>
+    local name="$1" json="$2" out
+    out=$(printf '%s' "$json" | bash "$HOOK_DIR/block-dangerous.sh" 2>&1)
+    if [ "$(printf '%s' "$out" | tr -d '[:space:]')" = "{}" ]; then
+        echo "PASS  $name"; pass=$((pass + 1))
+    else
+        echo "FAIL  $name -- expected '{}', got: ${out:-<no output>}"; fail=$((fail + 1))
+    fi
+}
+
+asks() { # <name> <json>
+    local name="$1" json="$2" out
+    out=$(printf '%s' "$json" | bash "$HOOK_DIR/block-dangerous.sh" 2>&1)
+    if printf '%s' "$out" | grep -q '"ask"'; then
+        echo "PASS  $name"; pass=$((pass + 1))
+    else
+        echo "FAIL  $name -- expected ask, got: ${out:-<no output>}"; fail=$((fail + 1))
+    fi
+}
+
+defers "package installs defer to the native assessment" \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"pip install requests"}}'
+defers "conda environment changes defer to the native assessment" \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"conda install numpy"}}'
+defers "a formatter run defers to the native assessment" \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"ruff format ."}}'
+defers "creating a directory defers to the native assessment" \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"mkdir build"}}'
+
+asks "deletion is still ours to ask about" \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"rm ./scratch.tmp"}}'
+asks "tagging is still ours to ask about" \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"git tag v1.4.0"}}'
+asks "checkout of a path is still ours to ask about" \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"git checkout -- src/foo.py"}}'
+asks "a deferred rule does not silence a retained one in the same command" \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"mkdir build; Remove-Item ./scratch.tmp"}}'
 
 # A reason carrying the command line carries the command's quotes and
 # backslashes with it. Unescaped, they produce invalid JSON -- and an
