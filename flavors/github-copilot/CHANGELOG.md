@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The provenance gate could not see the marker the instruction prescribes
+  (issue #81).** `provenance.instructions.md` puts a Python marker *after* the
+  module docstring, and the marker for a modified function *inside that
+  function's docstring*. Every gate that enforced it read the first five lines
+  of the file. For a module docstring of four lines or more the two rules
+  cannot both be satisfied; for the function-level placement they never can.
+  The block message named the instruction it was contradicting, so the only
+  move that cleared the gate was to violate the convention it pointed at.
+  MPUsageXPTP work item WIT #3119 carried an acceptance criterion that was
+  unsatisfiable for exactly this reason.
+
+  Detection now lives in one place — `Test-AfProvenanceMarker` in `_common.ps1`
+  and `af_has_provenance_marker` in `_common.sh` — and scans the whole file.
+  All six call sites (`implementer-stop`, `test-writer-stop`, `scan-secrets`,
+  in both shells) and the two rows in `compliance-checker.agent.md` now ask it,
+  and their messages no longer promise a five-line window.
+
+  `-Kind generated` still narrows *what counts* — test-writer's gate is about
+  authorship of a new file, so `copilot:modified` must not satisfy it — but
+  nothing was tightened about the marker's format. Widening where we look must
+  not quietly start blocking work the old window would have passed.
+
 - **The context budget measured the disk, not the content (issue #59).**
   `check-context-budget.py` estimated tokens as `st_size // 4` — bytes on disk.
   Bytes move for reasons that leave the content the model reads completely
