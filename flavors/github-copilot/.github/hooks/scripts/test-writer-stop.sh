@@ -53,7 +53,7 @@ while IFS= read -r line; do
     # Extract filename from git status (untracked ?? or added A)
     file=$(echo "$line" | sed 's/^.. //' | tr -d '"')
     if [[ "$file" == *.py ]] && [ -f "$file" ]; then
-        if ! head -5 "$file" | grep -q 'copilot:generated'; then
+        if ! af_has_provenance_marker "$file" generated; then
             missing="${missing}${file}, "
         fi
     fi
@@ -61,7 +61,7 @@ done < <(git status --porcelain "tests/" 2>/dev/null | grep -E '^\?\? |^A ')
 
 if [ -n "$missing" ]; then
     missing="${missing%, }"  # trim trailing comma
-    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Provenance violation: new test files missing copilot:generated marker: ${missing}\"}}"
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Provenance violation: these new test files carry no copilot:generated marker anywhere: ${missing}. See instructions/provenance.instructions.md for where to put it.\"}}"
     exit 0
 fi
 

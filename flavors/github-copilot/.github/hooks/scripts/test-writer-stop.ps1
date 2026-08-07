@@ -84,9 +84,7 @@ $newTestFiles = & git -C $codeRoot status --porcelain "tests/" 2>$null |
 $missingMarkers = @()
 foreach ($f in $newTestFiles) {
     if (Test-Path (Join-Path $codeRoot $f)) {
-        $header = Get-Content (Join-Path $codeRoot $f) -TotalCount 5 -ErrorAction SilentlyContinue
-        $headerText = $header -join "`n"
-        if ($headerText -notmatch 'copilot:generated') {
+        if (-not (Test-AfProvenanceMarker -Path (Join-Path $codeRoot $f) -Kind 'generated')) {
             $missingMarkers += $f
         }
     }
@@ -98,7 +96,7 @@ if ($missingMarkers.Count -gt 0) {
         hookSpecificOutput = @{
             hookEventName = "Stop"
             decision = "block"
-            reason = "Provenance violation: new test files missing 'copilot:generated' marker in first 5 lines: $list"
+            reason = "Provenance violation: these new test files carry no 'copilot:generated' marker anywhere: $list. See instructions/provenance.instructions.md for where to put it."
         }
     } | ConvertTo-Json -Compress -Depth 3
     Write-Output $output

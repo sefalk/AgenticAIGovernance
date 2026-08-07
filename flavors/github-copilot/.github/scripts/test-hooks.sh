@@ -327,6 +327,113 @@ stop_case "stop-tests warns on the condition documenter-stop blocks on" \
 stop_case "stop-tests does not accept another workflow's COMPLETED plan" \
     stop-tests.sh warning "docs/plans/fix-2026-01-01-other.md=$PLAN_OTHER"
 
+# --- Provenance marker placement (issue #81) -------------------------------
+#
+# provenance.instructions.md puts a Python marker after the module docstring,
+# and a marker for a modified function inside that function's docstring. Every
+# enforcing hook read the first 5 lines, so the instructed placement could not
+# clear the gate it is quoted by.
+
+echo "## provenance marker placement"
+
+if [ -f "$HOOK_DIR/_common.sh" ]; then
+    pfx=$(mktemp -d)
+    mkdir -p "$pfx/scripts"
+    cp "$HOOK_DIR/_common.sh" "$pfx/scripts/"
+
+    printf '%s\n' \
+        '# copilot:generated | implementer | 2026-08-07' \
+        '"""Module."""' \
+        '' \
+        'import os' > "$pfx/line1.py"
+
+    printf '%s\n' \
+        '"""Tests for the ColPar telegram-metadata registry.' \
+        '' \
+        'Validates the schema extensions, the per-telegram frames, the consolidated' \
+        'frame, the Type token vocabulary, the Extract column retrofit and the' \
+        'supporting enum dicts.' \
+        '"""' \
+        '' \
+        '# copilot:generated | test-writer | 2026-08-07' \
+        '' \
+        'import os' > "$pfx/docstring.py"
+
+    printf '%s\n' \
+        '"""Module."""' \
+        '' \
+        'from __future__ import annotations' \
+        '' \
+        '' \
+        'def compute(df):' \
+        '    """Compute a result.' \
+        '' \
+        '    Notes' \
+        '    -----' \
+        '    copilot:modified | implementer | 2026-08-07 | extracted pure logic' \
+        '    """' \
+        '    return df' > "$pfx/infunction.py"
+
+    printf '%s\n' \
+        '"""Module."""' \
+        '' \
+        'import os' > "$pfx/none.py"
+
+    cat > "$pfx/scripts/probe.sh" <<'PROBE'
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+kind="${1:-any}"
+shift
+# An absent detector must not look like a False verdict -- a non-zero exit
+# from a missing function is exactly the silence this issue is about.
+if ! declare -F af_has_provenance_marker >/dev/null 2>&1; then
+    for f in "$@"; do echo "$(basename "$f")=MISSING-DETECTOR"; done
+    exit 0
+fi
+for f in "$@"; do
+    if af_has_provenance_marker "$f" "$kind"; then echo "$(basename "$f")=1"; else echo "$(basename "$f")=0"; fi
+done
+PROBE
+
+    prov=$(bash "$pfx/scripts/probe.sh" any \
+        "$pfx/line1.py" "$pfx/docstring.py" "$pfx/infunction.py" \
+        "$pfx/none.py" "$pfx/missing.py" 2>&1)
+
+    case "$prov" in *"line1.py=1"*) assert_true "a marker above the module docstring is still found" 1 ;;
+        *) assert_true "a marker above the module docstring is still found" 0 "got: $prov" ;; esac
+    case "$prov" in *"docstring.py=1"*) assert_true "a marker after a long module docstring is found" 1 ;;
+        *) assert_true "a marker after a long module docstring is found" 0 "got: $prov" ;; esac
+    case "$prov" in *"infunction.py=1"*) assert_true "a marker inside a function docstring is found" 1 ;;
+        *) assert_true "a marker inside a function docstring is found" 0 "got: $prov" ;; esac
+    case "$prov" in *"none.py=0"*) assert_true "a file with no marker anywhere is still reported unmarked" 1 ;;
+        *) assert_true "a file with no marker anywhere is still reported unmarked" 0 "got: $prov" ;; esac
+    case "$prov" in *"missing.py=0"*) assert_true "a path that does not exist is unmarked rather than an error" 1 ;;
+        *) assert_true "a path that does not exist is unmarked rather than an error" 0 "got: $prov" ;; esac
+
+    # Widening where we look must not widen what counts: the test-writer gate
+    # is about a new file, so copilot:modified must not satisfy it.
+    gen=$(bash "$pfx/scripts/probe.sh" generated \
+        "$pfx/docstring.py" "$pfx/infunction.py" 2>&1)
+    case "$gen" in *"infunction.py=0"*) assert_true "a modified-marker alone does not satisfy a generated-marker gate" 1 ;;
+        *) assert_true "a modified-marker alone does not satisfy a generated-marker gate" 0 "got: $gen" ;; esac
+    case "$gen" in *"docstring.py=1"*) assert_true "a generated-marker still satisfies a generated-marker gate" 1 ;;
+        *) assert_true "a generated-marker still satisfies a generated-marker gate" 0 "got: $gen" ;; esac
+
+    rm -rf "$pfx"
+fi
+
+# A detector nobody calls is the failure mode of issue #69. These bind the
+# gates to it.
+for site in implementer-stop.sh test-writer-stop.sh scan-secrets.sh; do
+    text=$(cat "$HOOK_DIR/$site" 2>/dev/null || true)
+    case "$text" in *af_has_provenance_marker*) assert_true "$site asks the shared detector" 1 ;;
+        *) assert_true "$site asks the shared detector" 0 "no call to af_has_provenance_marker" ;; esac
+    if echo "$text" | grep -qE 'head +-n? *5|first 5 lines'; then
+        assert_true "$site no longer bounds the search to a fixed window" 0 "fixed 5-line window still present"
+    else
+        assert_true "$site no longer bounds the search to a fixed window" 1
+    fi
+done
+
 # --- Resolution invariants -------------------------------------------------
 #
 # run_case copies the hook into a fixture and runs it *from the fixture root*,

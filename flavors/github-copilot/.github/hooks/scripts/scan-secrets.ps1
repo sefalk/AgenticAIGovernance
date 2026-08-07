@@ -95,13 +95,13 @@ foreach ($filePath in $filePaths) {
     # Held back until every file has been scanned: a secret anywhere in the
     # batch outranks a missing marker, and only one verdict can be emitted.
     if (-not $provenanceAdvisory -and $ext -eq '.py') {
-        $firstLines = Get-Content $filePath -TotalCount 5 -ErrorAction SilentlyContinue | Out-String
-        if ($firstLines -and $firstLines -notmatch 'copilot:(generated|modified)') {
+        if ((Test-Path -LiteralPath $filePath -PathType Leaf) -and
+            -not (Test-AfProvenanceMarker -Path $filePath)) {
             $provenanceAdvisory = @{
                 gate = "provenance-check"
                 status = "WARN"
                 file = $filePath
-                detail = "No copilot:generated or copilot:modified marker found in first 5 lines. " +
+                detail = "No copilot:generated or copilot:modified marker found anywhere in this file. " +
                     "If this file was created or substantially modified by an agent, add a provenance marker. " +
                     "See instructions/provenance.instructions.md."
             } | ConvertTo-Json -Compress

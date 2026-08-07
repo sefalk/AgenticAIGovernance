@@ -212,3 +212,41 @@ for path in found:
         print(path)
 ' 2>/dev/null
 }
+
+# --- Provenance marker detection -------------------------------------------
+#
+# instructions/provenance.instructions.md puts a Python marker *after* the
+# module docstring, and the marker for a modified function *inside that
+# function's docstring*. Every gate here used to read the first five lines, so
+# a module docstring of four lines or more put the instructed placement out of
+# reach and the function-level placement was unreachable by construction
+# (issue #81). The block message quoted the instruction it contradicted.
+#
+# Two things this deliberately does not do:
+#   * It does not judge *where* the marker sits. A marker's job is to be
+#     found; prescribing its position is the instruction's job and checking it
+#     is a reviewer's.
+#   * It does not tighten what counts as a marker. The second argument narrows
+#     which kinds satisfy the caller ("generated" for test-writer's new-file
+#     gate, where copilot:modified must not count). It does not additionally
+#     demand the full `kind | agent | date` triple -- widening where we look
+#     must not quietly start blocking work the old window would have passed.
+#
+# Usage: af_has_provenance_marker <path> [any|generated]
+# Exit status 0 = marked, 1 = unmarked. A missing or unreadable path is
+# unmarked, never an error.
+af_has_provenance_marker() {
+    _prov_file="$1"
+    _prov_kind="${2:-any}"
+
+    [ -n "$_prov_file" ] || return 1
+    [ -f "$_prov_file" ] || return 1
+
+    if [ "$_prov_kind" = "generated" ]; then
+        _prov_pattern='copilot:generated'
+    else
+        _prov_pattern='copilot:(generated|modified)'
+    fi
+
+    grep -qE "$_prov_pattern" "$_prov_file" 2>/dev/null
+}

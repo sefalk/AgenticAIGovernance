@@ -1123,6 +1123,177 @@ Assert-True "stop-tests does not accept another workflow's COMPLETED plan" `
 
 Write-Output ""
 
+# ── 6b. Provenance marker placement (issue #81) ──────────────────────────
+#
+# provenance.instructions.md puts a Python marker *after* the module docstring,
+# and a marker for a modified function *inside that function's docstring*.
+# Every enforcing hook read the first 5 lines. For a module docstring longer
+# than three lines the two rules cannot both be satisfied; for the
+# function-level placement they never can. The agent's only escape was to
+# violate the convention the block message points at.
+
+Write-Output "## Provenance marker placement"
+
+$PY_MARKER_LINE1 = @'
+# copilot:generated | implementer | 2026-08-07
+"""Module."""
+
+import os
+'@
+
+# The placement the instruction actually prescribes, on a docstring of the
+# length real modules have. This is the case that could never pass.
+$PY_MARKER_AFTER_DOCSTRING = @'
+"""Tests for the ColPar telegram-metadata registry.
+
+Validates the schema extensions, the per-telegram frames, the consolidated
+frame, the Type token vocabulary, the Extract column retrofit and the
+supporting enum dicts.
+"""
+
+# copilot:generated | test-writer | 2026-08-07
+
+import os
+'@
+
+# Row 2 of the instruction's table: a modified function marks itself in its
+# own docstring. No fixed window reaches this, by construction.
+$PY_MARKER_IN_FUNCTION = @'
+"""Module."""
+
+from __future__ import annotations
+
+
+def compute(df):
+    """Compute a result.
+
+    Notes
+    -----
+    copilot:modified | implementer | 2026-08-07 | extracted pure logic
+    """
+    return df
+'@
+
+$PY_NO_MARKER = @'
+"""Module."""
+
+import os
+
+
+def compute(df):
+    """Compute a result."""
+    return df
+'@
+
+# Probes the shared detector directly. The stop hooks that call it run the
+# project's whole test suite first, so they cannot be reached in a fixture on
+# a machine without pytest -- and a case that silently skips is worse than no
+# case at all.
+function Get-MarkerVerdicts {
+    param([hashtable]$Files, [string]$Kind = 'any')
+    $fx = Join-Path ([System.IO.Path]::GetTempPath()) "af-prov-$(Get-Random)"
+    $fxHooks = Join-Path $fx '.github/hooks/scripts'
+    New-Item -ItemType Directory -Path $fxHooks -Force | Out-Null
+    Copy-Item (Join-Path $scriptDir '_common.ps1') $fxHooks
+    try {
+        $paths = @()
+        foreach ($rel in $Files.Keys) {
+            $dest = Join-Path $fx $rel
+            New-Item -ItemType Directory -Path (Split-Path $dest) -Force | Out-Null
+            Set-Content -Path $dest -Value $Files[$rel] -Encoding UTF8
+            $paths += $dest
+        }
+        $paths += (Join-Path $fx 'does-not-exist.py')
+        $probeBody = @'
+param([string]$Kind, [string]$Paths)
+. "$PSScriptRoot/_common.ps1"
+# -File passes every argument as one string, so the list arrives joined.
+$pathList = $Paths -split ','
+# An absent detector must not be indistinguishable from a False verdict --
+# that is the very confusion this issue is about.
+if (-not (Get-Command Test-AfProvenanceMarker -ErrorAction SilentlyContinue)) {
+    foreach ($p in $pathList) { Write-Output ("{0}=MISSING-DETECTOR" -f (Split-Path $p -Leaf)) }
+    exit 0
+}
+foreach ($p in $pathList) {
+    $v = Test-AfProvenanceMarker -Path $p -Kind $Kind
+    Write-Output ("{0}={1}" -f (Split-Path $p -Leaf), [bool]$v)
+}
+'@
+        $probePath = Join-Path $fxHooks 'probe.ps1'
+        Set-Content -Path $probePath -Value $probeBody
+        # A probe that errors is a verdict too, so its stderr must reach the
+        # assertion instead of aborting the suite under -ErrorActionPreference Stop.
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            return (& powershell -NoProfile -ExecutionPolicy Bypass -File $probePath -Kind $Kind -Paths ($paths -join ',') 2>&1 | Out-String)
+        } finally {
+            $ErrorActionPreference = $prev
+        }
+    } finally {
+        Remove-Item $fx -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+$markerFiles = @{
+    'line1.py'      = $PY_MARKER_LINE1
+    'docstring.py'  = $PY_MARKER_AFTER_DOCSTRING
+    'infunction.py' = $PY_MARKER_IN_FUNCTION
+    'none.py'       = $PY_NO_MARKER
+}
+$verdicts = Get-MarkerVerdicts -Files $markerFiles
+
+Assert-True "a marker above the module docstring is still found" `
+    ($verdicts -match 'line1\.py=True') "got: $verdicts"
+
+Assert-True "a marker after a module docstring longer than the old window is found" `
+    ($verdicts -match 'docstring\.py=True') "got: $verdicts"
+
+Assert-True "a marker inside a function docstring is found" `
+    ($verdicts -match 'infunction\.py=True') "got: $verdicts"
+
+Assert-True "a file with no marker anywhere is still reported unmarked" `
+    ($verdicts -match 'none\.py=False') "got: $verdicts"
+
+Assert-True "a path that does not exist is unmarked rather than an error" `
+    ($verdicts -match 'does-not-exist\.py=False') "got: $verdicts"
+
+# test-writer's gate is about authorship of a *new* file, so copilot:modified
+# must not satisfy it. Widening where we look must not widen what counts.
+$generatedOnly = Get-MarkerVerdicts -Files $markerFiles -Kind 'generated'
+Assert-True "a modified-marker alone does not satisfy a generated-marker gate" `
+    ($generatedOnly -match 'infunction\.py=False') "got: $generatedOnly"
+Assert-True "a generated-marker still satisfies a generated-marker gate" `
+    ($generatedOnly -match 'docstring\.py=True') "got: $generatedOnly"
+
+# The detector is only worth anything if the gates ask it. Without these, the
+# behaviour above is a helper nobody calls -- the failure mode of issue #69.
+$provenanceCallSites = @(
+    'implementer-stop.ps1', 'test-writer-stop.ps1', 'scan-secrets.ps1',
+    'implementer-stop.sh', 'test-writer-stop.sh', 'scan-secrets.sh'
+)
+foreach ($site in $provenanceCallSites) {
+    $sitePath = Join-Path $scriptDir $site
+    $siteText = if (Test-Path $sitePath) { Get-Content $sitePath -Raw } else { '' }
+    $helper = if ($site.EndsWith('.ps1')) { 'Test-AfProvenanceMarker' } else { 'af_has_provenance_marker' }
+
+    Assert-True "$site asks the shared detector" `
+        ($siteText -match [regex]::Escape($helper)) `
+        "no call to $helper in $site"
+
+    Assert-True "$site no longer bounds the search to a fixed window" `
+        ($siteText -notmatch '(?i)(TotalCount\s+5|head\s+-n?\s*5|first 5 lines)') `
+        "fixed 5-line window still present in $site"
+}
+
+$compliancePath = Join-Path $githubDir 'agents/compliance-checker.agent.md'
+Assert-True "compliance-checker states the same detection rule as the hooks" `
+    (((Get-Content $compliancePath -Raw) -notmatch 'first 5 lines')) `
+    "post-flight gate still describes a 5-line window"
+
+Write-Output ""
+
 # ── 7. Edge cases ────────────────────────────────────────────────────────
 
 Write-Output "## Edge cases"
