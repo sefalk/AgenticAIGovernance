@@ -95,8 +95,43 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
         }
     } catch {}
 
+    # The unit of accountability is the branch delta: what the merge will add.
+    # Resolved here rather than at each gate so provenance, quality and hygiene
+    # all speak about the same base.
+    $mergeBase = $null
+    foreach ($ref in @($BASE_BRANCH, "origin/$BASE_BRANCH")) {
+        if (-not $BASE_BRANCH) { break }
+        $mergeBase = @(git -C $codeRoot merge-base HEAD $ref 2>$null)[0]
+        if ($mergeBase) { break }
+    }
+    $diffBaseArgs = @()
+    if ($mergeBase) { $diffBaseArgs = @('--diff-base', $mergeBase) }
+
+    # Resolve Python once -- the authorship filter and both gates need it.
+    $pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
+    if (-not (Test-Path $pythonExe)) {
+        $pythonExe = if ($AfPython) { $AfPython } else { $null }
+    }
+    $qualityScript = Join-Path $mainRoot '.github/scripts/check-python-quality.py'
+
+    # A provenance marker is a claim of authorship, so it may only be demanded
+    # of files the agent authored. `ruff format` rewrites every line of a file
+    # without writing a word of it, and a diff cannot tell the two apart
+    # (issue #86). If the query cannot run, keep the whole diff: an
+    # unanswerable question must not silence the gate.
+    $authoredPy = @($changedPy | Where-Object { $_ })
+    if ($mergeBase -and $pythonExe -and (Test-Path $qualityScript) -and $authoredPy.Count -gt 0) {
+        Push-Location $codeRoot
+        $authoredOut = & $pythonExe $qualityScript @diffBaseArgs --list-authored --files @($authoredPy) 2>$null
+        $authoredExit = $LASTEXITCODE
+        Pop-Location
+        if ($authoredExit -eq 0) {
+            $authoredPy = @($authoredOut | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })
+        }
+    }
+
     $missingMarkers = @()
-    foreach ($f in $changedPy) {
+    foreach ($f in $authoredPy) {
         if ($f -and (Test-Path (Join-Path $codeRoot $f))) {
             if (-not (Test-AfProvenanceMarker -Path (Join-Path $codeRoot $f))) {
                 $missingMarkers += $f
@@ -130,14 +165,7 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
     # Files committed in an EARLIER phase of this workflow appear in neither
     # diff above -- the coordinator commits the test files at the end of the Red
     # phase, so they were invisible here and shipped unlinted (issue #13).
-    # The unit of accountability is the branch delta: what the merge will add.
     $inheritedLintPy = @()
-    $mergeBase = $null
-    foreach ($ref in @($BASE_BRANCH, "origin/$BASE_BRANCH")) {
-        if (-not $BASE_BRANCH) { break }
-        $mergeBase = @(git -C $codeRoot merge-base HEAD $ref 2>$null)[0]
-        if ($mergeBase) { break }
-    }
     if ($mergeBase) {
         $branchDelta = git -C $codeRoot diff --name-only --diff-filter=AM "$mergeBase..HEAD" -- '*.py' 2>$null
         $inheritedLintPy = @($branchDelta | Where-Object {
@@ -146,17 +174,6 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
         })
     }
 
-    # The quality gate reports per changed function, not per changed file
-    # (issue #45). It reuses the base resolved above rather than deriving its
-    # own, so the framework keeps one base-branch resolver.
-    $diffBaseArgs = @()
-    if ($mergeBase) { $diffBaseArgs = @('--diff-base', $mergeBase) }
-
-    # Resolve Python once -- the quality gate and the linting gate both need it.
-    $pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
-    if (-not (Test-Path $pythonExe)) {
-        $pythonExe = if ($AfPython) { $AfPython } else { $null }
-    }
 
     if ($changedSrcPy.Count -gt 0) {
         $qualityScript = Join-Path $mainRoot '.github/scripts/check-python-quality.py'

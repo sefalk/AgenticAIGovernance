@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Gates were scoped to the diff, so a formatter run looked like authorship
+  (issue #86).** The provenance, docstring and ignore-hygiene gates all asked
+  their question of whatever the branch diff listed. A diff answers "which
+  lines moved", and a formatter moves all of them. MPUsageXPTP work item
+  WIT #3121 — `ruff format` across the repository, acceptance criteria "a
+  single dedicated commit" and "no logic change" — came back with 148 hand
+  edits across 68 files: 72 provenance markers, 35 docstring sections and 9
+  suppression justifications, each one mapping onto a gate the agent had to
+  clear to exit. The markers claimed authorship of files nobody authored, and
+  an AST comparison found 11 files carrying authored docstring *content*
+  inside a commit labelled formatting-only. Formatter adoption, import
+  rewrites and codemods had no correct path at all: the implementer and
+  refactorer are gated and the coordinator cannot write code.
+
+  `check-python-quality.py` now answers a different question. `is_authored`
+  compares the file's AST against the base commit's, with docstring
+  whitespace collapsed — `ast.dump` omits line and column attributes, so
+  reflowing, re-quoting and re-bracketing leave the signature untouched,
+  while the words in a docstring do not. Undecidable means authored: no base
+  blob, an unparseable file on either side, or git unable to answer all keep
+  the gate on. Type hints and docstrings are skipped for a file with no
+  authored change, and `--list-authored` reports the authored subset so
+  `implementer-stop.ps1`/`.sh` can scope the provenance gate the same way.
+  If that query cannot run, the gate keeps the whole diff.
+
+  Ignore hygiene is deliberately *not* filtered this way: comments leave no
+  trace in an AST, so a `# noqa` smuggled into a "formatting only" commit
+  would read as mechanical. Instead, ownership there now follows the
+  suppression rather than the line it sits on — inherited suppressions are
+  counted in the base blob, and what is left over is what the branch
+  introduced. This also fixes the converse misfire, where a reformat rewrote
+  the line an inherited suppression sat on and made it blocking. Linting is
+  not scoped by authorship at all, and both hook suites assert statically
+  that no lint invocation references the filter.
+
 - **The provenance gate could not see the marker the instruction prescribes
   (issue #81).** `provenance.instructions.md` puts a Python marker *after* the
   module docstring, and the marker for a modified function *inside that
