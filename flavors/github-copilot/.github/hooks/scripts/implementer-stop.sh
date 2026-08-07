@@ -80,15 +80,49 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
         changed_py=$(git diff --name-only HEAD --diff-filter=AM -- '*.py' 2>/dev/null)
     fi
 
+    # The unit of accountability is the branch delta: what the merge will add.
+    # Resolved here rather than at each gate so provenance, quality and hygiene
+    # all speak about the same base.
+    merge_base=""
+    if [ -n "$BASE_BRANCH" ]; then
+        merge_base=$(git merge-base HEAD "$BASE_BRANCH" 2>/dev/null | head -1)
+        [ -z "$merge_base" ] && merge_base=$(git merge-base HEAD "origin/$BASE_BRANCH" 2>/dev/null | head -1)
+    fi
+    diff_base_args=""
+    [ -n "$merge_base" ] && diff_base_args="--diff-base $merge_base"
+
+    # Resolve Python once -- the authorship filter and both gates need it.
+    python_exe=""
+    if [ -x ".venv/bin/python" ]; then
+        python_exe=".venv/bin/python"
+    elif [ -x ".venv/Scripts/python.exe" ]; then
+        python_exe=".venv/Scripts/python.exe"
+    else
+        python_exe="$AF_PYTHON"
+    fi
+    quality_script=".github/scripts/check-python-quality.py"
+
+    # A provenance marker is a claim of authorship, so it may only be demanded
+    # of files the agent authored. `ruff format` rewrites every line of a file
+    # without writing a word of it, and a diff cannot tell the two apart
+    # (issue #86). If the query cannot run, keep the whole diff: an
+    # unanswerable question must not silence the gate.
+    authored_py="$changed_py"
+    if [ -n "$changed_py" ] && [ -n "$merge_base" ] && [ -n "$python_exe" ] && [ -f "$quality_script" ]; then
+        if authored_out=$(echo "$changed_py" | xargs "$python_exe" "$quality_script" $diff_base_args --list-authored --files 2>/dev/null); then
+            authored_py="$authored_out"
+        fi
+    fi
+
     missing=""
-    if [ -n "$changed_py" ]; then
+    if [ -n "$authored_py" ]; then
         while IFS= read -r f; do
             if [ -f "$f" ]; then
                 if ! af_has_provenance_marker "$f"; then
                     missing="${missing:+$missing, }$f"
                 fi
             fi
-        done <<< "$changed_py"
+        done <<< "$authored_py"
     fi
 
     if [ -n "$missing" ]; then
@@ -115,13 +149,7 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
     # Files committed in an EARLIER phase of this workflow appear in neither
     # diff above -- the coordinator commits the test files at the end of the Red
     # phase, so they were invisible here and shipped unlinted (issue #13).
-    # The unit of accountability is the branch delta: what the merge will add.
     inherited_lint_py=""
-    merge_base=""
-    if [ -n "$BASE_BRANCH" ]; then
-        merge_base=$(git merge-base HEAD "$BASE_BRANCH" 2>/dev/null | head -1)
-        [ -z "$merge_base" ] && merge_base=$(git merge-base HEAD "origin/$BASE_BRANCH" 2>/dev/null | head -1)
-    fi
     if [ -n "$merge_base" ]; then
         branch_delta=$(git diff --name-only --diff-filter=AM "${merge_base}..HEAD" -- '*.py' 2>/dev/null)
         if [ -n "$branch_delta" ]; then
@@ -135,24 +163,7 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
         fi
     fi
 
-    # Resolve Python once -- quality gate and linting gate both need it.
-    python_exe=""
-    if [ -x ".venv/bin/python" ]; then
-        python_exe=".venv/bin/python"
-    elif [ -x ".venv/Scripts/python.exe" ]; then
-        python_exe=".venv/Scripts/python.exe"
-    else
-        python_exe="$AF_PYTHON"
-    fi
-
-    # The quality gate reports per changed function, not per changed file
-    # (issue #45). It reuses the base resolved above rather than deriving its
-    # own, so the framework keeps one base-branch resolver.
-    diff_base_args=""
-    [ -n "$merge_base" ] && diff_base_args="--diff-base $merge_base"
-
     if [ -n "$changed_src_py" ]; then
-        quality_script=".github/scripts/check-python-quality.py"
         if [ ! -f "$quality_script" ]; then
             echo '{"hookSpecificOutput": {"hookEventName": "Stop", "decision": "block", "reason": "Python quality gate: .github/scripts/check-python-quality.py not found. Cannot verify type hints/docstrings/ignore hygiene."}}'
             exit 0

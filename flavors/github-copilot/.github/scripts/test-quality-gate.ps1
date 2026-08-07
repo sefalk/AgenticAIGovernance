@@ -237,9 +237,15 @@ Set-RepoFile $repo 'src/new_mod.py' "`"`"`"New module.`"`"`"`n# copilot:generate
 Assert-GateFail 'untracked new file is entirely in scope' `
     (Invoke-Quality -Repo $repo -Files @('src/new_mod.py') -DiffBase 'dev') 'fresh'
 
-# 8. Changing only a decorator changes the function.
+# 8. Changing only a decorator changes the function. The fixture used to make
+#    that change by appending a comment, which #86 showed is not a change at
+#    all -- comments leave no trace in an AST -- so it now swaps the decorator.
 $decorated = @'
 def _deco(f):
+    return f
+
+
+def _deco2(f):
     return f
 
 
@@ -248,7 +254,7 @@ def decorated(x):
     return x
 '@
 $repo = New-QualityRepo @{ 'src/app.py' = ($MODULE_HEADER + $decorated + "`n") }
-Set-RepoFile $repo 'src/app.py' ($MODULE_HEADER + ($decorated -replace '@_deco', '@_deco  # keep') + "`n")
+Set-RepoFile $repo 'src/app.py' ($MODULE_HEADER + ($decorated -replace '(?m)^@_deco$', '@_deco2') + "`n")
 Assert-GateFail 'decorator-only change puts the function in scope' `
     (Invoke-Quality -Repo $repo -Files @('src/app.py') -DiffBase 'dev') 'decorated'
 
