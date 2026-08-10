@@ -327,6 +327,92 @@ stop_case "stop-tests warns on the condition documenter-stop blocks on" \
 stop_case "stop-tests does not accept another workflow's COMPLETED plan" \
     stop-tests.sh warning "docs/plans/fix-2026-01-01-other.md=$PLAN_OTHER"
 
+# --- Workflow-log timestamps are measured, not authored (issue #91) --------
+#
+# A documenter wrote `completed:` six and a half hours into the future, in the
+# same output that declared "zero fabricated data". Nothing caught it: every
+# gate downstream checks that the field is present, and an invented value is
+# present. The cost block already answered this shape — measured by the hook,
+# never transcribed by the model — and the timestamps now follow it.
+
+echo "## documenter-stop.sh timestamps"
+
+LOG_INVENTED='workflow_id: "72-x"\nstarted: "2099-01-01T09:00:00Z"\ncompleted: "2099-01-01T16:30:00Z"\nstatus: "COMPLETED"\n'
+LOG_BARE='workflow_id: "72-x"\nstatus: "COMPLETED"\n'
+RETRO_MD='# Retro 72-x\n\n- lesson\n'
+
+# stamp_log PLAN LOG -- runs documenter-stop.sh over a seeded fixture and
+# echoes the workflow log as the hook left it. A hook that writes into the
+# repository cannot be judged by its verdict alone.
+stamp_log() {
+    local plan="$1" log="$2" fixture out
+    fixture=$(mktemp -d)
+    mkdir -p "$fixture/.github/hooks/scripts" "$fixture/.github/logs" \
+             "$fixture/.github/retros/auto" "$fixture/docs/plans"
+    cp "$HOOK_DIR/documenter-stop.sh" "$fixture/.github/hooks/scripts/"
+    cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
+    [ -f "$GITHUB_DIR/af-env.conf" ] && cp "$GITHUB_DIR/af-env.conf" "$fixture/.github/"
+    printf '%b' "$plan" > "$fixture/docs/plans/fix-2026-08-07-x.md"
+    printf '%b' "$log" > "$fixture/.github/logs/72-x.yaml"
+    printf '%b' "$RETRO_MD" > "$fixture/.github/retros/auto/72-x.md"
+    (
+        cd "$fixture" || exit 1
+        git init -q .
+        git checkout -q -b agent/72-x
+        printf '%s' '{"session_id":"s1","transcript_path":"/none"}' \
+            | bash ".github/hooks/scripts/documenter-stop.sh"
+    ) > /dev/null 2>&1
+    out=$(cat "$fixture/.github/logs/72-x.yaml")
+    rm -rf "$fixture"
+    printf '%s' "$out"
+}
+
+stamped=$(stamp_log "$PLAN_DONE" "$LOG_INVENTED")
+case "$stamped" in
+    *2099*) assert_true "a completed: the documenter invented does not survive the hook" 0 "got: $stamped" ;;
+    *)      assert_true "a completed: the documenter invented does not survive the hook" 1 ;;
+esac
+
+# Replacing has to mean replacing. Appending a measured value beside the
+# invented one leaves a duplicate YAML key, and a parser takes the last one.
+started_count=$(printf '%s\n' "$stamped" | grep -c '^started:')
+completed_count=$(printf '%s\n' "$stamped" | grep -c '^completed:')
+assert_true "the log carries each timestamp exactly once" \
+    "$([ "$started_count" -eq 1 ] && [ "$completed_count" -eq 1 ] && echo 1 || echo 0)" \
+    "started=$started_count completed=$completed_count in: $stamped"
+
+bare=$(stamp_log "$PLAN_DONE" "$LOG_BARE")
+b_started=$(printf '%s\n' "$bare" | grep -c '^started: "')
+b_completed=$(printf '%s\n' "$bare" | grep -c '^completed: "')
+assert_true "a log without timestamps gets both from the hook" \
+    "$([ "$b_started" -eq 1 ] && [ "$b_completed" -eq 1 ] && echo 1 || echo 0)" \
+    "got: $bare"
+
+# The artifact gate already tells the two documenter lifecycles apart. A call
+# made while the workflow is still running must not date its completion.
+mid=$(stamp_log "$PLAN_RUNNING" "$LOG_INVENTED")
+case "$mid" in
+    *2099*) assert_true "a workflow that has not finished is not stamped as finished" 1 ;;
+    *)      assert_true "a workflow that has not finished is not stamped as finished" 0 "the mid-workflow call rewrote the log: $mid" ;;
+esac
+
+# The schema is the instruction. Leaving the fields in it and arguing against
+# them in prose elsewhere is how the fabrication happened in the first place.
+doc_agent=$(cat "$GITHUB_DIR/agents/documenter.agent.md")
+case "$doc_agent" in
+    *'started: "<ISO 8601>"'*)
+        assert_true "the log schema no longer asks the documenter for timestamps" 0 \
+            "the schema block still contains a timestamp field for the model to fill in" ;;
+    *)  assert_true "the log schema no longer asks the documenter for timestamps" 1 ;;
+esac
+
+case "$doc_agent" in
+    *'Do not write `started:`'*)
+        assert_true "the documenter is told the timestamps are not its to write" 1 ;;
+    *)  assert_true "the documenter is told the timestamps are not its to write" 0 \
+            "no instruction found that hands the timestamps to the Stop hook" ;;
+esac
+
 # --- Provenance marker placement (issue #81) -------------------------------
 #
 # provenance.instructions.md puts a Python marker after the module docstring,

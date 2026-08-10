@@ -109,6 +109,54 @@ if ($missing.Count -gt 0) {
     exit 0
 }
 
+# ---------- Timestamps (ADVISORY -- never blocks, never fails the hook) ----------
+#
+# Stamped here rather than written by the documenter so the values never pass
+# through a language model. Measured: a documenter wrote a `completed:` six and
+# a half hours into the future, in the same output that declared "zero
+# fabricated data" -- and every gate downstream accepted it, because they check
+# that the field is present, and an invented value is present (issue #91).
+#
+# `completed:` is now: this hook fires when the documenter finishes. `started:`
+# is the branch's oldest commit, the same approximation the cost collector
+# already uses for --workflow-start. Anything the documenter left behind is
+# replaced rather than joined -- two `completed:` keys is a YAML file whose
+# meaning depends on which one the parser reaches last.
+
+$stampNote = ''
+try {
+    $logPath = if (Test-Path $logPath1) { $logPath1 } else { $logPath2 }
+
+    $completedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    $startedAt = $completedAt
+    $base = if ($BASE_BRANCH) { $BASE_BRANCH } else { 'dev' }
+    $isoStamps = & git log --format=%cI "$base..HEAD" 2>$null
+    if ($isoStamps) { $startedAt = @($isoStamps)[-1] }
+
+    # Top-level keys only: a `started:` indented inside a step belongs to that
+    # step and is none of this hook's business.
+    $kept = @(Get-Content $logPath | Where-Object { $_ -notmatch '^(started|completed):' })
+    $stampLines = @("started: `"$startedAt`"", "completed: `"$completedAt`"")
+
+    $anchor = -1
+    for ($i = 0; $i -lt $kept.Count; $i++) {
+        if ($kept[$i] -match '^workflow_id:') { $anchor = $i; break }
+    }
+    if ($anchor -ge 0) {
+        $head = @($kept[0..$anchor])
+        $tail = if ($anchor -lt ($kept.Count - 1)) { @($kept[($anchor + 1)..($kept.Count - 1)]) } else { @() }
+        $kept = $head + $stampLines + $tail
+    } else {
+        $kept = $stampLines + $kept
+    }
+
+    Set-Content -Path $logPath -Value $kept -Encoding UTF8
+    $stampNote = ' + timestamps measured'
+}
+catch {
+    $stampNote = ''
+}
+
 # ---------- Cost block (ADVISORY -- never blocks, never fails the hook) ----------
 #
 # Appended here rather than written by the documenter so the numbers never pass
@@ -199,7 +247,7 @@ catch {
 }
 
 $output = @{
-    systemMessage = "documenter:Stop -- artifact gate PASS: workflow log and retro snippet exist for '$workflowId'$costNote$scratchNote"
+    systemMessage = "documenter:Stop -- artifact gate PASS: workflow log and retro snippet exist for '$workflowId'$stampNote$costNote$scratchNote"
 } | ConvertTo-Json -Compress
 Write-Output $output
 exit 0

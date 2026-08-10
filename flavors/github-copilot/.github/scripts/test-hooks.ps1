@@ -41,7 +41,8 @@ function Invoke-Hook {
         [string]$JsonInput,
         [string]$Branch,
         [switch]$Detached,
-        [hashtable]$Files
+        [hashtable]$Files,
+        [string]$ReadBack
     )
     $hookPath = Join-Path $scriptDir $Script
     if (-not (Test-Path $hookPath)) {
@@ -50,7 +51,7 @@ function Invoke-Hook {
     if (-not $Branch -and -not $Detached -and -not $Files) {
         return (Invoke-HookScript -HookPath $hookPath -JsonInput $JsonInput)
     }
-    return (Invoke-HookInFixture -HookPath $hookPath -Script $Script -JsonInput $JsonInput -Branch $Branch -Detached:$Detached -Files $Files)
+    return (Invoke-HookInFixture -HookPath $hookPath -Script $Script -JsonInput $JsonInput -Branch $Branch -Detached:$Detached -Files $Files -ReadBack $ReadBack)
 }
 
 # Branch-context gates read the branch of the repo the hook sits in, resolved
@@ -64,7 +65,11 @@ function Invoke-HookInFixture {
         [string]$JsonInput,
         [string]$Branch,
         [switch]$Detached,
-        [hashtable]$Files
+        [hashtable]$Files,
+        # A hook that writes into the repository cannot be judged by its
+        # verdict alone -- the fixture is deleted on the way out, so the file
+        # has to be read back before then. $null means the path was absent.
+        [string]$ReadBack
     )
     $fixture = Join-Path ([System.IO.Path]::GetTempPath()) "af-hook-branch-$(Get-Random)"
     $fixtureHooks = Join-Path $fixture '.github/hooks/scripts'
@@ -97,7 +102,14 @@ function Invoke-HookInFixture {
         }
         $output = $JsonInput | powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fixtureHooks $Script) 2>&1
         $exitCode = $LASTEXITCODE
-        return @{ Output = ($output | Out-String).Trim(); ExitCode = $exitCode }
+        # Not $readBack: PowerShell variable names are case-insensitive, so a
+        # local differing only in case silently overwrites the parameter.
+        $readContent = $null
+        if ($ReadBack) {
+            $rbPath = Join-Path $fixture $ReadBack
+            if (Test-Path $rbPath) { $readContent = (Get-Content $rbPath -Raw) }
+        }
+        return @{ Output = ($output | Out-String).Trim(); ExitCode = $exitCode; ReadBack = $readContent }
     } finally {
         Pop-Location
         Remove-Item $fixture -Recurse -Force -ErrorAction SilentlyContinue
@@ -1192,6 +1204,88 @@ $stOther = Get-StopTestsOutput @{ 'docs/plans/fix-2026-01-01-other.md' = ($PLAN_
 Assert-True "stop-tests does not accept another workflow's COMPLETED plan" `
     ($stOther -match 'WARNING') `
     "got: $stOther"
+
+Write-Output ""
+
+# ── Workflow-log timestamps are measured, not authored (issue #91) ───────
+#
+# A documenter wrote `completed:` six and a half hours into the future, in the
+# same output that declared "zero fabricated data". Nothing caught it: every
+# gate downstream checks that the field is *present*, and an invented value is
+# present. The log is the only durable record of when a workflow ran, so a
+# plausible wrong timestamp is worse than a missing one — it cannot be told
+# apart from a measurement afterwards.
+#
+# The cost block already answered this shape: it is measured by the hook and
+# the documenter is told never to transcribe it. Timestamps get the same
+# treatment rather than a validation rule, because a range check still accepts
+# any lie that falls inside the range. The hook fires when the documenter
+# finishes, so it knows the completion time; the branch's oldest commit dates
+# the start — the same source the cost collector already uses for
+# --workflow-start.
+
+Write-Output "## documenter-stop.ps1 timestamps"
+
+$LOG_INVENTED = "workflow_id: `"72-x`"`nstarted: `"2099-01-01T09:00:00Z`"`ncompleted: `"2099-01-01T16:30:00Z`"`nstatus: `"COMPLETED`"`n"
+
+function Get-StampedLog {
+    param([string]$Log, [string]$Plan = $PLAN_DONE)
+    (Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -ReadBack '.github/logs/72-x.yaml' -Files @{
+        'docs/plans/fix-2026-08-07-x.md' = $Plan
+        '.github/logs/72-x.yaml'         = $Log
+        '.github/retros/auto/72-x.md'    = $RETRO_MD
+    }).ReadBack
+}
+
+$stamped = Get-StampedLog $LOG_INVENTED
+
+Assert-True "a completed: the documenter invented does not survive the hook" `
+    ($stamped -notmatch '2099') `
+    "got: $stamped"
+
+$completedValue = ([regex]::Match($stamped, '(?m)^completed:\s*"([^"]+)"')).Groups[1].Value
+$completedOk = $false
+if ($completedValue) {
+    try { $completedOk = ([datetime]::Parse($completedValue).ToUniversalTime() -le (Get-Date).ToUniversalTime().AddMinutes(2)) } catch { $completedOk = $false }
+}
+Assert-True "completed: is the moment the documenter finished, not a later one" `
+    $completedOk `
+    "got: '$completedValue'"
+
+Assert-True "started: is stamped too, so the pair comes from one source" `
+    ($stamped -match '(?m)^started:\s*"[^"]+"') `
+    "got: $stamped"
+
+# Replacing has to mean replacing. Appending a measured value beside the
+# invented one leaves a duplicate YAML key, and a parser takes whichever it
+# reaches last.
+Assert-True "the log carries each timestamp exactly once" `
+    (([regex]::Matches($stamped, '(?m)^completed:')).Count -eq 1 -and ([regex]::Matches($stamped, '(?m)^started:')).Count -eq 1) `
+    "got: $stamped"
+
+$bare = Get-StampedLog $LOG_YAML
+Assert-True "a log without timestamps gets both from the hook" `
+    ($bare -match '(?m)^started:\s*"[^"]+"' -and $bare -match '(?m)^completed:\s*"[^"]+"') `
+    "got: $bare"
+
+# The artifact gate already distinguishes the two documenter lifecycles. A
+# call made while the workflow is still running must not date its completion.
+$midRun = Get-StampedLog $LOG_INVENTED $PLAN_RUNNING
+Assert-True "a workflow that has not finished is not stamped as finished" `
+    ($midRun -match '2099') `
+    "the mid-workflow call rewrote a log for a workflow still in progress: $midRun"
+
+# The schema is the instruction. Leaving the fields in it and adding prose
+# against them elsewhere is how the fabrication happened in the first place.
+$documenterAgent = Get-Content (Join-Path $githubDir 'agents/documenter.agent.md') -Raw
+
+Assert-True "the log schema no longer asks the documenter for timestamps" `
+    ($documenterAgent -notmatch '(?m)^(started|completed): "<ISO 8601>"') `
+    "the schema block still contains a timestamp field for the model to fill in"
+
+Assert-True "the documenter is told the timestamps are not its to write" `
+    ($documenterAgent -match '(?i)do not write [^\n]*started:') `
+    "no instruction found that hands the timestamps to the Stop hook"
 
 Write-Output ""
 

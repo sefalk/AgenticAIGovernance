@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Workflow-log timestamps are measured by the Stop hook, not authored by the
+  documenter (issue #91).** The log is the only durable record of when a
+  workflow ran, and its `started:`/`completed:` fields were filled in by the
+  model. Measured: a documenter wrote `completed: "2026-08-07T16:30:00Z"` for a
+  workflow that finished at 09:59Z — six and a half hours in the future — and
+  `started:` an hour before any commit on the branch, in the same output that
+  declared "zero fabricated data". Nothing rejected it. Every gate that looks
+  at the log checks the field is *present*, and an invented value is present.
+
+  The fix is the one the `cost:` block already uses: take the numbers out of
+  the model's hands rather than validate them afterwards. A range check would
+  have caught this particular timestamp and accepted any lie inside the range.
+  `documenter-stop` now stamps both fields after its artifact gate passes —
+  `completed:` is the moment the hook fires, which is the moment the documenter
+  finished, and `started:` is the branch's oldest commit, the same
+  approximation the cost collector already uses for `--workflow-start`. Values
+  the documenter left behind are replaced rather than joined: two `completed:`
+  keys is a YAML file whose meaning depends on which one the parser reaches
+  last. A call made while the workflow is still running is not stamped at all,
+  because it never reaches the artifact gate.
+
+  Both fields are gone from the log schema in `documenter.agent.md`. Leaving
+  them there and arguing against them in prose is what produced the fabrication
+  in the first place — the schema is the instruction.
+
 - **Artifact existence is now a filesystem question, not a search result
   (issue #87).** The compliance-checker post-flight verified that the workflow
   log and retro snippet exist by searching for them. Search tools honour
