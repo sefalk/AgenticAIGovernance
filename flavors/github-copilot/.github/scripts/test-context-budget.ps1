@@ -476,7 +476,8 @@ try {
     #     project and not the repo that writes them.
     $afHook = Join-Path $repoRootAF '../../.githooks/pre-commit'
     if (Test-Path $afHook) {
-        $results['II_af_repo_dispatches_guards'] = ((Get-Content $afHook -Raw) -match 'hooks/scripts')
+        $results['II_af_repo_dispatches_guards'] =
+            ((Get-Content $afHook -Raw) -match 'hooks/git/pre-commit')
     } else {
         Write-Host '  (II_af_repo_dispatches_guards skipped: not an AF source tree)'
     }

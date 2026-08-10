@@ -7,6 +7,11 @@
 #                            .github/af-env.conf   (override: ALLOW_LARGE_FILES=1)
 #   check-strict-json.py  -- staged .vscode/tasks.json is not strict JSON
 #                            (override: ALLOW_JSONC=1)
+#   check-context-budget-staged.py
+#                         -- staged instruction/agent payload is over the
+#                            budgets in .github/af-env.conf; runs only when the
+#                            commit touches a measured file
+#                            (override: ALLOW_CONTEXT_BUDGET=1)
 #
 # Fail-open if a checker or a Python interpreter is missing; the checkers
 # themselves are fail-closed on git errors.
@@ -16,28 +21,45 @@
 set -u
 
 repo_root="$(git rev-parse --show-toplevel)"
-scripts_dir="$repo_root/.github/hooks/scripts"
+
+# Resolve the checkers relative to this hook rather than to the repo root: the
+# AF source repo keeps the payload under flavors/github-copilot/ and invokes
+# this script from its own .githooks/pre-commit.
+hook_dir="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)"
+if [ -n "$hook_dir" ] && [ -d "$hook_dir/../scripts" ]; then
+    scripts_dir="$hook_dir/../scripts"
+else
+    scripts_dir="$repo_root/.github/hooks/scripts"
+fi
 
 python_bin=""
 python_bin_extra_args=""
-if [ -x "$repo_root/.venv/Scripts/python.exe" ]; then
-    python_bin="$repo_root/.venv/Scripts/python.exe"
-elif [ -x "$repo_root/.venv/bin/python" ]; then
-    python_bin="$repo_root/.venv/bin/python"
-elif command -v python3 >/dev/null 2>&1; then
-    python_bin="python3"
-elif command -v python >/dev/null 2>&1; then
-    python_bin="python"
-elif command -v py >/dev/null 2>&1; then
-    python_bin="py"; python_bin_extra_args="-3"
-fi
+# A candidate is accepted only if it can actually report a version: on Windows
+# `command -v python` answers with the Microsoft Store alias, which then
+# refuses to run. Trusting that answer turned every guard into a failure and
+# every commit into a block -- a broken interpreter probe is indistinguishable
+# from a payload that is genuinely over budget.
+try_python() {
+    if [ -n "$1" ] && "$1" $2 --version >/dev/null 2>&1; then
+        python_bin="$1"
+        python_bin_extra_args="$2"
+        return 0
+    fi
+    return 1
+}
+try_python "$repo_root/.venv/Scripts/python.exe" "" \
+    || try_python "$repo_root/.venv/bin/python" "" \
+    || try_python python3 "" \
+    || try_python python "" \
+    || try_python py "-3" \
+    || true
 if [ -z "$python_bin" ]; then
     echo "[pre-commit] WARN: no python interpreter found -- skipping guards." >&2
     exit 0
 fi
 
 status=0
-for checker in check-large-files.py check-strict-json.py; do
+for checker in check-large-files.py check-strict-json.py check-context-budget-staged.py; do
     [ -f "$scripts_dir/$checker" ] || continue  # fail-open if checker missing
     if ! "$python_bin" $python_bin_extra_args "$scripts_dir/$checker"; then
         status=1
