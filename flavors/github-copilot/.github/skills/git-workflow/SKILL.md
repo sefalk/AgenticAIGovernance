@@ -232,6 +232,7 @@ errors; the shim is fail-open if a checker or a Python interpreter is missing.
 |---|---|---|
 | `check-large-files.py` | Staged file above `LARGE_FILE_MAX_BYTES` | `ALLOW_LARGE_FILES=1` |
 | `check-strict-json.py` | Staged `.vscode/tasks.json` that is not strict JSON | `ALLOW_JSONC=1` |
+| `check-context-budget-staged.py` | Staged instruction/agent payload over the budgets in `af-env.conf` | `ALLOW_CONTEXT_BUDGET=1` |
 
 **Existing clones** must re-run `bootstrap-python-env.ps1`/`.sh` (or run
 `git config core.hooksPath .github/hooks/git` manually) to pick up the guards —
@@ -271,6 +272,28 @@ the knowledge belongs instead: `instructions/tooling.instructions.md`.
 
 - **Override (one-off):** `ALLOW_JSONC=1 git commit -m "..."`.
 - Checker logic: `.github/hooks/scripts/check-strict-json.py`.
+
+### Context Budget Guard
+
+Blocks commits whose staged payload exceeds the budgets in
+`.github/af-env.conf` (`AF_CONTEXT_BUDGET_TOKENS`,
+`AF_CONDITIONAL_BUDGET_TOKENS`, `AF_AGENT_CONTEXT_BUDGET_TOKENS`).
+
+**Rationale:** every always-on token is paid on every turn of every workflow.
+The measurement always existed; nothing ever ran it, so the framework's own
+conditional set drifted 273 tokens past its ceiling and stayed there. The
+budgets carry deliberate headroom, which means the ceiling is meant to be
+reached — by the change that crosses it, while its author still has the
+context to decide what should have been narrowed or moved.
+
+- **Scope:** runs only when the commit stages `copilot-instructions.md`,
+  `instructions/*.md`, `agents/*.agent.md`, or the `af-env.conf` that sets the
+  ceiling. Every other commit pays nothing.
+- **Override (one-off):** `ALLOW_CONTEXT_BUDGET=1 git commit -m "..."`.
+- Checker logic: `.github/hooks/scripts/check-context-budget-staged.py`, which
+  exports the staged payload out of the index and hands it to
+  `.github/scripts/check-context-budget.py` — the measurement keeps exactly one
+  definition. Regression suite: `.github/scripts/test-context-budget.ps1`.
 
 ### Handling Large Files with Git LFS
 

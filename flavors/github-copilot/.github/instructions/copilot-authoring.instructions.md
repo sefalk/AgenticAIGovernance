@@ -92,7 +92,6 @@ Before saving any `.agent.md`, `.prompt.md`, or `.instructions.md` file:
 - [ ] `applyTo` globs use forward slashes and `**` patterns
 - [ ] `infer` not used (deprecated — use `user-invocable` + `disable-model-invocation`)
 - [ ] Model arrays use exact model names with vendor suffix: `Model Name (copilot)`
-- [ ] Context budget still holds: `python .github/scripts/check-context-budget.py`
 
 ### Before widening an `applyTo` to `**`
 
@@ -108,7 +107,8 @@ Prefer, in order:
 3. **The owning agent file.** A rule only one agent needs is not a global rule.
 4. **`applyTo: '**'`** — only for rules every agent needs on every turn.
 
-`check-context-budget.py` enforces the ceiling (`AF_CONTEXT_BUDGET_TOKENS`).
+The pre-commit guard enforces the ceiling (`AF_CONTEXT_BUDGET_TOKENS`) on every
+commit that stages one of these files; `ALLOW_CONTEXT_BUDGET=1` overrides once.
 The headroom is deliberately small: adding an always-on rule should mean
 removing something else, not raising the budget.
 

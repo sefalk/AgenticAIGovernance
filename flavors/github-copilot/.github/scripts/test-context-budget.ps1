@@ -1,4 +1,6 @@
-# Regression tests for the context budget gate (check-context-budget.py).
+# Regression tests for the context budget gate: the measurement
+# (check-context-budget.py) and the commit guard that invokes it
+# (hooks/scripts/check-context-budget-staged.py).
 #
 # Portable + deterministic: drives the checker directly against synthetic
 # .github fixtures in throwaway temp dirs, asserting the exit-code contract
@@ -342,6 +344,162 @@ try {
     $ghBad = New-Fixture -RootBytes ([byte[]](0x80, 0x81, 0x82, 0x83)) -Conf $invConf
     $fixtures += $ghBad
     $results['W_invalid_utf8_blocked'] = ((Invoke-Checker $ghBad).Code -eq 2)
+
+    # --- The commit guard (issue #85) ------------------------------------
+    # Everything above measures a directory on request. For months nothing
+    # made the request, so the payload drifted 273 tokens over its own
+    # ceiling and case J sat red on dev unobserved. These cases pin the
+    # guard that asks without being asked.
+    $guard = Join-Path $scriptDir '..' | Join-Path -ChildPath 'hooks/scripts/check-context-budget-staged.py'
+    $guardConf = "AF_CONTEXT_BUDGET_TOKENS=1000`nAF_AGENT_CONTEXT_BUDGET_TOKENS=5000`nAF_CONDITIONAL_BUDGET_TOKENS=2000`n"
+
+    # Turns a fixture into a git repo with the payload staged. -Prefix nests
+    # the payload the way the AF source repo nests its own
+    # (flavors/github-copilot/.github), which is not where a consumer keeps it.
+    function New-StagedRepo {
+        param([string]$GithubDir, [string]$Prefix = '')
+        $base = Split-Path -Parent $GithubDir
+        $rel = '.github'
+        if ($Prefix) {
+            $rel = "$Prefix/.github"
+            New-Item -ItemType Directory -Path (Join-Path $base $Prefix) -Force | Out-Null
+            Move-Item -LiteralPath $GithubDir -Destination (Join-Path $base $rel)
+        }
+        Push-Location $base
+        try {
+            git init -q
+            git config user.email t@example.com
+            git config user.name tester
+            # Never inherit the ambient hook path into a throwaway fixture.
+            git config core.hooksPath .nohooks
+            git add -- ":(literal)$rel" 2>&1 | Out-Null
+        } finally { Pop-Location }
+        return $base
+    }
+
+    function Invoke-Guard([string]$repo) {
+        Push-Location $repo
+        try {
+            $out = & $python $guard 2>&1 | Out-String
+            return @{ Code = $LASTEXITCODE; Output = $out }
+        } finally { Pop-Location }
+    }
+
+    function New-OverBudgetFixture {
+        return New-Fixture -RootTokens 100 -Conf $guardConf -Instructions @{
+            'huge.instructions.md' = @{ Tokens = 2000; ApplyTo = '**' }
+        }
+    }
+
+    # X: a staged payload over budget blocks the commit, naming the offender.
+    $gh = New-OverBudgetFixture; $fixtures += $gh
+    $repoOver = New-StagedRepo $gh
+    $r = Invoke-Guard $repoOver
+    $results['X_staged_over_budget_blocked'] = ($r.Code -eq 1)
+    $results['X_staged_names_offender'] = ($r.Output -match 'huge\.instructions\.md')
+
+    # Y: a commit that stages nothing the budget depends on pays nothing and
+    #    says nothing -- even with an over-budget payload in the index (AC2).
+    #    The file sits inside .github, which is where scoping is actually decided.
+    git -C $repoOver commit -qm seed 2>&1 | Out-Null
+    $skillDir = Join-Path $repoOver '.github/skills/demo'
+    New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
+    'skill' | Set-Content (Join-Path $skillDir 'SKILL.md')
+    git -C $repoOver add -- ':(literal).github/skills/demo/SKILL.md' 2>&1 | Out-Null
+    $results['Y_unmeasured_file_not_checked'] = ((Invoke-Guard $repoOver).Code -eq 0)
+
+    # Y2: the ceiling is part of what the payload must satisfy. Lowering it puts
+    #     an untouched payload over budget, so a budget edit is itself a trigger
+    #     -- a ceiling that binds only the next edit does not bind.
+    $gh = New-Fixture -RootTokens 300 -Conf "AF_CONTEXT_BUDGET_TOKENS=100000`n" -Instructions @{
+        'a.instructions.md' = @{ Tokens = 10; ApplyTo = '**' }
+    }
+    $fixtures += $gh
+    $repoConf = New-StagedRepo $gh
+    git -C $repoConf commit -qm seed 2>&1 | Out-Null
+    "AF_CONTEXT_BUDGET_TOKENS=200`n" | Set-Content (Join-Path $repoConf '.github/af-env.conf') -NoNewline
+    git -C $repoConf add -- ':(literal).github/af-env.conf' 2>&1 | Out-Null
+    $results['Y_budget_edit_rechecked'] = ((Invoke-Guard $repoConf).Code -eq 1)
+
+    # Z: an agent edit is a measured edit, and it measures the whole payload --
+    #    not merely the file that happened to be staged.
+    $agentFile = Join-Path $repoOver '.github/agents/stub.agent.md'
+    Add-Content -LiteralPath $agentFile -Value 'zzzz'
+    git -C $repoOver add -- ':(literal).github/agents/stub.agent.md' 2>&1 | Out-Null
+    $results['Z_agent_edit_measures_payload'] = ((Invoke-Guard $repoOver).Code -eq 1)
+
+    # AA: the escape hatch exists and is per-commit, like the sibling guards.
+    $env:ALLOW_CONTEXT_BUDGET = '1'
+    $results['AA_override_allows'] = ((Invoke-Guard $repoOver).Code -eq 0)
+    Remove-Item Env:ALLOW_CONTEXT_BUDGET
+
+    # BB: the guard measures the index, not the working tree. A fat unstaged
+    #     edit is not being committed and must not block the commit.
+    $gh = New-Fixture -RootTokens 100 -Conf $guardConf -Instructions @{
+        'ok.instructions.md' = @{ Tokens = 200; ApplyTo = '**' }
+    }
+    $fixtures += $gh
+    $repo = New-StagedRepo $gh
+    Add-Content -LiteralPath (Join-Path $repo '.github/instructions/ok.instructions.md') -Value ('y' * 40000)
+    $results['BB_unstaged_bloat_ignored'] = ((Invoke-Guard $repo).Code -eq 0)
+
+    # CC: ... and the converse. Shrinking the file on disk after staging it
+    #     does not un-commit the breach.
+    $gh = New-OverBudgetFixture; $fixtures += $gh
+    $repo = New-StagedRepo $gh
+    'tiny' | Set-Content (Join-Path $repo '.github/instructions/huge.instructions.md')
+    $results['CC_unstaged_shrink_ignored'] = ((Invoke-Guard $repo).Code -eq 1)
+
+    # DD: the ceiling is the one in the staged af-env.conf -- a consumer's
+    #     budget, not the framework's.
+    $gh = New-Fixture -RootTokens 300 -Conf "AF_CONTEXT_BUDGET_TOKENS=200`n" -Instructions @{
+        'a.instructions.md' = @{ Tokens = 10; ApplyTo = '**' }
+    }
+    $fixtures += $gh
+    $results['DD_tight_consumer_budget_blocks'] = ((Invoke-Guard (New-StagedRepo $gh)).Code -eq 1)
+    $gh = New-Fixture -RootTokens 300 -Conf "AF_CONTEXT_BUDGET_TOKENS=100000`n" -Instructions @{
+        'a.instructions.md' = @{ Tokens = 10; ApplyTo = '**' }
+    }
+    $fixtures += $gh
+    $results['DD_loose_consumer_budget_passes'] = ((Invoke-Guard (New-StagedRepo $gh)).Code -eq 0)
+
+    # EE: a payload the guard cannot measure must not read as a payload within
+    #     budget. BLOCKED propagates; it does not collapse into consent.
+    $gh = New-Fixture -RootTokens 100 -Conf "AF_CONTEXT_BUDGET_TOKENS=abc`n" -Instructions @{
+        'a.instructions.md' = @{ Tokens = 10; ApplyTo = '**' }
+    }
+    $fixtures += $gh
+    $results['EE_inner_blocked_propagates'] = ((Invoke-Guard (New-StagedRepo $gh)).Code -eq 2)
+
+    # FF: the AF source repo nests its payload under flavors/github-copilot/.
+    #     A guard that only knows the deployed layout would protect every
+    #     consumer and not the repo that authors the budgets (AC3).
+    $gh = New-OverBudgetFixture; $fixtures += $gh
+    $results['FF_nested_payload_measured'] =
+        ((Invoke-Guard (New-StagedRepo $gh -Prefix 'flavors/github-copilot')).Code -eq 1)
+
+    # GG: a git failure is an unknown verdict, not a pass.
+    $noRepo = Join-Path ([IO.Path]::GetTempPath()) ("ctxg-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    New-Item -ItemType Directory -Path $noRepo -Force | Out-Null
+    $fixtures += (Join-Path $noRepo 'x')
+    $results['GG_outside_repo_blocked'] = ((Invoke-Guard $noRepo).Code -eq 2)
+
+    # HH: wiring. A checker nobody calls is the defect this issue is about, so
+    #     the dispatch line is asserted -- not the comment that names it.
+    $shim = Get-Content (Join-Path $scriptDir '..' | Join-Path -ChildPath 'hooks/git/pre-commit') -Raw
+    $results['HH_shim_registers_guard'] =
+        ($shim -match 'for checker in [^\r\n]*check-context-budget-staged\.py')
+
+    # II: the AF source repo's own hook path is .githooks/, which never
+    #     dispatched the shipped guards -- so they protected every consumer
+    #     project and not the repo that writes them.
+    $afHook = Join-Path $repoRootAF '../../.githooks/pre-commit'
+    if (Test-Path $afHook) {
+        $results['II_af_repo_dispatches_guards'] =
+            ((Get-Content $afHook -Raw) -match '(^|\n)\s*sh\s+"\$PAYLOAD_HOOK"')
+    } else {
+        Write-Host '  (II_af_repo_dispatches_guards skipped: not an AF source tree)'
+    }
 }
 finally {
     foreach ($f in $fixtures) {

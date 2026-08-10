@@ -28,6 +28,7 @@ hooks/scripts/coordinator-postmerge.sh
 hooks/scripts/check-large-files.py
 hooks/scripts/check-strict-json.py
 hooks/scripts/check-scratch-tasks.py
+hooks/scripts/check-context-budget-staged.py
 hooks/git/pre-commit
 
 # Scripts (canonical test and lint runners)
