@@ -80,8 +80,6 @@ Create one YAML file per workflow in `.github/logs/`:
 ```yaml
 workflow_id: "<workflow-id>"
 trigger: "<user request>"
-started: "<ISO 8601>"
-completed: "<ISO 8601>"
 status: "COMPLETED"  # COMPLETED | FAILED | ESCALATED
 git_branch: "agent/<workflow-id>"
 af_version: "<version from .github/.af-version, e.g. 1.18.22>"
@@ -128,6 +126,13 @@ escalation:
 For the `verdict` field in step entries, use the parseable format from
 MANIFEST § 13 (Inter-Agent Contracts → Verdict Format): APPROVED,
 REJECTED, ESCALATE, RESOLVED, or COMPROMISE.
+
+**Do not write `started:` or `completed:`.** Your Stop hook stamps both after
+your artifact gate passes: it fires the moment you finish, and the branch's
+oldest commit dates the start. Never estimate them — a documenter once wrote a
+`completed:` six hours in the future in the same output that declared zero
+fabricated data, and every gate downstream accepted it, because they check that
+the field is present and an invented value is present (issue #91).
 
 **Do not write a `cost:` block.** Your Stop hook measures the session and
 appends it after your artifact gate passes. Never estimate or transcribe those

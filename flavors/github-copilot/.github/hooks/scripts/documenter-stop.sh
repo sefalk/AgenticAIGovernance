@@ -90,6 +90,45 @@ if [ ${#missing[@]} -gt 0 ]; then
     exit 0
 fi
 
+# ---------- Timestamps (ADVISORY — never blocks, never fails the hook) ----------
+#
+# Stamped here rather than written by the documenter so the values never pass
+# through a language model. Measured: a documenter wrote a `completed:` six and
+# a half hours into the future, in the same output that declared "zero
+# fabricated data" — and every gate downstream accepted it, because they check
+# that the field is present, and an invented value is present (issue #91).
+#
+# `completed:` is now: this hook fires when the documenter finishes. `started:`
+# is the branch's oldest commit, the same approximation the cost collector
+# already uses for --workflow-start. Anything the documenter left behind is
+# replaced rather than joined — two `completed:` keys is a YAML file whose
+# meaning depends on which one the parser reaches last.
+
+stamp_note=""
+log_path=".github/logs/${workflow_id}.yaml"
+[ -f "$log_path" ] || log_path=".github/logs/${workflow_id}.yml"
+
+if [ -f "$log_path" ]; then
+    completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    started_at=$(git log --format=%cI "${BASE_BRANCH}..HEAD" 2>/dev/null | tail -1)
+    [ -n "$started_at" ] || started_at="$completed_at"
+
+    stamp_tmp=$(mktemp)
+    # Top-level keys only: a `started:` indented inside a step belongs to that
+    # step and is none of this hook's business.
+    if awk -v s="started: \"${started_at}\"" -v c="completed: \"${completed_at}\"" '
+        /^(started|completed):/ { next }
+        { print }
+        /^workflow_id:/ && !ins { print s; print c; ins = 1 }
+        END { if (!ins) { print s; print c } }
+    ' "$log_path" > "$stamp_tmp" 2>/dev/null && [ -s "$stamp_tmp" ]; then
+        mv "$stamp_tmp" "$log_path"
+        stamp_note=" + timestamps measured"
+    else
+        rm -f "$stamp_tmp"
+    fi
+fi
+
 # ---------- Cost block (ADVISORY — never blocks, never fails the hook) ----------
 #
 # Appended here rather than written by the documenter so the numbers never pass
@@ -164,5 +203,5 @@ if [ -f "$checker" ] && [ -f ".vscode/tasks.json" ]; then
     fi
 fi
 
-echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS: workflow log and retro snippet exist for '${workflow_id}'${cost_note}${scratch_note}\"}"
+echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS: workflow log and retro snippet exist for '${workflow_id}'${stamp_note}${cost_note}${scratch_note}\"}"
 exit 0
