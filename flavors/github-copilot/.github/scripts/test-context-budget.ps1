@@ -1,4 +1,6 @@
-# Regression tests for the context budget gate (check-context-budget.py).
+# Regression tests for the context budget gate: the measurement
+# (check-context-budget.py) and the commit guard that invokes it
+# (hooks/scripts/check-context-budget-staged.py).
 #
 # Portable + deterministic: drives the checker directly against synthetic
 # .github fixtures in throwaway temp dirs, asserting the exit-code contract
@@ -396,12 +398,28 @@ try {
     $results['X_staged_over_budget_blocked'] = ($r.Code -eq 1)
     $results['X_staged_names_offender'] = ($r.Output -match 'huge\.instructions\.md')
 
-    # Y: a commit that stages nothing measured pays nothing and says nothing --
-    #    even with an over-budget payload sitting in the index (AC2).
+    # Y: a commit that stages nothing the budget depends on pays nothing and
+    #    says nothing -- even with an over-budget payload in the index (AC2).
+    #    The file sits inside .github, which is where scoping is actually decided.
     git -C $repoOver commit -qm seed 2>&1 | Out-Null
-    'readme' | Set-Content (Join-Path $repoOver 'README.md')
-    git -C $repoOver add -- ':(literal)README.md' 2>&1 | Out-Null
-    $results['Y_unrelated_commit_not_checked'] = ((Invoke-Guard $repoOver).Code -eq 0)
+    $skillDir = Join-Path $repoOver '.github/skills/demo'
+    New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
+    'skill' | Set-Content (Join-Path $skillDir 'SKILL.md')
+    git -C $repoOver add -- ':(literal).github/skills/demo/SKILL.md' 2>&1 | Out-Null
+    $results['Y_unmeasured_file_not_checked'] = ((Invoke-Guard $repoOver).Code -eq 0)
+
+    # Y2: the ceiling is part of what the payload must satisfy. Lowering it puts
+    #     an untouched payload over budget, so a budget edit is itself a trigger
+    #     -- a ceiling that binds only the next edit does not bind.
+    $gh = New-Fixture -RootTokens 300 -Conf "AF_CONTEXT_BUDGET_TOKENS=100000`n" -Instructions @{
+        'a.instructions.md' = @{ Tokens = 10; ApplyTo = '**' }
+    }
+    $fixtures += $gh
+    $repoConf = New-StagedRepo $gh
+    git -C $repoConf commit -qm seed 2>&1 | Out-Null
+    "AF_CONTEXT_BUDGET_TOKENS=200`n" | Set-Content (Join-Path $repoConf '.github/af-env.conf') -NoNewline
+    git -C $repoConf add -- ':(literal).github/af-env.conf' 2>&1 | Out-Null
+    $results['Y_budget_edit_rechecked'] = ((Invoke-Guard $repoConf).Code -eq 1)
 
     # Z: an agent edit is a measured edit, and it measures the whole payload --
     #    not merely the file that happened to be staged.
@@ -467,9 +485,10 @@ try {
     $results['GG_outside_repo_blocked'] = ((Invoke-Guard $noRepo).Code -eq 2)
 
     # HH: wiring. A checker nobody calls is the defect this issue is about, so
-    #     the call sites are asserted, not assumed.
+    #     the dispatch line is asserted -- not the comment that names it.
     $shim = Get-Content (Join-Path $scriptDir '..' | Join-Path -ChildPath 'hooks/git/pre-commit') -Raw
-    $results['HH_shim_registers_guard'] = ($shim -match 'check-context-budget-staged\.py')
+    $results['HH_shim_registers_guard'] =
+        ($shim -match 'for checker in [^\r\n]*check-context-budget-staged\.py')
 
     # II: the AF source repo's own hook path is .githooks/, which never
     #     dispatched the shipped guards -- so they protected every consumer
@@ -477,7 +496,7 @@ try {
     $afHook = Join-Path $repoRootAF '../../.githooks/pre-commit'
     if (Test-Path $afHook) {
         $results['II_af_repo_dispatches_guards'] =
-            ((Get-Content $afHook -Raw) -match 'hooks/git/pre-commit')
+            ((Get-Content $afHook -Raw) -match '(^|\n)\s*sh\s+"\$PAYLOAD_HOOK"')
     } else {
         Write-Host '  (II_af_repo_dispatches_guards skipped: not an AF source tree)'
     }

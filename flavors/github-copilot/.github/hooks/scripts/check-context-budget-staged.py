@@ -13,9 +13,9 @@ written out of the index into a temporary tree and handed to the existing
 checker, so globs, budgets and ``applyTo`` semantics keep exactly one
 definition.
 
-The check runs only when the commit stages a file the budget actually measures
-(``copilot-instructions.md``, ``instructions/*.md``, ``agents/*.agent.md``), so
-every other commit pays nothing.
+The check runs only when the commit stages something the budget depends on
+(``copilot-instructions.md``, ``instructions/*.md``, ``agents/*.agent.md``, or
+the ``af-env.conf`` that sets the ceiling), so every other commit pays nothing.
 
 Exit codes: 0 pass, 1 over budget, 2 internal error or unmeasurable payload.
 """
@@ -52,10 +52,14 @@ def _staged_files() -> list[str]:
 
 
 def _payload_root(path: str) -> str | None:
-    """Repo-relative ``.github`` directory a measured staged file belongs to.
+    """Repo-relative ``.github`` directory a staged file puts under budget.
 
-    Returns ``None`` when the path is not part of the measured payload. The
-    directory is derived from the path rather than assumed, because the AF
+    Returns ``None`` when the path cannot change the verdict. ``af-env.conf``
+    counts even though it is not measured: lowering a ceiling can put an
+    untouched payload over budget, and a ceiling that binds only the next edit
+    does not bind.
+
+    The directory is derived from the path rather than assumed, because the AF
     source repo nests its payload under ``flavors/github-copilot/`` while a
     deployed project keeps it at the repo root.
     """
@@ -64,12 +68,12 @@ def _payload_root(path: str) -> str | None:
         return None
     index = parts.index(".github")
     rest = parts[index + 1:]
-    measured = (
-        rest == ["copilot-instructions.md"]
+    relevant = (
+        rest in (["copilot-instructions.md"], ["af-env.conf"])
         or (len(rest) == 2 and rest[0] == "instructions" and rest[1].endswith(".md"))
         or (len(rest) == 2 and rest[0] == "agents" and rest[1].endswith(".agent.md"))
     )
-    return "/".join(parts[: index + 1]) if measured else None
+    return "/".join(parts[: index + 1]) if relevant else None
 
 
 def _export_index(root: str, dest: Path) -> bool:
