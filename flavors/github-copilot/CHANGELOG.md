@@ -9,6 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The context budget is enforced at commit time instead of being asked for
+  politely (issue #85).** `check-context-budget.py` could always measure the
+  payload; nothing ever asked it to. Its only reference anywhere in the
+  repository was a checklist line — one that told the reader to run a Python
+  script with `pwsh`, so it had never been executed as written. The result was
+  visible on `dev`: the conditional instruction set sat 273 tokens past its own
+  ceiling, and `test-context-budget.ps1` case `J_real_payload_within_budget`
+  was red for the whole period. A red test in a suite nobody runs is
+  indistinguishable from a green one.
+
+  A new pre-commit checker, `check-context-budget-staged.py`, exports the
+  staged payload out of the index into a temporary tree and hands it to the
+  existing measurement — globs, budgets and `applyTo` semantics keep exactly
+  one definition, and what is measured is what would be committed rather than
+  whatever happens to be on disk. It runs only when the commit stages
+  `copilot-instructions.md`, `instructions/*.md`, `agents/*.agent.md`, or the
+  `af-env.conf` that sets the ceiling, so every other commit pays nothing. It
+  blocks rather than warns: the budgets carry deliberate headroom, so the
+  ceiling is meant to be reached by the change that crosses it, while its
+  author still has the context to decide what should have been narrowed or
+  moved. One-off escape hatch: `ALLOW_CONTEXT_BUDGET=1 git commit ...`.
+
+  Two things had to be fixed for that guard to reach the repository that needs
+  it. The AF source repo's hook path is `.githooks/`, whose `pre-commit` only
+  bumped `VERSION`, while the shipped guards resolve themselves under
+  `$repo_root/.github` — a directory this repo does not have. The framework's
+  own commit guards therefore ran in every consumer project and in none of the
+  commits that wrote them. `.githooks/pre-commit` now dispatches the payload
+  shim first, so a blocked commit does not leave a bumped `VERSION` staged
+  behind it, and the shim resolves its checkers relative to itself instead of
+  assuming the deployed layout. The shim's interpreter probe also trusted
+  `command -v python`, which on Windows answers with the Microsoft Store alias
+  that then refuses to run; a candidate must now report a `--version`. A broken
+  interpreter probe is indistinguishable from a payload that is genuinely over
+  budget, and it blocked every commit rather than none.
+
+  The checklist line is gone. `copilot-authoring.instructions.md` now points at
+  the gate that runs instead of asking a human to remember one.
+  `test-context-budget.ps1` grows from 39 to 54 checks covering scoping,
+  staged-versus-working-tree, the override, BLOCKED propagation, consumer
+  budgets, the nested source-repo layout, and both wiring call sites.
+
 - **Workflow-log timestamps are measured by the Stop hook, not authored by the
   documenter (issue #91).** The log is the only durable record of when a
   workflow ran, and its `started:`/`completed:` fields were filled in by the
