@@ -454,6 +454,46 @@ else
     assert_true "implementer-stop.sh does not scope the lint gate to authored files" 1
 fi
 
+# --- Artifact existence is a filesystem question (issue #87) ---------------
+#
+# The post-flight checked for the workflow log and retro with git-aware search,
+# which skips whatever .gitignore excludes. Any repo that gitignores .github/
+# -- the normal setup for a consumer of a deployed payload -- therefore got
+# BLOCKED regardless of what was on disk. The agent never needs to search:
+# every artifact sits at a path derived from the workflow id.
+
+echo "## artifact existence (issue #87)"
+
+compliance_file="$GITHUB_DIR/agents/compliance-checker.agent.md"
+compliance_text=$(cat "$compliance_file" 2>/dev/null || true)
+compliance_tools=$(printf '%s\n' "$compliance_text" | sed -n '/^tools:/,/^\(hooks:\|---\)/p')
+
+case "$compliance_tools" in *read/readFile*) assert_true "the compliance-checker tool list is readable" 1 ;;
+    *) assert_true "the compliance-checker tool list is readable" 0 "could not parse the tools block" ;; esac
+
+for t in search/fileSearch search/textSearch search/codebase; do
+    case "$compliance_tools" in
+        *"$t"*) assert_true "compliance-checker does not hold $t, which honours .gitignore" 0 "tool list still grants $t" ;;
+        *) assert_true "compliance-checker does not hold $t, which honours .gitignore" 1 ;;
+    esac
+done
+
+case "$compliance_text" in *.gitignore*) assert_true "compliance-checker names the ignore trap it must not walk into" 1 ;;
+    *) assert_true "compliance-checker names the ignore trap it must not walk into" 0 "no explanation why a search miss is not absence" ;; esac
+
+case "$compliance_text" in *"MISSING: not found at"*) assert_true "post-flight reports the path it probed" 1 ;;
+    *) assert_true "post-flight reports the path it probed" 0 "the MISSING line still carries no resolved path" ;; esac
+
+tdd_text=$(cat "$GITHUB_DIR/skills/tdd-orchestration/SKILL.md" 2>/dev/null || true)
+# The PowerShell pendant matches with -match, which is case-insensitive. `case`
+# is not, so lowercase the haystack or the two harnesses disagree on casing
+# alone and this one fails on prose that satisfies the rule.
+tdd_lower=$(printf '%s' "$tdd_text" | tr '[:upper:]' '[:lower:]')
+case "$tdd_lower" in *"genuinely absent"*) assert_true "Step 7b confirms absence on disk before recreating anything" 1 ;;
+    *) assert_true "Step 7b confirms absence on disk before recreating anything" 0 "remediation still trusts the verdict" ;; esac
+case "$tdd_lower" in *"never overwrite an existing"*) assert_true "Step 7b never overwrites an existing artifact" 1 ;;
+    *) assert_true "Step 7b never overwrites an existing artifact" 0 "recreate can still replace verified content" ;; esac
+
 # --- Resolution invariants -------------------------------------------------
 #
 # run_case copies the hook into a fixture and runs it *from the fixture root*,

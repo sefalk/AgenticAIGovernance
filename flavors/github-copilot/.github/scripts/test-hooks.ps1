@@ -1398,6 +1398,61 @@ foreach ($pair in @(@{ n = 'implementer-stop.ps1'; t = $implPs1 }, @{ n = 'imple
 
 Write-Output ""
 
+# ── 6d. Artifact existence is a filesystem question (issue #87) ──────────
+
+Write-Output "## Artifact existence (issue #87)"
+
+# The post-flight verifies that a workflow log and a retro exist, and did so
+# with git-aware search -- which by design skips whatever .gitignore excludes.
+# In every repo that gitignores .github/ (the normal setup for a consumer of a
+# deployed payload) that made the verdict BLOCKED regardless of what was on
+# disk: measured in MPUsageXPTP, a 2922-byte log two hours old, reported
+# missing.
+#
+# The agent never needs to *search* for any of it -- every artifact it checks
+# sits at a path derived from the workflow id. And the fix cannot be a warning
+# in the prompt: the issue records that the prompt did warn, and the agent
+# reached for the ignore-aware tool anyway. So the tools go.
+
+$compliancePath = Join-Path $githubDir 'agents/compliance-checker.agent.md'
+$compliance = Get-Content $compliancePath -Raw
+$complianceTools = ([regex]::Match($compliance, '(?s)\ntools:\r?\n(.*?)\r?\n(?:hooks:|---)')).Groups[1].Value
+
+Assert-True "the compliance-checker tool list is readable" `
+    ($complianceTools -match 'read/readFile') "could not parse the tools block"
+
+foreach ($t in @('search/fileSearch', 'search/textSearch', 'search/codebase')) {
+    Assert-True "compliance-checker does not hold $t, which honours .gitignore" `
+        ($complianceTools -notmatch [regex]::Escape($t)) `
+        "tool list still grants $t"
+}
+
+# A tool removed in the frontmatter but still named as the method in the prose
+# is the same false negative with an extra step.
+Assert-True "compliance-checker names the ignore trap it must not walk into" `
+    ($compliance -match '(?i)\.gitignore') `
+    "the agent never says why a search miss is not evidence of absence"
+
+# Point 2 of the issue: a MISSING that names no path cannot be told apart from
+# a false negative by anyone downstream.
+Assert-True "post-flight reports the path it probed" `
+    ($compliance -match '(?i)MISSING: not found at') `
+    "the MISSING line still carries no resolved path"
+
+# Point 4: the remediation is what turns the false negative into data loss.
+$tddSkillPath = Join-Path $githubDir 'skills/tdd-orchestration/SKILL.md'
+$tddSkill = Get-Content $tddSkillPath -Raw
+
+Assert-True "Step 7b confirms absence on disk before recreating anything" `
+    ($tddSkill -match '(?i)genuinely absent') `
+    "remediation still trusts the verdict without probing"
+
+Assert-True "Step 7b never overwrites an existing artifact" `
+    ($tddSkill -match '(?i)never overwrite an existing') `
+    "recreate can still replace verified content"
+
+Write-Output ""
+
 # ── 7. Edge cases ────────────────────────────────────────────────────────
 
 Write-Output "## Edge cases"
