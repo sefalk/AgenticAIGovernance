@@ -3,6 +3,13 @@
 # Exercises each Copilot agent hook with crafted JSON inputs and verifies
 # the expected output (deny, ask, allow, or specific JSON fields).
 #
+# Two properties hold over every case here, and the suite checks itself
+# against both before it checks anything else:
+#   - a hook makes exactly one statement per invocation. Two decisions are
+#     not a decision, and the first one is not the answer.
+#   - a verdict needs a subject. An assertion whose subject came back empty
+#     has decided nothing, whichever way it points.
+#
 # Usage:
 #   .github/scripts/test-hooks.ps1              # Run all tests
 #   .github/scripts/test-hooks.ps1 -Verbose     # Show pass detail

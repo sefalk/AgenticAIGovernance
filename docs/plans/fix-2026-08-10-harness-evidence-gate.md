@@ -7,7 +7,7 @@
 - **Branch:** `agent/95-96-harness-evidence-gate`
 - **Base:** `dev` @ `7b6130b`
 - **Complexity tier:** Standard
-- **Status:** IN_PROGRESS
+- **Status:** COMPLETED
 
 ## Problem
 
@@ -174,8 +174,61 @@ empty subject fails" mechanically checkable rather than a claim.
 
 ## Results
 
-_To be filled in by the documenter._
+| Suite | Baseline | Red | Green |
+|---|---|---|---|
+| `test-hooks.ps1` | 213 / 0 | 218 / 14 | **233 / 0** |
+| `test-hooks.sh` | 106 / 0 | 106 / 12 | **120 / 0** |
+
+The bash Red run is the substantive finding: `run_case said: pass` for a
+deny-then-allow emitter and `stop_case said: pass` for a block-then-pass one,
+both produced by the real harness functions against stub hooks.
+
+### Mutations
+
+| # | Mutation | Red cases |
+|---|---|---|
+| M1 | read-back returns `$null` unconditionally | 9 — including `a completed: the documenter invented does not survive the hook`, the `-notmatch` assertion named in #96 |
+| M2 | statement counter always reports 1 | 4 |
+| M3 | `Test-SubjectPresent` always true | 4 |
+| M4 | `Assert-True` ignores `-Subject` | 1 |
+| M5 | `[` no longer opens a value (array not counted as one) | 1 |
+| M6 | `Resolve-StopDecision` skips the count | 1 |
+| M7 | `Resolve-Decision` skips the count | 2 |
+| B1 | `af_json_statements` always reports 1 | 4 — including both end-to-end cases: `a hook that denies and then allows is not certified as denying` and the Stop-hook pendant |
+| B2 | `af_subject_present` always true | 2 |
+
+All nine mutants killed. M5 was rewritten after a first version (`$count++`
+at every closing brace) turned 102 cases red — it proved the counter is
+load-bearing but said nothing specific, so it was narrowed to the property
+the case actually claims. B1 is the one that matters most: it turns red
+exactly the two cases that were passing before this branch, in the harness
+functions the rest of the suite is built on.
 
 ## Notes
 
-_To be filled in by the documenter._
+**The issue's mechanism did not survive measurement.** #95 reasoned from the
+code that `ConvertFrom-Json` would build a collection and the first element
+would answer. On 5.1 it throws. The issue said so itself — "inferred from that
+code, not from an executed run" — and the two-object fixture it asked for is
+the reason this landed as a real fix in bash rather than a no-op in
+PowerShell. The PowerShell half is still worth having: it converts an accident
+of the parser into a stated property, with a message that names the right
+cause.
+
+**Why the fix could not live inside `Assert-True`.** Its signature takes
+`[bool]$Condition`. By the time it is called, `$null -notmatch '2099'` is
+already `$true` and the subject is gone. Any guard there would be guarding
+nothing. This is the general shape: a checker cannot recover evidence its
+caller has already discarded.
+
+**Commit granularity.** The Red commit carries `test-hooks.sh` only. The
+PowerShell assertions and the harness they exercise are the same file, so its
+Red (measured at 218 / 14) could not be committed apart from the
+implementation. The measurement is the evidence; the commit boundary is not.
+
+**Placement in bash.** The self-check needs `run_case`, `stop_case` and
+`$READ_FILE`, which are defined further down the file. Bash resolves a
+function body at call time, so the block is wrapped in
+`run_harness_self_check` and invoked after those definitions — the same
+constraint PowerShell does not have, and the reason the two suites read
+differently at that point.

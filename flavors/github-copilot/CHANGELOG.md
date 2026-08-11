@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The hook harness no longer certifies what it never observed (issues #95,
+  #96).** Two defects in the instrument every quality claim in this framework
+  is read through.
+
+  A hook is supposed to make exactly one statement per invocation. Because the
+  harness searched its output for the expected answer, a hook that decided
+  correctly and then contradicted itself was certified as correct — while a
+  last-wins consumer would act on the second statement. Measured, not inferred:
+  `run_case` reported `pass` for a deny-then-allow emitter and `stop_case`
+  reported `pass` for a block-then-pass one. The issue predicted the same for
+  PowerShell; it does not reproduce there, because `ConvertFrom-Json` on 5.1
+  happens to throw on two concatenated objects. That is protection by parser
+  version, not by design, and it reported the failure as `unparsable` — naming
+  the wrong cause. Both harnesses now count top-level JSON values
+  (`Get-JsonStatementCount`, `af_json_statements`) and treat more than one as
+  its own outcome. A top-level array is still one value; prose printed beside
+  the JSON is not a clean statement either. `Get-StopDecision` had its own
+  parse path and now routes through a shared `Resolve-StopDecision`, so the
+  rule cannot hold in one half of the harness and not the other.
+
+  The second defect: `$null -notmatch '2099'` is `$true`. Every negative
+  content assertion passed when the thing it examined was empty, so the
+  read-back channel added for #91 could have returned nothing for every case
+  while the suite stayed green. The neighbouring assertions were saved by
+  accident — `-match` on `$null` is false, and a match count of 0 is not 1 —
+  which made "does this assertion survive an empty subject" a coincidence of
+  operator choice. `Assert-Contains`/`Assert-NotContains` and
+  `assert_contains`/`assert_not_contains` now take the subject itself and fail
+  when it is empty; `Assert-True` gained an optional `-Subject` for compound
+  conditions. Passing the subject in is the whole point: once the caller has
+  collapsed it to a boolean there is nothing left for a guard to inspect.
+
+  Both harnesses now self-check the read-back channel as well as the verdict
+  channel, and they do it by asserting that certain assertions *fail* —
+  PowerShell by snapshotting the tally around a probe, bash by running the
+  probe in a subshell. Suites: `test-hooks.ps1` 213 → 233 checks,
+  `test-hooks.sh` 106 → 120, both green. Mutation evidence: breaking the
+  read-back turns nine cases red including the `-notmatch` one; disabling the
+  statement count turns the contradiction cases red in both harnesses;
+  removing the empty-subject guard turns the vacuous cases red.
+
+  The test-critic gained the question this defect answers to: would this
+  assertion still pass if the thing under test produced nothing?
+
 - **The context budget is enforced at commit time instead of being asked for
   politely (issue #85).** `check-context-budget.py` could always measure the
   payload; nothing ever asked it to. Its only reference anywhere in the

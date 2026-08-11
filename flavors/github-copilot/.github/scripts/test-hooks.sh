@@ -11,6 +11,13 @@
 # checkout. Run from anywhere:
 #
 #     bash .github/scripts/test-hooks.sh
+#
+# Two properties hold over every case, and the suite checks itself against
+# both before it checks anything else:
+#   - a hook makes exactly one statement per invocation. Two decisions are not
+#     a decision, and the first one is not the answer.
+#   - a verdict needs a subject. An assertion whose subject came back empty
+#     has decided nothing, whichever way it points.
 
 set -uo pipefail
 
