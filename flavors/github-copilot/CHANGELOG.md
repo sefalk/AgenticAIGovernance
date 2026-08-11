@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A consumer can report a framework defect without being granted the tools to
+  do it (issue #113).** Filing #104–#112 from a consumer project required
+  hand-editing 22 `github/*` MCP grants into that project's
+  `coordinator.agent.md` — a local divergence in an AF-owned file, reported as a
+  conflict by every subsequent deploy, with a grant list that drifts unreviewed.
+  The name for the fix already existed: `quality-gates.instructions.md` lists
+  `gh-issue-manager` in its provider-worker table. Only the worker was missing.
+
+  `gh-issue-manager` follows the `ado-*` pattern — MCP only, no git, no
+  terminal — and carries an issue-lifecycle tool set rather than the general
+  repository surface the ad-hoc grant had accumulated. Two routes share it:
+  `project` for the project's own tracker (`GH_CAPABILITY_MODE`, `GH_OWNER`,
+  `GH_REPOSITORY`) and `upstream` for defects in the framework itself
+  (`AF_UPSTREAM_REPORTING`, `AF_UPSTREAM_REPO`). The gates are independent on
+  purpose: a project tracking work items in Azure DevOps previously had no path
+  to report a framework defect at all, short of a human copying text between two
+  systems.
+
+  Two properties matter more than the plumbing. When the gate is `off` — the
+  default — the worker still returns the drafted issue body, because suppressing
+  the write must not suppress the finding; a defect noticed and never recorded is
+  indistinguishable from a defect never noticed. And an upstream report is
+  verified against the framework *source* before it is filed, not against the
+  consumer's deployed copy, since a deployed copy may carry local modifications
+  and a defect observed there may be a divergence the consumer introduced. The
+  coordinator holds no `github/*` tools; it delegates.
+
 ### Fixed
 
 - **The retro has one destination, and is owed only when the run had something

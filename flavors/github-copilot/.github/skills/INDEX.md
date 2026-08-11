@@ -36,6 +36,7 @@
 | 25 | `tdd-orchestration` | The coordinator's execution runbook — workflow state machine, git phase checkpoints, subagent context injection, the Step 1–7b delegation prompts with their retry and escalation policies, per-return protocols, and interruption/cancellation recovery. | coordinator |
 | 26 | `test-execution` | Run tests and lint from an agent — pre-defined task labels, phase-specific scoping, expected runtimes, the per-workflow test budget, and the shared test log. | test-writer, test-critic, implementer, refactorer, code-critic |
 | 27 | `copilot-authoring` | Reference depth for authoring Copilot customisation files — subagent pattern, model tiers, managed regions, built-in tool names, hooks JSON, prompt features, skill visibility, custom tool sets. | `copilot-authoring.instructions.md` (any agent editing a customisation file) |
+| 28 | `gh-issue` | GitHub issue lifecycle — repository routing (project vs framework upstream), duplicate search before create, evidence-grounded framework defect reports, sub-issue linking, and degraded-mode fallback. | gh-issue-manager |
 
 ## Agent Skill Matrix
 
@@ -55,6 +56,7 @@
 | **ado-work-item-manager** | ado-workitem, ado-shared, databricks-execution-patterns |
 | **ado-wiki-manager** | ado-wiki, ado-shared |
 | **ado-pr-manager** | ado-pr, ado-shared |
+| **gh-issue-manager** | gh-issue |
 
 ## Available for Activation (34 skills in `skills/_available/`)
 
