@@ -51,6 +51,22 @@ function Get-AfConfig {
     return $Default
 }
 
+# The retro destination is configurable (issue #117), so every gate has to
+# derive it the same way. A hook that kept the old path hardcoded would report
+# a missing artifact the documenter had correctly written somewhere else --
+# the gate would be wrong and the agent would be blamed.
+#
+# Normalised so `docs/retros/`, `docs\retros` and `docs/retros` are one value.
+# A trailing slash yields `docs/retros//id.md`, which Test-Path accepts and
+# string comparison does not, so the path a gate reports would stop matching
+# the path it checked.
+function Get-AfRetroDir {
+    $dir = Get-AfConfig -Key 'RETRO_DIR' -Default '.github/retros/auto'
+    $dir = ($dir -replace '\\', '/') -replace '/+$', ''
+    if (-not $dir) { return '.github/retros/auto' }
+    return $dir
+}
+
 # A resolvable interpreter is not a working one: on Windows `python3` is an
 # App Execution Alias that is on PATH, runs nothing and exits non-zero.
 # Probe each candidate instead of trusting the lookup.

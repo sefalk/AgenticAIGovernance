@@ -65,6 +65,28 @@ af_conf_get() {
     return 0
 }
 
+# af_retro_dir
+#
+# The retro destination is configurable (issue #117), so every gate has to
+# derive it the same way. A hook that kept the old path hardcoded would report
+# a missing artifact the documenter had correctly written somewhere else --
+# the gate would be wrong and the agent would be blamed.
+#
+# Normalised so `docs/retros/`, `docs\retros` and `docs/retros` are one value.
+# A trailing slash yields `docs/retros//id.md`, which `test -f` accepts and
+# string comparison does not, so the path a gate reports would stop matching
+# the path it checked.
+af_retro_dir() {
+    local _dir
+    _dir=$(af_conf_get RETRO_DIR '.github/retros/auto')
+    _dir=$(printf '%s' "$_dir" | tr '\\' '/' | sed -e 's:/*$::')
+    if [ -z "$_dir" ]; then
+        _dir=".github/retros/auto"
+    fi
+    printf '%s\n' "$_dir"
+    return 0
+}
+
 # af_find_python CANDIDATE...
 #
 # A resolvable interpreter is not a working one. On Windows, `python3` is an

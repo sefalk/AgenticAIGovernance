@@ -672,6 +672,99 @@ stop_case "stop-tests does not accept the legacy retro path either" \
     ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
     "retros/auto/72-x.md=$LEGACY_RETRO"
 
+# --- the retro destination is configurable (issue #117) -------------------
+#
+# The default destination ships a `.gitignore` because retros were classed with
+# the workflow logs. The classification does not hold: the log embeds the user
+# request verbatim, the retro records a lesson. So the destination becomes a
+# project decision -- and the DEFAULT DOES NOT MOVE, because a consumer that
+# upgrades without touching af-env.conf must observe unchanged behaviour.
+#
+# The specific risk this block exists for: a key honoured by the PowerShell
+# dialect and ignored by this one. That gate would pass on Windows and block on
+# Linux, and its verdict would depend on who ran it -- the shape #93 lived in
+# for weeks. Everything the .ps1 suite asserts about RETRO_DIR is asserted here
+# against the real bash hooks.
+
+echo "## retro destination is configurable (RETRO_DIR)"
+
+CONF_DOCS_B='RETRO_DIR=docs/retros\n'
+
+# If the shipped config lost the key, every override case below would still
+# pass -- against the default, proving nothing.
+if grep -qE '^RETRO_DIR=\.github/retros/auto[[:space:]]*$' "$GITHUB_DIR/af-env.conf" 2>/dev/null; then
+    conf_default_ok=1
+else
+    conf_default_ok=0
+fi
+assert_true "the shipped af-env.conf carries RETRO_DIR at the unchanged default" \
+    "$conf_default_ok" "an upgrading consumer must not have its retro destination move under it"
+
+doc_stop_case "with no RETRO_DIR configured the default destination still satisfies the gate" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO"
+
+doc_stop_case "with the default an arbitrary other directory does not" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    "docs/retros/72-x.md=$LEGACY_RETRO"
+
+doc_stop_case "with RETRO_DIR overridden the configured directory satisfies the gate" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=$CONF_DOCS_B" \
+    "docs/retros/72-x.md=$LEGACY_RETRO"
+
+# The inverse proves the key is consulted rather than merely added: if the old
+# path still passed, an override would look like it worked while the gate
+# quietly guarded two directories -- which is the ambiguity #98 removed.
+doc_stop_case "and the default directory stops satisfying it" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=$CONF_DOCS_B" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO"
+
+configured_out=$(stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=$CONF_DOCS_B")
+assert_contains "the block message names the configured destination" \
+    "$configured_out" "docs/retros/72-x.md"
+assert_not_contains "and does not send the documenter to the directory it stopped using" \
+    "$configured_out" ".github/retros/auto/72-x.md"
+
+# `docs/retros/` and `docs\retros` are one directory to the filesystem and two
+# strings to a gate. Un-normalised, the reported path would be
+# `docs/retros//72-x.md` -- writable, but not equal to what the hook checked.
+for variant in 'docs/retros/' 'docs\\retros' 'docs\\retros\\'; do
+    doc_stop_case "RETRO_DIR '$variant' resolves to the same destination" \
+        pass "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+        ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+        ".github/af-env.conf=RETRO_DIR=$variant\n" \
+        "docs/retros/72-x.md=$LEGACY_RETRO"
+done
+
+# An empty value is a half-finished config edit. Falling back keeps the gate
+# working; treating '' as the repository root would make every retro satisfy it.
+doc_stop_case "an empty RETRO_DIR falls back to the default, not to the repo root" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=RETRO_DIR=\n" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO"
+
+# stop-tests judges the same condition with less force. A key honoured by one
+# of the two gates would warn about an artifact the other had just accepted.
+# Asserted on the words, not via stop_case's `pass`: that expectation only
+# rules out a block, and stop-tests never blocks -- a WARNING would slip past.
+st_configured=$(stop_output stop-tests.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=$CONF_DOCS_B" \
+    "docs/retros/72-x.md=$LEGACY_RETRO")
+assert_not_contains "stop-tests honours RETRO_DIR too" \
+    "$st_configured" "WARNING"
+
 # --- Workflow-log timestamps are measured, not authored (issue #91) --------
 #
 # A documenter wrote `completed:` six and a half hours into the future, in the

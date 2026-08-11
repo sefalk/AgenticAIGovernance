@@ -5,7 +5,8 @@
 #
 # Verifies the documenter has produced the required workflow artifacts:
 #   1. YAML workflow log in .github/logs/{workflow-id}.yaml
-#   2. Retro snippet in .github/retros/auto/{workflow-id}.md -- but only when
+#   2. Retro snippet in $RETRO_DIR/{workflow-id}.md (default
+#      .github/retros/auto/) -- but only when
 #      the workflow log shows there was something to learn (issue #27)
 #
 # The gate applies only to finalisation, which is recognised by the plan file
@@ -96,19 +97,22 @@ if (-not (Test-Path $logPath1) -and -not (Test-Path $logPath2)) {
 # unhelpful as accepting it.
 #
 # Whether a retro is owed at all is decided from the log, not from the
-# documenter's account of its own run (issue #27).
+# documenter's account of its own run (issue #27). WHERE it is owed comes from
+# `RETRO_DIR`, because the default destination is gitignored and a project that
+# wants retros as reviewable history must be able to say so (issue #117).
 
-$retroPath = ".github/retros/auto/$workflowId.md"
+$retroDir = Get-AfRetroDir
+$retroPath = "$retroDir/$workflowId.md"
 $legacyRetroPath = "retros/auto/$workflowId.md"
 $retro = Get-AfRetroRequirement -WorkflowId $workflowId
 $retroNote = ''
 
 if (-not (Test-Path $retroPath)) {
     if ($retro.Required) {
-        if (Test-Path $legacyRetroPath) {
-            $missing += "retro snippet at its canonical path -- found '$legacyRetroPath', which is no longer accepted; move it to .github/retros/auto/$workflowId.md"
+        if ($legacyRetroPath -ne $retroPath -and (Test-Path $legacyRetroPath)) {
+            $missing += "retro snippet at its configured path -- found '$legacyRetroPath', which is no longer accepted; move it to $retroPath"
         } else {
-            $missing += "retro snippet (.github/retros/auto/$workflowId.md), required because $($retro.Reason)"
+            $missing += "retro snippet ($retroPath), required because $($retro.Reason)"
         }
     } else {
         $retroNote = " -- no retro required ($($retro.Reason))"

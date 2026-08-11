@@ -6,7 +6,8 @@
 #
 # Verifies the documenter has produced the required workflow artifacts:
 #   1. YAML workflow log in .github/logs/{workflow-id}.yaml
-#   2. Retro snippet in .github/retros/auto/{workflow-id}.md -- but only when
+#   2. Retro snippet in $RETRO_DIR/{workflow-id}.md (default
+#      .github/retros/auto/) -- but only when
 #      the workflow log shows there was something to learn (issue #27)
 #
 # The gate applies only to finalisation, which is recognised by the plan file
@@ -83,17 +84,20 @@ fi
 # A legacy file is named rather than silently ignored.
 #
 # Whether a retro is owed at all is decided from the log, not from the
-# documenter's account of its own run (issue #27).
+# documenter's account of its own run (issue #27). WHERE it is owed comes from
+# `RETRO_DIR`, because the default destination is gitignored and a project that
+# wants retros as reviewable history must be able to say so (issue #117).
 
+retro_dir=$(af_retro_dir)
 retro_note=""
-if [ ! -f ".github/retros/auto/${workflow_id}.md" ]; then
+if [ ! -f "${retro_dir}/${workflow_id}.md" ]; then
     retro_verdict=$(af_retro_required "$workflow_id")
     retro_reason="${retro_verdict#*|}"
     if [ "${retro_verdict%%|*}" = "1" ]; then
-        if [ -f "retros/auto/${workflow_id}.md" ]; then
-            missing+=("retro snippet at its canonical path -- found 'retros/auto/${workflow_id}.md', which is no longer accepted; move it to .github/retros/auto/${workflow_id}.md")
+        if [ "$retro_dir" != "retros/auto" ] && [ -f "retros/auto/${workflow_id}.md" ]; then
+            missing+=("retro snippet at its configured path -- found 'retros/auto/${workflow_id}.md', which is no longer accepted; move it to ${retro_dir}/${workflow_id}.md")
         else
-            missing+=("retro snippet (.github/retros/auto/${workflow_id}.md), required because ${retro_reason}")
+            missing+=("retro snippet (${retro_dir}/${workflow_id}.md), required because ${retro_reason}")
         fi
     else
         retro_note=" -- no retro required (${retro_reason})"

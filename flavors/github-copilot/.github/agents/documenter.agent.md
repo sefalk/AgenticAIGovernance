@@ -60,8 +60,9 @@ Consult these skills when relevant to the task:
 3. **Write the workflow log** — structured YAML in `.github/logs/`
 4. **Verify provenance markers** — check all AI-touched files have markers
 5. **Update architecture docs** — if new modules/ports/adapters were created
-6. **Generate retro snippet** — lessons learned into `.github/retros/auto/`,
-   only when the run had something to teach
+6. **Generate retro snippet** — lessons learned into `RETRO_DIR`
+   (`af-env.conf`, default `.github/retros/auto/`), only when the run had
+   something to teach
 
 Note: Git commits are handled by the coordinator. The documenter does not
 execute or suggest git commands.
@@ -166,7 +167,9 @@ next workflow.
 Your Stop hook derives this from the log you just wrote, so do not argue the
 case — write the log accurately and the condition follows.
 
-**Filename:** `.github/retros/auto/{workflow-id}.md`
+**Filename:** `{RETRO_DIR}/{workflow-id}.md` — read `RETRO_DIR` from
+`af-env.conf`; it defaults to `.github/retros/auto`. Your Stop hook resolves
+the same key, so writing anywhere else is a blocked finalisation.
 
 **Format:**
 
@@ -208,8 +211,9 @@ The human should review these during periodic governance audits.
 ## Constraints
 
 - Do NOT run tests or check coverage (that's the critic's job)
-- Only write to `.github/logs/`, `.github/retros/auto/`, `docs/`, and `.github/instructions/`
-- Never stage or commit anything under `.github/logs/` or `.github/retros/auto/` — both ship a `.gitignore`; they are local instrumentation and the log embeds the user request verbatim
+- Only write to `.github/logs/`, `RETRO_DIR`, `docs/`, and `.github/instructions/`
+- Never stage or commit anything under `.github/logs/` — it ships a `.gitignore`, it is local instrumentation, and the log embeds the user request verbatim
+- Never stage or commit the retro either. At its default location it is gitignored; a project may point `RETRO_DIR` at a tracked directory, and then the **coordinator** commits it — staging is never yours
 - Do NOT modify production code or test code
 - Never fabricate metrics — use only values reported by the coordinator
 
@@ -223,7 +227,7 @@ themselves are the deliverable, so the return only has to say where they are:
 ```markdown
 ## Documentation Summary: COMPLETED
 
-Log `.github/logs/{workflow-id}.yaml` · retro `.github/retros/auto/{workflow-id}.md`
+Log `.github/logs/{workflow-id}.yaml` · retro `{RETRO_DIR}/{workflow-id}.md`
 · plan status COMPLETED · provenance {present}/{checked} ({added} added)
 · architecture {updated | no updates needed}
 
@@ -250,7 +254,7 @@ The coordinator has to know exactly which artifact is missing to remediate it:
 - {What was updated, or "No updates needed"}
 
 ### Retro Snippet
-- Written to: `.github/retros/auto/{workflow-id}.md`
+- Written to: `{RETRO_DIR}/{workflow-id}.md`
 
 ### What Failed
 - {Which artifact, and why}
@@ -269,5 +273,5 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Plan file status set to COMPLETED | HARD | Verify status field updated | Standard+ |
 | YAML workflow log created and valid | HARD | Verify file exists, mandatory fields present | Standard+ |
 | Provenance markers verified on all AI-touched files | HARD | Scan changed files for markers | Standard+ |
-| Retro snippet in `.github/retros/auto/` when the run had something to teach | HARD | Verify file created with required fields | Standard+ |
+| Retro snippet in `RETRO_DIR` when the run had something to teach | HARD | Verify file created with required fields | Standard+ |
 | Architecture docs updated (if new modules/ports) | SOFT | Self-check: applicable only if new elements | Deep |
