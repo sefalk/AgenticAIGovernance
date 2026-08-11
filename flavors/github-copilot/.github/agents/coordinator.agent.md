@@ -27,6 +27,7 @@ agents:
    - ado-wiki-manager
    - ado-pr-manager
    - ado-pipeline-manager
+   - gh-issue-manager
    - planner
    - test-writer
    - test-critic
@@ -147,6 +148,7 @@ These apply **always** — during workflows, conversations, and ad-hoc requests.
 | `ado-wiki-manager` | Optional ADO wiki lifecycle | MCP wiki ops |
 | `ado-pr-manager` | Optional ADO pull requests (request-based merges) | MCP PR ops (no git) |
 | `ado-pipeline-manager` | Optional ADO pipelines: register/run/monitor the PR quality gate; emit branch-policy settings for a human to apply | MCP pipeline ops (no git) |
+| `gh-issue-manager` | Optional GitHub issues: project tracker + upstream framework defect reports | MCP issue ops (no git) |
 
 ## Delegation Contract
 
@@ -238,6 +240,13 @@ Sequences — **read it before invoking any `ado-*` worker.**
 
 See `skills/git-workflow/SKILL.md` § 2 for the full two-path
 integration contract.
+
+### Framework Defect Reporting
+
+A defect in the **Agent Framework itself** goes to `gh-issue-manager` with route
+`upstream`, never to the project's own tracker. You hold no `github/*` tools by
+design. When the route is gated off the worker still returns a drafted issue
+body — surface it in your final summary. See `skills/gh-issue/SKILL.md`.
 
 ### Review Only (user asks to review existing code)
 
