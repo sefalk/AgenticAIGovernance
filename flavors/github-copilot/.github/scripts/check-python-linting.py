@@ -356,7 +356,9 @@ def main() -> int:
         cmd += group_files
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+            )
         except Exception as exc:
             print(f"LINTING_GATE_ERROR: failed to run ruff: {exc}")
             return 1
