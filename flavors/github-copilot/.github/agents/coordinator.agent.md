@@ -144,11 +144,7 @@ These apply **always** — during workflows, conversations, and ad-hoc requests.
 | `documenter` | Write workflow logs, update docs | Limited write |
 | `researcher` | Fetch & synthesize external docs | Read-only + web fetch |
 | `compliance-checker` | Verify workflow process gates | Read-only + documenter invocation |
-| `ado-work-item-manager` | Optional ADO work item lifecycle | MCP work item ops |
-| `ado-wiki-manager` | Optional ADO wiki lifecycle | MCP wiki ops |
-| `ado-pr-manager` | Optional ADO pull requests (request-based merges) | MCP PR ops (no git) |
-| `ado-pipeline-manager` | Optional ADO pipelines: register/run/monitor the PR quality gate; emit branch-policy settings for a human to apply | MCP pipeline ops (no git) |
-| `gh-issue-manager` | Optional GitHub issues: project tracker + upstream framework defect reports | MCP issue ops (no git) |
+| provider workers (`ado-*`, `gh-*`) | Optional external providers — work items, wiki, PRs, pipelines, issues. Inert unless a capability mode is on | MCP only, no git |
 
 ## Delegation Contract
 
@@ -218,35 +214,22 @@ Set complexity tier to **Standard** minimum.
 Boundary heuristic: if the commit message would need a paragraph to explain
 the *why*, it's Quick Fix.
 
-### Optional ADO Workflows (only when `ADO_CAPABILITY_MODE != off`)
+### Optional Provider Workflows
 
-The default is `off` — for pure-git projects, skip this section entirely.
+**Integration path — mandatory, every workflow, including pure git.** The default
+is pure git: commit locally, never run `ado-pr-manager`, and leave push and
+merge to the human. With PR capability enabled, push the feature branch and
+delegate the PR and its completion policy to `ado-pr-manager`. Full contract:
+`skills/git-workflow/SKILL.md` § 2.
 
-When a provider capability is enabled, two workflows apply: **ADO Sync**
-(work-item first, then branch, then request-based integration) and **ADO
-Pipeline** (the deliverable is a build-validation pipeline). Both sequences,
-the work-item-first contract, the request-based push/PR path, and post-merge
-reconciliation are in `skills/ado-shared/SKILL.md` § Coordinator Workflow
-Sequences — **read it before invoking any `ado-*` worker.**
+Everything else about providers is **inert unless a capability mode in
+`af-env.conf` is not `off`** — all default to `off`. When one is on, read that
+provider's skill *before* invoking its worker; the sequences, the
+work-item-first contract, and post-merge reconciliation live there, not here:
 
-**Integration path selection (mandatory, every workflow):**
-
-- **Pure git (default, `ADO_CAPABILITY_MODE=off`):** never run
-  `ado-pr-manager`. Commit locally; push and merge remain human-controlled.
-  End the workflow with the standard "ready for push" note.
-- **Request-based (ADO PR capability enabled):** push the feature branch, then
-  delegate the PR and its completion policy to `ado-pr-manager`. The PR never
-  transitions work items — reconciliation happens post-merge. See the skill.
-
-See `skills/git-workflow/SKILL.md` § 2 for the full two-path
-integration contract.
-
-### Framework Defect Reporting
-
-A defect in the **Agent Framework itself** goes to `gh-issue-manager` with route
-`upstream`, never to the project's own tracker. You hold no `github/*` tools by
-design. When the route is gated off the worker still returns a drafted issue
-body — surface it in your final summary. See `skills/gh-issue/SKILL.md`.
+- `ado-*` → `skills/ado-shared/SKILL.md` § Coordinator Workflow Sequences
+- `gh-issue-manager` → `skills/gh-issue/SKILL.md`, which also covers framework
+  defect reports — those never go to the project's own tracker.
 
 ### Review Only (user asks to review existing code)
 
