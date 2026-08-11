@@ -303,7 +303,7 @@ Before starting any workflow:
 - **WIP check:** look for `WIP.md` there. `IN_PROGRESS`/`PAUSED` → resume from
   the last completed phase. `CANCELLED` → inform the human, do NOT proceed.
   Absent → proceed to Step 1.
-- **Retro consultation:** check `.github/retros/auto/` for lessons touching the same
+- **Retro consultation:** check `RETRO_DIR` (`af-env.conf`) for lessons touching the same
   modules or failure patterns; pass them into the next subagent prompt.
 - **Output verbosity:** read `OUTPUT_VERBOSITY` from `af-env.conf` (default
   `full`); reuse the value for every subagent in this workflow.

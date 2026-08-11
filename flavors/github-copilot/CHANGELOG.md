@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The retro destination is now a project decision (`RETRO_DIR`).** Agent
+  retros were classed with the workflow logs and gitignored on that basis.
+  The classification was checked and does not hold.
+
+  `retros/README.md` justified the exclusion by saying the two are "the same
+  class of artifact", and `documenter.agent.md` gave the operative reason:
+  *the log embeds the user request verbatim*. That is a property of the **log**.
+  Measured on a real 55-file consumer corpus, the agent retros contained zero
+  credential values, zero personal or absolute paths and zero URLs — the three
+  `secret` hits all named the Databricks Secrets API and secret *names*. The
+  56 workflow logs, by contrast, carry a verbatim `trigger:` in 55 of them
+  (40–420 characters, averaging 104). One of the two is unsafe to publish, and
+  it is not the retro.
+
+  So the destination becomes configurable while the **default does not move**:
+
+  ```conf
+  RETRO_DIR=.github/retros/auto
+  ```
+
+  A consumer that upgrades without touching `af-env.conf` observes byte-for-byte
+  the behaviour it had before the key existed — asserted directly, in both
+  dialects, rather than assumed. Point it at a tracked directory such as
+  `docs/retros` and retros become reviewable project history that survives a
+  fresh clone.
+
+  What does **not** become configurable:
+
+  - **There is still exactly one destination.** The gates resolve the same key
+    the documenter writes to, so a retro in the wrong place is still detected
+    rather than tolerated — the property #98 established, now derived from
+    config instead of a literal. The override cases assert the inverse too: with
+    `RETRO_DIR` pointed elsewhere, the old path stops satisfying the gate. A key
+    that only ever *added* an acceptable location would have re-created the
+    ambiguity it was meant to preserve against.
+  - **The logs stay local, unconditionally.** The verbatim-request argument is
+    true of them.
+
+  Resolution lives in one function per dialect (`Get-AfRetroDir`,
+  `af_retro_dir`), because a key honoured by `.ps1` and ignored by `.sh` is a
+  gate whose verdict depends on who ran it — the shape #93 lived in for weeks.
+  Both normalise trailing slashes and backslashes, and both fall back to the
+  default on an empty value rather than treating `''` as the repository root,
+  which would have made every retro satisfy the gate.
+
+  Revises the reasoning shipped with #98/#27, and is the constructive half of
+  #109: a migration that moves records into a gitignored directory is only safe
+  once the directory does not have to be gitignored.
+
+  Closes #117.
+
 ### Fixed
 
 - **Two gate scripts decoded git and ruff output with the platform default

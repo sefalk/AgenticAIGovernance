@@ -51,18 +51,19 @@ if ($branch -and $branch -match '^agent/(.+)$') {
         }
     }
 
-    # Retro snippet: one destination, and only when the log shows there was
-    # something to learn (issues #98, #27). Same condition documenter-stop
-    # blocks on, asserted with less force.
-    $retroPattern = ".github/retros/auto/$workflowId.md"
+    # Retro snippet: one destination -- the one `RETRO_DIR` names (issue #117)
+    # -- and only when the log shows there was something to learn (issues #98,
+    # #27). Same condition documenter-stop blocks on, asserted with less force.
+    $retroDir = Get-AfRetroDir
+    $retroPattern = "$retroDir/$workflowId.md"
     $legacyRetro = "retros/auto/$workflowId.md"
     if (-not (Test-Path $retroPattern)) {
         $retro = Get-AfRetroRequirement -WorkflowId $workflowId
         if ($retro.Required) {
-            if (Test-Path $legacyRetro) {
-                $missing += "retro snippet at its canonical path (found '$legacyRetro', no longer accepted)"
+            if ($legacyRetro -ne $retroPattern -and (Test-Path $legacyRetro)) {
+                $missing += "retro snippet at its configured path (found '$legacyRetro', no longer accepted)"
             } else {
-                $missing += "retro snippet (.github/retros/auto/$workflowId.md)"
+                $missing += "retro snippet ($retroPattern)"
             }
         }
     }

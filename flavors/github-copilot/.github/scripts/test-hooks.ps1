@@ -1642,6 +1642,137 @@ foreach ($pair in @(@{ n = 'documenter-stop.sh'; t = $docSh }, @{ n = 'stop-test
 
 Write-Output ""
 
+# ── The retro destination is configurable (issue #117) ───────────────────
+#
+# The default destination ships a `.gitignore`, because retros were classed
+# with the workflow logs. The classification does not hold: the log embeds the
+# user request verbatim, the retro records a lesson. Measured across a real
+# 55-file consumer corpus, the retros carried no credentials, no personal or
+# absolute paths and no URLs — nothing in them argued for keeping them out of
+# version control.
+#
+# So the destination becomes a project decision, and the DEFAULT DOES NOT MOVE:
+# an upgrading consumer that never touches af-env.conf must observe exactly the
+# behaviour it had before this key existed. That is the first assertion below.
+#
+# The second risk is a key honoured by one dialect and ignored by the other —
+# a gate that passes on Windows and blocks on Linux is worse than one that is
+# merely wrong, because its verdict depends on who ran it. Both runtimes are
+# asserted, and #98's property is preserved throughout: there is still exactly
+# ONE destination, so a retro in the wrong place is still detected.
+
+Write-Output "## retro destination is configurable (RETRO_DIR)"
+
+$confPath = Join-Path $githubDir 'af-env.conf'
+$REAL_CONF = Get-Content $confPath -Raw
+
+# If this fails, every override case below silently tests the default instead:
+# the replace would match nothing, the hook would fall back, and the
+# assertions would pass while proving nothing.
+Assert-True "the shipped af-env.conf carries RETRO_DIR at the unchanged default" `
+    ($REAL_CONF -match '(?m)^RETRO_DIR=\.github/retros/auto\s*$') `
+    "an upgrading consumer must not have its retro destination move under it"
+
+function New-ConfWith {
+    param([string]$Dir)
+    $out = $REAL_CONF -replace '(?m)^RETRO_DIR=.*$', "RETRO_DIR=$Dir"
+    if ($out -eq $REAL_CONF) { throw "RETRO_DIR not substituted -- the override would be untested" }
+    return $out
+}
+
+$CONF_DOCS = New-ConfWith 'docs/retros'
+
+Assert-True "with the default config the old destination still satisfies the gate" `
+    ((Get-RetroDecision $LOG_RETRIES @{ '.github/retros/auto/72-x.md' = $RETRO_MD }) -eq 'pass') `
+    "unchanged config must mean unchanged behaviour"
+
+Assert-True "with the default config an arbitrary other directory does not" `
+    ((Get-RetroDecision $LOG_RETRIES @{ 'docs/retros/72-x.md' = $RETRO_MD }) -eq 'block') `
+    "one destination, not any destination (issue #98)"
+
+Assert-True "with RETRO_DIR overridden the configured directory satisfies the gate" `
+    ((Get-RetroDecision $LOG_RETRIES @{
+        '.github/af-env.conf'  = $CONF_DOCS
+        'docs/retros/72-x.md'  = $RETRO_MD
+    }) -eq 'pass') `
+    "the hook must read the key, not the literal it used to hardcode"
+
+# The inverse is the one that proves the key is actually consulted: if the hook
+# still accepted the old path, an override would look like it worked while the
+# gate quietly guarded two directories.
+Assert-True "and the default directory stops satisfying it" `
+    ((Get-RetroDecision $LOG_RETRIES @{
+        '.github/af-env.conf'         = $CONF_DOCS
+        '.github/retros/auto/72-x.md' = $RETRO_MD
+    }) -eq 'block') `
+    "still exactly one destination -- the configured one"
+
+$configured = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+    '.github/logs/72-x.yaml'         = $LOG_RETRIES
+    '.github/af-env.conf'            = $CONF_DOCS
+}
+Assert-Contains "the block message names the configured destination, not the default" `
+    $configured.Output 'docs/retros/72-x.md'
+Assert-NotContains "and does not send the documenter to the directory it stopped using" `
+    $configured.Output '.github/retros/auto/72-x.md'
+
+# `docs/retros/` and `docs\retros` are the same directory to a filesystem and
+# two different strings to a gate. Un-normalised, the message would report
+# `docs/retros//72-x.md` -- a path the documenter can write to but cannot match
+# against what it was told.
+foreach ($variant in @('docs/retros/', 'docs\retros', 'docs\retros\')) {
+    Assert-True "RETRO_DIR '$variant' resolves to the same destination" `
+        ((Get-RetroDecision $LOG_RETRIES @{
+            '.github/af-env.conf' = (New-ConfWith $variant)
+            'docs/retros/72-x.md' = $RETRO_MD
+        }) -eq 'pass') `
+        "trailing slashes and backslashes must not fork the destination"
+}
+
+# An empty value is a config edit half-finished. Falling through to the default
+# keeps the gate working; treating '' as the repository root would make every
+# retro satisfy it.
+Assert-True "an empty RETRO_DIR falls back to the default rather than to the repo root" `
+    ((Get-RetroDecision $LOG_RETRIES @{
+        '.github/af-env.conf'         = (New-ConfWith '')
+        '.github/retros/auto/72-x.md' = $RETRO_MD
+    }) -eq 'pass') `
+    "an unset key is not a wildcard"
+
+# stop-tests judges the same condition with less force. A configurable key
+# honoured by one of the two gates would warn about an artifact that the other
+# gate had just accepted.
+$stConfigured = Get-StopTestsOutput @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+    '.github/logs/72-x.yaml'         = $LOG_RETRIES
+    '.github/af-env.conf'            = $CONF_DOCS
+    'docs/retros/72-x.md'            = $RETRO_MD
+}
+Assert-True "stop-tests honours RETRO_DIR too" `
+    ($stConfigured -notmatch 'WARNING') `
+    "got: $stConfigured" -Subject $stConfigured
+
+# The cheap static claim that the same edit reached the bash side. The bash
+# suite proves the behaviour; this catches the dialect drift that #93 lived in.
+Assert-True "the bash preamble resolves the destination from config" `
+    ($commonShText -match 'af_retro_dir\(\)' -and $commonShText -match 'RETRO_DIR') `
+    "no af_retro_dir in _common.sh"
+
+foreach ($pair in @(@{ n = 'documenter-stop.sh'; t = $docSh }, @{ n = 'stop-tests.sh'; t = $stopSh })) {
+    Assert-True "$($pair.n) resolves the retro destination from config" `
+        ($pair.t -match 'af_retro_dir') `
+        "no call to af_retro_dir"
+    # The legacy root check is deliberate and stays. Any OTHER literal use of
+    # the default path is a destination the key does not govern.
+    $literals = [regex]::Matches($pair.t, '(?m)^[^#]*\.github/retros/auto')
+    Assert-True "$($pair.n) has no hardcoded default destination left in its logic" `
+        ($literals.Count -eq 0) `
+        "still hardcoded: $($literals | ForEach-Object { $_.Value.Trim() })"
+}
+
+Write-Output ""
+
 # ── Workflow-log timestamps are measured, not authored (issue #91) ───────
 #
 # A documenter wrote `completed:` six and a half hours into the future, in the

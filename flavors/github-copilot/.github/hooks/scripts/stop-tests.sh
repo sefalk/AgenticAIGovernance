@@ -49,15 +49,17 @@ if [[ "$branch" =~ ^agent/(.+)$ ]]; then
         missing+=("workflow log (.github/logs/${workflow_id}.yaml)")
     fi
 
-    # Retro snippet: one destination, and only when the log shows there was
-    # something to learn (issues #98, #27).
-    if [ ! -f ".github/retros/auto/${workflow_id}.md" ]; then
+    # Retro snippet: one destination -- the one `RETRO_DIR` names (issue #117)
+    # -- and only when the log shows there was something to learn (issues #98,
+    # #27).
+    retro_dir=$(af_retro_dir)
+    if [ ! -f "${retro_dir}/${workflow_id}.md" ]; then
         retro_verdict=$(af_retro_required "$workflow_id")
         if [ "${retro_verdict%%|*}" = "1" ]; then
-            if [ -f "retros/auto/${workflow_id}.md" ]; then
-                missing+=("retro snippet at its canonical path (found 'retros/auto/${workflow_id}.md', no longer accepted)")
+            if [ "$retro_dir" != "retros/auto" ] && [ -f "retros/auto/${workflow_id}.md" ]; then
+                missing+=("retro snippet at its configured path (found 'retros/auto/${workflow_id}.md', no longer accepted)")
             else
-                missing+=("retro snippet (.github/retros/auto/${workflow_id}.md)")
+                missing+=("retro snippet (${retro_dir}/${workflow_id}.md)")
             fi
         fi
     fi

@@ -33,11 +33,33 @@ and capture action items for the next cycle.
 | Path | Author | Tracked |
 |---|---|---|
 | `retros/*.md` | Human / team | **Your choice** — a team retrospective is project documentation |
-| `.github/retros/auto/*.md` | documenter agent | **No** — ignored by `auto/.gitignore` |
+| `RETRO_DIR` at its default `.github/retros/auto/*.md` | documenter agent | **No** — ignored by `auto/.gitignore` |
+| `RETRO_DIR` pointed at a tracked directory, e.g. `docs/retros` | documenter agent | **Yes** — the project's decision |
 
-The split is by author, not by topic. Agent-generated snippets are
-self-improvement instrumentation of the same class as `.github/logs/`: they
-quote workflow triggers and describe how the framework behaved, not what the
-project does. A retrospective a team wrote and agreed on is a different
-artifact, and the framework does not decide its fate.
+### Why this is a choice and not a rule
+
+This directory's contents used to be classed with `.github/logs/`, on the
+reasoning that both are self-improvement instrumentation rather than project
+output. Measurement did not support the equivalence.
+
+The workflow log quotes the user request **verbatim** — that is what makes it
+unsafe to publish, and it is a property of the log, not of the retro. A retro
+snippet is a lesson: what was retried, which gate blocked, what to do
+differently. Across a real 55-file consumer corpus, the agent retros contained
+no credentials, no personal or absolute paths and no URLs. Nothing in them
+argued for keeping them out of version control; what argued for it was the
+category they had been filed under.
+
+So the default stays local — an existing project must not have its history
+change under it on upgrade — but the destination is now `RETRO_DIR` in
+`af-env.conf`. Point it at a tracked directory and retros become reviewable
+project history: they survive a fresh clone, they are visible in review, and
+the lessons stop being an artifact only the machine that produced them can see.
+
+What does **not** become a choice: there is still exactly one destination. The
+gates resolve the same key the documenter writes to, so a retro in the wrong
+place is still detected rather than quietly accepted (issue #98). And the logs
+stay local, unconditionally — the verbatim-request argument is true of them.
+
+Related: issues #98, #27, #109, #117.
 
