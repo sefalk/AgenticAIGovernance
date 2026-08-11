@@ -800,7 +800,7 @@ const AGENTS = {
     tools: ['search/*', 'read/*', 'editFiles', 'createFile'],
     skills: ['documentation'],
     hooks: ['documenter-stop (workflow log + retro snippet must exist)'],
-    notes: 'Creates YAML workflow log in .github/logs/ and retro snippet in retros/auto/. Updates plan file status to COMPLETED.',
+    notes: 'Creates YAML workflow log in .github/logs/ and, when the run had something to teach, a retro snippet in .github/retros/auto/. Updates plan file status to COMPLETED.',
     makerChecker: null
   },
   researcher: {
@@ -896,7 +896,7 @@ const HOOKS_DETAIL = {
     desc: 'Blocks the refactorer from using createFile or createDirectory tools. Refactoring must only modify existing files.',
     enforcement: 'HARD -- blocks file/directory creation tool calls' },
   'hook-doc-stop': { name: 'Documentation Artifact Gate', event: 'SubagentStop', scope: 'documenter', script: 'documenter-stop.ps1/.sh',
-    desc: 'Derives workflow-id from branch name (agent/{id}). Checks: (1) YAML workflow log exists in .github/logs/{id}.yaml, (2) retro snippet exists in retros/auto/{id}.md.',
+    desc: 'Derives workflow-id from branch name (agent/{id}). Checks: (1) YAML workflow log exists in .github/logs/{id}.yaml, (2) retro snippet exists in .github/retros/auto/{id}.md when the log shows the run was not clean.',
     enforcement: 'HARD -- blocks if artifacts missing' }
 };
 

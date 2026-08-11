@@ -1606,6 +1606,30 @@ $stLegacy = Get-StopTestsOutput @{
 Assert-Contains "stop-tests does not accept the legacy retro path either" `
     $stLegacy 'WARNING'
 
+# The two runtimes are documented as interchangeable, and #93 was a defect that
+# lived for weeks in exactly the gap between them: one merged its log, the
+# other overwrote it, and nothing asserted they agreed. The bash suite proves
+# the behaviour, but it costs a quarter of an hour to run -- this is the cheap
+# static claim that the same edit reached the .sh side at all.
+$docSh = Get-Content (Join-Path $scriptDir 'documenter-stop.sh') -Raw
+$stopSh = Get-Content (Join-Path $scriptDir 'stop-tests.sh') -Raw
+$commonShText = Get-Content (Join-Path $scriptDir '_common.sh') -Raw
+
+Assert-True "the bash preamble carries the retro condition" `
+    ($commonShText -match 'af_retro_required\(\)') `
+    "no af_retro_required in _common.sh"
+
+foreach ($pair in @(@{ n = 'documenter-stop.sh'; t = $docSh }, @{ n = 'stop-tests.sh'; t = $stopSh })) {
+    Assert-True "$($pair.n) asks whether a retro is owed instead of always demanding one" `
+        ($pair.t -match 'af_retro_required') `
+        "no call to af_retro_required"
+    # `[ ! -f canonical ] && [ ! -f legacy ]` is the tolerant form: it is the
+    # construct that made either destination acceptable.
+    Assert-True "$($pair.n) no longer accepts either retro destination" `
+        ($pair.t -notmatch '(?m)!\s*-f\s*"?\.github/retros/auto/[^"]*"?\s*\]\s*&&\s*\[\s*!\s*-f') `
+        "the dual-path condition survives"
+}
+
 Write-Output ""
 
 # ── Workflow-log timestamps are measured, not authored (issue #91) ───────

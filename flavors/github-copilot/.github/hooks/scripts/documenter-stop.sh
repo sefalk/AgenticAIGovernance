@@ -6,7 +6,8 @@
 #
 # Verifies the documenter has produced the required workflow artifacts:
 #   1. YAML workflow log in .github/logs/{workflow-id}.yaml
-#   2. Retro snippet in retros/auto/{workflow-id}.md or .github/retros/auto/
+#   2. Retro snippet in .github/retros/auto/{workflow-id}.md -- but only when
+#      the workflow log shows there was something to learn (issue #27)
 #
 # The gate applies only to finalisation, which is recognised by the plan file
 # being marked COMPLETED. A mid-workflow documenter call (plan persistence,
@@ -75,11 +76,28 @@ if [ ! -f ".github/logs/${workflow_id}.yaml" ] && [ ! -f ".github/logs/${workflo
 fi
 
 # ---------- Gate 2: Retro snippet ----------
+#
+# One destination. The bare root path used to be accepted too, which did not
+# resolve the ambiguity but preserved it: a documenter writing to the wrong
+# place was indistinguishable from one writing to the right place (issue #98).
+# A legacy file is named rather than silently ignored.
+#
+# Whether a retro is owed at all is decided from the log, not from the
+# documenter's account of its own run (issue #27).
 
-# Canonical location is .github/retros/auto/; the bare path is accepted for
-# projects that adopted it before the location was settled.
-if [ ! -f ".github/retros/auto/${workflow_id}.md" ] && [ ! -f "retros/auto/${workflow_id}.md" ]; then
-    missing+=("retro snippet (.github/retros/auto/${workflow_id}.md)")
+retro_note=""
+if [ ! -f ".github/retros/auto/${workflow_id}.md" ]; then
+    retro_verdict=$(af_retro_required "$workflow_id")
+    retro_reason="${retro_verdict#*|}"
+    if [ "${retro_verdict%%|*}" = "1" ]; then
+        if [ -f "retros/auto/${workflow_id}.md" ]; then
+            missing+=("retro snippet at its canonical path -- found 'retros/auto/${workflow_id}.md', which is no longer accepted; move it to .github/retros/auto/${workflow_id}.md")
+        else
+            missing+=("retro snippet (.github/retros/auto/${workflow_id}.md), required because ${retro_reason}")
+        fi
+    else
+        retro_note=" -- no retro required (${retro_reason})"
+    fi
 fi
 
 # ---------- Verdict ----------
@@ -203,5 +221,5 @@ if [ -f "$checker" ] && [ -f ".vscode/tasks.json" ]; then
     fi
 fi
 
-echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS: workflow log and retro snippet exist for '${workflow_id}'${stamp_note}${cost_note}${scratch_note}\"}"
+echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS for '${workflow_id}'${retro_note}${stamp_note}${cost_note}${scratch_note}\"}"
 exit 0

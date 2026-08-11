@@ -60,7 +60,8 @@ Consult these skills when relevant to the task:
 3. **Write the workflow log** — structured YAML in `.github/logs/`
 4. **Verify provenance markers** — check all AI-touched files have markers
 5. **Update architecture docs** — if new modules/ports/adapters were created
-6. **Generate retro snippet** — extract lessons learned into `.github/retros/auto/`
+6. **Generate retro snippet** — lessons learned into `.github/retros/auto/`,
+   only when the run had something to teach
 
 Note: Git commits are handled by the coordinator. The documenter does not
 execute or suggest git commands.
@@ -156,9 +157,14 @@ architecture instructions file:
 
 ## Retro Snippet Generation
 
-After writing the workflow log, generate a retro snippet in `.github/retros/auto/`.
-This captures lessons learned so they can be pulled on demand via
-`/af-retro-summary`.
+Write a retro **only when the workflow had something to teach** — any of:
+`retries > 0`, `escalations > 0`, a critic verdict of REJECTED or ESCALATE, or
+a status other than COMPLETED. A clean run needs none: the log already records
+it as clean, and a file saying nothing happened is read back as input by the
+next workflow.
+
+Your Stop hook derives this from the log you just wrote, so do not argue the
+case — write the log accurately and the condition follows.
 
 **Filename:** `.github/retros/auto/{workflow-id}.md`
 
@@ -183,9 +189,7 @@ This captures lessons learned so they can be pulled on demand via
 **Rules:**
 - Keep snippets short — max 15 lines
 - Only record genuine findings, not boilerplate
-- If the workflow was trivial (Quick Fix, no retries, no issues), the
-  snippet can be just Task + Outcome + "No issues" under "What went well"
-- Never fabricate problems — if everything went smoothly, say so
+- Never fabricate problems
 
 ### Governance Action Items
 
@@ -265,5 +269,5 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Plan file status set to COMPLETED | HARD | Verify status field updated | Standard+ |
 | YAML workflow log created and valid | HARD | Verify file exists, mandatory fields present | Standard+ |
 | Provenance markers verified on all AI-touched files | HARD | Scan changed files for markers | Standard+ |
-| Retro snippet generated in `.github/retros/auto/` | HARD | Verify file created with required fields | Standard+ |
+| Retro snippet in `.github/retros/auto/` when the run had something to teach | HARD | Verify file created with required fields | Standard+ |
 | Architecture docs updated (if new modules/ports) | SOFT | Self-check: applicable only if new elements | Deep |

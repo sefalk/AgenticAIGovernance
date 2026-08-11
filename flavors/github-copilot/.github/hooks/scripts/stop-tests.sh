@@ -49,9 +49,17 @@ if [[ "$branch" =~ ^agent/(.+)$ ]]; then
         missing+=("workflow log (.github/logs/${workflow_id}.yaml)")
     fi
 
-    # Check for retro snippet (canonical first, legacy root path still accepted)
-    if [ ! -f ".github/retros/auto/${workflow_id}.md" ] && [ ! -f "retros/auto/${workflow_id}.md" ]; then
-        missing+=("retro snippet (.github/retros/auto/${workflow_id}.md)")
+    # Retro snippet: one destination, and only when the log shows there was
+    # something to learn (issues #98, #27).
+    if [ ! -f ".github/retros/auto/${workflow_id}.md" ]; then
+        retro_verdict=$(af_retro_required "$workflow_id")
+        if [ "${retro_verdict%%|*}" = "1" ]; then
+            if [ -f "retros/auto/${workflow_id}.md" ]; then
+                missing+=("retro snippet at its canonical path (found 'retros/auto/${workflow_id}.md', no longer accepted)")
+            else
+                missing+=("retro snippet (.github/retros/auto/${workflow_id}.md)")
+            fi
+        fi
     fi
 
     if [ ${#missing[@]} -gt 0 ]; then

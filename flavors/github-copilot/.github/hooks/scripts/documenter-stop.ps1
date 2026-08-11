@@ -5,7 +5,8 @@
 #
 # Verifies the documenter has produced the required workflow artifacts:
 #   1. YAML workflow log in .github/logs/{workflow-id}.yaml
-#   2. Retro snippet in retros/auto/{workflow-id}.md or .github/retros/auto/
+#   2. Retro snippet in .github/retros/auto/{workflow-id}.md -- but only when
+#      the workflow log shows there was something to learn (issue #27)
 #
 # The gate applies only to finalisation, which is recognised by the plan file
 # being marked COMPLETED. A mid-workflow documenter call (plan persistence,
@@ -85,13 +86,33 @@ if (-not (Test-Path $logPath1) -and -not (Test-Path $logPath2)) {
 }
 
 # ---------- Gate 2: Retro snippet ----------
+#
+# One destination. The bare root path used to be accepted too, which did not
+# resolve the ambiguity but preserved it: a documenter writing to the wrong
+# place was indistinguishable from one writing to the right place, and a
+# consumer accumulated 48 retros at the root, 35 of them tracked, with no rule
+# telling the two groups apart (issue #98). A legacy file is named rather than
+# silently ignored -- rejecting it without saying what to move would be as
+# unhelpful as accepting it.
+#
+# Whether a retro is owed at all is decided from the log, not from the
+# documenter's account of its own run (issue #27).
 
-# Canonical location is .github/retros/auto/; the bare path is accepted for
-# projects that adopted it before the location was settled.
-$retroPath1 = ".github/retros/auto/$workflowId.md"
-$retroPath2 = "retros/auto/$workflowId.md"
-if (-not (Test-Path $retroPath1) -and -not (Test-Path $retroPath2)) {
-    $missing += "retro snippet (.github/retros/auto/$workflowId.md)"
+$retroPath = ".github/retros/auto/$workflowId.md"
+$legacyRetroPath = "retros/auto/$workflowId.md"
+$retro = Get-AfRetroRequirement -WorkflowId $workflowId
+$retroNote = ''
+
+if (-not (Test-Path $retroPath)) {
+    if ($retro.Required) {
+        if (Test-Path $legacyRetroPath) {
+            $missing += "retro snippet at its canonical path -- found '$legacyRetroPath', which is no longer accepted; move it to .github/retros/auto/$workflowId.md"
+        } else {
+            $missing += "retro snippet (.github/retros/auto/$workflowId.md), required because $($retro.Reason)"
+        }
+    } else {
+        $retroNote = " -- no retro required ($($retro.Reason))"
+    }
 }
 
 # ---------- Verdict ----------
@@ -247,7 +268,7 @@ catch {
 }
 
 $output = @{
-    systemMessage = "documenter:Stop -- artifact gate PASS: workflow log and retro snippet exist for '$workflowId'$stampNote$costNote$scratchNote"
+    systemMessage = "documenter:Stop -- artifact gate PASS for '$workflowId'$retroNote$stampNote$costNote$scratchNote"
 } | ConvertTo-Json -Compress
 Write-Output $output
 exit 0

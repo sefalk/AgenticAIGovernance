@@ -1073,6 +1073,19 @@ if ((Test-Path $targetAvailable) -and (Test-Path $targetSkills)) {
     }
 }
 
+# ── Retro ignore check ─────────────────────────────────────────────────────
+# The documenter creates .github/retros/auto/ on its own, at run time. The
+# .gitignore that keeps its output out of the repository ships in the payload
+# -- and `retros/` is [optional] in the manifest, so a project can end up with
+# the directory and without the ignore. Measured in a consumer repo: generated
+# retros were staged as if they were authored source. The directory existing
+# is not evidence that the ignore came with it.
+$retroIgnoreMissing = $false
+$targetRetroAuto = Join-Path $TargetGitHub 'retros\auto'
+if (Test-Path $targetRetroAuto) {
+    $retroIgnoreMissing = -not (Test-Path (Join-Path $targetRetroAuto '.gitignore'))
+}
+
 # Summary
 Write-Host ""
 Write-Host "=== Summary ===" -ForegroundColor Cyan
@@ -1103,6 +1116,12 @@ if ($staleSkills.Count -gt 0) {
     foreach ($s in $staleSkills | Sort-Object) {
         Write-Host "    - skills/$s/  (re-copy from skills/_available/$s/ to update)" -ForegroundColor Yellow
     }
+}
+
+if ($retroIgnoreMissing) {
+    Write-Host ""
+    Write-Host "  .github/retros/auto/ exists but has no .gitignore -- generated retros will be committed as source." -ForegroundColor Yellow
+    Write-Host "  -> Copy .github/retros/auto/.gitignore from the AF payload, or re-run deploy with retros/ enabled." -ForegroundColor Yellow
 }
 
 # ── Curated skills reminder ────────────────────────────────────────────────
