@@ -40,7 +40,9 @@ run_case() {
     fixture=$(mktemp -d)
 
     mkdir -p "$fixture/.github/hooks/scripts"
-    cp "$HOOK_DIR/$hook" "$fixture/.github/hooks/scripts/"
+    # HOOK_SRC lets the harness self-check point run_case at a stub emitter
+    # without writing into the payload directory.
+    cp "${HOOK_SRC:-$HOOK_DIR}/$hook" "$fixture/.github/hooks/scripts/"
     # Hooks source the shared preamble; a deployed .github always ships it,
     # so the fixture has to as well or every hook dies before its first gate.
     cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
@@ -89,6 +91,11 @@ run_case() {
 }
 
 # assert_true <name> <1|0> [detail] -- for cases run_case cannot express.
+#
+# The caller collapses the evidence to 1|0 before this function sees it, so it
+# cannot tell a condition decided by real output from one decided by nothing.
+# Content assertions therefore belong in assert_contains / assert_not_contains
+# below, which are handed the subject itself.
 assert_true() {
     local name="$1" ok="$2" detail="${3:-}"
     if [ "$ok" -eq 1 ]; then
@@ -98,6 +105,134 @@ assert_true() {
         echo "FAIL  $name -- $detail"
         fail=$((fail + 1))
     fi
+}
+
+# Runs an assertion (or a *_case helper) in isolation and reports whether it
+# passed. Command substitution puts it in a subshell, so the tally in this
+# shell is untouched and the verdict can be read off the printed line --
+# which is what testing a harness requires: some assertions must FAIL.
+probe_outcome() {
+    local out
+    out=$("$@" 2>&1)
+    case "$out" in
+        PASS*) printf 'pass' ;;
+        FAIL*) printf 'fail' ;;
+        *)     printf 'none' ;;
+    esac
+}
+
+# ── harness self-check: one statement per invocation (issue #95) ──────────
+#
+# run_case and stop_case look for the expected answer *inside* the hook's
+# output. A hook that answers correctly and then contradicts itself therefore
+# reads as correct, while a last-wins consumer acts on the second statement.
+# Measured before fixing: a deny-then-allow emitter was certified as denying
+# and a block-then-pass emitter as blocking. Only `silent` escaped, because it
+# happens to compare for equality rather than containment.
+
+# Bash resolves a function body only when it is called, so the block is
+# written here -- where it belongs in the reading order -- and invoked further
+# down, once run_case and stop_case exist to be checked.
+run_harness_self_check() {
+
+echo "## harness self-check"
+
+# A helper that does not exist yet must show up as a failed case, not as a
+# crashed suite.
+probe_statements() {
+    if ! type af_json_statements >/dev/null 2>&1; then printf 'missing'; return; fi
+    af_json_statements "$1"
+}
+
+TWO_DECISIONS='{"hookSpecificOutput":{"permissionDecision":"deny"}}
+{"hookSpecificOutput":{"permissionDecision":"allow"}}'
+
+assert_true "two decisions count as two statements" \
+    "$([ "$(probe_statements "$TWO_DECISIONS")" = "2" ] && echo 1 || echo 0)" \
+    "got: $(probe_statements "$TWO_DECISIONS")"
+
+assert_true "one decision counts as one statement" \
+    "$([ "$(probe_statements '{"hookSpecificOutput":{"permissionDecision":"deny"}}')" = "1" ] && echo 1 || echo 0)" \
+    "got: $(probe_statements '{"hookSpecificOutput":{"permissionDecision":"deny"}}')"
+
+assert_true "a top-level array is one statement, not two" \
+    "$([ "$(probe_statements '[{"a":1},{"b":2}]')" = "1" ] && echo 1 || echo 0)" \
+    "got: $(probe_statements '[{"a":1},{"b":2}]')"
+
+assert_true "prose printed beside the JSON is not a clean statement" \
+    "$([ "$(probe_statements 'WARNING: partial config{"a":1}')" = "-1" ] && echo 1 || echo 0)" \
+    "got: $(probe_statements 'WARNING: partial config{"a":1}')"
+
+# End to end, because the rule has to live in the functions that form the
+# verdict -- a counter nobody calls is the defect this repository keeps fixing.
+STUB_DIR=$(mktemp -d)
+cat > "$STUB_DIR/two-statements.sh" <<'STUB'
+#!/usr/bin/env bash
+cat > /dev/null
+printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"blocked"}}'
+printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"safe"}}'
+exit 0
+STUB
+cat > "$STUB_DIR/block-then-pass.sh" <<'STUB'
+#!/usr/bin/env bash
+cat > /dev/null
+printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"Stop","decision":"block","reason":"workflow log missing"}}'
+printf '%s\n' '{"systemMessage":"documenter:Stop -- artifact gate PASS"}'
+exit 0
+STUB
+cat > "$STUB_DIR/one-statement.sh" <<'STUB'
+#!/usr/bin/env bash
+cat > /dev/null
+printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"blocked"}}'
+exit 0
+STUB
+
+HOOK_SRC="$STUB_DIR"
+R_TWO=$(probe_outcome run_case "probe" two-statements.sh agent/95-x "$READ_FILE" deny)
+R_ONE=$(probe_outcome run_case "probe" one-statement.sh agent/95-x "$READ_FILE" deny)
+R_STOP=$(probe_outcome stop_case "probe" block-then-pass.sh block)
+HOOK_SRC=""
+rm -rf "$STUB_DIR"
+
+assert_true "a hook that denies and then allows is not certified as denying" \
+    "$([ "$R_TWO" = "fail" ] && echo 1 || echo 0)" "run_case said: $R_TWO"
+
+assert_true "a hook that denies once is still certified as denying" \
+    "$([ "$R_ONE" = "pass" ] && echo 1 || echo 0)" "run_case said: $R_ONE"
+
+assert_true "a Stop hook that blocks and then reports success is not certified as blocking" \
+    "$([ "$R_STOP" = "fail" ] && echo 1 || echo 0)" "stop_case said: $R_STOP"
+
+# ── harness self-check: no verdict without a subject (issue #96) ──────────
+#
+# An empty string contains no '2099', so a negative content assertion about
+# output nobody produced reads as a pass. That is how the read-back channel
+# could have returned nothing for every case while the suite stayed green.
+
+assert_true "a negative assertion against nothing is not a pass" \
+    "$([ "$(probe_outcome assert_not_contains probe '' '2099')" = "fail" ] && echo 1 || echo 0)" \
+    "got: $(probe_outcome assert_not_contains probe '' '2099')"
+
+assert_true "whitespace is no more of a subject than an empty string" \
+    "$([ "$(probe_outcome assert_not_contains probe '   ' '2099')" = "fail" ] && echo 1 || echo 0)" \
+    "got: $(probe_outcome assert_not_contains probe '   ' '2099')"
+
+assert_true "a real subject without the pattern is a pass" \
+    "$([ "$(probe_outcome assert_not_contains probe 'completed: "2026-08-10T12:00:00Z"' '2099')" = "pass" ] && echo 1 || echo 0)" \
+    "got: $(probe_outcome assert_not_contains probe 'completed: "2026-08-10T12:00:00Z"' '2099')"
+
+assert_true "a real subject carrying the pattern is a failure" \
+    "$([ "$(probe_outcome assert_not_contains probe 'completed: "2099-01-01T16:30:00Z"' '2099')" = "fail" ] && echo 1 || echo 0)" \
+    "got: $(probe_outcome assert_not_contains probe 'completed: "2099-01-01T16:30:00Z"' '2099')"
+
+assert_true "a positive assertion against nothing is not a pass either" \
+    "$([ "$(probe_outcome assert_contains probe '' 'started:')" = "fail" ] && echo 1 || echo 0)" \
+    "got: $(probe_outcome assert_contains probe '' 'started:')"
+
+assert_true "a positive assertion with its pattern present is a pass" \
+    "$([ "$(probe_outcome assert_contains probe 'started: "2026-08-10T09:00:00Z"' 'started:')" = "pass" ] && echo 1 || echo 0)" \
+    "got: $(probe_outcome assert_contains probe 'started: "2026-08-10T09:00:00Z"' 'started:')"
+
 }
 
 # Tool names and field sets as VS Code actually sends them, read out of
@@ -238,7 +373,7 @@ stop_case() {
 
     fixture=$(mktemp -d)
     mkdir -p "$fixture/.github/hooks/scripts"
-    cp "$HOOK_DIR/$hook" "$fixture/.github/hooks/scripts/"
+    cp "${HOOK_SRC:-$HOOK_DIR}/$hook" "$fixture/.github/hooks/scripts/"
     cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
 
     # Lifecycle state lives on disk, so seeding it is the only way to make it
@@ -289,6 +424,10 @@ doc_stop_case() {
     local name="$1" expect="$2"; shift 2
     stop_case "$name" documenter-stop.sh "$expect" "$@"
 }
+
+# Verify the instrument before trusting it to judge the hooks: run_case and
+# stop_case now exist, so the self-check can exercise them.
+run_harness_self_check
 
 doc_stop_case "mid-workflow documenter call is not forced to write a COMPLETED log" \
     pass "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING"
@@ -368,10 +507,15 @@ stamp_log() {
 }
 
 stamped=$(stamp_log "$PLAN_DONE" "$LOG_INVENTED")
-case "$stamped" in
-    *2099*) assert_true "a completed: the documenter invented does not survive the hook" 0 "got: $stamped" ;;
-    *)      assert_true "a completed: the documenter invented does not survive the hook" 1 ;;
-esac
+
+# The read-back channel is the subject of every assertion below it, so it is
+# established before it is trusted: an empty read-back must not be able to
+# certify anything.
+assert_true "the log comes back from the fixture before the hook is judged by it" \
+    "$([ -n "$stamped" ] && echo 1 || echo 0)" "the read-back returned nothing"
+
+assert_not_contains "a completed: the documenter invented does not survive the hook" \
+    "$stamped" "2099"
 
 # Replacing has to mean replacing. Appending a measured value beside the
 # invented one leaves a duplicate YAML key, and a parser takes the last one.
@@ -391,10 +535,8 @@ assert_true "a log without timestamps gets both from the hook" \
 # The artifact gate already tells the two documenter lifecycles apart. A call
 # made while the workflow is still running must not date its completion.
 mid=$(stamp_log "$PLAN_RUNNING" "$LOG_INVENTED")
-case "$mid" in
-    *2099*) assert_true "a workflow that has not finished is not stamped as finished" 1 ;;
-    *)      assert_true "a workflow that has not finished is not stamped as finished" 0 "the mid-workflow call rewrote the log: $mid" ;;
-esac
+assert_contains "a workflow that has not finished is not stamped as finished" \
+    "$mid" "2099" "the mid-workflow call rewrote the log"
 
 # The schema is the instruction. Leaving the fields in it and arguing against
 # them in prose elsewhere is how the fabrication happened in the first place.
