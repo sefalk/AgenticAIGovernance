@@ -31,11 +31,39 @@ if ! af_py=$(bash -c ". '$HOOK_DIR/_common.sh'; printf '%s' \"\$AF_PYTHON\"" 2>/
     exit 0
 fi
 
+# How many top-level JSON values the text contains, or -1 when it is not a
+# clean sequence of values. The hook protocol is one statement per invocation:
+# two is not cosmetic, because a last-wins consumer acts on the second while a
+# harness that searches the output for the expected answer credits the first.
+#
+# Delegated to the interpreter the hooks themselves parse with, which this
+# harness already refuses to run without -- a brace-counting loop in shell
+# would be a second, differently-wrong parser.
+af_json_statements() {
+    printf '%s' "$1" | "$af_py" -c '
+import json, sys
+s = sys.stdin.read().strip()
+if not s:
+    print(0); sys.exit(0)
+dec, n, i = json.JSONDecoder(), 0, 0
+while i < len(s):
+    try:
+        _, i = dec.raw_decode(s, i)
+    except ValueError:
+        print(-1); sys.exit(0)
+    n += 1
+    while i < len(s) and s[i].isspace():
+        i += 1
+print(n)
+'
+}
+
 # run_case <name> <hook> <branch|--detach> <json> <deny|allow|ask|silent|notdeny>
 # 'notdeny' is for cases whose point is that the DENY tier stayed out of it,
 # and whose allow/ask outcome is decided by tiers this test has no opinion on.
 run_case() {
     local name="$1" hook="$2" mode="$3" json="$4" expect="$5"
+    local fixture out err rc=0 ok=0 stmts
     local fixture out err rc=0 ok=0
     fixture=$(mktemp -d)
 
@@ -67,8 +95,16 @@ run_case() {
     # A hook that exits non-zero never reached a verdict, whatever it printed
     # on the way out. Judging its stdout alone would credit a crash with an
     # opinion it never formed.
+    stmts=$(af_json_statements "$out")
     if [ "$rc" -ne 0 ]; then
         ok=0
+    elif [ "$stmts" -gt 1 ]; then
+        # Searching the output for the expected answer would certify a hook
+        # that decides correctly and then contradicts itself.
+        echo "FAIL  $name -- the hook made $stmts statements; the protocol is one: $out"
+        fail=$((fail + 1))
+        rm -rf "$fixture"
+        return
     else
         case "$expect" in
             deny)   [[ "$out" == *'"deny"'*   ]] && ok=1 ;;
@@ -105,6 +141,52 @@ assert_true() {
         echo "FAIL  $name -- $detail"
         fail=$((fail + 1))
     fi
+}
+
+# ── Content assertions ────────────────────────────────────────────────────
+#
+# An empty string contains no '2099', so a negative assertion about output
+# that was never produced reads as a pass. Handing the subject to the harness
+# instead of a pre-computed 1|0 is the point: once the caller has collapsed it,
+# there is nothing left to inspect.
+af_subject_present() {
+    [ -n "${1//[[:space:]]/}" ]
+}
+
+# assert_contains <name> <subject> <substring> [detail]
+assert_contains() {
+    local name="$1" subject="$2" needle="$3" detail="${4:-}"
+    if ! af_subject_present "$subject"; then
+        echo "FAIL  $name -- nothing to match against: the subject was empty. $detail"
+        fail=$((fail + 1))
+        return
+    fi
+    case "$subject" in
+        *"$needle"*)
+            echo "PASS  $name"
+            pass=$((pass + 1)) ;;
+        *)
+            echo "FAIL  $name -- expected to contain '$needle', got: $subject. $detail"
+            fail=$((fail + 1)) ;;
+    esac
+}
+
+# assert_not_contains <name> <subject> <substring> [detail]
+assert_not_contains() {
+    local name="$1" subject="$2" needle="$3" detail="${4:-}"
+    if ! af_subject_present "$subject"; then
+        echo "FAIL  $name -- nothing to match against: the subject was empty. $detail"
+        fail=$((fail + 1))
+        return
+    fi
+    case "$subject" in
+        *"$needle"*)
+            echo "FAIL  $name -- expected not to contain '$needle', got: $subject. $detail"
+            fail=$((fail + 1)) ;;
+        *)
+            echo "PASS  $name"
+            pass=$((pass + 1)) ;;
+    esac
 }
 
 # Runs an assertion (or a *_case helper) in isolation and reports whether it
@@ -369,7 +451,7 @@ PLAN_OTHER='# Implementation Plan\n\n**Branch:** `agent/99-other`\n**Status:** C
 #   FILESPEC = relative/path=content   (content goes through printf %b)
 stop_case() {
     local name="$1" hook="$2" expect="$3"; shift 3
-    local fixture rc=0 out ok=0 spec path content
+    local fixture rc=0 out ok=0 spec path content stmts
 
     fixture=$(mktemp -d)
     mkdir -p "$fixture/.github/hooks/scripts"
@@ -395,8 +477,14 @@ stop_case() {
 
     out=$(cat "$fixture/out.txt")
 
+    stmts=$(af_json_statements "$out")
     if [ "$rc" -ne 0 ]; then
         ok=0
+    elif [ "$stmts" -gt 1 ]; then
+        echo "FAIL  $name -- the hook made $stmts statements; the protocol is one: $out"
+        fail=$((fail + 1))
+        rm -rf "$fixture"
+        return
     else
         case "$expect" in
             block) [[ "$out" == *'"block"'* ]] && ok=1 ;;
