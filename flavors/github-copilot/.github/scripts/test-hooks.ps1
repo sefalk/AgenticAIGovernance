@@ -1529,7 +1529,12 @@ summary:
 $LOG_RETRIES  = $LOG_CLEAN -replace 'retries: 0', 'retries: 2'
 $LOG_UNFILLED = $LOG_CLEAN -replace 'retries: 0', 'retries: <number>'
 $LOG_ESCALATED = $LOG_CLEAN -replace 'COMPLETED', 'ESCALATED'
-$LOG_REJECTED = $LOG_CLEAN + "steps:`n  - step: 4`n    agent: code-critic`n    verdict: `"REJECTED`"`n"
+# The here-string above has no trailing newline, so the appended block needs
+# its own or it lands on the `escalations: 0` line and makes that counter
+# unreadable -- the case would then go red for the counter it was not about.
+# Mutation testing found exactly that: removing the verdict condition left the
+# assertion green.
+$LOG_REJECTED = $LOG_CLEAN + "`nsteps:`n  - step: 4`n    agent: code-critic`n    verdict: `"REJECTED`"`n"
 # The trigger field quotes the user request verbatim, so the words a trigger
 # scan looks for can appear in it as prose. The condition is a field value, not
 # a word on the page.
@@ -1554,10 +1559,15 @@ $legacy = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branc
     '.github/logs/72-x.yaml'         = $LOG_RETRIES
     'retros/auto/72-x.md'            = $RETRO_MD
 }
-Assert-Contains "the gate names the legacy file it found, not just the one it wants" `
-    $legacy.Output 'retros/auto/72-x.md'
+# `retros/auto/72-x.md` is a substring of the canonical path, so asserting it
+# alone is satisfied by the generic message that names no file at all. The
+# assertion has to quote what only the legacy branch can produce -- matched as
+# a pattern because the JSON encoder escapes the surrounding quotes.
+Assert-True "the gate names the legacy file it found, not just the one it wants" `
+    ($legacy.Output -match 'found.{0,10}retros/auto/72-x\.md') `
+    "got: $($legacy.Output)"
 Assert-Contains "and names the destination to move it to" `
-    $legacy.Output '.github/retros/auto/'
+    $legacy.Output 'move it to .github/retros/auto/72-x.md'
 
 Assert-True "a clean run needs no retro" `
     ((Get-RetroDecision $LOG_CLEAN) -eq 'pass') `

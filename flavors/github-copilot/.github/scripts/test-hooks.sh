@@ -624,9 +624,9 @@ legacy_out=$(stop_output documenter-stop.sh \
 # Silent rejection is as unhelpful as silent acceptance: the file exists, and
 # the only person who can move it has to be told where it is.
 assert_contains "the gate names the legacy file it is refusing" \
-    "$legacy_out" "retros/auto/72-x.md"
+    "$legacy_out" "found 'retros/auto/72-x.md'"
 assert_contains "the gate names the destination to move it to" \
-    "$legacy_out" ".github/retros/auto/72-x.md"
+    "$legacy_out" "move it to .github/retros/auto/72-x.md"
 
 doc_stop_case "a clean run is not made to write a retro about nothing" \
     pass "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
