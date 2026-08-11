@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Two gate scripts decoded git and ruff output with the platform default
+  encoding.** On a German Windows host that default is `cp1252`, so a valid
+  UTF-8 byte sequence containing `0x81` — Cyrillic `Ё` in a commit subject, for
+  instance — raised `UnicodeDecodeError`. The exception is raised inside
+  `subprocess`'s reader thread, so it never reaches the caller: `subprocess.run`
+  returns `returncode=0` with `stdout=None`. Git *succeeded*; the script simply
+  never learned what it said.
+
+  The two consumers in `check-python-quality.py` fail differently, and the
+  second is the reason this is filed as a defect rather than a nuisance:
+
+  - `_changed_line_ranges` guards with `if code != 0`, which is false, then
+    calls `out.splitlines()` on `None` → `AttributeError`, loud and visible.
+  - `_read_base_source` guards with `if code != 0`, which is false, then
+    returns `None` — and `None` is that function's documented value for *"the
+    base has no such blob"*. A failed read is indistinguishable from a file
+    that did not exist before, so the gate silently loses its comparison
+    baseline and reports on a premise that is not true.
+
+  `check-python-linting.py` had the same call shape around `ruff`, where a
+  decode failure surfaces as `LINTING_GATE_ERROR: failed to run ruff` — an
+  encoding bug wearing a tooling bug's label. Both now pass
+  `encoding="utf-8", errors="replace"`; a gate must not crash on, or quietly
+  misread, the content it exists to inspect. Most sibling scripts already
+  decoded explicitly, so this closes an incomplete rollout rather than
+  introducing a convention.
+
 ### Changed
 
 - **The provider registry is no longer always-on (issue #115).** Five provider

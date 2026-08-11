@@ -40,7 +40,14 @@ def _git(args: list[str]) -> tuple[int, str]:
         Exit code and captured stdout (empty if git is unavailable).
     """
     try:
-        proc = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
     except OSError:
         return 1, ""
     return proc.returncode, proc.stdout
