@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The retro has one destination, and is owed only when the run had something
+  to teach (issues #98, #27).** The destination contradiction #98 reported was
+  already gone from the source — every agent file names
+  `.github/retros/auto/`. What survived was the gate underneath: both hooks
+  accepted the retro at the canonical path *or* at the legacy root path. That
+  does not resolve an ambiguity, it preserves it — a documenter writing to the
+  wrong place was indistinguishable from one writing to the right place, and
+  the file it left behind sat outside the `.gitignore` that exists to keep
+  generated retros out of the repository. The legacy path is no longer
+  accepted, and a file found there is named in the block message rather than
+  ignored: silent rejection is as unhelpful as silent acceptance when the only
+  person who can move the file has to be told where it is.
+
+  The second half is #27. Every workflow was made to write a retro, including
+  runs with nothing to report, so the corpus filled with files recording that
+  nothing happened — and `/af-retro-summary` reads them back as input. A retro
+  is now owed only when the workflow log records retries, escalations, an
+  adverse step verdict, or a status other than COMPLETED.
+
+  The condition is derived by the hook from the log, never declared by the
+  documenter: "it was clean, so I skipped it" is the self-report channel #91
+  closed for timestamps, and it would be reopened here for a strictly larger
+  prize. The default is REQUIRED, so a log that is missing, empty, or still
+  carrying the unfilled `retries: <number>` template licenses nothing —
+  absence of evidence is not evidence of a clean run. Every condition matches a
+  *field*, because the log quotes the user request verbatim in `trigger:`,
+  where "blocked" and "rejected" appear as ordinary prose.
+
+  When the exemption applies, the hook says so (`no retro required (retries 0,
+  escalations 0, status COMPLETED, no adverse verdict)`). An exemption applied
+  in silence cannot be reviewed, and looks exactly like a gate that was never
+  reached.
+
+  `deploy.ps1` now warns when a target has `.github/retros/auto/` without the
+  `.gitignore` that belongs next to it — the documenter creates that directory
+  at run time, `retros/` is optional in the manifest, and the directory
+  existing is not evidence that the ignore came with it. Measured in a consumer
+  repo: generated retros staged as if they were authored source.
+
 - **The test log now actually merges on Windows, and a log the runner cannot
   read is announced instead of overwritten (issue #93).** `run-tests.ps1` read
   `.github/test-log.json` with `ConvertFrom-Json -AsHashtable`, a parameter

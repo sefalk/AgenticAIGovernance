@@ -7,7 +7,7 @@
 - **Branch:** `agent/98-27-retro-destination-and-condition`
 - **Base:** `dev` @ `e6fe5fe`
 - **Complexity tier:** Standard
-- **Status:** IN_PROGRESS
+- **Status:** COMPLETED
 
 ## Problem
 
@@ -138,8 +138,69 @@ committed-by-accident case the issue measured.
 
 ## Results
 
-_To be filled in by the documenter._
+`test-hooks.ps1` 233 → **238 pass / 7 fail** at Red → **250 / 0** at Green.
+`test-hooks.sh` **132 / 0**. Twelve new PowerShell assertions, twelve new bash
+assertions, five static claims that the same edit reached the `.sh` side.
+
+The seven reds were exactly the claimed properties: the legacy root path still
+satisfied the gate in three places, a clean run was still forced to write a
+retro, the words in the trigger prose still forced one, and `stop-tests` both
+warned about a retro nobody owed and accepted the legacy path.
+
+Five mutants, five killed, each at the assertion it was aimed at:
+
+| Mutant | Result | Killed |
+|---|---|---|
+| M1 restore the legacy path in the PowerShell hook | 247/3 | canonical-only + both migration messages |
+| M2 skip when the log cannot be read | 242/8 | every case that owes a retro |
+| M3 treat `retries: <number>` as clean | 249/1 | the unfilled template |
+| M4 drop the adverse-verdict condition | 249/1 | the REJECTED verdict |
+| M5 drop the legacy-path message, keep the rejection | 248/2 | both migration messages |
+
+M4 and M5 did not kill anything on the first attempt. Both survivals were
+defects in the assertions, not in the product — see Notes.
 
 ## Notes
 
-_To be filled in by the documenter._
+**The contradiction the issue reported was already gone.** #98 cites a
+documenter that names `retros/auto/` in one place and `.github/retros/auto/` in
+another; measured against source, every reference in every agent file already
+said `.github/`. What survived was the gate underneath, which accepted *either*
+path — and that is the more interesting defect, because a gate that accepts
+both answers does not resolve the ambiguity it exists to resolve, it preserves
+it. A documenter writing to the wrong place was indistinguishable from one
+writing to the right place, and the file it left behind sat outside the
+`.gitignore` that keeps generated retros out of the repository. The consumer
+repo where this was measured has a payload from `1.21.43`, which predates the
+commit that added that `.gitignore` at all.
+
+**Variant A was chosen without the decider.** The prior agreement was Variant B
+(move the canonical location to the repository root). Asked to confirm the
+switch, the human was unavailable. B would have reversed a shipped,
+CHANGELOG-documented decision while the person who made it could not be asked;
+A keeps the shipped location, is the conservative direction, and stays
+reversible. Recorded here so the choice is reviewable rather than merely
+executed.
+
+**Two assertions passed on the wrong thing, and mutation testing is the only
+reason that is known.** M5 removed the message that names the legacy file while
+keeping the rejection, and the suite stayed green: the assertion looked for
+`retros/auto/72-x.md`, which is a *substring of the canonical path*, so the
+generic message that names no file at all satisfied it. M4 removed the
+adverse-verdict condition and the REJECTED case still went red — but for the
+wrong reason: the fixture appended its `steps:` block to a here-string with no
+trailing newline, so it landed on the `escalations: 0` line and the case was
+failing on an unreadable counter, never reaching the verdict at all. Both are
+the same failure as the one this issue is about: an artifact that looks like
+evidence and is not.
+
+**A CRLF anchor bug cost one Green cycle.** The counter regexes ended with
+`[^\S\r\n]*$`, which cannot match the `\r` of a CRLF line: in .NET multiline
+mode `$` sits *between* `\r` and `\n`. Every log written on Windows read as
+"the log does not record `escalations: 0`" — the REQUIRED default doing its job
+and hiding the bug behind a plausible reason. Fixed by ending both with `\s*$`.
+
+**The Red assertion for the exemption had to be tightened before it was
+committed.** `Assert-Contains $clean.Output 'retro'` passed at Red, because the
+existing block message already contains "retro snippet". A red test that would
+have passed for an unrelated reason proves nothing about what turns it green.
