@@ -111,6 +111,7 @@ A critical security finding → **REJECT**, regardless of all other results.
 | Pattern | Description | Verdict |
 |---|---|---|
 | Trivial tests | `assert True`, `assert 1 == 1` | REJECT |
+| Vacuous assertions | Negative check whose subject can be empty or `None` — it passes when the code produced nothing | REJECT |
 | Coverage padding | Function called but result not asserted | REJECT |
 | Dead code | Unreachable branches or unused functions | Flag |
 | Artificial splits | One function split into always-called-together parts | Flag |

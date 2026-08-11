@@ -116,6 +116,9 @@ These are the **canonical thresholds** — source of truth for all agents.
 ## What Not to Write
 
 - **Trivial tests** — `assert True`, or a test that cannot fail.
+- **Assertions that pass on nothing** — a negative check (`not in`, `!=`,
+  `-notmatch`) against output the code never produced. Ask of every assertion:
+  would this still pass if the thing under test returned nothing?
 - **Tests of implementation** — assert on behaviour, not internal variables.
 - **External deps in domain tests** — if you need them, it is an adapter test.
 - **Logic in tests** — no `if`/`for`/`try` in test bodies; tests are linear.

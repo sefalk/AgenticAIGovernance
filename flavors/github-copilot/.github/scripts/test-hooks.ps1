@@ -3,6 +3,13 @@
 # Exercises each Copilot agent hook with crafted JSON inputs and verifies
 # the expected output (deny, ask, allow, or specific JSON fields).
 #
+# Two properties hold over every case here, and the suite checks itself
+# against both before it checks anything else:
+#   - a hook makes exactly one statement per invocation. Two decisions are
+#     not a decision, and the first one is not the answer.
+#   - a verdict needs a subject. An assertion whose subject came back empty
+#     has decided nothing, whichever way it points.
+#
 # Usage:
 #   .github/scripts/test-hooks.ps1              # Run all tests
 #   .github/scripts/test-hooks.ps1 -Verbose     # Show pass detail
@@ -116,15 +123,61 @@ function Invoke-HookInFixture {
     }
 }
 
+# How many top-level JSON values the hook printed. The protocol is one
+# statement per invocation; two is not cosmetic, because a last-wins consumer
+# acts on the second one while a harness that searches the output for the
+# expected answer credits the first.
+#
+# Counted rather than left to ConvertFrom-Json: on this host it happens to
+# throw on two concatenated objects, which is protection by parser version --
+# a stricter or more lenient host silently changes the answer, and the failure
+# would read as 'unparsable', naming the wrong cause. Returns -1 when the text
+# is not a clean sequence of values (unbalanced, or prose printed beside it).
+function Get-JsonStatementCount {
+    param([string]$Text)
+    $t = if ($null -eq $Text) { '' } else { $Text.Trim() }
+    if ($t -eq '') { return 0 }
+    $count = 0
+    $depth = 0
+    $inString = $false
+    $escaped = $false
+    foreach ($ch in $t.ToCharArray()) {
+        if ($inString) {
+            if ($escaped) { $escaped = $false }
+            elseif ($ch -eq [char]'\') { $escaped = $true }
+            elseif ($ch -eq [char]'"') { $inString = $false }
+            continue
+        }
+        if ($ch -eq [char]'"') { $inString = $true; continue }
+        if ($ch -eq [char]'{' -or $ch -eq [char]'[') { $depth++; continue }
+        if ($ch -eq [char]'}' -or $ch -eq [char]']') {
+            $depth--
+            if ($depth -lt 0) { return -1 }
+            if ($depth -eq 0) { $count++ }
+            continue
+        }
+        # Between values only whitespace is allowed. A hook that prints prose
+        # beside its JSON has not made a clean statement either.
+        if ($depth -eq 0 -and -not [char]::IsWhiteSpace($ch)) { return -1 }
+    }
+    if ($depth -ne 0 -or $inString) { return -1 }
+    return $count
+}
+
 # The single place that decides what a hook answered. 'silent' is deliberately
 # not 'allow': on the wire they are the same bytes, but only one of them means
 # the hook looked at the request. A non-zero exit or unparsable output means it
-# never reached a verdict, whatever else it printed.
+# never reached a verdict, whatever else it printed. 'multi' is its own outcome
+# rather than a parse error, so the failure says what actually happened: the
+# hook made more than one statement.
 function Resolve-Decision {
     param([string]$Text, [int]$ExitCode = 0)
     if ($ExitCode -ne 0) { return 'error' }
     $t = if ($null -eq $Text) { '' } else { $Text.Trim() }
     if ($t -eq '' -or $t -eq '{}') { return 'silent' }
+    $statements = Get-JsonStatementCount $t
+    if ($statements -gt 1) { return 'multi' }
+    if ($statements -lt 1) { return 'error' }
     try {
         $parsed = $t | ConvertFrom-Json -ErrorAction Stop
     } catch {
@@ -133,6 +186,20 @@ function Resolve-Decision {
     $decision = $parsed.hookSpecificOutput.permissionDecision
     if ([string]::IsNullOrWhiteSpace($decision)) { return 'silent' }
     return [string]$decision
+}
+
+# Stop hooks answer in `decision`, PreToolUse in `permissionDecision`, so the
+# two verdicts cannot share a resolver -- which is exactly why they have to
+# share the one-statement rule. Fixing it only where it was noticed would
+# leave the same blind spot in the other half.
+function Resolve-StopDecision {
+    param([string]$Text, [int]$ExitCode = 0)
+    if ($ExitCode -ne 0) { return "error(exit $ExitCode): $Text" }
+    $statements = Get-JsonStatementCount $Text
+    if ($statements -gt 1) { return "multi($statements): $Text" }
+    try { $p = $Text | ConvertFrom-Json -ErrorAction Stop } catch { return "unparsable: $Text" }
+    if ($p.hookSpecificOutput.decision) { return [string]$p.hookSpecificOutput.decision }
+    return 'pass'
 }
 
 function Assert-Decision {
@@ -246,7 +313,17 @@ function Assert-ExitCode {
 }
 
 function Assert-True {
-    param([string]$TestName, [bool]$Condition, [string]$Detail)
+    param([string]$TestName, [bool]$Condition, [string]$Detail, $Subject)
+    # A condition is only evidence if something produced it. Callers whose
+    # condition is compound -- a match count, a conjunction -- name the text it
+    # was computed from, and an empty one voids the verdict instead of
+    # confirming it. Omitting -Subject stays silent: most assertions here are
+    # about behaviour, not content.
+    if ($PSBoundParameters.ContainsKey('Subject') -and -not (Test-SubjectPresent $Subject)) {
+        $script:failed++
+        $script:errors += "FAIL  $TestName -- the condition was decided by nothing: the subject was empty. $Detail"
+        return
+    }
     if ($Condition) {
         $script:passed++
         if ($Verbose) { Write-Output "  PASS  $TestName" }
@@ -254,6 +331,81 @@ function Assert-True {
         $script:failed++
         $script:errors += "FAIL  $TestName -- $Detail"
     }
+}
+
+# ── Content assertions ────────────────────────────────────────────────
+#
+# `$null -notmatch 'x'` is $true, so a negative assertion about output that was
+# never produced reads as a pass. Passing the subject in instead of a boolean
+# is the whole point: by the time Assert-True has `[bool]$Condition` there is
+# nothing left to inspect, and no guard could recover it.
+function Test-SubjectPresent {
+    param($Subject)
+    return -not [string]::IsNullOrWhiteSpace([string]$Subject)
+}
+
+function Assert-Contains {
+    param([string]$TestName, $Subject, [string]$Pattern, [string]$Detail)
+    if (-not (Test-SubjectPresent $Subject)) {
+        $script:failed++
+        $script:errors += "FAIL  $TestName -- nothing to match against: the subject was empty. $Detail"
+        return
+    }
+    if ([string]$Subject -match $Pattern) {
+        $script:passed++
+        if ($Verbose) { Write-Output "  PASS  $TestName" }
+    } else {
+        $script:failed++
+        $script:errors += "FAIL  $TestName -- expected to contain '$Pattern', got: $Subject. $Detail"
+    }
+}
+
+function Assert-NotContains {
+    param([string]$TestName, $Subject, [string]$Pattern, [string]$Detail)
+    if (-not (Test-SubjectPresent $Subject)) {
+        $script:failed++
+        $script:errors += "FAIL  $TestName -- nothing to match against: the subject was empty. $Detail"
+        return
+    }
+    if ([string]$Subject -notmatch $Pattern) {
+        $script:passed++
+        if ($Verbose) { Write-Output "  PASS  $TestName" }
+    } else {
+        $script:failed++
+        $script:errors += "FAIL  $TestName -- expected not to contain '$Pattern', got: $Subject. $Detail"
+    }
+}
+
+# ── Testing the harness with the harness ─────────────────────────────────
+#
+# The cases below assert that certain assertions FAIL. Running them normally
+# would fail the suite, so the tally is snapshotted around the probe and the
+# verdict read from the delta. Nothing else may report a pass this way.
+function Test-AssertionOutcome {
+    param([scriptblock]$Body)
+    $p0 = $script:passed
+    $f0 = $script:failed
+    $e0 = @($script:errors)
+    $verdict = 'none'
+    try {
+        & $Body | Out-Null
+        if ($script:failed -gt $f0) { $verdict = 'fail' }
+        elseif ($script:passed -gt $p0) { $verdict = 'pass' }
+    } catch {
+        $verdict = "missing: $($_.Exception.Message)"
+    }
+    $script:passed = $p0
+    $script:failed = $f0
+    $script:errors = $e0
+    return $verdict
+}
+
+# A helper that does not exist yet must report as a failed case, not abort the
+# run -- $ErrorActionPreference is 'Stop', so an unguarded call would take the
+# whole suite with it and hide every other result.
+function Invoke-HarnessProbe {
+    param([scriptblock]$Body)
+    try { return (& $Body) } catch { return "missing: $($_.Exception.Message)" }
 }
 
 Write-Output "=== Hook Integration Tests ==="
@@ -269,16 +421,20 @@ Write-Output ""
 
 Write-Output "## harness self-check"
 
-$decAllow = '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"safe"}}'
-$decDeny  = '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"blocked"}}'
-$decAsk   = '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"confirm"}}'
+# Upper-case because they are reused by the self-check sections below; a local
+# differing only in case would silently overwrite them (PowerShell variable
+# names are case-insensitive).
+$DEC_ALLOW = '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"safe"}}'
+$DEC_DENY  = '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"blocked"}}'
+$DEC_ASK   = '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"confirm"}}'
+$DEC_PROBE_JSON = '{"tool_name":"read_file","tool_input":{"filePath":"README.md","startLine":1,"endLine":2}}'
 
 Assert-True "explicit allow is an allow" `
-    ((Resolve-Decision $decAllow 0) -eq 'allow') "got: $(Resolve-Decision $decAllow 0)"
+    ((Resolve-Decision $DEC_ALLOW 0) -eq 'allow') "got: $(Resolve-Decision $DEC_ALLOW 0)"
 Assert-True "deny is a deny" `
-    ((Resolve-Decision $decDeny 0) -eq 'deny') "got: $(Resolve-Decision $decDeny 0)"
+    ((Resolve-Decision $DEC_DENY 0) -eq 'deny') "got: $(Resolve-Decision $DEC_DENY 0)"
 Assert-True "ask is an ask" `
-    ((Resolve-Decision $decAsk 0) -eq 'ask') "got: $(Resolve-Decision $decAsk 0)"
+    ((Resolve-Decision $DEC_ASK 0) -eq 'ask') "got: $(Resolve-Decision $DEC_ASK 0)"
 
 # The three that used to be indistinguishable from an approval.
 Assert-True "an empty verdict is silence, not approval" `
@@ -312,9 +468,146 @@ try {
     Assert-True "a non-zero exit survives the runner and voids the verdict" `
         ((Resolve-Decision $rCrash.Output $rCrash.ExitCode) -eq 'error') `
         "got: '$($rCrash.Output)' (exit $($rCrash.ExitCode))"
+
+    # The shape issue #95 is about, end to end as a process: a hook that
+    # answers correctly and then contradicts itself.
+    $stubTwo = Join-Path $stubDir 'two.ps1'
+    Set-Content -Path $stubTwo -Value "`$null = [Console]::In.ReadToEnd()`r`nWrite-Output '$DEC_DENY'`r`nWrite-Output '$DEC_ALLOW'`r`nexit 0"
+    $rTwo = Invoke-HookScript -HookPath $stubTwo -JsonInput $stubPayload
+    Assert-True "a hook that contradicts itself is not credited with its first answer" `
+        ((Resolve-Decision $rTwo.Output $rTwo.ExitCode) -eq 'multi') `
+        "got: '$($rTwo.Output)' (exit $($rTwo.ExitCode))"
 } finally {
     Remove-Item $stubDir -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+Write-Output ""
+
+# ── 0b. One statement per invocation (issue #95) ─────────────────────────
+#
+# The harness reads a hook's answer out of its output. Accepting the expected
+# answer *anywhere* in that output certifies a hook that decides correctly and
+# then contradicts itself -- and a last-wins consumer acts on the second
+# statement, so the harness would be calling a hook blocking while it does not
+# block.
+#
+# Measured before fixing: on this host ConvertFrom-Json throws on two
+# concatenated objects, so PowerShell rejected them already -- by accident of
+# the parser version, and reported as 'unparsable', which names the wrong
+# cause. bash matched by substring and accepted them outright. Counting the
+# statements makes it a property of the harness instead of a property of
+# whichever JSON parser the host happens to ship.
+
+Write-Output "## harness self-check: one statement per invocation"
+
+$TWO_DECISIONS = $DEC_DENY + "`r`n" + $DEC_ALLOW
+
+Assert-True "two decisions are not a decision" `
+    ((Invoke-HarnessProbe { Resolve-Decision $TWO_DECISIONS 0 }) -eq 'multi') `
+    "got: $(Invoke-HarnessProbe { Resolve-Decision $TWO_DECISIONS 0 })"
+
+Assert-True "one decision still resolves" `
+    ((Invoke-HarnessProbe { Resolve-Decision $DEC_DENY 0 }) -eq 'deny') `
+    "got: $(Invoke-HarnessProbe { Resolve-Decision $DEC_DENY 0 })"
+
+Assert-True "a top-level array is one statement, not two" `
+    ((Invoke-HarnessProbe { Get-JsonStatementCount '[{"a":1},{"b":2}]' }) -eq 1) `
+    "got: $(Invoke-HarnessProbe { Get-JsonStatementCount '[{"a":1},{"b":2}]' })"
+
+Assert-True "a brace inside a string does not open a statement" `
+    ((Invoke-HarnessProbe { Get-JsonStatementCount '{"permissionDecisionReason":"use {} to stay silent"}' }) -eq 1) `
+    "got: $(Invoke-HarnessProbe { Get-JsonStatementCount '{"permissionDecisionReason":"use {} to stay silent"}' })"
+
+Assert-True "prose printed beside the JSON is not a clean statement" `
+    ((Invoke-HarnessProbe { Get-JsonStatementCount 'WARNING: partial config{"a":1}' }) -eq -1) `
+    "got: $(Invoke-HarnessProbe { Get-JsonStatementCount 'WARNING: partial config{"a":1}' })"
+
+# Stop hooks answer in `decision`, PreToolUse in `permissionDecision`, so the
+# two cannot share a resolver. They must share this rule -- fixing it only
+# where it was noticed leaves the same blind spot in the other half.
+$TWO_STOP = '{"hookSpecificOutput":{"decision":"block","reason":"log missing"}}' + "`r`n" + '{"systemMessage":"documenter:Stop -- artifact gate PASS"}'
+
+Assert-True "a Stop hook that blocks and then reports success is not a block" `
+    ([string](Invoke-HarnessProbe { Resolve-StopDecision $TWO_STOP 0 }) -like 'multi*') `
+    "got: $(Invoke-HarnessProbe { Resolve-StopDecision $TWO_STOP 0 })"
+
+Assert-True "a Stop hook that speaks once is still resolved" `
+    ((Invoke-HarnessProbe { Resolve-StopDecision '{"hookSpecificOutput":{"decision":"block"}}' 0 }) -eq 'block') `
+    "got: $(Invoke-HarnessProbe { Resolve-StopDecision '{"hookSpecificOutput":{"decision":"block"}}' 0 })"
+
+Write-Output ""
+
+# ── 0c. No verdict without a subject (issue #96) ─────────────────────────
+#
+# `$null -notmatch '2099'` is $true. Every negative content assertion in this
+# suite therefore passes when the thing it examines is empty -- which is how
+# the read-back channel added in #91 reported success while returning nothing
+# for every case. The neighbouring assertions were saved by accident: -match
+# on $null is false and a match count of 0 is not 1, so which assertions
+# survive an empty subject is currently a coincidence of operator choice.
+#
+# The subject is passed to the harness instead of being folded into a boolean
+# by the caller. Once `[bool]$Condition` has been computed there is nothing
+# left to inspect -- no guard inside Assert-True can recover evidence it was
+# never given.
+
+Write-Output "## harness self-check: no verdict without a subject"
+
+Assert-True "a negative assertion against nothing is not a pass" `
+    ((Test-AssertionOutcome { Assert-NotContains 'probe' $null '2099' }) -eq 'fail') `
+    "got: $(Test-AssertionOutcome { Assert-NotContains 'probe' $null '2099' })"
+
+Assert-True "an empty string is no more of a subject than a null" `
+    ((Test-AssertionOutcome { Assert-NotContains 'probe' '' '2099' }) -eq 'fail') `
+    "got: $(Test-AssertionOutcome { Assert-NotContains 'probe' '' '2099' })"
+
+Assert-True "a real subject without the pattern is a pass" `
+    ((Test-AssertionOutcome { Assert-NotContains 'probe' 'completed: "2026-08-10T12:00:00Z"' '2099' }) -eq 'pass') `
+    "got: $(Test-AssertionOutcome { Assert-NotContains 'probe' 'completed: "2026-08-10T12:00:00Z"' '2099' })"
+
+Assert-True "a real subject carrying the pattern is a failure" `
+    ((Test-AssertionOutcome { Assert-NotContains 'probe' 'completed: "2099-01-01T16:30:00Z"' '2099' }) -eq 'fail') `
+    "got: $(Test-AssertionOutcome { Assert-NotContains 'probe' 'completed: "2099-01-01T16:30:00Z"' '2099' })"
+
+Assert-True "a positive assertion against nothing is not a pass either" `
+    ((Test-AssertionOutcome { Assert-Contains 'probe' $null 'started:' }) -eq 'fail') `
+    "got: $(Test-AssertionOutcome { Assert-Contains 'probe' $null 'started:' })"
+
+# Compound conditions -- regex counts, conjunctions -- cannot be expressed as
+# one pattern, so they keep Assert-True and name their subject instead.
+Assert-True "a compound condition decided by nothing is not a pass" `
+    ((Test-AssertionOutcome { Assert-True 'probe' $true 'detail' -Subject $null }) -eq 'fail') `
+    "got: $(Test-AssertionOutcome { Assert-True 'probe' $true 'detail' -Subject $null })"
+
+Assert-True "a compound condition with a subject still passes" `
+    ((Test-AssertionOutcome { Assert-True 'probe' $true 'detail' -Subject 'content' }) -eq 'pass') `
+    "got: $(Test-AssertionOutcome { Assert-True 'probe' $true 'detail' -Subject 'content' })"
+
+# An omitted -Subject must stay silent rather than fail every existing case.
+Assert-True "an assertion that names no subject is unaffected" `
+    ((Test-AssertionOutcome { Assert-True 'probe' $true 'detail' }) -eq 'pass') `
+    "got: $(Test-AssertionOutcome { Assert-True 'probe' $true 'detail' })"
+
+# The read-back channel itself: #91 added it and nothing verified it. An empty
+# read-back has to be distinguishable from a file whose content is fine.
+$RB_SEEDED = 'workflow_id: "probe"' + "`n" + 'completed: "2026-08-10T12:00:00Z"'
+$rbHit = Invoke-Hook -Script 'block-dangerous.ps1' -JsonInput $DEC_PROBE_JSON -Branch 'agent/rb-x' `
+    -ReadBack '.github/logs/probe.yaml' -Files @{ '.github/logs/probe.yaml' = $RB_SEEDED }
+$rbMiss = Invoke-Hook -Script 'block-dangerous.ps1' -JsonInput $DEC_PROBE_JSON -Branch 'agent/rb-x' `
+    -ReadBack '.github/logs/absent.yaml' -Files @{ '.github/logs/probe.yaml' = $RB_SEEDED }
+
+Assert-True "a seeded file comes back through the read-back channel" `
+    ($rbHit.ReadBack -match 'completed:') `
+    "got: '$($rbHit.ReadBack)'"
+
+Assert-True "an absent path comes back as null, not as content" `
+    ($null -eq $rbMiss.ReadBack) `
+    "got: '$($rbMiss.ReadBack)'"
+
+Assert-True "the two read-back outcomes are distinguishable by assertion" `
+    ((Test-AssertionOutcome { Assert-NotContains 'probe' $rbHit.ReadBack '2099' }) -eq 'pass' -and `
+     (Test-AssertionOutcome { Assert-NotContains 'probe' $rbMiss.ReadBack '2099' }) -eq 'fail') `
+    "seeded: $(Test-AssertionOutcome { Assert-NotContains 'probe' $rbHit.ReadBack '2099' }), absent: $(Test-AssertionOutcome { Assert-NotContains 'probe' $rbMiss.ReadBack '2099' })"
 
 Write-Output ""
 
@@ -1141,10 +1434,7 @@ $RETRO_MD = "# Retro 72-x`n`n- lesson`n"
 function Get-StopDecision {
     param([hashtable]$Files, [string]$Branch = 'agent/72-x')
     $r = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch $Branch -Files $Files
-    if ($r.ExitCode -ne 0) { return "error(exit $($r.ExitCode)): $($r.Output)" }
-    try { $p = $r.Output | ConvertFrom-Json -ErrorAction Stop } catch { return "unparsable: $($r.Output)" }
-    if ($p.hookSpecificOutput.decision) { return [string]$p.hookSpecificOutput.decision }
-    return 'pass'
+    return (Resolve-StopDecision $r.Output $r.ExitCode)
 }
 
 Assert-True "mid-workflow documenter call is not forced to write a COMPLETED log" `
@@ -1180,7 +1470,7 @@ Assert-True "another workflow's COMPLETED plan does not finalise this one" `
 $noPlan = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{ 'README.md' = 'x' }
 Assert-True "with no plan file the gate says it could not classify the call" `
     ($noPlan.Output -match 'no plan file' -and $noPlan.Output -notmatch '"block"') `
-    "got: $($noPlan.Output)"
+    "got: $($noPlan.Output)" -Subject $noPlan.Output
 
 # stop-tests judges the same condition with less force (AC4). It used to warn
 # about missing closing artifacts for a workflow that had not claimed to be
@@ -1193,17 +1483,15 @@ function Get-StopTestsOutput {
 $stOpen = Get-StopTestsOutput @{ 'docs/plans/fix-2026-08-07-x.md' = $PLAN_RUNNING }
 Assert-True "stop-tests treats an open workflow as pending, not as missing artifacts" `
     ($stOpen -match 'PENDING' -and $stOpen -notmatch 'WARNING') `
-    "got: $stOpen"
+    "got: $stOpen" -Subject $stOpen
 
 $stDone = Get-StopTestsOutput @{ 'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE }
-Assert-True "stop-tests warns on the condition documenter-stop blocks on" `
-    ($stDone -match 'WARNING') `
-    "got: $stDone"
+Assert-Contains "stop-tests warns on the condition documenter-stop blocks on" `
+    $stDone 'WARNING'
 
 $stOther = Get-StopTestsOutput @{ 'docs/plans/fix-2026-01-01-other.md' = ($PLAN_DONE -replace '72-x', '99-other') }
-Assert-True "stop-tests does not accept another workflow's COMPLETED plan" `
-    ($stOther -match 'WARNING') `
-    "got: $stOther"
+Assert-Contains "stop-tests does not accept another workflow's COMPLETED plan" `
+    $stOther 'WARNING'
 
 Write-Output ""
 
@@ -1239,9 +1527,14 @@ function Get-StampedLog {
 
 $stamped = Get-StampedLog $LOG_INVENTED
 
-Assert-True "a completed: the documenter invented does not survive the hook" `
-    ($stamped -notmatch '2099') `
-    "got: $stamped"
+# Every assertion below reads this variable, so the channel that produced it is
+# established before it is trusted. A read-back that returns nothing would
+# otherwise satisfy the negative assertions by having no content to fail on.
+Assert-Contains "the log comes back from the fixture before the hook is judged by it" `
+    $stamped 'workflow_id:' "the read-back returned nothing"
+
+Assert-NotContains "a completed: the documenter invented does not survive the hook" `
+    $stamped '2099'
 
 $completedValue = ([regex]::Match($stamped, '(?m)^completed:\s*"([^"]+)"')).Groups[1].Value
 $completedOk = $false
@@ -1250,41 +1543,40 @@ if ($completedValue) {
 }
 Assert-True "completed: is the moment the documenter finished, not a later one" `
     $completedOk `
-    "got: '$completedValue'"
+    "got: '$completedValue'" -Subject $stamped
 
-Assert-True "started: is stamped too, so the pair comes from one source" `
-    ($stamped -match '(?m)^started:\s*"[^"]+"') `
-    "got: $stamped"
+Assert-Contains "started: is stamped too, so the pair comes from one source" `
+    $stamped '(?m)^started:\s*"[^"]+"'
 
 # Replacing has to mean replacing. Appending a measured value beside the
 # invented one leaves a duplicate YAML key, and a parser takes whichever it
 # reaches last.
 Assert-True "the log carries each timestamp exactly once" `
     (([regex]::Matches($stamped, '(?m)^completed:')).Count -eq 1 -and ([regex]::Matches($stamped, '(?m)^started:')).Count -eq 1) `
-    "got: $stamped"
+    "got: $stamped" -Subject $stamped
 
 $bare = Get-StampedLog $LOG_YAML
 Assert-True "a log without timestamps gets both from the hook" `
     ($bare -match '(?m)^started:\s*"[^"]+"' -and $bare -match '(?m)^completed:\s*"[^"]+"') `
-    "got: $bare"
+    "got: $bare" -Subject $bare
 
 # The artifact gate already distinguishes the two documenter lifecycles. A
 # call made while the workflow is still running must not date its completion.
 $midRun = Get-StampedLog $LOG_INVENTED $PLAN_RUNNING
-Assert-True "a workflow that has not finished is not stamped as finished" `
-    ($midRun -match '2099') `
-    "the mid-workflow call rewrote a log for a workflow still in progress: $midRun"
+Assert-Contains "a workflow that has not finished is not stamped as finished" `
+    $midRun '2099' `
+    "the mid-workflow call rewrote a log for a workflow still in progress"
 
 # The schema is the instruction. Leaving the fields in it and adding prose
 # against them elsewhere is how the fabrication happened in the first place.
 $documenterAgent = Get-Content (Join-Path $githubDir 'agents/documenter.agent.md') -Raw
 
-Assert-True "the log schema no longer asks the documenter for timestamps" `
-    ($documenterAgent -notmatch '(?m)^(started|completed): "<ISO 8601>"') `
+Assert-NotContains "the log schema no longer asks the documenter for timestamps" `
+    $documenterAgent '(?m)^(started|completed): "<ISO 8601>"' `
     "the schema block still contains a timestamp field for the model to fill in"
 
-Assert-True "the documenter is told the timestamps are not its to write" `
-    ($documenterAgent -match '(?i)do not write [^\n]*started:') `
+Assert-Contains "the documenter is told the timestamps are not its to write" `
+    $documenterAgent '(?i)do not write [^\n]*started:' `
     "no instruction found that hands the timestamps to the Stop hook"
 
 Write-Output ""
