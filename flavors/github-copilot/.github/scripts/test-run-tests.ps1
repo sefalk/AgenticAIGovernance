@@ -120,6 +120,16 @@ function Get-LogScopes([string]$logPath) {
     }
 }
 
+# Block comments and whole-line comments are removed before scanning for
+# forbidden constructs: a guard that punishes explaining why a construct is
+# absent would delete its own documentation. A trailing comment on a code line
+# still counts -- keeping the cut simple avoids the false negative that a `#`
+# inside a string literal would otherwise create.
+function Remove-PsComments([string]$text) {
+    $noBlocks = [regex]::Replace($text, '(?s)<#.*?#>', '')
+    return (($noBlocks -split "`n" | Where-Object { $_.TrimStart() -notmatch '^#' }) -join "`n")
+}
+
 # ---- production values, read from the shipped scripts (never hardcoded) ----
 
 # run-tests.ps1: $scopeMap = @{ 'all' = '...'; ... }
@@ -470,7 +480,7 @@ print('3 passed in 0.42s')
     if (Test-Path $githubDir) {
         foreach ($f in (Get-ChildItem -Path $githubDir -Recurse -Filter '*.ps1' -File)) {
             if ($f.FullName -eq $PSCommandPath) { continue }
-            $text = Get-Content $f.FullName -Raw
+            $text = Remove-PsComments (Get-Content $f.FullName -Raw)
             foreach ($p in $ps6Patterns) {
                 if ($text -match $p) {
                     $offenders += ("{0}: {1}" -f $f.Name, ($p -replace '\\', ''))
