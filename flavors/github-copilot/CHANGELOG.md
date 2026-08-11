@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The test log now actually merges on Windows, and a log the runner cannot
+  read is announced instead of overwritten (issue #93).** `run-tests.ps1` read
+  `.github/test-log.json` with `ConvertFrom-Json -AsHashtable`, a parameter
+  that exists only in PowerShell 6+. Windows PowerShell 5.1 is the default host
+  for the shipped VS Code tasks, so on Windows the read always threw, a silent
+  `catch` reset the accumulator, and the file was rewritten with only the scope
+  that had just run. Measured here: a `domain` run followed by a `contracts`
+  run left `scopes=[contracts]`. Exit code 0 throughout.
+
+  The lost merge is the symptom. The defect is the `catch`, which converted a
+  hard interpreter incompatibility into a plausible-looking artifact — the same
+  failure as #73 in the same file, and the same shape as everything else in
+  this release: a mechanism that fails silently produces output that cannot be
+  distinguished from success. It matters because `testing.instructions.md`
+  tells every agent to consult this log before running anything, and acceptance
+  criteria are routinely phrased as "green at the same pass count as before".
+  An agent establishing that baseline found the other scope missing, with no
+  way to tell a regression from a parser it could not run.
+
+  `run-tests.sh` already merged correctly. So this was never a missing feature;
+  it was two runners documented as interchangeable disagreeing about what their
+  shared artifact means, with nothing asserting that they agree. There is now a
+  case that runs both and compares.
+
+  The read no longer uses the parameter at all rather than branching on the
+  host version — one path, not two, and not one that would go untested on a
+  maintainer's PowerShell 7 machine. An absent log stays silent, because a
+  first run is legitimate and a warning on every one of them would be noise. A
+  log that exists and will not parse is data loss: it is reported with the
+  parser's own message and copied to `test-log.json.unreadable` before being
+  replaced, so the evidence outlives the run that tripped over it. A new guard
+  scans every shipped `.ps1` for PowerShell 6-only constructs — `-AsHashtable`
+  was the only one in the payload, and nothing was stopping the next one.
+
 - **The hook harness no longer certifies what it never observed (issues #95,
   #96).** Two defects in the instrument every quality claim in this framework
   is read through.
