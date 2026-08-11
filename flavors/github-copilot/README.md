@@ -142,7 +142,7 @@ Use two deployment modes to balance speed and safety:
 | **1** | Use `@coordinator` for small tasks — try `/af-quick-fix` or `/af-trivial-fix` |
 | **2** | Run a feature with `/af-tdd-feature`. Watch the subagent calls in the chat |
 | **3** | Customise `copilot-instructions.md` and `architecture.instructions.md` for your project |
-| **4** | Review workflow logs in `.github/logs/` and retro snippets in `retros/auto/` |
+| **4** | Review workflow logs in `.github/logs/` and retro snippets in `.github/retros/auto/` |
 
 ## How It Works
 

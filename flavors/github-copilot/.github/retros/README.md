@@ -33,7 +33,7 @@ and capture action items for the next cycle.
 | Path | Author | Tracked |
 |---|---|---|
 | `retros/*.md` | Human / team | **Your choice** — a team retrospective is project documentation |
-| `retros/auto/*.md` | documenter agent | **No** — ignored by `auto/.gitignore` |
+| `.github/retros/auto/*.md` | documenter agent | **No** — ignored by `auto/.gitignore` |
 
 The split is by author, not by topic. Agent-generated snippets are
 self-improvement instrumentation of the same class as `.github/logs/`: they

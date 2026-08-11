@@ -147,6 +147,55 @@ af_plan_lifecycle() {
     return 0
 }
 
+# af_retro_required WORKFLOW_ID [ROOT]
+# Prints "1|reason" when a retro snippet is owed, "0|reason" when it is not.
+#
+# The retro used to be unconditional, so a clean run produced a file recording
+# that nothing happened — and the next workflow read it back as input.
+#
+# The condition is derived here, from the workflow log, and never from the
+# documenter's account of its own run: "it was clean, so I skipped it" is the
+# self-report channel #91 closed for timestamps.
+#
+# The default is REQUIRED. Skipping needs positive evidence — counters that
+# actually read zero, a COMPLETED status, no adverse verdict. A log that is
+# missing, unreadable, or still carrying the unfilled `retries: <number>`
+# template establishes nothing, and absence of evidence is not evidence of a
+# clean run.
+#
+# Every condition matches a FIELD, not a word: the log quotes the user request
+# verbatim in `trigger:`, so "blocked" and "rejected" can appear as prose.
+af_retro_required() {
+    local wid="$1" root="${2:-.}" log=""
+
+    if [ -f "$root/.github/logs/${wid}.yaml" ]; then
+        log="$root/.github/logs/${wid}.yaml"
+    elif [ -f "$root/.github/logs/${wid}.yml" ]; then
+        log="$root/.github/logs/${wid}.yml"
+    fi
+
+    if [ -z "$log" ] || [ ! -s "$log" ]; then
+        printf '1|the workflow log could not be read, so a clean run is not established\n'
+        return 0
+    fi
+
+    grep -Eq '^[[:blank:]]*retries:[[:blank:]]*0[[:space:]]*$' "$log" || {
+        printf '1|the log does not record `retries: 0`\n'; return 0; }
+    grep -Eq '^[[:blank:]]*escalations:[[:blank:]]*0[[:space:]]*$' "$log" || {
+        printf '1|the log does not record `escalations: 0`\n'; return 0; }
+    grep -Eqi '^[[:blank:]]*status:[[:blank:]]*"?COMPLETED' "$log" || {
+        printf '1|the workflow status is not COMPLETED\n'; return 0; }
+    if grep -Eqi '^[[:blank:]]*verdict:[[:blank:]]*"?[[:blank:]]*(REJECTED|ESCALATE|BLOCKED)' "$log"; then
+        printf '1|a step verdict was adverse\n'; return 0
+    fi
+    if grep -Eq '^escalation:[[:space:]]*$' "$log"; then
+        printf '1|the log carries an escalation block\n'; return 0
+    fi
+
+    printf '0|retries 0, escalations 0, status COMPLETED, no adverse verdict\n'
+    return 0
+}
+
 # af_is_write_tool TOOL_NAME
 #
 # True if the tool call modifies files or directories in the workspace.

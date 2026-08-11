@@ -1495,6 +1495,153 @@ Assert-Contains "stop-tests does not accept another workflow's COMPLETED plan" `
 
 Write-Output ""
 
+# ── One retro destination, and a retro only when there is something to
+#    learn (issues #98, #27) ────────────────────────────────────────────
+#
+# #98: the hooks accepted the retro at `.github/retros/auto/` OR at the legacy
+# root `retros/auto/`. A gate that passes either way does not resolve an
+# ambiguity, it preserves it — measured in a consumer: both directories
+# populated, 48 files at the root, 35 of them tracked, no rule telling the two
+# groups apart. Rejecting the legacy path is only half the fix; the message has
+# to name the file it found, or the consumer is failed without being told what
+# to move.
+#
+# #27: the retro is a HARD gate, so it is written for every workflow — a clean
+# run produces a file saying nothing happened, which the next workflow reads
+# back as input. The exemption is derived *here*, from the log this hook has
+# already verified, and never from the documenter's own claim that the run was
+# clean: that is the channel #91 closed for timestamps.
+#
+# The default is REQUIRED. Skipping needs positive evidence — counters that
+# read zero, a COMPLETED status, no adverse verdict. A log that is missing,
+# unreadable, or still carrying the unfilled template licenses nothing.
+# Absence of evidence is not evidence of a clean run.
+
+Write-Output "## retro destination and condition"
+
+$LOG_CLEAN = @"
+workflow_id: "72-x"
+status: "COMPLETED"
+summary:
+  retries: 0
+  escalations: 0
+"@
+$LOG_RETRIES  = $LOG_CLEAN -replace 'retries: 0', 'retries: 2'
+$LOG_UNFILLED = $LOG_CLEAN -replace 'retries: 0', 'retries: <number>'
+$LOG_ESCALATED = $LOG_CLEAN -replace 'COMPLETED', 'ESCALATED'
+# The here-string above has no trailing newline, so the appended block needs
+# its own or it lands on the `escalations: 0` line and makes that counter
+# unreadable -- the case would then go red for the counter it was not about.
+# Mutation testing found exactly that: removing the verdict condition left the
+# assertion green.
+$LOG_REJECTED = $LOG_CLEAN + "`nsteps:`n  - step: 4`n    agent: code-critic`n    verdict: `"REJECTED`"`n"
+# The trigger field quotes the user request verbatim, so the words a trigger
+# scan looks for can appear in it as prose. The condition is a field value, not
+# a word on the page.
+$LOG_PROSE = $LOG_CLEAN -replace 'workflow_id: "72-x"', "workflow_id: `"72-x`"`ntrigger: `"the release was blocked and the design rejected`""
+
+function Get-RetroDecision {
+    param([string]$Log, [hashtable]$Extra = @{})
+    $files = @{
+        'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+        '.github/logs/72-x.yaml'         = $Log
+    }
+    foreach ($k in $Extra.Keys) { $files[$k] = $Extra[$k] }
+    return (Get-StopDecision $files)
+}
+
+Assert-True "a retro at the legacy root path no longer satisfies the gate" `
+    ((Get-RetroDecision $LOG_RETRIES @{ 'retros/auto/72-x.md' = $RETRO_MD }) -eq 'block') `
+    "the canonical location is .github/retros/auto/"
+
+$legacy = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+    '.github/logs/72-x.yaml'         = $LOG_RETRIES
+    'retros/auto/72-x.md'            = $RETRO_MD
+}
+# `retros/auto/72-x.md` is a substring of the canonical path, so asserting it
+# alone is satisfied by the generic message that names no file at all. The
+# assertion has to quote what only the legacy branch can produce -- matched as
+# a pattern because the JSON encoder escapes the surrounding quotes.
+Assert-True "the gate names the legacy file it found, not just the one it wants" `
+    ($legacy.Output -match 'found.{0,10}retros/auto/72-x\.md') `
+    "got: $($legacy.Output)"
+Assert-Contains "and names the destination to move it to" `
+    $legacy.Output 'move it to .github/retros/auto/72-x.md'
+
+Assert-True "a clean run needs no retro" `
+    ((Get-RetroDecision $LOG_CLEAN) -eq 'pass') `
+    "retries 0, escalations 0, COMPLETED, no adverse verdict"
+
+$clean = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+    '.github/logs/72-x.yaml'         = $LOG_CLEAN
+}
+Assert-Contains "and the exemption is stated rather than silently applied" `
+    $clean.Output 'no retro required'
+
+Assert-True "a run with retries still owes a retro" `
+    ((Get-RetroDecision $LOG_RETRIES) -eq 'block') `
+    "retries: 2"
+
+Assert-True "a REJECTED verdict still owes a retro" `
+    ((Get-RetroDecision $LOG_REJECTED) -eq 'block') `
+    "counters are zero but a critic rejected"
+
+Assert-True "an ESCALATED workflow still owes a retro" `
+    ((Get-RetroDecision $LOG_ESCALATED) -eq 'block') `
+    "status is not COMPLETED"
+
+Assert-True "an unfilled log template does not license the skip" `
+    ((Get-RetroDecision $LOG_UNFILLED) -eq 'block') `
+    "'retries: <number>' is not a measurement of zero"
+
+Assert-True "the words blocked and rejected in the trigger prose do not force a retro" `
+    ((Get-RetroDecision $LOG_PROSE) -eq 'pass') `
+    "the condition is a field value, not a word on the page"
+
+$stClean = Get-StopTestsOutput @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+    '.github/logs/72-x.yaml'         = $LOG_CLEAN
+}
+Assert-True "stop-tests does not warn about a retro a clean run never owed" `
+    ($stClean -match 'PASS' -and $stClean -notmatch 'WARNING') `
+    "got: $stClean" -Subject $stClean
+
+$stLegacy = Get-StopTestsOutput @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+    '.github/logs/72-x.yaml'         = $LOG_RETRIES
+    'retros/auto/72-x.md'            = $RETRO_MD
+}
+Assert-Contains "stop-tests does not accept the legacy retro path either" `
+    $stLegacy 'WARNING'
+
+# The two runtimes are documented as interchangeable, and #93 was a defect that
+# lived for weeks in exactly the gap between them: one merged its log, the
+# other overwrote it, and nothing asserted they agreed. The bash suite proves
+# the behaviour, but it costs a quarter of an hour to run -- this is the cheap
+# static claim that the same edit reached the .sh side at all.
+$docSh = Get-Content (Join-Path $scriptDir 'documenter-stop.sh') -Raw
+$stopSh = Get-Content (Join-Path $scriptDir 'stop-tests.sh') -Raw
+$commonShText = Get-Content (Join-Path $scriptDir '_common.sh') -Raw
+
+Assert-True "the bash preamble carries the retro condition" `
+    ($commonShText -match 'af_retro_required\(\)') `
+    "no af_retro_required in _common.sh"
+
+foreach ($pair in @(@{ n = 'documenter-stop.sh'; t = $docSh }, @{ n = 'stop-tests.sh'; t = $stopSh })) {
+    Assert-True "$($pair.n) asks whether a retro is owed instead of always demanding one" `
+        ($pair.t -match 'af_retro_required') `
+        "no call to af_retro_required"
+    # `[ ! -f canonical ] && [ ! -f legacy ]` is the tolerant form: it is the
+    # construct that made either destination acceptable.
+    Assert-True "$($pair.n) no longer accepts either retro destination" `
+        ($pair.t -notmatch '(?m)!\s*-f\s*"?\.github/retros/auto/[^"]*"?\s*\]\s*&&\s*\[\s*!\s*-f') `
+        "the dual-path condition survives"
+}
+
+Write-Output ""
+
 # ── Workflow-log timestamps are measured, not authored (issue #91) ───────
 #
 # A documenter wrote `completed:` six and a half hours into the future, in the

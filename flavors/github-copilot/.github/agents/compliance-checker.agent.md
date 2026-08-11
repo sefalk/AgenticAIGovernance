@@ -125,7 +125,7 @@ The coordinator invokes you with `mode=post-flight` and provides:
 |---|---|---|
 | Plan file status = COMPLETED | Read the plan file, check status field | **MISSING** |
 | Workflow log YAML exists | Read `.github/logs/{workflow-id}.yaml` | **MISSING** |
-| Retro snippet exists | Read `.github/retros/auto/{workflow-id}.md` | **MISSING** |
+| Retro snippet exists, if the log shows retries, escalations, an adverse verdict, or a non-COMPLETED status | Read `.github/retros/auto/{workflow-id}.md` | **MISSING** |
 | Provenance markers on new files | Read each new file and look for `copilot:generated`, wherever `instructions/provenance.instructions.md` places it | **WARNING** |
 | Provenance markers on modified files | Check for `copilot:modified` in substantially changed files | **ADVISORY** |
 | Integration path matches capability mode | Read `ADO_CAPABILITY_MODE` from `af-env.conf`: if `required`, a PR must have been opened (request-based); if `off`, no PR worker ran (pure git). Mismatch = wrong integration path | **MISSING** for request-based |
@@ -208,7 +208,7 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Pre-flight: work-item first (tracker active) | HARD | When `ADO_CAPABILITY_MODE != off`: a resolved work item exists, is Active, and its id prefixes the branch slug | Standard+ |
 | Post-flight: plan file status = COMPLETED | HARD | Read plan file, check status field | Standard+ |
 | Post-flight: workflow log YAML is complete | HARD | **Read** `.github/logs/{workflow-id}.yaml` — a successful read is the existence proof, never a search hit — AND check its `status:` is `COMPLETED` AND `workflow_id`, `git_branch`, `completed:` and a non-empty `steps:` list are present. Existence alone is not the gate: a log written mid-workflow to satisfy a hook is a file, not a record (issue #72). | Standard+ |
-| Post-flight: retro snippet is substantive | HARD | **Read** `.github/retros/auto/{workflow-id}.md` AND check it carries at least one concrete lesson — not an empty file, not the unfilled template, not placeholder text | Standard+ |
+| Post-flight: retro snippet is substantive **when one is owed** | HARD | A retro is owed only if the log records retries, escalations, an adverse step verdict, or a status other than COMPLETED — a clean run owes none (issue #27). When owed: **Read** `.github/retros/auto/{workflow-id}.md` AND check it carries at least one concrete lesson — not an empty file, not the unfilled template, not placeholder text | Standard+ |
 | Post-flight: integration path matches capability mode | HARD | If `ADO_CAPABILITY_MODE=required`, a PR was opened; if `off`, no PR worker ran | Standard+ |
 | Post-flight: branch-to-work-item association (R-SD-08) | HARD | When tracker capability is active (`ADO_CAPABILITY_MODE != off`): the branch-slug work item id equals the PR-linked work item id (no cross-attribution), the item was Active at work start, and it links the branch + plan path. Tracker off ⇒ local traceability artifact instead. | Standard+ |
 | Post-flight: provenance markers on new files | SOFT | Read each new file and look for a `copilot:generated` marker | Standard+ |

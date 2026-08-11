@@ -51,11 +51,20 @@ if ($branch -and $branch -match '^agent/(.+)$') {
         }
     }
 
-    # Check for retro snippet (canonical first, legacy root path still accepted)
+    # Retro snippet: one destination, and only when the log shows there was
+    # something to learn (issues #98, #27). Same condition documenter-stop
+    # blocks on, asserted with less force.
     $retroPattern = ".github/retros/auto/$workflowId.md"
-    $retroPatternGH = "retros/auto/$workflowId.md"
-    if (-not (Test-Path $retroPattern) -and -not (Test-Path $retroPatternGH)) {
-        $missing += "retro snippet (.github/retros/auto/$workflowId.md)"
+    $legacyRetro = "retros/auto/$workflowId.md"
+    if (-not (Test-Path $retroPattern)) {
+        $retro = Get-AfRetroRequirement -WorkflowId $workflowId
+        if ($retro.Required) {
+            if (Test-Path $legacyRetro) {
+                $missing += "retro snippet at its canonical path (found '$legacyRetro', no longer accepted)"
+            } else {
+                $missing += "retro snippet (.github/retros/auto/$workflowId.md)"
+            }
+        }
     }
 
     if ($missing.Count -gt 0) {

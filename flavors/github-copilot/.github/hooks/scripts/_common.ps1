@@ -126,6 +126,67 @@ function Get-AfPlanLifecycle {
     return $result
 }
 
+# ── Is a retro snippet owed for this workflow? (issue #27) ───────────────
+#
+# The retro used to be unconditional, so a clean run produced a file recording
+# that nothing happened -- and the next workflow read it back as input.
+#
+# The condition is derived here, from the workflow log, and never from the
+# documenter's account of its own run: "it was clean, so I skipped it" is the
+# self-report channel #91 closed for timestamps.
+#
+# The default is REQUIRED. Skipping needs positive evidence -- counters that
+# actually read zero, a COMPLETED status, no adverse verdict. A log that is
+# missing, unreadable, or still carrying the unfilled `retries: <number>`
+# template establishes nothing, and absence of evidence is not evidence of a
+# clean run.
+#
+# Every condition matches a FIELD, not a word: the log quotes the user request
+# verbatim in `trigger:`, so "blocked" and "rejected" can appear in it as prose.
+function Get-AfRetroRequirement {
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkflowId,
+        [string]$Root = '.'
+    )
+
+    $result = @{ Required = $true; Reason = 'the workflow log could not be read, so a clean run is not established' }
+
+    $log = $null
+    foreach ($ext in @('yaml', 'yml')) {
+        $p = Join-Path $Root ".github/logs/$WorkflowId.$ext"
+        if (Test-Path $p) {
+            $log = Get-Content $p -Raw -ErrorAction SilentlyContinue
+            break
+        }
+    }
+    if (-not $log) { return $result }
+
+    if ($log -notmatch '(?im)^[^\S\r\n]*retries:[^\S\r\n]*0\s*$') {
+        $result.Reason = 'the log does not record `retries: 0`'
+        return $result
+    }
+    if ($log -notmatch '(?im)^[^\S\r\n]*escalations:[^\S\r\n]*0\s*$') {
+        $result.Reason = 'the log does not record `escalations: 0`'
+        return $result
+    }
+    if ($log -notmatch '(?im)^[^\S\r\n]*status:[^\S\r\n]*"?COMPLETED') {
+        $result.Reason = 'the workflow status is not COMPLETED'
+        return $result
+    }
+    if ($log -match '(?im)^[^\S\r\n]*verdict:[^\S\r\n]*"?[^\S\r\n]*(REJECTED|ESCALATE|BLOCKED)') {
+        $result.Reason = "a step verdict was $($Matches[1])"
+        return $result
+    }
+    if ($log -match '(?im)^escalation:[^\S\r\n]*$') {
+        $result.Reason = 'the log carries an escalation block'
+        return $result
+    }
+
+    $result.Required = $false
+    $result.Reason = 'retries 0, escalations 0, status COMPLETED, no adverse verdict'
+    return $result
+}
+
 # ── Write-tool classification ────────────────────────────────────────────
 #
 # Which tool calls write to the workspace, and where they keep their paths.

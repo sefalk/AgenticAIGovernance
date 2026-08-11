@@ -561,6 +561,117 @@ stop_case "stop-tests warns on the condition documenter-stop blocks on" \
 stop_case "stop-tests does not accept another workflow's COMPLETED plan" \
     stop-tests.sh warning "docs/plans/fix-2026-01-01-other.md=$PLAN_OTHER"
 
+# --- retro destination and condition (issues #98, #27) --------------------
+#
+# Two defects with one shape. The gate accepted the retro at either the
+# canonical path or the legacy root path, which does not resolve the ambiguity
+# it was meant to resolve -- it preserves it, and a documenter writing to the
+# wrong place is indistinguishable from one writing to the right place.
+#
+# And it demanded a retro from every workflow, including runs with nothing to
+# report, so the corpus filled with files recording that nothing happened. The
+# exemption is derived from the log by the hook, never declared by the
+# documenter, and the default is REQUIRED: a missing, unreadable or unfilled
+# log establishes nothing.
+
+echo "## retro destination and condition"
+
+LOG_CLEAN_B='workflow_id: "72-x"\nstatus: "COMPLETED"\nsummary:\n  retries: 0\n  escalations: 0\n'
+LOG_RETRIES_B='workflow_id: "72-x"\nstatus: "COMPLETED"\nsummary:\n  retries: 2\n  escalations: 0\n'
+LOG_UNFILLED_B='workflow_id: "72-x"\nstatus: "COMPLETED"\nsummary:\n  retries: <number>\n  escalations: <number>\n'
+LOG_REJECTED_B='workflow_id: "72-x"\nstatus: "COMPLETED"\nsummary:\n  retries: 0\n  escalations: 0\nsteps:\n  - step: 4\n    agent: code-critic\n    verdict: "REJECTED"\n'
+# The log quotes the request verbatim, so the words a naive scan looks for
+# appear as prose in a run that was in fact clean.
+LOG_PROSE_B='workflow_id: "72-x"\ntrigger: "the release was blocked and the design rejected"\nstatus: "COMPLETED"\nsummary:\n  retries: 0\n  escalations: 0\n'
+LEGACY_RETRO='# Retro 72-x\n\n- lesson\n'
+
+# stop_output HOOK FILESPEC... -- the hook's own words, for the assertions
+# that are about what it says rather than which verdict it reaches.
+stop_output() {
+    local hook="$1"; shift
+    local fixture out spec path content
+    fixture=$(mktemp -d)
+    mkdir -p "$fixture/.github/hooks/scripts"
+    cp "${HOOK_SRC:-$HOOK_DIR}/$hook" "$fixture/.github/hooks/scripts/"
+    cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
+    for spec in "$@"; do
+        path="${spec%%=*}"
+        content="${spec#*=}"
+        mkdir -p "$fixture/$(dirname "$path")"
+        printf '%b' "$content" > "$fixture/$path"
+    done
+    out=$(
+        cd "$fixture" || exit 1
+        git init -q .
+        git checkout -q -b agent/72-x
+        printf '%s' '{"session_id":"s1","transcript_path":"/none"}' \
+            | bash ".github/hooks/scripts/$hook"
+    ) 2>/dev/null
+    rm -rf "$fixture"
+    printf '%s' "$out"
+}
+
+doc_stop_case "a retro at the legacy root path no longer satisfies the gate" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO"
+
+legacy_out=$(stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO")
+
+# Silent rejection is as unhelpful as silent acceptance: the file exists, and
+# the only person who can move it has to be told where it is.
+assert_contains "the gate names the legacy file it is refusing" \
+    "$legacy_out" "found 'retros/auto/72-x.md'"
+assert_contains "the gate names the destination to move it to" \
+    "$legacy_out" "move it to .github/retros/auto/72-x.md"
+
+doc_stop_case "a clean run is not made to write a retro about nothing" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_CLEAN_B"
+
+# An exemption that applies in silence cannot be reviewed, and looks exactly
+# like a gate that was not reached.
+clean_out=$(stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_CLEAN_B")
+assert_contains "the exemption is stated rather than silently applied" \
+    "$clean_out" "no retro required"
+
+doc_stop_case "a run with retries still owes a retro" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B"
+
+doc_stop_case "a rejected step verdict still owes a retro" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_REJECTED_B"
+
+# The template's own placeholders are not a report of a clean run.
+doc_stop_case "an unfilled log template does not license the exemption" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_UNFILLED_B"
+
+doc_stop_case "the words in a quoted request do not force a retro" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_PROSE_B"
+
+# stop-tests follows the same condition with less force. It used to warn about
+# a retro nobody owed.
+clean_st=$(stop_output stop-tests.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_CLEAN_B")
+assert_contains "stop-tests passes a clean workflow that wrote no retro" \
+    "$clean_st" "PASS"
+assert_not_contains "stop-tests does not warn about a retro nobody owed" \
+    "$clean_st" "WARNING"
+
+stop_case "stop-tests does not accept the legacy retro path either" \
+    stop-tests.sh warning "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO"
+
 # --- Workflow-log timestamps are measured, not authored (issue #91) --------
 #
 # A documenter wrote `completed:` six and a half hours into the future, in the
