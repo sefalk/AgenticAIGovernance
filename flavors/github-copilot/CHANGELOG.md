@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The provider registry is no longer always-on (issue #115).** Five provider
+  workers exist against eleven core agents, which looked like agent
+  proliferation. Measurement said otherwise: agent files load on demand, so a
+  sixth worker costs nothing for any workflow that does not invoke it. What did
+  cost was the *registry* — 511 tokens of `coordinator.agent.md` documenting
+  capabilities whose shipped defaults are all `off`, paid on every turn of every
+  workflow, including pure-git projects where none of them will ever fire.
+
+  Twenty-three of those lines duplicated `ado-shared` §§ 180–267 — the same
+  section the coordinator was being told to go and read. Five delegation rows
+  became one; the duplicated sequences became a pointer. The integration-path
+  rule stayed inline, because it is mandatory for *every* workflow including
+  pure git, and a mandatory rule moved into an on-demand skill is a rule that
+  can silently fail to load. Coordinator own prompt 6,011 → 5,765 tok; headroom
+  against the agent budget 24 → 270.
+
+  Two alternatives were measured and rejected. A provider *manager* with
+  subagents saves ~135 always-on tokens and costs ~6,400 per provider operation
+  for the extra invocation — and adds a delegation hop, where acceptance
+  criteria that must be copied verbatim can quietly stop being. One agent per
+  provider with capabilities selected by skill fails harder: tool grants are
+  static and per-agent, so the union of the four ADO workers (36 grants) would
+  put `pipelines_write` and `repo_pull_request_write` in scope for a wiki edit —
+  the exact over-grant #113 had just removed — and the four workers' mandatory
+  guards would have to move into on-demand skills to fit the budget.
+
 ### Added
 
 - **A consumer can report a framework defect without being granted the tools to

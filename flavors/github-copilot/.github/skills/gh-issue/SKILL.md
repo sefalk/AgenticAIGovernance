@@ -23,7 +23,10 @@ delegates every issue operation here. That is deliberate: a coordinator that
 files its own issues is a coordinator whose tool surface grows without review.
 What qualifies as a framework defect: a payload file that is wrong, a gate that
 cannot pass, a script that fails on arrival — anything the consumer project
-cannot fix on its own without diverging from the payload.
+cannot fix on its own without diverging from the payload. When a route is gated
+off and this worker returns a drafted body instead of filing it, the coordinator
+surfaces that body in its final summary — a suppressed write must not become a
+suppressed finding.
 
 ## 1. Capability Probe
 
