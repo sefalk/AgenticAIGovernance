@@ -158,12 +158,26 @@ $total = $passed + $failed + $errors
 # the counters are recorded as null and the entry is labelled an error instead.
 $runnerFailed = ((-not $summaryLine) -and $pytestExit -ne 0)
 
-# Read existing log (cumulative merge)
+# Read existing log (cumulative merge).
+#
+# Not `ConvertFrom-Json -AsHashtable`: that parameter is PowerShell 6+, and
+# Windows PowerShell 5.1 is the default host for the shipped VS Code tasks. It
+# threw there on every run, and the catch below turned that into a log holding
+# only the scope that had just run.
+#
+# An absent file is legitimately empty. A file that exists and cannot be parsed
+# is data loss, so it is announced and kept -- overwriting it would destroy the
+# only artifact that could explain what happened.
 $testLog = @{}
 if (Test-Path $testLogPath) {
     try {
-        $testLog = Get-Content $testLogPath -Raw | ConvertFrom-Json -AsHashtable
+        $existing = Get-Content $testLogPath -Raw | ConvertFrom-Json
+        foreach ($p in $existing.PSObject.Properties) { $testLog[$p.Name] = $p.Value }
     } catch {
+        $keptPath = "$testLogPath.unreadable"
+        Copy-Item $testLogPath $keptPath -Force -ErrorAction SilentlyContinue
+        Write-Output "WARNING: could not read $testLogPath ($($_.Exception.Message))"
+        Write-Output "WARNING: previously recorded scopes are lost; the unreadable file was kept at $keptPath"
         $testLog = @{}
     }
 }

@@ -1,6 +1,17 @@
 # Regression tests for the canonical test runner (run-tests.ps1 / run-tests.sh).
 #
-# Covers issue #73, which has two independent halves:
+# Covers issues #73 and #93. Both are the same class: the runner writes an
+# artifact that looks authoritative and is wrong, and exits 0 while doing it.
+#
+# #93 -- the test log is documented as a cumulative merge across scopes. The
+#        read used `ConvertFrom-Json -AsHashtable`, which exists only in
+#        PowerShell 6+. On 5.1 -- the default host for the shipped VS Code
+#        tasks -- it throws, the catch resets the accumulator, and every run
+#        writes a log holding only the scope that just ran. The property has to
+#        be stated across TWO runs: a case that checks the scope just run
+#        passes either way and never observes the bug.
+#
+# Issue #73 has two independent halves:
 #
 #   1. Argument mangling (Windows only). A scope path carrying a trailing
 #      separator becomes "...\tests\" after Join-Path. PowerShell quotes the
@@ -55,11 +66,68 @@ $pyExe  = $python[0]
 $pyPre  = if ($python.Count -gt 1) { $python[1..($python.Count - 1)] } else { @() }
 
 # A workspace path that CONTAINS A SPACE -- mandatory, the defect is invisible
-# without one.
+# without one. Self-registering, so a fixture abandoned half-built is still
+# cleaned up.
 function New-SpacedFixture([string]$tag) {
     $p = Join-Path ([IO.Path]::GetTempPath()) ("af rt $tag " + [guid]::NewGuid().ToString('N').Substring(0, 8))
     New-Item -ItemType Directory -Path $p -Force | Out-Null
+    $script:fixtures += $p
     return $p
+}
+
+# A workspace that runs the SHIPPED run-tests.ps1 against a fake pytest module.
+# A real venv is unavoidable: the runner resolves .venv/Scripts/python.exe and
+# exits before anything else if it is absent. Returns $null if the fixture
+# could not be built, so a missing prerequisite fails the case rather than
+# passing it vacuously.
+function New-FakePytestWorkspace([string]$tag) {
+    $ws = New-SpacedFixture $tag
+    New-Item -ItemType Directory -Path (Join-Path $ws '.github/scripts') -Force | Out-Null
+    foreach ($d in @('tests', 'tests/domain', 'tests/contracts')) {
+        New-Item -ItemType Directory -Path (Join-Path $ws $d) -Force | Out-Null
+    }
+    Copy-Item $runTestsPs1 (Join-Path $ws '.github/scripts/run-tests.ps1')
+    Invoke-Py @('-m', 'venv', '--without-pip', (Join-Path $ws '.venv')) *> $null
+
+    $fxPy = Join-Path $ws '.venv/Scripts/python.exe'
+    if (-not (Test-Path $fxPy)) { $fxPy = Join-Path $ws '.venv/bin/python' }
+    if (-not (Test-Path $fxPy)) { return $null }
+
+    $site = (& $fxPy -c "import sysconfig; print(sysconfig.get_paths()['purelib'])" 2>$null)
+    if (-not $site -or -not (Test-Path $site)) { return $null }
+
+    $pkg = Join-Path $site 'pytest'
+    New-Item -ItemType Directory -Path $pkg -Force | Out-Null
+    Set-Content -Path (Join-Path $pkg '__init__.py') -Value '' -Encoding ascii
+    Set-Content -Path (Join-Path $pkg '__main__.py') -Encoding ascii -Value @'
+import json, os, sys
+_p = os.environ.get('AF_FAKE_PYTEST_ARGV')
+if _p:
+    with open(_p, 'w') as fh:
+        json.dump(sys.argv[1:], fh)
+print('3 passed in 0.42s')
+'@
+    return $ws
+}
+
+function Get-LogScopes([string]$logPath) {
+    if (-not (Test-Path $logPath)) { return @() }
+    try {
+        $obj = Get-Content $logPath -Raw | ConvertFrom-Json
+        return @($obj.PSObject.Properties.Name)
+    } catch {
+        return @()
+    }
+}
+
+# Block comments and whole-line comments are removed before scanning for
+# forbidden constructs: a guard that punishes explaining why a construct is
+# absent would delete its own documentation. A trailing comment on a code line
+# still counts -- keeping the cut simple avoids the false negative that a `#`
+# inside a string literal would otherwise create.
+function Remove-PsComments([string]$text) {
+    $noBlocks = [regex]::Replace($text, '(?s)<#.*?#>', '')
+    return (($noBlocks -split "`n" | Where-Object { $_.TrimStart() -notmatch '^#' }) -join "`n")
 }
 
 # ---- production values, read from the shipped scripts (never hardcoded) ----
@@ -132,7 +200,7 @@ try {
     #    assert the following arguments survive as separate argv entries.
     #    This is what actually reaches pytest.
     # ---------------------------------------------------------------------
-    $fx = New-SpacedFixture 'argv'; $fixtures += $fx
+    $fx = New-SpacedFixture 'argv'
     $dump = Join-Path $fx 'argvdump.py'
     Set-Content -Path $dump -Encoding ascii -Value @'
 import sys
@@ -160,7 +228,7 @@ for a in sys.argv[1:]:
     #      to parse. That is precisely the shape produced by the argv defect,
     #      by a missing dependency, or by a usage error -- on any platform.
     # ---------------------------------------------------------------------
-    $ws = New-SpacedFixture 'log'; $fixtures += $ws
+    $ws = New-SpacedFixture 'log'
     New-Item -ItemType Directory -Path (Join-Path $ws '.github/scripts') -Force | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $ws 'tests/domain')     -Force | Out-Null
     Copy-Item $runTestsPs1 (Join-Path $ws '.github/scripts/run-tests.ps1')
@@ -215,7 +283,7 @@ for a in sys.argv[1:]:
     #    the production code, the new stderr redirect did not break stdout
     #    capture, and a genuine run is still recorded as status=ok.
     # ---------------------------------------------------------------------
-    $ws2 = New-SpacedFixture 'ok'; $fixtures += $ws2
+    $ws2 = New-SpacedFixture 'ok'
     New-Item -ItemType Directory -Path (Join-Path $ws2 '.github/scripts') -Force | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $ws2 'tests') -Force | Out-Null
     Copy-Item $runTestsPs1 (Join-Path $ws2 '.github/scripts/run-tests.ps1')
@@ -267,12 +335,169 @@ print('3 passed in 0.42s')
             ($null -ne $entry2) -and ($entry2.status -eq 'ok') -and ($entry2.passed -eq 3) -and ($entry2.exit_code -eq 0)
         $details['G_success_path_recorded_as_ok'] = "status=$($entry2.status) passed=$($entry2.passed) exit_code=$($entry2.exit_code)"
     }
+
+    # ---------------------------------------------------------------------
+    # H-J (#93): the log is a cumulative merge, and a log the runner cannot
+    #            read is not replaced in silence.
+    #
+    #            One fixture, used four times in sequence. Each block leaves
+    #            the log in the state the next one needs.
+    # ---------------------------------------------------------------------
+    $hKeys = @('H1_merge_survives_a_second_scope',
+               'H2_foreign_entry_survives_with_its_values',
+               'J1_unreadable_log_is_announced',
+               'J2_unreadable_log_is_preserved',
+               'J3_absent_log_is_not_announced')
+    $wsM = New-FakePytestWorkspace 'merge'
+    if (-not $wsM) {
+        foreach ($k in $hKeys) { $results[$k] = $false; $details[$k] = 'fake-pytest fixture could not be created' }
+    } else {
+        $runner = Join-Path $wsM '.github/scripts/run-tests.ps1'
+        $logM   = Join-Path $wsM '.github/test-log.json'
+
+        # H1: two runs of different scopes. The second must not evict the
+        #     first. A case that inspects only the scope just run passes with
+        #     the defect present, which is why the assertion spans two runs.
+        & $runner -Scope domain    *> $null
+        & $runner -Scope contracts *> $null
+        $scopes = Get-LogScopes $logM
+        $results['H1_merge_survives_a_second_scope'] =
+            ($scopes -contains 'domain') -and ($scopes -contains 'contracts')
+        $details['H1_merge_survives_a_second_scope'] = "scopes=[$($scopes -join ', ')]"
+
+        # H2: an entry this runner did not write survives intact -- keys AND
+        #     values. The two runners share the file, so a merge that keeps
+        #     the name and drops the numbers is no merge.
+        Set-Content -Path $logM -Encoding utf8 -Value @'
+{
+  "properties": {
+    "last_run": "2026-01-01T00:00:00+00:00",
+    "passed": 7,
+    "failed": 0,
+    "errors": 0,
+    "total": 7,
+    "runtime_seconds": 1.5,
+    "run_by": "run-tests.sh",
+    "exit_code": 0,
+    "coverage_percent": null,
+    "status": "ok"
+  }
+}
+'@
+        & $runner -Scope domain *> $null
+        $merged = $null
+        if (Test-Path $logM) { try { $merged = Get-Content $logM -Raw | ConvertFrom-Json } catch { $merged = $null } }
+        $results['H2_foreign_entry_survives_with_its_values'] =
+            ($null -ne $merged) -and ($null -ne $merged.properties) -and ($merged.properties.passed -eq 7) -and
+            ($merged.properties.run_by -eq 'run-tests.sh') -and ($null -ne $merged.domain)
+        $details['H2_foreign_entry_survives_with_its_values'] =
+            "properties.passed=$($merged.properties.passed) run_by=$($merged.properties.run_by) domain=$($null -ne $merged.domain)"
+
+        # J1/J2: a log that exists but cannot be parsed is data loss. Silence
+        #        there is the actual defect behind #93 -- the interpreter
+        #        incompatibility was survivable, the swallowed exception was
+        #        not.
+        $garbage = '{ "domain": { "passed": 1317,'
+        Set-Content -Path $logM -Value $garbage -Encoding utf8
+        $warnTxt = (& $runner -Scope domain 2>&1 | Out-String)
+        $results['J1_unreadable_log_is_announced'] =
+            ($warnTxt -match 'WARNING') -and ($warnTxt -match 'test-log\.json') -and ($warnTxt -match 'lost')
+        $details['J1_unreadable_log_is_announced'] =
+            (($warnTxt -split "`n" | Where-Object { $_ -match 'WARNING' }) -join ' ').Trim()
+
+        $keptPath = "$logM.unreadable"
+        $kept = if (Test-Path $keptPath) { (Get-Content $keptPath -Raw).Trim() } else { '' }
+        $results['J2_unreadable_log_is_preserved'] = ($kept -eq $garbage)
+        $details['J2_unreadable_log_is_preserved'] =
+            if (Test-Path $keptPath) { "kept='$kept'" } else { "no backup at $keptPath" }
+
+        # J3: an absent log is legitimately empty. Warning there would train
+        #     the reader to ignore the warning that matters.
+        Remove-Item $logM, $keptPath -Force -ErrorAction SilentlyContinue
+        $quietTxt = (& $runner -Scope domain 2>&1 | Out-String)
+        $results['J3_absent_log_is_not_announced'] = ($quietTxt -notmatch 'WARNING') -and ($quietTxt.Trim() -ne '')
+        $details['J3_absent_log_is_not_announced'] = ($quietTxt -replace '\s+', ' ').Trim()
+    }
+
+    # ---------------------------------------------------------------------
+    # I (#93): the same property for run-tests.sh. It merges today via sed;
+    #          the case exists so the two runners cannot drift apart again --
+    #          which is exactly what #93 turned out to be.
+    # ---------------------------------------------------------------------
+    $bashExe = $null
+    foreach ($c in @('C:\Program Files\Git\bin\bash.exe', '/bin/bash', '/usr/bin/bash')) {
+        if (Test-Path $c) { $bashExe = $c; break }
+    }
+    if (-not $bashExe) { $bashExe = (Get-Command bash -ErrorAction SilentlyContinue).Source }
+
+    if (-not $bashExe) {
+        $results['I_sh_runner_keeps_foreign_scope'] = $false
+        $details['I_sh_runner_keeps_foreign_scope'] = 'no bash interpreter found'
+    } else {
+        $wsSh = New-SpacedFixture 'sh'
+        New-Item -ItemType Directory -Path (Join-Path $wsSh '.github/scripts') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $wsSh 'tests/contracts') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $wsSh '.venv/bin') -Force | Out-Null
+        Copy-Item $runTestsSh (Join-Path $wsSh '.github/scripts/run-tests.sh')
+
+        # run-tests.sh only requires .venv/bin/python to be executable; a shim
+        # that prints a pytest summary is enough and keeps the case hermetic.
+        $shim = Join-Path $wsSh '.venv/bin/python'
+        [IO.File]::WriteAllText($shim, "#!/bin/sh`necho '3 passed in 0.42s'`n".Replace("`r", ''))
+        $shPosix = ($shim -replace '\\', '/')
+        & $bashExe -c "chmod +x '$shPosix'" 2>&1 | Out-Null
+
+        $logSh = Join-Path $wsSh '.github/test-log.json'
+        Set-Content -Path $logSh -Encoding utf8 -Value @'
+{
+  "domain": { "last_run": "2026-01-01T00:00:00+00:00", "passed": 1317, "failed": 0, "errors": 0, "total": 1317, "runtime_seconds": 12.5, "run_by": "run-tests.ps1", "exit_code": 0, "coverage_percent": null, "status": "ok" }
+}
+'@
+        $runnerSh = ((Join-Path $wsSh '.github/scripts/run-tests.sh') -replace '\\', '/')
+        $shOut = (& $bashExe -c "'$runnerSh' --scope contracts" 2>&1 | Out-String)
+        $shScopes = Get-LogScopes $logSh
+        $results['I_sh_runner_keeps_foreign_scope'] =
+            ($shScopes -contains 'domain') -and ($shScopes -contains 'contracts')
+        $details['I_sh_runner_keeps_foreign_scope'] =
+            "scopes=[$($shScopes -join ', ')] runner said: $(($shOut -replace '\s+', ' ').Trim())"
+    }
+
+    # ---------------------------------------------------------------------
+    # K (#93): the class, not the instance. `-AsHashtable` was one PowerShell
+    #          6+ construct in a payload that runs on 5.1; nothing stopped the
+    #          next one. This scan is the standing guard.
+    #
+    #          The scanner excludes itself -- it necessarily contains every
+    #          pattern it looks for. It runs on the same 5.1 host as the suite,
+    #          so a PS6 construct here fails immediately and loudly anyway.
+    # ---------------------------------------------------------------------
+    $ps6Patterns = @(
+        '-AsHashtable', '-Parallel', '-AsByteStream', '-AsPlainText\s+-Force',
+        'Test-Json', 'Join-String', '\$IsWindows', '\$IsLinux', '\$IsMacOS'
+    )
+    $githubDir = Join-Path $repoRootAF '.github'
+    $offenders = @()
+    if (Test-Path $githubDir) {
+        foreach ($f in (Get-ChildItem -Path $githubDir -Recurse -Filter '*.ps1' -File)) {
+            if ($f.FullName -eq $PSCommandPath) { continue }
+            $text = Remove-PsComments (Get-Content $f.FullName -Raw)
+            foreach ($p in $ps6Patterns) {
+                if ($text -match $p) {
+                    $offenders += ("{0}: {1}" -f $f.Name, ($p -replace '\\', ''))
+                }
+            }
+        }
+    } else {
+        $offenders += "payload directory not found at $githubDir"
+    }
+    $results['K_no_ps6_only_construct_in_shipped_scripts'] = ($offenders.Count -eq 0)
+    $details['K_no_ps6_only_construct_in_shipped_scripts'] = ($offenders -join '; ')
 }
 finally {
     foreach ($f in $fixtures) { Remove-Item $f -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
-Write-Host '===== test-runner regression tests (issue #73) ====='
+Write-Host '===== test-runner regression tests (issues #73, #93) ====='
 $allPass = $true
 foreach ($k in $results.Keys) {
     if ($results[$k]) {
