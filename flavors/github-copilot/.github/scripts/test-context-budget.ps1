@@ -646,6 +646,89 @@ try {
     } else {
         Write-Host '  (II_af_repo_dispatches_guards skipped: not an AF source tree)'
     }
+
+    # --- The guard's own blind spot (issue #125) --------------------------
+    # The guard measures the index, so a project that gitignores .github/ can
+    # never stage a budget input and the guard can never fire. It emitted
+    # nothing, which is exactly what a passing guard emits -- and read as a
+    # pass for months. These cases pin the difference between "measured
+    # nothing" and "measured everything, all within budget".
+
+    # Copies guard and checker into a fixture, so the guard can locate its own
+    # payload from where it is installed -- as it does in a real deployment.
+    function Install-Guard([string]$GithubDir) {
+        foreach ($pair in @(@('hooks/scripts', $guard), @('scripts', $checker))) {
+            $dst = Join-Path $GithubDir $pair[0]
+            New-Item -ItemType Directory -Path $dst -Force | Out-Null
+            Copy-Item -LiteralPath $pair[1] -Destination $dst
+        }
+    }
+
+    function Invoke-DeployedGuard([string]$repo) {
+        Push-Location $repo
+        try {
+            $out = & $python '.github/hooks/scripts/check-context-budget-staged.py' 2>&1 | Out-String
+            return @{ Code = $LASTEXITCODE; Output = $out }
+        } finally { Pop-Location }
+    }
+
+    # TT: a payload git refuses to hold cannot be staged, so no commit will
+    #     ever reach the measurement. Saying so is the whole fix.
+    $gh = New-OverBudgetFixture; $fixtures += $gh
+    Install-Guard $gh
+    $repoBlind = Split-Path -Parent $gh
+    Push-Location $repoBlind
+    try {
+        git init -q
+        git config user.email t@example.com
+        git config user.name tester
+        git config core.hooksPath .nohooks
+        '.github/' | Set-Content .gitignore
+        'x' | Set-Content readme.md
+        git add -- ':(literal).gitignore' ':(literal)readme.md' 2>&1 | Out-Null
+    } finally { Pop-Location }
+    $r = Invoke-DeployedGuard $repoBlind
+    $results['TT_untracked_payload_named'] = ($r.Output -match 'NOT GATED')
+    $results['TT_untracked_payload_not_blocked'] = ($r.Code -eq 0)
+    $results['TT_gitignore_named_as_cause'] = ($r.Output -match 'gitignore rule')
+
+    # UU: the ordinary commit must stay silent. A guard that speaks on every
+    #     commit becomes a banner, and a banner is the next form of silence.
+    $gh = New-OverBudgetFixture; $fixtures += $gh
+    Install-Guard $gh
+    $repo = New-StagedRepo $gh
+    git -C $repo commit -qm seed 2>&1 | Out-Null
+    'x' | Set-Content (Join-Path $repo 'readme.md')
+    git -C $repo add -- ':(literal)readme.md' 2>&1 | Out-Null
+    $r = Invoke-DeployedGuard $repo
+    $results['UU_tracked_payload_stays_silent'] = (($r.Code -eq 0) -and ($r.Output.Trim() -eq ''))
+
+    # VV: partial tracking is the same defect wearing a passing verdict. Half
+    #     an unignored .github/ is not half a gate; it is a gate that measures
+    #     a subset and reports it as the total.
+    $gh = New-Fixture -RootTokens 100 -Conf $guardConf -Instructions @{
+        'shared.instructions.md' = @{ Tokens = 100; ApplyTo = '**' }
+    }
+    $fixtures += $gh
+    Install-Guard $gh
+    $repo = New-StagedRepo $gh
+    git -C $repo commit -qm seed 2>&1 | Out-Null
+    $local = Join-Path $repo '.github/instructions/local.instructions.md'
+    [IO.File]::WriteAllText($local, ('x' * 400))
+    'x' | Set-Content (Join-Path $repo 'readme.md')
+    git -C $repo add -- ':(literal)readme.md' 2>&1 | Out-Null
+    $r = Invoke-DeployedGuard $repo
+    $results['VV_partial_tracking_reported'] = ($r.Output -match 'PARTIALLY GATED')
+    $results['VV_partial_tracking_names_file'] = ($r.Output -match 'local\.instructions\.md')
+
+    # WW: and on a payload commit the same blindness makes the reading a
+    #     floor. The staged verdict still stands -- an exit code is a statement
+    #     about the commit, untracked files a statement about the repository.
+    Add-Content -LiteralPath (Join-Path $repo '.github/instructions/shared.instructions.md') -Value 'xxxx'
+    git -C $repo add -- ':(literal).github/instructions/shared.instructions.md' 2>&1 | Out-Null
+    $r = Invoke-DeployedGuard $repo
+    $results['WW_floor_reported_on_payload_commit'] = ($r.Output -match 'is a floor')
+    $results['WW_floor_does_not_block'] = ($r.Code -eq 0)
 }
 finally {
     foreach ($f in $fixtures) {
