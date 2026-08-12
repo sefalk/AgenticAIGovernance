@@ -22,7 +22,9 @@ emits nothing, and nothing is exactly what a passing guard emits. A project
 that gitignores ``.github/`` can never stage a budget input, so the guard was
 installed, wired, and structurally unable to fire -- for months reading as
 consent. Whenever the staged set is empty, the guard therefore checks whether
-git holds the payload at all and says so when it does not.
+git holds the payload at all, and when it does not, measures the payload from
+disk instead. Copilot loads those files from disk too; git tracking changes
+nothing about what they cost.
 
 Exit codes: 0 pass, 1 over budget, 2 internal error or unmeasurable payload.
 Blindness is reported, never blocked: an exit code is a statement about the
@@ -194,9 +196,29 @@ def _report_blind_spot() -> int:
         print("  Cause: a gitignore rule matches them.")
     else:
         print("  Cause: they exist on disk but were never added to git.")
-    print("  Restore the gate by tracking them. To measure them now:")
-    print(f"    python {root}/scripts/check-context-budget.py")
+    _advise(root)
+    print("  Restore the gate by tracking them.")
     return 0
+
+
+def _advise(root: str) -> None:
+    """Measure the working tree, because the index is not what pays.
+
+    Copilot loads instruction files from disk; whether git holds them changes
+    nothing about what they cost. The index is the right basis for a *verdict*
+    -- it is what the commit is made of -- but the wrong basis for a *number*
+    when git holds only part of the payload. So the reading is taken from disk
+    and blocks nothing: no commit can be held responsible for a file it did not
+    stage and, here, could not have staged.
+    """
+    checker = _checker()
+    if not checker.is_file():
+        print(f"  Measure them by hand: python {root}/scripts/check-context-budget.py")
+        return
+    print("  Measured from the working tree instead -- advisory, blocks nothing:")
+    if _measure(checker, Path(root), indent="    ") != 0:
+        print("  Over budget, and unenforceable: this guard has no commit to attach")
+        print("  the verdict to until git holds the files.")
 
 
 def _export_index(root: str, dest: Path) -> bool:
@@ -230,14 +252,22 @@ def _export_index(root: str, dest: Path) -> bool:
     return True
 
 
-def _measure(checker: Path, github_dir: Path) -> int:
+def _checker() -> Path:
+    """The measurement, which lives beside this guard: hooks/scripts/ -> scripts/.
+
+    Guard and checker therefore always ship as one version.
+    """
+    return Path(__file__).resolve().parents[2] / "scripts" / "check-context-budget.py"
+
+
+def _measure(checker: Path, github_dir: Path, indent: str = "  ") -> int:
     result = subprocess.run(
         [sys.executable, str(checker), "--github-dir", str(github_dir)],
         capture_output=True, text=True, encoding="utf-8", check=False,
     )
     output = (result.stdout or "") + (result.stderr or "")
     for line in output.splitlines():
-        print(f"  {line}")
+        print(f"{indent}{line}")
     return result.returncode
 
 
@@ -249,9 +279,7 @@ def main() -> int:
         roots = sorted({r for path in _staged_files() if (r := _payload_root(path))})
         if not roots:
             return _report_blind_spot()
-        # The measurement lives beside this guard: hooks/scripts/ -> scripts/.
-        # Guard and checker therefore always ship as one version.
-        checker = Path(__file__).resolve().parents[2] / "scripts" / "check-context-budget.py"
+        checker = _checker()
         if not checker.is_file():
             print(f"{TAG} WARNING: {checker.name} is missing -- staged payload not measured.")
             return 0
