@@ -691,6 +691,11 @@ try {
     $results['TT_untracked_payload_named'] = ($r.Output -match 'NOT GATED')
     $results['TT_untracked_payload_not_blocked'] = ($r.Code -eq 0)
     $results['TT_gitignore_named_as_cause'] = ($r.Output -match 'gitignore rule')
+    # ... and it carries a number. Copilot loads these files from disk whether
+    # or not git holds them, so disk is the honest basis for the reading --
+    # the index is the honest basis only for a verdict.
+    $results['TT_untracked_payload_measured'] = ($r.Output -match 'FAIL')
+    $results['TT_reading_marked_advisory'] = ($r.Output -match 'advisory')
 
     # UU: the ordinary commit must stay silent. A guard that speaks on every
     #     commit becomes a banner, and a banner is the next form of silence.
@@ -720,6 +725,7 @@ try {
     $r = Invoke-DeployedGuard $repo
     $results['VV_partial_tracking_reported'] = ($r.Output -match 'PARTIALLY GATED')
     $results['VV_partial_tracking_names_file'] = ($r.Output -match 'local\.instructions\.md')
+    $results['VV_partial_tracking_measured'] = ($r.Output -match 'PASS --')
 
     # WW: and on a payload commit the same blindness makes the reading a
     #     floor. The staged verdict still stands -- an exit code is a statement
