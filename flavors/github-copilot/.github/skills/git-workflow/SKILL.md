@@ -289,6 +289,12 @@ context to decide what should have been narrowed or moved.
 - **Scope:** runs only when the commit stages `copilot-instructions.md`,
   `instructions/*.md`, `agents/*.agent.md`, or the `af-env.conf` that sets the
   ceiling. Every other commit pays nothing.
+- **Blind spot:** it measures the index, so a payload git does not track cannot
+  be measured — and a guard with nothing to measure emits exactly what a
+  passing guard emits. When the staged set is empty it checks whether git holds
+  the payload at all and prints `NOT GATED` / `PARTIALLY GATED` instead of
+  exiting silently. Reported, never blocked: the exit code judges the commit,
+  not the repository's configuration.
 - **Override (one-off):** `ALLOW_CONTEXT_BUDGET=1 git commit -m "..."`.
 - Checker logic: `.github/hooks/scripts/check-context-budget-staged.py`, which
   exports the staged payload out of the index and hands it to

@@ -168,6 +168,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The context budget guard was inert wherever `.github/` was gitignored, and
+  inert looked exactly like passing.** The guard measures the *staged* payload,
+  which is the right scope: it is why an ordinary commit pays nothing. But a
+  project that blanket-ignores `.github/` can never stage a budget input, so
+  the guard was installed, wired, dispatched on every commit — and structurally
+  unable to fire. It emitted nothing. Nothing is also what a passing guard
+  emits, so for months the absence of complaints read as consent. When the
+  payload was finally tracked, the guard's first run reported three
+  simultaneous breaches (always-on 562 over, conditional 161 over, coordinator
+  636 over) that no single commit had introduced.
+
+  The guard now distinguishes *"this commit stages no budget input"* — the
+  ordinary case, still silent, because whatever it would measure was already
+  measured when it was committed — from *"git holds no budget input at all"*,
+  which is not that case: there was no such commit and there cannot be one.
+  In the second case it prints `NOT GATED`, names how many files it can see on
+  disk but not in git, says whether a gitignore rule is the cause, and gives
+  the command that measures them by hand.
+
+  Partial tracking gets the same treatment, because it is the same defect
+  wearing a passing verdict: half an unignored `.github/` is not half a gate,
+  it is a gate that measures a subset and reports it as the total. Untracked
+  budget inputs are listed as `PARTIALLY GATED` when nothing is staged, and on
+  a payload commit the measurement is labelled a floor rather than a total.
+
+  Blindness is reported, never blocked. An exit code is a statement about the
+  commit in front of the guard; untracked files are a statement about the
+  repository. Charging one to the other would make an unrelated commit pay for
+  a configuration defect. Measuring the working tree on every commit instead
+  was considered and declined: it would report breaches the committer did not
+  stage and cannot act on, and a non-blocking measurement repeated on every
+  commit is the banner that becomes the next form of silence.
+
+  Closes #125.
+
 - **Two gate scripts decoded git and ruff output with the platform default
   encoding.** On a German Windows host that default is `cp1252`, so a valid
   UTF-8 byte sequence containing `0x81` — Cyrillic `Ё` in a commit subject, for
