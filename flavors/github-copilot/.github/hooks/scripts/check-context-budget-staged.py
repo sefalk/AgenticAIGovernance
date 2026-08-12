@@ -17,7 +17,18 @@ The check runs only when the commit stages something the budget depends on
 (``copilot-instructions.md``, ``instructions/*.md``, ``agents/*.agent.md``, or
 the ``af-env.conf`` that sets the ceiling), so every other commit pays nothing.
 
+That scoping has a failure mode of its own: a guard with nothing to measure
+emits nothing, and nothing is exactly what a passing guard emits. A project
+that gitignores ``.github/`` can never stage a budget input, so the guard was
+installed, wired, and structurally unable to fire -- for months reading as
+consent. Whenever the staged set is empty, the guard therefore checks whether
+git holds the payload at all and says so when it does not.
+
 Exit codes: 0 pass, 1 over budget, 2 internal error or unmeasurable payload.
+Blindness is reported, never blocked: an exit code is a statement about the
+commit in front of the guard, and untracked files are a statement about the
+repository. Charging one to the other makes an unrelated commit pay for a
+configuration defect.
 """
 from __future__ import annotations
 
@@ -30,6 +41,7 @@ from pathlib import Path
 
 TAG = "[context-budget-guard]"
 OVERRIDE_ENV = "ALLOW_CONTEXT_BUDGET"
+BUDGET_FILES = frozenset({"copilot-instructions.md", "af-env.conf", ".af-manifest"})
 
 
 def _git_text(args: list[str]) -> str:
@@ -52,29 +64,139 @@ def _staged_files() -> list[str]:
     return [entry for entry in stdout.split("\0") if entry]
 
 
+def _is_budget_input(relative: str) -> bool:
+    """Does a path inside ``.github`` change the verdict?
+
+    The measured content, plus the two files that decide how it is measured:
+    ``af-env.conf`` sets the ceilings -- lowering one can put an untouched
+    payload over budget, and a ceiling that binds only the next edit does not
+    bind -- and ``.af-manifest`` decides which files are the framework's and
+    which are the project's.
+    """
+    parts = relative.split("/")
+    if len(parts) == 1:
+        return parts[0] in BUDGET_FILES
+    if len(parts) != 2:
+        return False
+    if parts[0] == "instructions":
+        return parts[1].endswith(".md")
+    return parts[0] == "agents" and parts[1].endswith(".agent.md")
+
+
 def _payload_root(path: str) -> str | None:
     """Repo-relative ``.github`` directory a staged file puts under budget.
 
-    Returns ``None`` when the path cannot change the verdict. ``af-env.conf``
-    counts even though it is not measured: lowering a ceiling can put an
-    untouched payload over budget, and a ceiling that binds only the next edit
-    does not bind.
-
-    The directory is derived from the path rather than assumed, because the AF
-    source repo nests its payload under ``flavors/github-copilot/`` while a
-    deployed project keeps it at the repo root.
+    Returns ``None`` when the path cannot change the verdict. The directory is
+    derived from the path rather than assumed, because the AF source repo nests
+    its payload under ``flavors/github-copilot/`` while a deployed project keeps
+    it at the repo root.
     """
     parts = path.split("/")
     if ".github" not in parts:
         return None
     index = parts.index(".github")
-    rest = parts[index + 1:]
-    relevant = (
-        rest in (["copilot-instructions.md"], ["af-env.conf"], [".af-manifest"])
-        or (len(rest) == 2 and rest[0] == "instructions" and rest[1].endswith(".md"))
-        or (len(rest) == 2 and rest[0] == "agents" and rest[1].endswith(".agent.md"))
+    if not _is_budget_input("/".join(parts[index + 1:])):
+        return None
+    return "/".join(parts[: index + 1])
+
+
+def _on_disk(root: str) -> set[str]:
+    """Budget inputs present in the working tree under ``root``."""
+    base = Path(root)
+    found = {name for name in BUDGET_FILES if (base / name).is_file()}
+    for sub in ("instructions", "agents"):
+        directory = base / sub
+        if not directory.is_dir():
+            continue
+        for entry in directory.iterdir():
+            relative = f"{sub}/{entry.name}"
+            if entry.is_file() and _is_budget_input(relative):
+                found.add(relative)
+    return found
+
+
+def _tracked(root: str) -> set[str]:
+    """Budget inputs git holds under ``root``."""
+    names = _git_bytes(
+        ["-c", "core.quotePath=false", "ls-files", "-z", "--", f":(literal){root}"],
     )
-    return "/".join(parts[: index + 1]) if relevant else None
+    prefix = f"{root}/"
+    return {
+        entry[len(prefix):]
+        for entry in names.decode("utf-8", "replace").split("\0")
+        if entry.startswith(prefix) and _is_budget_input(entry[len(prefix):])
+    }
+
+
+def _blind_spot(root: str) -> list[str]:
+    """Budget inputs on disk that git does not hold -- invisible to the index."""
+    return sorted(_on_disk(root) - _tracked(root))
+
+
+def _own_root() -> str | None:
+    """Repo-relative payload directory this guard was deployed into.
+
+    With nothing staged there is no path to derive the root from, so the guard
+    falls back to where it lives: ``hooks/scripts/`` -> ``.github/``. Returns
+    ``None`` when that is outside the repository being committed to, which is
+    someone else's payload and none of this guard's business.
+    """
+    top = Path(_git_text(["rev-parse", "--show-toplevel"]).strip()).resolve()
+    try:
+        return Path(__file__).resolve().parents[2].relative_to(top).as_posix()
+    except ValueError:
+        return None
+
+
+def _ignored(paths: list[str]) -> set[str]:
+    """Which of ``paths`` a gitignore rule matches. Empty on any git failure."""
+    result = subprocess.run(
+        ["git", "check-ignore", "-z", "--stdin"],
+        input="\0".join(paths).encode("utf-8"), capture_output=True, check=False,
+    )
+    if result.returncode not in (0, 1):
+        return set()
+    return {p for p in result.stdout.decode("utf-8", "replace").split("\0") if p}
+
+
+def _print_names(names: list[str], limit: int = 5) -> None:
+    for name in names[:limit]:
+        print(f"    {name}")
+    if len(names) > limit:
+        print(f"    ... and {len(names) - limit} more")
+
+
+def _report_blind_spot() -> int:
+    """Say when the guard has nothing to gate, instead of exiting 0 mutely.
+
+    A commit that stages no budget input is the ordinary case and stays silent;
+    the payload it would measure was already measured when it was committed. A
+    repository where git holds no budget input at all is not that case -- there
+    was no such commit and there cannot be one.
+    """
+    root = _own_root()
+    if root is None:
+        return 0
+    on_disk = _on_disk(root)
+    blind = _blind_spot(root) if on_disk else []
+    if not blind:
+        return 0
+    if len(blind) == len(on_disk):
+        print(f"{TAG} NOT GATED -- git tracks none of the {len(on_disk)} files under")
+        print(f"  {root}/ that the budget depends on. Nothing about them can be staged,")
+        print("  so this guard cannot fire on any commit. Its silence was not a pass.")
+    else:
+        print(f"{TAG} PARTIALLY GATED -- {len(blind)} of {len(on_disk)} files under {root}/")
+        print("  that the budget depends on are untracked, so the index measures a subset")
+        print("  and reports it as the total:")
+        _print_names(blind)
+    if _ignored([f"{root}/{name}" for name in blind]):
+        print("  Cause: a gitignore rule matches them.")
+    else:
+        print("  Cause: they exist on disk but were never added to git.")
+    print("  Restore the gate by tracking them. To measure them now:")
+    print(f"    python {root}/scripts/check-context-budget.py")
+    return 0
 
 
 def _export_index(root: str, dest: Path) -> bool:
@@ -126,7 +248,7 @@ def main() -> int:
     try:
         roots = sorted({r for path in _staged_files() if (r := _payload_root(path))})
         if not roots:
-            return 0
+            return _report_blind_spot()
         # The measurement lives beside this guard: hooks/scripts/ -> scripts/.
         # Guard and checker therefore always ship as one version.
         checker = Path(__file__).resolve().parents[2] / "scripts" / "check-context-budget.py"
@@ -142,6 +264,11 @@ def main() -> int:
                     continue
                 print(f"{TAG} measuring the staged payload in {root}:")
                 code = _measure(checker, dest / root)
+            blind = _blind_spot(root)
+            if blind:
+                print(f"{TAG} the reading above is a floor -- {len(blind)} file(s) under")
+                print(f"  {root}/ are untracked, so the index holds no copy to measure:")
+                _print_names(blind)
             if code == 0:
                 continue
             status = max(status, 1 if code == 1 else 2)
