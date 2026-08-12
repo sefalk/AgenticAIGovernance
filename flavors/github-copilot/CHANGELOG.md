@@ -193,13 +193,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   budget inputs are listed as `PARTIALLY GATED` when nothing is staged, and on
   a payload commit the measurement is labelled a floor rather than a total.
 
+  Where the index is blind, the reading is taken from disk. Copilot loads
+  instruction files from the working tree; whether git holds them changes
+  nothing about what they cost, so the index is the right basis for a *verdict*
+  — it is what the commit is made of — and the wrong basis for a *number*. The
+  blind-spot report therefore carries an actual measurement, marked advisory.
+  Measuring the working tree on *every* commit was considered and declined: it
+  would report breaches the committer did not stage and cannot act on, and a
+  repository whose payload is fully tracked would pay for a second reading that
+  can only repeat the first. The measurement runs exactly where the index
+  cannot answer.
+
   Blindness is reported, never blocked. An exit code is a statement about the
   commit in front of the guard; untracked files are a statement about the
   repository. Charging one to the other would make an unrelated commit pay for
-  a configuration defect. Measuring the working tree on every commit instead
-  was considered and declined: it would report breaches the committer did not
-  stage and cannot act on, and a non-blocking measurement repeated on every
-  commit is the banner that becomes the next form of silence.
+  a configuration defect, and would leave a project that deliberately keeps its
+  payload local no way forward except disabling the guard entirely.
 
   Closes #125.
 

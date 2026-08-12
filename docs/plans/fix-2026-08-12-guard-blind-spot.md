@@ -71,8 +71,9 @@ trigger set and the blind-spot set cannot drift apart.
 
 - **Nothing staged, blind spot empty** → silent, exit 0. Unchanged.
 - **Nothing staged, everything blind** → `NOT GATED`, naming the file count,
-  whether a gitignore rule is the cause, and the command to measure by hand.
-- **Nothing staged, partially blind** → `PARTIALLY GATED`, listing the files.
+  whether a gitignore rule is the cause, and the payload measured from disk.
+- **Nothing staged, partially blind** → `PARTIALLY GATED`, listing the files,
+  with the same disk reading.
 - **Payload commit with a blind spot** → the measurement is labelled a floor,
   not a total, and the omitted files are named.
 
@@ -81,44 +82,56 @@ guard falls back to where it is installed: `hooks/scripts/` → `.github/`.
 Outside the repository being committed to it stays silent — that is someone
 else's payload.
 
-## Two decisions worth recording
+## Three decisions worth recording
+
+**The reading comes from disk where the index is blind.** Copilot loads
+instruction files from the working tree; whether git holds them changes nothing
+about what they cost. So the index is the right basis for a *verdict* — it is
+what the commit is made of, which is what BB/CC pin — and the wrong basis for a
+*number*. Measuring the working tree on *every* commit was considered and
+declined: it would report breaches the committer did not stage and cannot act
+on, and a fully-tracked repository would pay 0.6 s for a second reading that
+can only repeat the first. The measurement runs exactly where the index cannot
+answer, which costs a healthy repository nothing and stops the moment the
+tracking is fixed.
 
 **Blindness is reported, never blocked.** An exit code is a statement about the
 commit in front of the guard; untracked files are a statement about the
 repository. Charging one to the other would make an unrelated commit pay for a
 configuration defect, and would hand a project that deliberately keeps its
 payload local no way forward except disabling the guard entirely. The
-persistent, specific complaint is the enforcement.
+persistent, specific complaint plus a real number is the enforcement.
 
-**Measuring the working tree on every commit was declined.** The issue raised
-it as an option. It would give a reading on every commit — including breaches
-the committer did not stage, cannot act on, and did not cause. And a
-non-blocking measurement printed identically on every commit is the banner that
-becomes the next form of silence. The guard reports the defect it can act on
-(the gate is off) and points at the one command that produces the number.
+**The advisory failure output is verbose, deliberately.** When the disk reading
+fails it carries the checker's full breakdown and fix advice — roughly twenty
+lines on every commit. That is the cost of a payload outside version control,
+it names the file responsible, and it ends the moment the tracking is fixed. A
+passing reading is a single line.
 
 ## Changes
 
 | File | Change |
 |---|---|
-| `.github/hooks/scripts/check-context-budget-staged.py` | `_is_budget_input`, `_on_disk`, `_tracked`, `_blind_spot`, `_own_root`, `_ignored`, `_report_blind_spot`; `_payload_root` rewritten on the shared predicate; floor note on payload commits |
-| `.github/scripts/test-context-budget.ps1` | Cases TT–WW (8 checks) plus `Install-Guard` / `Invoke-DeployedGuard`, which deploy the guard *into* the fixture so it can locate its own payload |
+| `.github/hooks/scripts/check-context-budget-staged.py` | `_is_budget_input`, `_on_disk`, `_tracked`, `_blind_spot`, `_own_root`, `_ignored`, `_report_blind_spot`, `_advise`, `_checker`; `_payload_root` rewritten on the shared predicate; floor note on payload commits |
+| `.github/scripts/test-context-budget.ps1` | Cases TT–WW (11 checks) plus `Install-Guard` / `Invoke-DeployedGuard`, which deploy the guard *into* the fixture so it can locate its own payload |
 | `.github/skills/git-workflow/SKILL.md` | Blind-spot bullet beside the existing scope and override bullets |
 | `CHANGELOG.md` | Entry under Unreleased → Fixed |
 
 ## Verification
 
-- `test-context-budget.ps1`: **79/79** checks pass (71 before, 8 added). The new
+- `test-context-budget.ps1`: **82/82** checks pass (71 before, 11 added). The new
   assertions match strings this change introduces (`NOT GATED`,
-  `PARTIALLY GATED`, `is a floor`, `gitignore rule`), none of which the guard
-  could previously emit.
+  `PARTIALLY GATED`, `is a floor`, `gitignore rule`, `advisory`), none of which
+  the guard could previously emit.
 - `python -m ruff check` clean on the guard.
 - Case `UU_tracked_payload_stays_silent` pins the ordinary commit as silent —
-  the fix must not turn every commit into a banner.
+  the fix must not turn every commit into a banner, and a healthy repository
+  must not pay for a measurement.
 - Run against the AF repository itself with nothing staged: silent, exit 0
   (its payload is fully tracked).
 - Run against a throwaway repository with `.github/` gitignored: `NOT GATED`,
-  4 files named, gitignore identified as the cause, exit 0.
+  files named, gitignore identified as the cause, `FAIL -- AF always-on set is
+  1,507 tok over budget` printed as advisory, exit 0.
 
 ## Known limitation
 
