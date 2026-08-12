@@ -345,6 +345,37 @@ try {
     $fixtures += $ghBad
     $results['W_invalid_utf8_blocked'] = ((Invoke-Checker $ghBad).Code -eq 2)
 
+    # --- Tokenizer verification (issue #59) ------------------------------
+    # The divisor is a measured constant now, not a rule of thumb, so it has
+    # to stay falsifiable: a number nobody can re-derive decays back into
+    # folklore as soon as the payload's character mix drifts.
+    #
+    # This runs against the real payload, not a fixture. Fixture text is a run
+    # of filler characters, which BPE collapses to a handful of tokens -- a
+    # synthetic case here would measure the fixture generator and fail an
+    # entirely correct divisor.
+    & $python -c 'import tiktoken' 2>&1 | Out-Null
+    $hasTiktoken = ($LASTEXITCODE -eq 0)
+    $rVerify = Invoke-Checker $realGh @('--verify-tokenizer')
+    if ($hasTiktoken) {
+        $results['JJ_divisor_still_matches_real_payload'] =
+            ($rVerify.Code -eq 0 -and $rVerify.Output -match 'measured ratio')
+    }
+    else {
+        # A verification that could not run is an unknown result. Exiting 0
+        # would report "calibration fine" on the strength of a missing import.
+        $results['JJ_verify_tokenizer_blocked_without_tiktoken'] = ($rVerify.Code -eq 2)
+    }
+
+    # KK: whichever branch ran above, the gate itself must still work where
+    #     tiktoken does not exist. Only the source can assert that -- an import
+    #     test passes for the wrong reason on a host that has the package. The
+    #     pattern is anchored at column zero on purpose: the flag's own import
+    #     is indented inside its handler, which is exactly the difference.
+    $checkerSrc = Get-Content $checker -Raw
+    $results['KK_gate_has_no_toplevel_tokenizer_import'] =
+        ($checkerSrc -notmatch '(?m)^import tiktoken' -and $checkerSrc -notmatch '(?m)^from tiktoken')
+
     # --- The commit guard (issue #85) ------------------------------------
     # Everything above measures a directory on request. For months nothing
     # made the request, so the payload drifted 273 tokens over its own
