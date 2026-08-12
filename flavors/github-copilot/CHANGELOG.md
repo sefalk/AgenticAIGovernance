@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The context budget has two owners now, so it stops failing on arrival.**
+  One ceiling covered the framework's instruction files and the consuming
+  project's together. The framework's own always-on files spend 3,461 tokens of
+  it, which left the project 1,489 to describe itself in — and AF's own
+  `copilot-instructions.md` template invites about 2,000. Issue #107 measured a
+  fresh consumer failing all three budgets on the day it was deployed, before
+  anyone had drifted anywhere.
+
+  A gate that fails on arrival has two available responses, and both destroy
+  it. Raise the numbers until it passes, and a drift detector becomes a rubber
+  stamp whose passing verdict carries no information — the same failure shape
+  as #98 and #27. Or shrink the project's own self-description to fit the
+  framework's leftovers, which is what the consumer in question actually did:
+  its `copilot-instructions.md` went from 2,051 tokens to 1,405, a 31% cut to
+  the file that tells every agent what the project *is*. It passes today with
+  84 tokens of headroom.
+
+  So the ceilings are split by author. `AF_CONTEXT_BUDGET_TOKENS`,
+  `AF_CONDITIONAL_BUDGET_TOKENS` and `AF_AGENT_CONTEXT_BUDGET_TOKENS` now cover
+  only what the framework ships and controls, and were **tightened** to match:
+  4,950 → 3,500, 5,500 → 3,850, 10,900 → 9,450, each the measured framework
+  share plus the headroom it already carried. The project's files are charged
+  to two new keys, `AF_PROJECT_CONTEXT_BUDGET_TOKENS` and
+  `AF_PROJECT_CONDITIONAL_BUDGET_TOKENS`, seeded from what the project actually
+  has — so the gate detects drift from the project's own baseline instead of
+  from a number the framework invented for someone else's repository.
+
+  Ownership is not guessed. `[customizable]` in `.af-manifest` marks the files
+  AF ships as templates and invites the project to rewrite; `.af-hashes` shows
+  what AF deployed at all, which is how a project's own instruction file is
+  told apart from AF's in the same directory. Checked against a real consumer,
+  the annotation is exactly accurate: only the customizable files had diverged,
+  the rest were byte-identical. Without `.af-manifest` the check is **BLOCKED**,
+  not passed — charging the wrong share to the wrong owner is how this defect
+  started.
+
+  Per-agent totals no longer include the project's always-on set. An agent that
+  fits must not stop fitting because the consuming project wrote itself a
+  longer overview. The real total is still printed as the worst case.
+
+  `deploy.ps1` and `deploy.sh` seed the project ceilings on a **fresh** install
+  only — on an update `af-env.conf` is a baseline somebody chose, and
+  overwriting it would erase the drift the ceiling exists to detect. Where no
+  Python is available deploy says so and names the command. Existing consumers
+  never receive the keys at all (`af-env.conf` is protected on update); until
+  they are seeded the project share is measured, printed as `UNBUDGETED` and
+  left ungated, because a project that never stated a baseline has not drifted
+  from one.
+
 - **The token divisor is a measurement now, not a rule of thumb.**
   `check-context-budget.py` estimates tokens as `characters / 4`, and the code
   said outright that the 4 "has not been calibrated against a tokenizer for
