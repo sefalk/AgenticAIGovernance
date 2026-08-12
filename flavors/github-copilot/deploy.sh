@@ -97,6 +97,12 @@ TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
 TARGET_GITHUB="$TARGET_DIR/.github"
 TARGET_VSCODE="$TARGET_DIR/.vscode"
 TARGET_AF_ENV="$TARGET_GITHUB/af-env.conf"
+# Captured before anything is written. After deployment the file always exists,
+# so this is the only moment at which "the target had no AF config" is knowable
+# -- and it decides whether the project context budgets are AF's shipped
+# placeholders (seed over them) or a baseline someone chose (leave alone).
+AF_ENV_WAS_ABSENT=0
+[[ -f "$TARGET_AF_ENV" ]] || AF_ENV_WAS_ABSENT=1
 
 get_af_env_value() {
     local key="$1"
@@ -1091,6 +1097,38 @@ source: $AF_ROOT
 EOF
 fi
 echo "  WRITE   .github/.af-version"
+
+# ── Project context budgets ────────────────────────────────────────────────
+# The context budget gate splits its ceilings: AF's own instruction files are
+# measured against limits calibrated in the framework repository, and the
+# project's own files against limits calibrated here. The second pair cannot
+# ship as a constant -- a number that fits this project fails the next one, and
+# a number generous enough for every project measures nothing (issue #107).
+# So a fresh install seeds them from what the target actually has.
+#
+# Only on a fresh install. On an update af-env.conf is customizable and
+# protected, and whatever is in it is a baseline someone chose; overwriting it
+# would erase the drift the gate exists to detect.
+if [[ "$AF_ENV_WAS_ABSENT" == "1" && "$DRY_RUN" != "true" ]]; then
+    budget_script="$TARGET_GITHUB/scripts/check-context-budget.py"
+    py_cmd=""
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1; then py_cmd="$candidate"; break; fi
+    done
+    if [[ ! -f "$budget_script" ]]; then
+        echo "  SKIP    project context budgets -- checker not deployed"
+    elif [[ -z "$py_cmd" ]]; then
+        echo ""
+        echo "  WARN    project context budgets not seeded -- no Python found."
+        echo "          af-env.conf carries the framework's own numbers, which do not"
+        echo "          describe this project. Run once, then commit af-env.conf:"
+        echo "            python .github/scripts/check-context-budget.py --seed-project-budget --force"
+    elif "$py_cmd" "$budget_script" --github-dir "$TARGET_GITHUB" --seed-project-budget --force >/dev/null; then
+        echo "  SEED    .github/af-env.conf -- project context budgets from this repository"
+    else
+        echo "  WARN    project context budget seeding failed -- af-env.conf keeps the framework's numbers"
+    fi
+fi
 
 # Summary
 echo ""

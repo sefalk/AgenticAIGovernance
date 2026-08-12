@@ -129,6 +129,11 @@ $TargetDir = (Resolve-Path $TargetDir).Path
 $TargetGitHub = Join-Path $TargetDir '.github'
 $TargetVSCode = Join-Path $TargetDir '.vscode'
 $TargetAFEnv = Join-Path $TargetGitHub 'af-env.conf'
+# Captured before anything is written. After deployment the file always exists,
+# so this is the only moment at which "the target had no AF config" is knowable
+# -- and it decides whether the project context budgets are AF's shipped
+# placeholders (seed over them) or a baseline someone chose (leave alone).
+$script:AFEnvWasAbsent = -not (Test-Path $TargetAFEnv)
 $script:BackupPruneDaysFromCli = $PSBoundParameters.ContainsKey('BackupPruneDays')
 
 function Get-AFEnvValue {
@@ -1050,6 +1055,43 @@ if (-not $DryRun) {
     [System.IO.File]::WriteAllText($DeployedVersionFile, $vc, (New-Object System.Text.UTF8Encoding($false)))
 }
 Write-Host "  WRITE   .github/.af-version" -ForegroundColor Cyan
+
+# ── Project context budgets ────────────────────────────────────────────────
+# The context budget gate splits its ceilings: AF's own instruction files are
+# measured against limits calibrated in the framework repository, and the
+# project's own files against limits calibrated here. The second pair cannot
+# ship as a constant -- a number that fits this project fails the next one, and
+# a number generous enough for every project measures nothing (issue #107).
+# So a fresh install seeds them from what the target actually has.
+#
+# Only on a fresh install. On an update af-env.conf is customizable and
+# protected, and whatever is in it is a baseline someone chose; overwriting it
+# would erase the drift the gate exists to detect.
+if ($script:AFEnvWasAbsent -and -not $DryRun) {
+    $budgetScript = Join-Path $TargetGitHub 'scripts\check-context-budget.py'
+    $py = @(Find-PythonCommand)
+    if (-not (Test-Path $budgetScript)) {
+        Write-Host "  SKIP    project context budgets -- checker not deployed" -ForegroundColor DarkGray
+    } elseif ($py.Count -eq 0) {
+        Write-Host ""
+        Write-Host "  WARN    project context budgets not seeded -- no Python found." -ForegroundColor Yellow
+        Write-Host "          af-env.conf carries the framework's own numbers, which do not" -ForegroundColor Yellow
+        Write-Host "          describe this project. Run once, then commit af-env.conf:" -ForegroundColor Yellow
+        Write-Host "            python .github/scripts/check-context-budget.py --seed-project-budget --force" -ForegroundColor Yellow
+    } else {
+        $seedArgs = @($budgetScript, '--github-dir', $TargetGitHub, '--seed-project-budget', '--force')
+        if ($py.Count -gt 1) {
+            & $py[0] $py[1] @seedArgs | Out-Null
+        } else {
+            & $py[0] @seedArgs | Out-Null
+        }
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  SEED    .github/af-env.conf -- project context budgets from this repository" -ForegroundColor Cyan
+        } else {
+            Write-Host "  WARN    project context budget seeding failed (exit $LASTEXITCODE) -- af-env.conf keeps the framework's numbers" -ForegroundColor Yellow
+        }
+    }
+}
 
 # ── Stale activation check ─────────────────────────────────────────────────
 # Warn when a project has activated a skill (skills/{name}/) but the

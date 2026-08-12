@@ -22,6 +22,7 @@ Exit codes: 0 pass, 1 over budget, 2 internal error or unmeasurable payload.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -69,7 +70,7 @@ def _payload_root(path: str) -> str | None:
     index = parts.index(".github")
     rest = parts[index + 1:]
     relevant = (
-        rest in (["copilot-instructions.md"], ["af-env.conf"])
+        rest in (["copilot-instructions.md"], ["af-env.conf"], [".af-manifest"])
         or (len(rest) == 2 and rest[0] == "instructions" and rest[1].endswith(".md"))
         or (len(rest) == 2 and rest[0] == "agents" and rest[1].endswith(".agent.md"))
     )
@@ -80,11 +81,14 @@ def _export_index(root: str, dest: Path) -> bool:
     """Write the indexed payload under ``root`` into ``dest``.
 
     ``af-env.conf`` travels with it: the budgets that apply are the ones being
-    committed to *this* repository, not the framework's own.
+    committed to *this* repository, not the framework's own. ``.af-manifest``
+    likewise decides which files are the framework's and which are the
+    project's, and a commit may be changing that.
     """
     pathspecs = [
         f":(literal){root}/copilot-instructions.md",
         f":(literal){root}/af-env.conf",
+        f":(literal){root}/.af-manifest",
         f":(literal){root}/instructions",
         f":(literal){root}/agents",
     ]
@@ -93,6 +97,14 @@ def _export_index(root: str, dest: Path) -> bool:
         return False
     prefix = dest.as_posix().rstrip("/") + "/"
     _git_bytes(["checkout-index", "-f", "-z", "--stdin", "--prefix", prefix], stdin=names)
+    # .af-hashes is a deployment record, not source: it is untracked in a
+    # consumer, so the index has no copy to export. Without it the checker
+    # cannot see that a project's own instruction file was never shipped by AF,
+    # and charges it to the framework -- a false failure, not a false pass, but
+    # a confusing one. Take the working-tree copy; nothing about it is stageable.
+    hashes = Path(root) / ".af-hashes"
+    if hashes.is_file():
+        shutil.copy2(hashes, dest / root / ".af-hashes")
     return True
 
 
