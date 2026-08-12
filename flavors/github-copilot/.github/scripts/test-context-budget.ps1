@@ -55,6 +55,9 @@ function New-Fixture {
         [hashtable]$Agents = @{},         # name -> tokens
         [string]$Conf = $null,
         [byte[]]$ConfBytes = $null,
+        [string[]]$Customizable = @(),    # manifest paths marked [customizable]
+        [string[]]$Hashes = $null,        # write .af-hashes listing these paths
+        [switch]$NoManifest,
         [switch]$NoInstructionsDir,
         [switch]$NoRootInstructions,
         [switch]$NoAgentsDir
@@ -93,6 +96,19 @@ function New-Fixture {
         [IO.File]::WriteAllBytes((Join-Path $gh 'af-env.conf'), $ConfBytes)
     } elseif ($null -ne $Conf) {
         [IO.File]::WriteAllText((Join-Path $gh 'af-env.conf'), $Conf)
+    }
+    # Ownership inputs. Default: a manifest with no [customizable] entries and
+    # no .af-hashes, so every file is AF-owned and the pre-split cases keep
+    # measuring exactly what they measured before.
+    if (-not $NoManifest) {
+        $lines = @('# fixture manifest', 'af-env.conf', 'copilot-instructions.md', 'instructions/', 'agents/')
+        foreach ($path in $Customizable) { $lines += "$path  [customizable]" }
+        [IO.File]::WriteAllText((Join-Path $gh '.af-manifest'), ($lines -join "`n") + "`n")
+    }
+    if ($null -ne $Hashes) {
+        $lines = @('# AF deployment baseline hashes')
+        foreach ($path in $Hashes) { $lines += "$path=0000" }
+        [IO.File]::WriteAllText((Join-Path $gh '.af-hashes'), ($lines -join "`n") + "`n")
     }
     return $gh
 }
@@ -228,7 +244,7 @@ try {
     }
     $fixtures += $gh
     $r = Invoke-Checker $gh @('--verbose')
-    $results['N_worst_case_over_marked'] = ($r.Output -match 'exceeds agent budget')
+    $results['N_worst_case_over_marked'] = ($r.Output -match 'worst case .* exceeds')
     $results['N_worst_case_over_does_not_fail'] = ($r.Code -eq 0)
 
     # O: the conditional total is enforced, not merely displayed.
@@ -375,6 +391,105 @@ try {
     $checkerSrc = Get-Content $checker -Raw
     $results['KK_gate_has_no_toplevel_tokenizer_import'] =
         ($checkerSrc -notmatch '(?m)^import tiktoken' -and $checkerSrc -notmatch '(?m)^from tiktoken')
+
+    # --- Framework share vs project share (issue #107) --------------------
+    # One ceiling over both shares meant AF's own files spent most of it and the
+    # project inherited the remainder as its allowance. Every consumer failed on
+    # arrival, and the only ways out were to raise the ceiling until it passed
+    # or to shrink the project's own self-description to fit the leftovers.
+    $splitConf = "AF_CONTEXT_BUDGET_TOKENS=1000`nAF_AGENT_CONTEXT_BUDGET_TOKENS=5000`nAF_CONDITIONAL_BUDGET_TOKENS=2000`n"
+
+    # LL: a [customizable] file is the project's, and is not charged to AF.
+    $gh = New-Fixture -RootTokens 100 -Conf $splitConf -Customizable @('copilot-instructions.md') `
+        -Instructions @{ 'wide.instructions.md' = @{ Tokens = 200; ApplyTo = '**' } }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh @('--verbose')
+    $results['LL_customizable_charged_to_project'] =
+        ($r.Output -match '200 tok\s+AF-owned' -and $r.Output -match '100 tok\s+project-owned')
+
+    # MM: a project share with no stated ceiling is measured and named, not
+    #     failed. A project that never declared a baseline has not drifted from
+    #     one, and inventing one on its behalf is the arrival failure itself.
+    $gh = New-Fixture -RootTokens 5000 -Conf $splitConf -Customizable @('copilot-instructions.md') `
+        -Instructions @{ 'wide.instructions.md' = @{ Tokens = 200; ApplyTo = '**' } }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh
+    $results['MM_unseeded_project_share_does_not_fail'] = ($r.Code -eq 0)
+    $results['MM_unseeded_project_share_is_named'] = ($r.Output -match 'UNBUDGETED')
+
+    # NN: once seeded, the project ceiling has teeth of its own, and says so in
+    #     the project's own terms rather than the framework's.
+    $seededConf = $splitConf + "AF_PROJECT_CONTEXT_BUDGET_TOKENS=1000`n"
+    $gh = New-Fixture -RootTokens 5000 -Conf $seededConf -Customizable @('copilot-instructions.md') `
+        -Instructions @{ 'wide.instructions.md' = @{ Tokens = 200; ApplyTo = '**' } }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh
+    $results['NN_seeded_project_over_budget_fails'] = ($r.Code -eq 1)
+    $results['NN_project_failure_is_distinct'] = ($r.Output -match 'over its own budget')
+
+    # OO: a project's own instruction file sits in the same directory as AF's
+    #     and carries no annotation. The deployment record is what distinguishes
+    #     them: AF never shipped it, so it is not AF's to budget.
+    $gh = New-Fixture -RootTokens 100 -Conf $splitConf -Instructions @{
+        'wide.instructions.md'  = @{ Tokens = 200; ApplyTo = '**' }
+        'local.instructions.md' = @{ Tokens = 300; ApplyTo = '**' }
+    } -Hashes @('copilot-instructions.md', 'instructions/wide.instructions.md', 'agents/stub.agent.md')
+    $fixtures += $gh
+    $r = Invoke-Checker $gh @('--verbose')
+    $results['OO_undeployed_file_is_project_owned'] = ($r.Output -match '300 tok\s+project\s+local\.instructions\.md')
+
+    # PP: without the manifest neither share can be attributed. Charging the
+    #     project's files to AF reproduces the defect; charging AF's files to the
+    #     project makes the framework ceiling vacuous. Result unknown, not pass.
+    $gh = New-Fixture -RootTokens 100 -Conf $splitConf -NoManifest `
+        -Instructions @{ 'wide.instructions.md' = @{ Tokens = 200; ApplyTo = '**' } }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh
+    $results['PP_missing_manifest_blocked'] = ($r.Code -eq 2 -and $r.Output -match 'af-manifest')
+
+    # QQ: the regression #107 describes. An agent that fits must not stop
+    #     fitting because the consuming project wrote itself a longer overview.
+    #     own 4,000 + AF always-on 200 = 4,200 against 5,000; the project's
+    #     2,000 is real cost, reported as worst case, but not AF's to budget.
+    $gh = New-Fixture -RootTokens 2000 -Conf $splitConf -Agents @{ 'solo' = 4000 } `
+        -Customizable @('copilot-instructions.md') `
+        -Instructions @{ 'wide.instructions.md' = @{ Tokens = 200; ApplyTo = '**' } }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh
+    $results['QQ_agent_not_failed_by_project_share'] = ($r.Code -eq 0)
+
+    # RR: seeding records what the project has, so the ceiling is the project's
+    #     own baseline rather than a number the framework invented for someone
+    #     else's repository.
+    $gh = New-Fixture -RootTokens 100 -Conf $splitConf -Customizable @('copilot-instructions.md') `
+        -Instructions @{ 'wide.instructions.md' = @{ Tokens = 200; ApplyTo = '**' } }
+    $fixtures += $gh
+    $confPath = Join-Path $gh 'af-env.conf'
+    $r = Invoke-Checker $gh @('--seed-project-budget')
+    $seeded = Get-Content $confPath -Raw
+    $results['RR_seed_writes_context_key'] = ($r.Code -eq 0 -and $seeded -match 'AF_PROJECT_CONTEXT_BUDGET_TOKENS=150')
+    $results['RR_seed_writes_conditional_key'] = ($seeded -match 'AF_PROJECT_CONDITIONAL_BUDGET_TOKENS=\d')
+    $results['RR_seeded_project_no_longer_unbudgeted'] =
+        ((Invoke-Checker $gh).Output -notmatch 'UNBUDGETED')
+    # A seeded budget is a decision someone made. Re-running deploy must not
+    # quietly replace it with today's measurement -- that would erase exactly
+    # the drift the ceiling exists to detect.
+    $r = Invoke-Checker $gh @('--seed-project-budget')
+    $results['RR_seed_refuses_silent_overwrite'] = ($r.Code -eq 1 -and $r.Output -match 'refusing to overwrite')
+    $results['RR_seed_force_overwrites'] = ((Invoke-Checker $gh @('--seed-project-budget', '--force')).Code -eq 0)
+
+    # SS: deploy is where a consumer gets its baseline. A fresh install that
+    #     silently kept the framework's own numbers would ship the arrival
+    #     failure again, so both dialects must carry the seeding step. Only
+    #     checked where the deploy scripts live -- a consumer has no copy.
+    $deployPs1 = Join-Path $repoRootAF 'deploy.ps1'
+    $deploySh = Join-Path $repoRootAF 'deploy.sh'
+    if ((Test-Path $deployPs1) -and (Test-Path $deploySh)) {
+        $results['SS_deploy_ps1_seeds_project_budget'] =
+            ((Get-Content $deployPs1 -Raw) -match '--seed-project-budget')
+        $results['SS_deploy_sh_seeds_project_budget'] =
+            ((Get-Content $deploySh -Raw) -match '--seed-project-budget')
+    }
 
     # --- The commit guard (issue #85) ------------------------------------
     # Everything above measures a directory on request. For months nothing
