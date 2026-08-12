@@ -9,6 +9,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The token divisor is a measurement now, not a rule of thumb.**
+  `check-context-budget.py` estimates tokens as `characters / 4`, and the code
+  said outright that the 4 "has not been calibrated against a tokenizer for
+  this payload". Issue #59 expected that to be wrong in the unsafe direction:
+  dense markdown was thought to run 3–3.5 characters per token, which would
+  mean every budget understated real consumption by 15–30%.
+
+  It was measured, against all 24 files the gate covers, with tiktoken
+  `o200k_base` cross-checked against `cl100k_base`:
+
+  ```
+  183,317 chars → 44,602 real tokens = 4.110 chars/token
+  per file 3.83 – 4.29 (median 4.111)
+  ```
+
+  **The suspicion was wrong.** `characters/4` lands within −4.2%/+7.2% per file
+  (+2.8% median) and it errs *high* — it reports slightly more tokens than
+  exist, which is the safe direction for a ceiling. By group: always-on +3.6%,
+  conditional +1.7%, agents +2.8%.
+
+  So the constant does not move and the **budgets are not restated**. Changing
+  4 to 4.11 would shift every figure by under 3% — inside the noise this gate
+  exists to ignore — and would relax all three ceilings for no gain. What
+  changes is the justification: the calibration date, the tokenizers, the
+  ratio, the per-file band and the direction of the error are now recorded
+  beside the constant and beside the budgets in `af-env.conf`, where somebody
+  deciding whether to raise a ceiling will actually be looking.
+
+### Added
+
+- **`check-context-budget.py --verify-tokenizer`.** A measured constant that
+  nobody can re-derive decays back into folklore the moment the payload's
+  character mix drifts. The flag re-runs the calibration and prints per-file
+  and aggregate drift against the divisor in use.
+
+  It imports tiktoken lazily, inside the handler, so the gate itself acquires
+  no third-party dependency — asserted on the source, because an import test
+  passes for the wrong reason on a host that has the package. It exits 1 when
+  the aggregate error exceeds 10%, since these figures are quoted to humans as
+  "tokens" in plans and pull requests. Without tiktoken it exits **2
+  (BLOCKED)**, not 0: a verification that could not run is an unknown result,
+  and "calibration fine" reported on the strength of a missing import is the
+  failure this framework keeps closing.
+
+  The regression case runs it against the **real** payload rather than a
+  fixture, which makes the calibration itself a live gate: if the character
+  mix ever drifts past 10%, the suite goes red. A synthetic fixture cannot do
+  this job — fixture text is a run of filler characters, which BPE collapses to
+  a handful of tokens, so it measures the fixture generator and fails a correct
+  divisor.
+
+  Known limitation, stated rather than buried: tiktoken is an OpenAI tokenizer,
+  and this payload is consumed by Claude, whose BPE is not available here. The
+  agreement between the two OpenAI vocabularies suggests the ratio is robust
+  for English markdown, but that is an inference, not a measurement of the
+  tokenizer that bills.
+
 - **The retro destination is now a project decision (`RETRO_DIR`).** Agent
   retros were classed with the workflow logs and gitignored on that basis.
   The classification was checked and does not hold.

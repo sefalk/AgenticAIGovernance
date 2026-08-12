@@ -25,7 +25,9 @@ Budgets come from ``.github/af-env.conf``:
   AF_CONDITIONAL_BUDGET_TOKENS    -- all narrowly-scoped instruction files
 
 Token figures are estimated as characters/4 and are used for drift detection
-only; they are not a tokenizer-derived or billed count.
+only; they are not a billed count. The divisor is calibrated against a real
+tokenizer -- see ``CHARS_PER_TOKEN`` -- and ``--verify-tokenizer`` re-runs that
+calibration wherever tiktoken is installed.
 
 Exit codes: 0 pass, 1 over budget, 2 blocked (required input missing/unreadable).
 """
@@ -45,11 +47,22 @@ from pathlib import Path
 # none of which change a single character the model reads. A gate whose whole
 # job is detecting real change must not react to those (issue #59).
 #
-# The divisor is the "~4 characters per token" rule of thumb for English prose.
-# It has not been calibrated against a tokenizer for this payload, which is
-# denser markdown; the budgets are calibrated against this estimator's own
-# scale, so the gate is internally consistent, but the figures it prints are
-# estimates and not a billed token count.
+# The divisor is measured, not assumed. Calibrated 2026-08-12 with tiktoken
+# (o200k_base, cross-checked against cl100k_base) over all 24 files this gate
+# measures: 183,317 characters to 44,602 real tokens = 4.110 characters per
+# token, per-file range 3.83-4.29. Characters/4 therefore lands within
+# -4.2%/+7.2% per file (+2.8% median) and errs high -- it reports slightly more
+# tokens than exist, which is the safe direction for a ceiling.
+#
+# It stays 4 rather than 4.11: the correction is smaller than the noise this
+# gate exists to ignore, and it would relax all three budgets for nothing. The
+# suspicion recorded in issue #59 -- that dense markdown runs 3-3.5 characters
+# per token, so every budget understates reality by 15-30% -- was measured and
+# is not true of this payload.
+#
+# `--verify-tokenizer` re-runs that measurement wherever tiktoken happens to be
+# installed, so the constant stays falsifiable as the payload's character mix
+# drifts.
 CHARS_PER_TOKEN = 4
 
 # applyTo globs that match every file. An author writing any of these means
@@ -218,6 +231,82 @@ def _print_breakdown(entries: list[tuple[str, int]], total: int, budget: int) ->
     print(f"  {total:6,} tok  TOTAL (budget {budget:,})")
 
 
+def _measured_files(github_dir: Path) -> list[Path]:
+    """Every file the budgets are computed from, in report order."""
+    paths = [github_dir / "copilot-instructions.md"]
+    paths += sorted((github_dir / "instructions").glob("*.md"))
+    paths += sorted((github_dir / "agents").glob("*.agent.md"))
+    return [path for path in paths if path.is_file()]
+
+
+def _verify_tokenizer(github_dir: Path) -> int:
+    """Re-measure characters-per-token against a real tokenizer.
+
+    A development aid, not part of the gate. It may import tiktoken; the gate
+    itself must not, or it stops running wherever that package is absent.
+
+    Returns 1 when the aggregate error exceeds 10%, because these figures are
+    quoted to humans as "tokens" in plan documents and pull request bodies. A
+    constant that has drifted that far is no longer describing the payload.
+    """
+    try:
+        import tiktoken
+    except ImportError as exc:
+        # Not exit 0: an unrun verification is an unknown result, and the whole
+        # point of this flag is to make the constant falsifiable.
+        raise Blocked(
+            "--verify-tokenizer needs tiktoken, which is not installed. Install it "
+            "in a throwaway environment; the gate itself must stay dependency-free."
+        ) from exc
+
+    paths = _measured_files(github_dir)
+    if not paths:
+        raise Blocked(f"no measurable payload files under {github_dir}")
+
+    encoding = tiktoken.get_encoding("o200k_base")
+    print(f"{TAG} tokenizer verification -- o200k_base vs characters/{CHARS_PER_TOKEN}")
+    print(f"  {'file':<44} {'chars':>8} {'est':>7} {'actual':>7} {'error':>7}")
+
+    total_chars = 0
+    total_actual = 0
+    worst_error = 0.0
+    worst_name = ""
+    for path in paths:
+        text = _read_text(path)
+        actual = len(encoding.encode(text))
+        if not actual:
+            continue
+        estimate = len(text) // CHARS_PER_TOKEN
+        error = (estimate - actual) / actual * 100
+        total_chars += len(text)
+        total_actual += actual
+        if abs(error) > abs(worst_error):
+            worst_error, worst_name = error, path.name
+        print(f"  {path.name:<44} {len(text):>8,} {estimate:>7,} {actual:>7,} {error:>+6.1f}%")
+
+    if not total_actual:
+        raise Blocked("tokenizer returned no tokens for the payload")
+
+    ratio = total_chars / total_actual
+    aggregate_error = (total_chars / CHARS_PER_TOKEN - total_actual) / total_actual * 100
+    print(f"  {'-' * 44}")
+    print(f"  {len(paths)} files: {total_chars:,} chars, {total_actual:,} real tokens")
+    print(f"  measured ratio {ratio:.3f} chars/token (divisor in use: {CHARS_PER_TOKEN})")
+    print(f"  aggregate error {aggregate_error:+.1f}%, worst file {worst_error:+.1f}% ({worst_name})")
+
+    if abs(aggregate_error) > 10:
+        print()
+        print(
+            f"{TAG} FAIL -- the divisor is {abs(aggregate_error):.1f}% off; "
+            f"the payload now measures {ratio:.3f} chars/token."
+        )
+        print("Update CHARS_PER_TOKEN and the calibration note beside the budgets.")
+        return 1
+
+    print(f"{TAG} PASS -- divisor {CHARS_PER_TOKEN} is within 10% of the measured ratio.")
+    return 0
+
+
 def _print_conditional(entries: list[tuple[str, int, str]], total: int, budget: int) -> None:
     print(f"{TAG} conditional set -- loaded when a matching file is in context:")
     for name, tokens, glob in sorted(entries, key=lambda row: row[1], reverse=True):
@@ -255,6 +344,12 @@ def main(argv: list[str] | None = None) -> int:
         "--verbose", action="store_true",
         help="Print the per-file breakdown even when the check passes",
     )
+    parser.add_argument(
+        "--verify-tokenizer", action="store_true",
+        help="Re-measure characters-per-token with tiktoken and report the drift "
+             "against the hardcoded divisor, instead of checking budgets "
+             "(development aid; requires tiktoken)",
+    )
     args = parser.parse_args(argv)
 
     # This script lives at <github-dir>/scripts/, which resolves correctly both
@@ -264,6 +359,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if not github_dir.is_dir():
             raise Blocked(f"github directory not found: {github_dir}")
+        if args.verify_tokenizer:
+            return _verify_tokenizer(github_dir)
         context_budget, agent_budget, conditional_budget = _read_budgets(github_dir / "af-env.conf")
         entries, conditional_entries, warnings = _instruction_sets(github_dir)
         always_on_total = sum(tokens for _, tokens in entries)
