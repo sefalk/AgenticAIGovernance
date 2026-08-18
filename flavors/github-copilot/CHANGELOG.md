@@ -88,6 +88,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The plan was written three times before it reached disk, because the agent
+  that produced it was forbidden to save it.** The planner returned the plan,
+  the coordinator repeated it verbatim inside a delegation prompt, and the
+  documenter emitted it a third time as the argument to `createFile`. All three
+  are output emissions — `createFile` takes the file body as an argument, so
+  persisting is not free either. Measured over the 66 plans in this framework
+  and one consuming project, the plan is a median 1,747 tokens when it first
+  lands (mean 2,951, max 8,410, 194,793 in total), so the two redundant passes
+  cost a median 3,494 and a mean 5,902 output tokens per workflow — roughly
+  390,000 across the corpus, for text that already existed.
+
+  The cause was a least-privilege rule applied by agent rather than by path:
+  the planner was read-only, so the only way to disk ran through an agent that
+  had no reason to read the document. The planner now holds `edit/createFile`
+  and writes its own plan, confined by a new `planner-pretooluse` hook to `.md`
+  files under a `plans/` directory. The hook is an allowlist, not a denylist
+  like `test-writer-pretooluse`: the planner's legitimate write surface is one
+  directory, so everything outside it is refused by default rather than
+  enumerated. Path traversal, absolute paths, non-`.md` payloads smuggled into
+  the plan directory, one bad path hidden in a batch of good ones, and pathless
+  writes are all denied — asserted by 20 cases in
+  `scripts/test-planner-write-scope.ps1`, of which 14 are attempts to escape.
+
+  The coordinator reads the plan file for its § 4 review gate instead of
+  reviewing a copy in its context, and the same change removes the same relay
+  from the Quick Fix investigation document. Critics and the arbiter remain
+  read-only; the planner still edits no code. Closes #130.
+
 - **The workflow log had a schema and no reader, so 16 of 55 logs speak a
   language the framework does not.** `documenter.agent.md` has always given the
   log a vocabulary — `status` is COMPLETED, FAILED or ESCALATED; a step verdict
