@@ -12,6 +12,9 @@
 #                            budgets in .github/af-env.conf; runs only when the
 #                            commit touches a measured file
 #                            (override: ALLOW_CONTEXT_BUDGET=1)
+#   check-plan-budget.py  -- staged plan document exceeds the budget its
+#                            complexity tier earns in .github/af-env.conf
+#                            (override: ALLOW_PLAN_BUDGET=1)
 #
 # Fail-open if a checker or a Python interpreter is missing; the checkers
 # themselves are fail-closed on git errors.
@@ -59,7 +62,7 @@ if [ -z "$python_bin" ]; then
 fi
 
 status=0
-for checker in check-large-files.py check-strict-json.py check-context-budget-staged.py; do
+for checker in check-large-files.py check-strict-json.py check-context-budget-staged.py check-plan-budget.py; do
     [ -f "$scripts_dir/$checker" ] || continue  # fail-open if checker missing
     if ! "$python_bin" $python_bin_extra_args "$scripts_dir/$checker"; then
         status=1
