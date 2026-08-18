@@ -88,6 +88,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Plan documents are budgeted by complexity tier, and the budget is checked
+  on commit.** The plan is the largest artifact a workflow writes and the one
+  nobody re-reads. Measured across 29 plans in a consuming project (768 KB):
+  Standard tier averaged 20,555 characters — about 5,100 tokens — and Deep
+  averaged 9,710 tokens, with the largest single plan at 87,696 characters.
+
+  The obvious remedy was to cut narrative sections out of the template. The
+  measurement says that would not have worked: the template is 4 KB, so it is
+  not the scaffolding that is expensive, and **45% of Standard-plan text sat in
+  sections the template never defines** — invented per plan, one at a time.
+  Deleting every droppable template section would have left the average at
+  ~3,900 tokens, still above the 3,000 the issue asked for. A template cannot
+  hold a limit, because nothing in a template says *and no more than this*.
+
+  So the limit is a number, in `af-env.conf`, enforced by a new pre-commit
+  guard against the staged blob:
+
+  ```conf
+  PLAN_BUDGET_TRIVIAL_TOKENS=0
+  PLAN_BUDGET_STANDARD_TOKENS=3000
+  PLAN_BUDGET_DEEP_TOKENS=12000
+  ```
+
+  - **Trivial is zero** because a Trivial fix is chartered to have no plan file.
+    That rule already existed; nothing enforced it, so nothing could tell
+    whether it held.
+  - **Deep is generous on purpose.** It leaves the average Deep plan untouched
+    and exists for the tail — the 87 KB plan no reviewer read.
+  - **An unstated tier is charged Standard.** Silence is not a licence for an
+    unbounded document. The template's own `<!-- Trivial / Standard / Deep -->`
+    placeholder is a comment and states nothing, which the guard asserts
+    directly rather than assuming.
+
+  The template and the planner now say the same thing in words: sections marked
+  `[Deep]` are omitted at Standard, subtask fields are one line each (subtasks
+  are the largest named section at ~6,600 characters), and no section outside
+  the template. The planner's return format stopped restating the whole template
+  and now references it — two copies of one structure had already drifted.
+
+  Also documented, because it was never written down: the plan text is emitted
+  **three times** before it reaches disk — the planner returns it, the
+  coordinator repeats it verbatim in the documenter's delegation prompt, and the
+  documenter writes the file. That is the price of the planner being read-only,
+  charged per workflow at the full size of the plan, and it means a plan kept
+  inside its budget is worth roughly three times its own size.
+
+  Guard: `.github/hooks/scripts/check-plan-budget.py`
+  (override `ALLOW_PLAN_BUDGET=1`). Regression suite:
+  `.github/scripts/test-plan-budget.ps1`, 18 checks.
+
+  Closes #26.
+
 - **`check-context-budget.py --verify-tokenizer`.** A measured constant that
   nobody can re-derive decays back into folklore the moment the payload's
   character mix drifts. The flag re-runs the calibration and prints per-file
