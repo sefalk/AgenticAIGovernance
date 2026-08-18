@@ -112,6 +112,43 @@ if [ ${#missing[@]} -gt 0 ]; then
     exit 0
 fi
 
+# ---------- Gate 3: Workflow log schema (issue #137) ----------
+#
+# The log has had a schema in documenter.agent.md all along and nothing ever
+# read a log against it, so the schema recorded an intention while the corpus
+# recorded a habit: measured over 55 logs, 16 use a `status` or a `verdict`
+# outside the vocabulary they were given and two are not valid YAML at all.
+#
+# Vocabulary blocks, because it is a choice the documenter can correct.
+# `summary.retries` and `summary.escalations` are NOT checked here — they are
+# derived from the steps and rewritten, on the same principle that stamps the
+# timestamps below (issue #91).
+
+schema_note=""
+log_path=".github/logs/${workflow_id}.yaml"
+[ -f "$log_path" ] || log_path=".github/logs/${workflow_id}.yml"
+schema_checker=".github/hooks/scripts/check-workflow-log.py"
+if [ -f "$schema_checker" ]; then
+    schema_py=""
+    for c in .venv/bin/python .venv/Scripts/python.exe; do
+        [ -x "$c" ] && schema_py="$c" && break
+    done
+    [ -z "$schema_py" ] && schema_py="$AF_PYTHON"
+
+    if [ -n "$schema_py" ]; then
+        schema_out=$("$schema_py" "$schema_checker" --log "$log_path" --fix-counters 2>&1)
+        schema_code=$?
+        if echo "$schema_out" | grep -q 'derived '; then
+            schema_note=" + counters derived from steps"
+        fi
+        if [ "$schema_code" -eq 1 ]; then
+            detail=$(echo "$schema_out" | grep -v 'derived ' | tr '\n' ' ' | sed 's/"/\\"/g')
+            echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Workflow log schema violation for '${workflow_id}': ${detail}. Fix the log, then finish. Use the vocabulary in your Workflow Log Schema: status is COMPLETED, FAILED or ESCALATED; a step verdict is APPROVED, REJECTED, ESCALATE, RESOLVED, COMPROMISE or null. Do not invent a value to describe a state the schema has no word for — say it in 'action:' instead.\"}}"
+            exit 0
+        fi
+    fi
+fi
+
 # ---------- Timestamps (ADVISORY — never blocks, never fails the hook) ----------
 #
 # Stamped here rather than written by the documenter so the values never pass
@@ -225,5 +262,5 @@ if [ -f "$checker" ] && [ -f ".vscode/tasks.json" ]; then
     fi
 fi
 
-echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS for '${workflow_id}'${retro_note}${stamp_note}${cost_note}${scratch_note}\"}"
+echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS for '${workflow_id}'${retro_note}${schema_note}${stamp_note}${cost_note}${scratch_note}\"}"
 exit 0

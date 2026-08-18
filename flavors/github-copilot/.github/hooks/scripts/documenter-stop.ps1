@@ -134,6 +134,56 @@ if ($missing.Count -gt 0) {
     exit 0
 }
 
+# ---------- Gate 3: Workflow log schema (issue #137) ----------
+#
+# The log has had a schema in documenter.agent.md all along and nothing ever
+# read a log against it, so the schema recorded an intention while the corpus
+# recorded a habit: measured over 55 logs, 16 use a `status` or a `verdict`
+# outside the vocabulary they were given and two are not valid YAML at all.
+# A log nothing can parse is not a record.
+#
+# Vocabulary blocks, because it is a choice the documenter can correct.
+# `summary.retries` and `summary.escalations` are NOT checked here -- they are
+# derived from the steps and rewritten, on the same principle that stamps the
+# timestamps below. Asking a model for a number it can get wrong and then
+# validating the number is strictly worse than not asking (issue #91).
+
+$schemaNote = ''
+try {
+    $logPath = if (Test-Path $logPath1) { $logPath1 } else { $logPath2 }
+    $schemaChecker = '.github/hooks/scripts/check-workflow-log.py'
+    if (Test-Path $schemaChecker) {
+        $schemaPy = $null
+        foreach ($c in @('.venv/Scripts/python.exe', '.venv/bin/python')) {
+            if (Test-Path $c) { $schemaPy = $c; break }
+        }
+        if (-not $schemaPy) { $schemaPy = $AfPython }
+
+        if ($schemaPy) {
+            $schemaOut = @(& $schemaPy $schemaChecker '--log' $logPath '--fix-counters' 2>&1)
+            $schemaCode = $LASTEXITCODE
+            if (@($schemaOut | Where-Object { $_ -match 'derived ' }).Count -gt 0) {
+                $schemaNote = ' + counters derived from steps'
+            }
+            if ($schemaCode -eq 1) {
+                $detail = (@($schemaOut | Where-Object { $_ -notmatch 'derived ' }) -join ' ').Trim()
+                $output = @{
+                    hookSpecificOutput = @{
+                        hookEventName = "Stop"
+                        decision = "block"
+                        reason = "Workflow log schema violation for '$workflowId': $detail. Fix the log, then finish. Use the vocabulary in your Workflow Log Schema: status is COMPLETED, FAILED or ESCALATED; a step verdict is APPROVED, REJECTED, ESCALATE, RESOLVED, COMPROMISE or null. Do not invent a value to describe a state the schema has no word for -- say it in `action:` instead."
+                    }
+                } | ConvertTo-Json -Compress -Depth 3
+                Write-Output $output
+                exit 0
+            }
+        }
+    }
+}
+catch {
+    $schemaNote = ''
+}
+
 # ---------- Timestamps (ADVISORY -- never blocks, never fails the hook) ----------
 #
 # Stamped here rather than written by the documenter so the values never pass
@@ -272,7 +322,7 @@ catch {
 }
 
 $output = @{
-    systemMessage = "documenter:Stop -- artifact gate PASS for '$workflowId'$retroNote$stampNote$costNote$scratchNote"
+    systemMessage = "documenter:Stop -- artifact gate PASS for '$workflowId'$retroNote$schemaNote$stampNote$costNote$scratchNote"
 } | ConvertTo-Json -Compress
 Write-Output $output
 exit 0
