@@ -208,8 +208,9 @@ compliance-checker(pre) → planner (investigation) → implementer
 ```
 
 Quick Fix workflows produce a lightweight **investigation document** (using
-`templates/INVESTIGATION.md`) instead of a full plan. The planner documents
-root cause, fix rationale, and alternatives considered.
+`templates/INVESTIGATION.md`) instead of a full plan. The planner writes it
+into the plan directory and documents root cause, fix rationale, and
+alternatives considered.
 Set complexity tier to **Standard** minimum.
 Boundary heuristic: if the commit message would need a paragraph to explain
 the *why*, it's Quick Fix.

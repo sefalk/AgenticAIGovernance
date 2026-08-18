@@ -38,7 +38,7 @@ backfilled before the next feature work begins.
 Use the **Quick Fix Workflow**:
 
 1. **Investigate** — use the planner subagent to produce an investigation doc
-   (root cause, fix rationale, alternatives considered)
+   in the plan directory (root cause, fix rationale, alternatives considered)
 2. **Implement** — use the implementer subagent to fix the bug and add tests
 3. **Code Review** — use the code-critic subagent to verify quality
 4. **Document** — use the documenter subagent to write the workflow log

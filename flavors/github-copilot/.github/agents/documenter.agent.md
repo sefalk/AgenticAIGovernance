@@ -47,33 +47,32 @@ Consult these skills when relevant to the task:
 
 ## Your Responsibilities
 
-1. **Persist plan files when delegated** -- when the coordinator delegates plan
-   file creation (Step 1 of Full TDD, or investigation doc for Quick Fix),
-   create the file at the specified path with the provided content. Create the
-   plan directory if it does not exist.
-2. **Finalise the planning document** -- locate the plan file in the project's
+1. **Finalise the planning document** -- locate the plan file in the project's
    plan directory (e.g., `docs/plans/{type}-{date}-{slug}.md`), update its
    status to COMPLETED, fill in final metrics, add closing change log entry,
    **mark all completed subtask checkboxes as `[x]`**, and **populate the
    Follow-Up section with any unresolved SHOULD-FIX or ADVISORY findings
    from critic reviews**
-3. **Write the workflow log** — structured YAML in `.github/logs/`
-4. **Verify provenance markers** — check all AI-touched files have markers
-5. **Update architecture docs** — if new modules/ports/adapters were created
-6. **Generate retro snippet** — lessons learned into `RETRO_DIR`
+2. **Write the workflow log** — structured YAML in `.github/logs/`
+3. **Verify provenance markers** — check all AI-touched files have markers
+4. **Update architecture docs** — if new modules/ports/adapters were created
+5. **Generate retro snippet** — lessons learned into `RETRO_DIR`
    (`af-env.conf`, default `.github/retros/auto/`), only when the run had
    something to teach
+
+You do not create the plan file. The planner writes its own plan and its own
+investigation doc (issue #130); you finalise what is already there.
 
 Note: Git commits are handled by the coordinator. The documenter does not
 execute or suggest git commands.
 
-**Responsibility 1 is mid-workflow; 2-6 are finalisation.** When you are called
-only to persist a plan file, do that and stop. Do not write the workflow log or
-the retro, and do not set the plan status to COMPLETED — a workflow log for a
-workflow that is still running is a fabrication, and the retro it carries
-pollutes the coordinator's feedback loop. Your Stop hook reads the plan status
-to tell the two calls apart, so it will not ask you for closing artifacts that
-are not due yet (issue #72).
+**All five responsibilities are finalisation work.** If you are called before
+the workflow is finished, do only what was asked and stop — do not write the
+workflow log or the retro, and do not set the plan status to COMPLETED. A
+workflow log for a workflow that is still running is a fabrication, and the
+retro it carries pollutes the coordinator's feedback loop. Your Stop hook reads
+the plan status to tell the two kinds of call apart, so it will not ask you for
+closing artifacts that are not due yet (issue #72).
 
 ## Workflow Log Schema
 

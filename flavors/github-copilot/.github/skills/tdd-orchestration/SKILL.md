@@ -84,9 +84,8 @@ pre-commit guards are in `skills/git-workflow/SKILL.md`.
 
 **Trivial Fix:** Single commit `[agent:coordinator] trivial fix: {description}`.
 
-**Quick Fix:** After planner returns investigation output, delegate file
-creation to the **documenter** (same pattern as Step 1 plan persistence).
-Then commit:
+**Quick Fix:** The planner writes the investigation document into the plan
+directory itself and returns its path, as in Step 1. Then commit:
 1. `git add {investigation_file}` then `git commit -m "[agent:planner] investigation doc"`
 2. `[agent:implementer] fix: {description}`
 
@@ -132,17 +131,14 @@ Use the **planner** agent as a subagent to decompose the user's request:
 > "{context_block}
 > Analyse the following request and create a detailed implementation plan.
 > Follow the structure in `.github/templates/PLAN.md`.
+> Write it to the plan directory (`{plan_dir}`) yourself and return the path,
+> not the plan text.
 > Include acceptance criteria, file list, and test requirements: {user_request}"
 
-**After receiving the plan:** Delegate file creation to the **documenter** agent:
-
-> "Persist the following plan as `{type}-{YYYY-MM-DD}-{slug}.md` in the plan
-> directory (`{plan_dir}`). Create the directory if needed. Content:
->
-> {planner_output}"
-
-where: Type = `feat`/`fix`/`refactor`/`adr`/`review`.
-Slug = branch name slug (e.g., `agent/fix-alignment-nulls` → `fix-alignment-nulls`).
+**The planner writes the file.** It returns a path, a suggested branch, the
+tier and any open risk — nothing more. Read the file to review it (issue #130:
+the plan used to be emitted three times before it reached disk, and two of
+those were relay).
 
 Commit: `git add {plan_file}` then `git commit -m "[agent:planner] implementation plan: {slug — what is planned}"`.
 The commit is where `check-plan-structure.py` rejects placeholder fields,
@@ -150,8 +146,8 @@ invented sections, and subtasks with no acceptance criteria. It decides the
 mechanical half. The questions below are the half it cannot decide.
 
 **Plan review (Standard tier and above).** Everything downstream is derived
-from the plan, and the plan is the only artifact no critic reads. Before
-proceeding, answer these about the plan already in your context:
+from the plan, and the plan is the only artifact no critic reads. Read
+`{plan_file}` and answer these before proceeding:
 
 1. Is every acceptance criterion decidable? "Works correctly" is not one;
    "an unknown status maps to UNKNOWN rather than raising" is.

@@ -88,7 +88,7 @@ entry in order. With no `model:` field the user's current selection is used.
 
 | Worker Type | Model Strategy |
 |---|---|
-| Read-only (planner, critics, arbiter) | Fast/efficient first |
+| Analysis (planner, critics, arbiter) | Fast/efficient first |
 | Editing (test-writer, implementer, refactorer) | Most capable (or user-selected) |
 | Documenter | Efficient (structured output) |
 
