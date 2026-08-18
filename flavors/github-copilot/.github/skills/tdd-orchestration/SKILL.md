@@ -145,17 +145,39 @@ where: Type = `feat`/`fix`/`refactor`/`adr`/`review`.
 Slug = branch name slug (e.g., `agent/fix-alignment-nulls` → `fix-alignment-nulls`).
 
 Commit: `git add {plan_file}` then `git commit -m "[agent:planner] implementation plan: {slug — what is planned}"`.
+The commit is where `check-plan-structure.py` rejects placeholder fields,
+invented sections, and subtasks with no acceptance criteria. It decides the
+mechanical half. The questions below are the half it cannot decide.
 
-**Decision gate:** Count the subtasks in the plan. If **any** of these are true,
-present the plan to the human for approval BEFORE proceeding:
+**Plan review (Standard tier and above).** Everything downstream is derived
+from the plan, and the plan is the only artifact no critic reads. Before
+proceeding, answer these about the plan already in your context:
+
+1. Is every acceptance criterion decidable? "Works correctly" is not one;
+   "an unknown status maps to UNKNOWN rather than raising" is.
+2. Does every subtask name its files and an exit criterion?
+3. Is the tier consistent with the layer-override rule in
+   `quality-gates.instructions.md`, or merely asserted?
+4. Can the subtasks be executed in the order given?
+5. Is anything in the plan not traceable to the request?
+
+A "no" is not an escalation. Return the plan to the planner once, naming the
+question; escalate on the second failure.
+
+You commissioned this plan, so this is a self-check, and a self-check nobody
+reads stops happening. Record the five answers — the documenter persists them
+as `plan_review` in the workflow log, and the compliance-checker looks for
+them post-flight.
+
+**Escalation gate:** present the plan to the human BEFORE proceeding if **any**
+of these are true:
 
 - 4 or more subtasks
 - Introduces a new module, port, adapter, or orchestrator
 - Touches files in more than 2 architectural layers
 - Planner flags any risk as "high"
 
-For plans with ≤ 3 subtasks, no new architectural elements, and no high risks,
-proceed automatically.
+Otherwise proceed once the five questions are answered.
 
 ---
 

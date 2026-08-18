@@ -118,6 +118,18 @@ summary:
     line_coverage: <number>
     branch_coverage: <number>
 
+# Standard tier and above: the coordinator's answers to the plan review
+# questions in the tdd-orchestration skill § 4. Record them as given, including
+# a "no" and what was done about it -- a review that only ever records "yes"
+# is a field, not a check.
+plan_review:
+  criteria_decidable: <yes | no: what was wrong>
+  subtasks_scoped: <yes | no: ...>
+  tier_justified: <yes | no: ...>
+  order_executable: <yes | no: ...>
+  traceable_to_request: <yes | no: ...>
+  replanned: <number of times the plan was sent back>
+
 # Optional — include only if escalation or arbiter was invoked:
 escalation:
   trigger: "<why escalated>"
