@@ -88,6 +88,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The fifteen regression suites ran only on a maintainer's laptop, so GitHub
+  had no way to tell a sound pull request from a broken one.** There was no
+  `.github/workflows` directory and no `.github` directory at the repository
+  root at all; `dev` and `main` both reported `"protected": false` with an
+  empty `required_status_checks.contexts`. Every suite result reached the
+  project as a claim in a chat transcript and nothing else, which is why the
+  question "may this pull request merge automatically once all conditions are
+  met" had no answer: there were no conditions, so a pull request was mergeable
+  the instant it was opened.
+
+  Two things had to be settled before a workflow could mean anything. Ten of
+  the fifteen suites end their preflight with `Write-Host 'SKIP: ...'` followed
+  by `exit 0` when Python, ruff or PyYAML is missing — correct on a developer
+  machine, and on a bare runner a green gate that asserted nothing, the same
+  shape as #125. And `test-hooks-integration.ps1` does not test the payload at
+  all: it reads VS Code's own hook log under `%APPDATA%\Code\logs` to confirm
+  hooks fired during a real session, so on a hosted runner it exits 2.
+
+  So `scripts/run-all-tests.ps1` gives the suites the single entry point and
+  single exit code a CI job needs, and classifies each one as PASS, SKIP,
+  BLOCKED or TIMEOUT by reading its output rather than trusting its exit code.
+  Under `-FailOnSkip`, which the workflow passes, a suite that asserted nothing
+  fails the run. `.github/workflows/regression.yml` runs it on `windows-latest`
+  — not a preference, since the suites are Windows PowerShell 5.1 scripts and
+  hosted Linux runners have no `powershell` — installs the prerequisites, and
+  configures a git identity, because several suites commit inside throwaway
+  repositories and a fresh runner has none. `test-hooks-integration.ps1` is
+  excluded explicitly, with the reason stated at the exclusion.
+
+  Baseline on the maintainer machine: 15 passed, 0 skipped, 0 failed, 956
+  seconds. This is a prerequisite, not the feature — branch protection,
+  auto-merge, automatic head-branch deletion and automatic issue closing remain
+  separate decisions, and each of them is only safe once this check exists and
+  is trusted. Closes #143.
+
 - **The plan was written three times before it reached disk, because the agent
   that produced it was forbidden to save it.** The planner returned the plan,
   the coordinator repeated it verbatim inside a delegation prompt, and the
