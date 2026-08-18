@@ -88,15 +88,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **The plan is no longer approved by counting its subtasks.** Every artifact
-  the framework produces has a reviewer except the one all the others are
-  derived from: tests have the test-critic, code has the code-critic,
-  disagreement has the arbiter, the process has the compliance-checker — and
-  the plan had a subtask count. Fewer than four subtasks, no new architectural
-  element, no high risk, and the plan was stamped `auto-approved` and handed to
-  the test-writer unread. `templates/PLAN.md` has carried a **Plan Approval**
-  section with `APPROVED | APPROVED-WITH-FINDINGS` and an **Open Findings**
-  list all along — critic vocabulary with no critic behind it.
+- **The retry budget was set per agent without ever counting a retry.**
+  MANIFEST § 4 gives every agent the same two attempts before escalation, and
+  that number has never been checked against a workflow. `analyze-retry-economy.py`
+  reads the `.github/logs/*.yaml` the documenter already writes and answers the
+  question the budget assumes: who actually retries, how often, and why.
+
+  Issue #43 named `transcripts/*.jsonl` as the source. They were measured first
+  and rejected: 143 MB across four workspace-storage directories, uncommitted,
+  machine-local, and a retry only inferrable from the shape of a `runSubagent`
+  call. The workflow logs are the framework's own record, they are versioned
+  with the project, and a retry is visible in them structurally — the same
+  agent appearing twice in one `steps` list.
+
+  Against a 55-log corpus the tool reports what the flat budget hides. The
+  implementer runs 75 times and retries 33 of them, 0.44 per step, in 43% of
+  the workflows it appears in; the refactorer and the compliance-checker never
+  retry at all. Two agents carry the retry cost and the rest pay the same
+  allowance. The distribution matters more than the mean: 27 of 53 workflows
+  have no retry whatsoever, and one has six — an average of 1.2 retries per
+  workflow describes neither.
+
+  Causes are attributed from the steps in between, and the tool states its
+  heuristic in the output before it prints a number. A `REJECTED` or `ESCALATE`
+  verdict in between is `critic-rejected`; a step below its hard-gate count is
+  `gate-failed`; nothing in between at all is `consecutive-pass`. Tool errors,
+  the third cause the issue asks for, are not derivable from these logs — no
+  step records them — so the tool says the column is missing rather than
+  printing zero. The largest single finding is that 19 of the implementer's 33
+  retries are `consecutive-pass`: the most expensive agent's most common repeat
+  is a second run with no reviewer between the two.
+
+  The tool refuses to be quiet about its own blind spots, per the #12 lesson.
+  An empty or missing log directory exits 2 — a framework with no evidence is
+  not a framework with no retries. A corpus where nothing parses exits 2. Any
+  log that fails to parse is named and excluded, and the count of what was
+  excluded is printed next to the count of what was read.
+
+  Reading the record exposed the record. In the corpus, 25 of 53 workflows have
+  a `summary` that contradicts their own `steps` — self-reported retries total
+  23 against 63 counted structurally, and `summary.escalations` is 0 in all 55
+  logs while a step verdict says `ESCALATE` once. Six verdicts fall outside the
+  MANIFEST closed set (`PASS`, `PASSED`, `SKIPPED`, `PROCEEDED`,
+  `SUBMITTED_FOR_REVIEW`, `APPROVED-WITH-ISSUES`). Two logs are not valid YAML
+  at all. Nothing had ever read them, so nothing had ever noticed. The tool
+  reports all three as drift and exits 1; fixing the record is a separate
+  problem from being able to read it.
+
+  `test-retry-economy.ps1` adds 20 checks over synthetic corpora, each proving
+  one claim by constructing the log that would break it — the empty directory,
+  the unparsable log, the lying summary, the verdict outside the set.
+  Closes #43.
+
 
   Two layers now stand where the count stood, and neither is a new agent.
 
