@@ -256,6 +256,7 @@ errors; the shim is fail-open if a checker or a Python interpreter is missing.
 | `check-strict-json.py` | Staged `.vscode/tasks.json` that is not strict JSON | `ALLOW_JSONC=1` |
 | `check-context-budget-staged.py` | Staged instruction/agent payload over the budgets in `af-env.conf` | `ALLOW_CONTEXT_BUDGET=1` |
 | `check-plan-budget.py` | Staged plan document over the budget its complexity tier earns | `ALLOW_PLAN_BUDGET=1` |
+| `check-plan-structure.py` | Staged plan document with placeholder fields, invented sections, or subtasks with no acceptance criteria | `ALLOW_PLAN_STRUCTURE=1` |
 
 **Existing clones** must re-run `bootstrap-python-env.ps1`/`.sh` (or run
 `git config core.hooksPath .github/hooks/git` manually) to pick up the guards —
@@ -348,6 +349,31 @@ in a template says "and no more than this". A number does.
 - **Override (one-off):** `ALLOW_PLAN_BUDGET=1 git commit -m "..."`.
 - Checker logic: `.github/hooks/scripts/check-plan-budget.py`. Regression
   suite: `.github/scripts/test-plan-budget.ps1`.
+
+### Plan Structure Guard
+
+Blocks commits that stage a plan document with fields left as template
+placeholders, headings the templates do not define, or subtasks that state no
+acceptance criteria.
+
+**Rationale:** every artifact the framework produces has a reviewer except the
+one all the others are derived from — tests have the test-critic, code has the
+code-critic, the process has the compliance-checker, and the plan had a subtask
+count. This guard is not that reviewer. It cannot judge whether an acceptance
+criterion is useful; it can tell that one exists and is not still a comment,
+which is the defect class an unreviewed plan actually carries.
+
+- **Scope:** the same as the budget guard, and both document kinds are
+  recognised — `templates/PLAN.md` and `templates/INVESTIGATION.md` are checked
+  against their own section sets, chosen by the title.
+- **Deliberately not enforced:** a Standard plan carrying a section the
+  template reserves for Deep. Length is already paid for by the budget guard,
+  and rejecting rigour would be the wrong lesson.
+- **DRAFT stands it down.** A document that says it is unfinished is taken at
+  its word — and named in the output, so DRAFT cannot become a quiet way out.
+- **Override (one-off):** `ALLOW_PLAN_STRUCTURE=1 git commit -m "..."`.
+- Checker logic: `.github/hooks/scripts/check-plan-structure.py`. Regression
+  suite: `.github/scripts/test-plan-structure.ps1`.
 
 ### Handling Large Files with Git LFS
 

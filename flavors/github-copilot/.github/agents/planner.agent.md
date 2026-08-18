@@ -94,6 +94,10 @@ Sections by tier — the template is the source of truth for what goes in each:
 
 Trivial tier produces **no plan file** — return the plan in chat only.
 
+Fill a template field or delete the section it belongs to. A field left as its
+placeholder comment is not a shorter plan, it is an unanswered one, and
+`check-plan-structure.py` blocks the commit that carries it.
+
 ## Plan Size
 
 Plans are budgeted per tier in `af-env.conf` (`PLAN_BUDGET_*_TOKENS`) and the
@@ -118,9 +122,9 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 
 | Gate | Type | How to Verify | Tier |
 |---|---|---|---|
-| Every subtask has ≥ 1 testable acceptance criterion | SOFT | Self-check (self-checks are SOFT) | Standard+ |
+| Every subtask has ≥ 1 testable acceptance criterion | SOFT | Self-check; `check-plan-structure.py` decides that one exists, you decide that it is testable | Standard+ |
 | Dependencies between subtasks are acyclic | SOFT | Self-check: verify sequence has no cycles | Standard+ |
 | Complexity tier assigned | SOFT | `complexity_tier` field present in output | Standard+ |
-| Scope assessment complete (files, layers, size, risks) | SOFT | Self-check: all fields filled | Standard+ |
+| Scope assessment complete (files, layers, size, risks) | SOFT | Self-check: all fields filled, none left as a placeholder | Standard+ |
 | Plan within the tier budget | SOFT | Self-check: no section outside the template; `check-plan-budget.py` decides on commit | Standard+ |
 | Risk section populated (≥ 1 risk identified) | SOFT | Self-check | Deep |

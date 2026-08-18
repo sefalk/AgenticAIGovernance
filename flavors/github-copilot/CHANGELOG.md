@@ -88,6 +88,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The plan is no longer approved by counting its subtasks.** Every artifact
+  the framework produces has a reviewer except the one all the others are
+  derived from: tests have the test-critic, code has the code-critic,
+  disagreement has the arbiter, the process has the compliance-checker — and
+  the plan had a subtask count. Fewer than four subtasks, no new architectural
+  element, no high risk, and the plan was stamped `auto-approved` and handed to
+  the test-writer unread. `templates/PLAN.md` has carried a **Plan Approval**
+  section with `APPROVED | APPROVED-WITH-FINDINGS` and an **Open Findings**
+  list all along — critic vocabulary with no critic behind it.
+
+  Two layers now stand where the count stood, and neither is a new agent.
+
+  `check-plan-structure.py` runs in the existing pre-commit shim, over the same
+  scope as the budget guard, and blocks a staged plan that has fields left as
+  template placeholders, headings the templates do not define, a subtask
+  without acceptance criteria, files, or an exit criterion, an unstated
+  complexity tier, or no subtasks at all. Both document kinds in the plans
+  directory are recognised: `PLAN.md` and `INVESTIGATION.md` are checked
+  against their own section sets, chosen by the title, so an investigation is
+  not rejected for lacking subtasks it was never supposed to have. `DRAFT`
+  stands the guard down — and is named in the output, so DRAFT cannot quietly
+  become the way out. Override: `ALLOW_PLAN_STRUCTURE=1`.
+
+  What it deliberately does not do is reject a Standard plan for containing a
+  section the template reserves for Deep. Length is already paid for by the
+  budget guard, and a rule that punished thoroughness would be teaching authors
+  to write less than they know.
+
+  It also cannot judge whether an acceptance criterion is *useful*, which is why
+  the second layer is a question and not a regex. The coordinator's gate in
+  `tdd-orchestration` § 4 now asks five things about the plan already in its
+  context — are the criteria decidable, does every subtask name files and an
+  exit criterion, is the tier justified against the layer-override rule rather
+  than asserted, can the subtasks be executed in the order given, is anything
+  in the plan untraceable to the request. A "no" returns the plan to the
+  planner once; the second failure escalates. The escalation triggers are
+  unchanged; this adds the reasons, it does not replace them.
+
+  The coordinator commissioned the plan, so those answers are a self-check, and
+  a self-check nobody reads stops happening. They are persisted as
+  `plan_review` in the workflow log and the compliance-checker's post-flight
+  bookend — already independent, already reading workflow artifacts — reports
+  their absence. An absent block means the gate was skipped, not passed.
+
+  Measured against the framework's own 34 plan documents, exactly one passes.
+  The other 33 predate the template that #26 tightened, and they are not
+  rewritten: the guard reads the staged blob, so it judges what is written from
+  here on. But the ratio is the finding. A template that nothing enforced was
+  followed by one document in thirty-four, and every one of those was written
+  by an agent instructed to follow it.
+
+  Guard: `.github/hooks/scripts/check-plan-structure.py`
+  Regression suite: `.github/scripts/test-plan-structure.ps1` (25 checks).
+  Whether a dedicated plan-critic is needed on top of this is deliberately not
+  decided here — issue #133 holds it until the retry cost it would prevent has
+  been measured. Closes #132.
+
 - **Plan documents are budgeted by complexity tier, and the budget is checked
   on commit.** The plan is the largest artifact a workflow writes and the one
   nobody re-reads. Measured across 29 plans in a consuming project (768 KB):

@@ -125,6 +125,7 @@ The coordinator invokes you with `mode=post-flight` and provides:
 |---|---|---|
 | Plan file status = COMPLETED | Read the plan file, check status field | **MISSING** |
 | Workflow log YAML exists | Read `.github/logs/{workflow-id}.yaml` | **MISSING** |
+| Plan review answered, at Standard tier and above | The log has a `plan_review` block with all five questions answered (tdd-orchestration § 4). An absent block means the gate was skipped, not passed | **WARNING** |
 | Retro snippet exists, if the log shows retries, escalations, an adverse verdict, or a non-COMPLETED status | Read `{RETRO_DIR}/{workflow-id}.md` | **MISSING** |
 | Provenance markers on new files | Read each new file and look for `copilot:generated`, wherever `instructions/provenance.instructions.md` places it | **WARNING** |
 | Provenance markers on modified files | Check for `copilot:modified` in substantially changed files | **ADVISORY** |

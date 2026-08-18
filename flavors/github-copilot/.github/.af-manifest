@@ -30,6 +30,7 @@ hooks/scripts/check-strict-json.py
 hooks/scripts/check-scratch-tasks.py
 hooks/scripts/check-context-budget-staged.py
 hooks/scripts/check-plan-budget.py
+hooks/scripts/check-plan-structure.py
 hooks/git/pre-commit
 
 # Scripts (canonical test and lint runners)
@@ -61,6 +62,7 @@ scripts/test-run-tests.ps1
 scripts/check-context-budget.py
 scripts/test-context-budget.ps1
 scripts/test-plan-budget.ps1
+scripts/test-plan-structure.ps1
 scripts/collect-session-cost.py
 scripts/test-session-cost.ps1
 
