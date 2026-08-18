@@ -88,6 +88,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The workflow log had a schema and no reader, so 16 of 55 logs speak a
+  language the framework does not.** `documenter.agent.md` has always given the
+  log a vocabulary — `status` is COMPLETED, FAILED or ESCALATED; a step verdict
+  is one of the five in MANIFEST § 13 — and nothing has ever read a log back
+  against it. Measured across the 55 logs in a consuming project: two are not
+  valid YAML at all, six carry verdicts from outside the set (`PASS`, `SKIPPED`,
+  `SUBMITTED_FOR_REVIEW`, `PROCEEDED`, `PASSED`), and six carry statuses from
+  outside it (`DRAFT`, `IN_PROGRESS`, `IN-PROGRESS`, one a whole sentence). A
+  schema nobody enforces records an intention; the corpus records the habit.
+
+  `check-workflow-log.py` runs from the documenter's Stop hook and **blocks** on
+  vocabulary, because vocabulary is a choice the documenter can correct. It is
+  stdlib-only for the scan and reaches for PyYAML only to answer "does this
+  parse", declaring the rule unrun rather than passing it when the library is
+  absent. A block scalar's body is skipped, so a `description: |` that quotes
+  `verdict: "PROCEEDED"` cannot invent a violation out of prose.
+
+  `summary.retries` and `summary.escalations` are handled the other way: they
+  are **derived from the steps and stamped by the hook**, and the documenter is
+  told to write `0`. In the same corpus, 25 of 53 readable summaries contradict
+  their own steps — 23 retries self-reported against 63 counted. That is not
+  dishonesty and not a rule violation, it is a model doing arithmetic over a
+  list at the end of a long context, and the fix for a number a model can get
+  wrong is not to validate the number, it is to stop asking for it. Issue #91
+  established the precedent with `completed:`, where a documenter wrote a
+  timestamp six hours in the future in the same output that declared zero
+  fabricated data. The derivation uses the same definition of a retry as
+  `analyze-retry-economy.py`, verified against the corpus, so the two tools
+  cannot disagree about what they are counting.
+
+  The mechanism was corrected before it was built. The issue proposed a
+  pre-commit guard over staged logs; `.github/logs/.gitignore` ignores `*`, so
+  such a guard could never have fired once. It would have been the #125 failure
+  mode — a check that passes because it never runs — proposed by an agent that
+  had read #125. `ALLOW_WORKFLOW_LOG_SCHEMA=1` stands the gate down for a human
+  who disagrees with it, and still prints what it found. 26 regression tests in
+  `test-workflow-log-schema.ps1`. Closes #137.
+
 - **The retry budget was set per agent without ever counting a retry.**
   MANIFEST § 4 gives every agent the same two attempts before escalation, and
   that number has never been checked against a workflow. `analyze-retry-economy.py`

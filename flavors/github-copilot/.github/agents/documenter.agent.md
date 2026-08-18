@@ -106,8 +106,8 @@ steps:
 
 summary:
   total_steps: <number>
-  retries: <number>
-  escalations: <number>
+  retries: <derived by your Stop hook -- write 0>
+  escalations: <derived by your Stop hook -- write 0>
   files_created: <number>
   files_modified: <number>
   tests_added: <number>
@@ -140,6 +140,25 @@ escalation:
 For the `verdict` field in step entries, use the parseable format from
 MANIFEST § 13 (Inter-Agent Contracts → Verdict Format): APPROVED,
 REJECTED, ESCALATE, RESOLVED, or COMPROMISE.
+
+**`status:` and `verdict:` are closed sets, and your Stop hook now blocks on
+them.** Use `COMPLETED`, `FAILED` or `ESCALATED` for a status and one of the
+five verdicts above — or `null` where a step produces no verdict. When a state
+has no word in the schema, describe it in `action:`; do not invent a word for
+`verdict:`. Measured across 55 logs, 16 carried a value from outside these
+sets — `PASS`, `SKIPPED`, `PROCEEDED`, `IN_PROGRESS`, `DRAFT`, one whole
+sentence — and every one of them made the log unreadable to the tools that
+measure the framework, because a vocabulary nothing enforces is a suggestion
+(issue #137). A verdict may carry a note: `APPROVED (Attempt 2)` is APPROVED.
+
+**Do not write `summary.retries` or `summary.escalations`.** Write `0` and let
+your Stop hook count them from the steps. They are not judgements, they are
+arithmetic over a list you already wrote — and in the same 55 logs, 25
+summaries contradicted their own steps, reporting 23 retries where the steps
+recorded 63. Nothing caught it, because a self-reported number is present
+whether or not it is true. The same reasoning as `started:` below: the fix for
+a number a model can get wrong is not to check the number, it is to stop asking
+for it (issues #137, #91).
 
 **Do not write `started:` or `completed:`.** Your Stop hook stamps both after
 your artifact gate passes: it fires the moment you finish, and the branch's
