@@ -10,8 +10,8 @@
 #      the workflow log shows there was something to learn (issue #27)
 #
 # The gate applies only to finalisation, which is recognised by the plan file
-# being marked COMPLETED. A mid-workflow documenter call (plan persistence,
-# Step 1 of Full TDD) terminates without these artifacts -- see Gate 0.
+# being marked COMPLETED. Any documenter call made before the workflow ends
+# terminates without these artifacts -- see Gate 0.
 #
 # Fires as SubagentStop when the documenter is invoked by the coordinator.
 # Requires chat.useCustomAgentHooks = true in .vscode/settings.json.
@@ -46,8 +46,8 @@ $BASE_BRANCH = Get-AfConfig -Key 'BASE_BRANCH' -Default 'dev'
 
 # ---------- Gate 0: Which lifecycle is this? ----------
 #
-# The documenter has two chartered jobs: persist plan files mid-workflow, and
-# finalise at the end. This gate used to fire on both, so a mid-workflow call
+# The documenter can be called before the workflow ends as well as to finalise
+# it. This gate used to fire on both, so a mid-workflow call
 # could only terminate by inventing a COMPLETED workflow log and retro for a
 # workflow still running -- the hook mechanically compelled the false artifact
 # it existed to guarantee (issue #72).

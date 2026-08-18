@@ -214,17 +214,19 @@ the template does not define do not belong in a plan.
 
 ### Write Passes
 
-The plan text is emitted **three times** before it reaches disk: the planner
-returns it, the coordinator repeats it verbatim inside the documenter's
-delegation prompt, and the documenter writes the file. Two of those three are
-output tokens spent on text that already existed.
+The plan text is emitted **once**: the planner writes it. Until issue #130 it
+was emitted three times — the planner returned it, the coordinator repeated it
+verbatim inside the documenter's delegation prompt, and the documenter emitted
+it again as the `createFile` argument. Two of those three were relay, a median
+1,747 tokens per workflow measured over 66 plans.
 
-The cause is structural, not accidental: the planner is read-only by charter,
-so the agent that produces the plan cannot be the agent that persists it, and
-subagents do not share context — anything handed on must be re-emitted. This is
-the price of the read-only rule, and it is charged per workflow at the full size
-of the plan. Keeping the plan inside its budget is therefore worth roughly three
-times its own size.
+The cause was structural rather than sloppy: the only agent permitted to write
+was one that had no reason to read, so the text had to be handed to a third
+party verbatim. The planner now writes its own plan, confined to the plan
+directory by `planner-pretooluse`, and the coordinator reviews the file instead
+of the message. Keeping the plan inside its budget still matters — it is read
+by the coordinator, the implementer and the documenter — but it is no longer
+charged three times at production rates.
 
 ### When to Skip
 

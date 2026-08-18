@@ -23,6 +23,8 @@ hooks/scripts/_common.ps1
 hooks/scripts/_common.sh
 hooks/scripts/researcher-pretooluse.ps1
 hooks/scripts/researcher-pretooluse.sh
+hooks/scripts/planner-pretooluse.ps1
+hooks/scripts/planner-pretooluse.sh
 hooks/scripts/coordinator-postmerge.ps1
 hooks/scripts/coordinator-postmerge.sh
 hooks/scripts/check-large-files.py
@@ -69,6 +71,7 @@ scripts/test-session-cost.ps1
 scripts/analyze-retry-economy.py
 scripts/test-retry-economy.ps1
 scripts/test-workflow-log-schema.ps1
+scripts/test-planner-write-scope.ps1
 
 # Instructions
 instructions/

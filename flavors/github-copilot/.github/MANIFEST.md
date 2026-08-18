@@ -241,7 +241,9 @@ Every agent operates under a distinct, verifiable identity:
 Agents receive only the tools and permissions needed for their role:
 
 - Tool sets in `.vscode/toolsets.jsonc` scope each agent's capabilities
-- Read-only agents (planner, critics, arbiter) cannot edit files
+- Read-only agents (critics, arbiter) cannot edit files
+- The planner writes exactly one file, its own plan document; every other path
+  is denied by `planner-pretooluse` (issue #130)
 - No agent is granted credentials capable of mutating production environments
   unless following a certified deployment workflow
 - Scoped, temporary credentials are preferred over long-lived tokens
@@ -341,7 +343,7 @@ until one is available. This optimises cost and speed:
 
 | Worker Type | Model Strategy | Rationale |
 |---|---|---|
-| Read-only (planner, critics, arbiter) | Fast/efficient models first | Only analysis, no edits |
+| Analysis (planner, critics, arbiter) | Fast/efficient models first | No code edits |
 | Editing (test-writer, implementer, refactorer) | Most capable model | Code quality matters |
 | Documenter | Efficient model | Structured log writing |
 
