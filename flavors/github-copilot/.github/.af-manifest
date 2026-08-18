@@ -72,6 +72,7 @@ scripts/analyze-retry-economy.py
 scripts/test-retry-economy.ps1
 scripts/test-workflow-log-schema.ps1
 scripts/test-planner-write-scope.ps1
+scripts/run-all-tests.ps1
 
 # Instructions
 instructions/
