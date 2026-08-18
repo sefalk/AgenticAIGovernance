@@ -204,6 +204,28 @@ There is no separate archival step.
 5. **Finalised** by the documenter at end-of-workflow (status → COMPLETED,
    metrics filled in)
 
+### Size
+
+Plans are budgeted per complexity tier in `af-env.conf` and the budget is
+enforced on commit — see *Plan Budget Guard* in § 7. Trivial: no plan file at
+all. Standard: subtasks with acceptance criteria, scope, risks. Deep adds the
+current baseline, the implementation sequence and the rollback plan. Sections
+the template does not define do not belong in a plan.
+
+### Write Passes
+
+The plan text is emitted **three times** before it reaches disk: the planner
+returns it, the coordinator repeats it verbatim inside the documenter's
+delegation prompt, and the documenter writes the file. Two of those three are
+output tokens spent on text that already existed.
+
+The cause is structural, not accidental: the planner is read-only by charter,
+so the agent that produces the plan cannot be the agent that persists it, and
+subagents do not share context — anything handed on must be re-emitted. This is
+the price of the read-only rule, and it is charged per workflow at the full size
+of the plan. Keeping the plan inside its budget is therefore worth roughly three
+times its own size.
+
 ### When to Skip
 
 Skip the planning document for:
@@ -233,6 +255,7 @@ errors; the shim is fail-open if a checker or a Python interpreter is missing.
 | `check-large-files.py` | Staged file above `LARGE_FILE_MAX_BYTES` | `ALLOW_LARGE_FILES=1` |
 | `check-strict-json.py` | Staged `.vscode/tasks.json` that is not strict JSON | `ALLOW_JSONC=1` |
 | `check-context-budget-staged.py` | Staged instruction/agent payload over the budgets in `af-env.conf` | `ALLOW_CONTEXT_BUDGET=1` |
+| `check-plan-budget.py` | Staged plan document over the budget its complexity tier earns | `ALLOW_PLAN_BUDGET=1` |
 
 **Existing clones** must re-run `bootstrap-python-env.ps1`/`.sh` (or run
 `git config core.hooksPath .github/hooks/git` manually) to pick up the guards —
@@ -301,6 +324,30 @@ context to decide what should have been narrowed or moved.
   exports the staged payload out of the index and hands it to
   `.github/scripts/check-context-budget.py` — the measurement keeps exactly one
   definition. Regression suite: `.github/scripts/test-context-budget.ps1`.
+
+### Plan Budget Guard
+
+Blocks commits that stage a plan document larger than the budget its complexity
+tier earns in `.github/af-env.conf` (`PLAN_BUDGET_TRIVIAL_TOKENS`,
+`PLAN_BUDGET_STANDARD_TOKENS`, `PLAN_BUDGET_DEEP_TOKENS`).
+
+**Rationale:** the plan is the largest artifact a workflow writes and the one
+nobody re-reads. Measured across 29 plans in a consuming project, Standard tier
+averaged ~5,100 tokens against a 4 KB template — so the size is not the
+scaffolding, it is what gets written into it, and 45% of it sat in sections the
+template never defines. A shorter template cannot hold a limit, because nothing
+in a template says "and no more than this". A number does.
+
+- **Scope:** every staged `*.md` under a `plans/` directory except `WIP.md`.
+- **Tier:** read from the plan's own text. An unstated tier is charged the
+  Standard budget — silence is not a licence for an unbounded document. The
+  template's `<!-- Trivial / Standard / Deep -->` placeholder is a comment and
+  states nothing.
+- **Trivial is zero:** a Trivial fix is chartered to have no plan file. The rule
+  predates the guard; nothing enforced it.
+- **Override (one-off):** `ALLOW_PLAN_BUDGET=1 git commit -m "..."`.
+- Checker logic: `.github/hooks/scripts/check-plan-budget.py`. Regression
+  suite: `.github/scripts/test-plan-budget.ps1`.
 
 ### Handling Large Files with Git LFS
 
