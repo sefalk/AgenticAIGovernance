@@ -57,6 +57,7 @@
 | **ado-wiki-manager** | ado-wiki, ado-shared |
 | **ado-pr-manager** | ado-pr, ado-shared |
 | **gh-issue-manager** | gh-issue |
+| **gh-pr-manager** | git-workflow |
 
 ## Available for Activation (34 skills in `skills/_available/`)
 

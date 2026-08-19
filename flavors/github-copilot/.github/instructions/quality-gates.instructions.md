@@ -65,6 +65,7 @@ Examples:
 - `ado-pr-manager`
 - `ado-pipeline-manager`
 - `gh-issue-manager`
+- `gh-pr-manager`
 
 Naming violations are SOFT unless they cause broken orchestration references,
 which is treated as HARD.
