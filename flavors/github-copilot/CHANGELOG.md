@@ -9,6 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A pull request that changes this repository's own environment must now say
+  so (#164).** `.vscode/`, `.githooks/` and the root `.github/` decide which
+  guards run and what CI enforces, and they are the paths where an unintended
+  change is least likely to be read, because reviewers read the payload diff.
+  Nothing signalled a change to them.
+
+  The prompt was a near-miss during the work on #124: a delegated subagent
+  returned an empty result and had nevertheless modified seven files, one of
+  them `.vscode/settings.json` — a tracked file that was never in scope, and a
+  side effect of an environment tool rather than of the task. It was caught
+  because the coordinator chose to read `git status` and every diff hunk.
+  Nothing required that, which is the whole problem: a rule telling agents to
+  declare environment changes is enforced by the same diligence that was
+  missing. Refs #123.
+
+  The regression job now fails a pull request touching those paths unless the
+  body carries `env-change: <reason>`. It is a step in the job that is already
+  required rather than a new job, because a new job means a new status-check
+  context and a hand-edited branch ruleset. The reason must be at least ten
+  characters: a bare marker is a checkbox, and a checkbox gets ticked. The body
+  is read from the API so that adding the line and re-running clears the check,
+  HTML comments are stripped so the commented-out template line cannot satisfy
+  it, and an unreadable file list or body fails closed. Like the attestation it
+  sits beside, this is a *declaration* gate — it proves somebody wrote down why
+  the environment changed, and it must never be cited as review. Refs #164.
+
+- **The declaration gate has its own decision table (#164).** The gate is a
+  PowerShell block inside a workflow, so `run-all-tests.ps1` does not reach it
+  — that sweep covers the payload. `.github/scripts/test-env-change-gate.py`
+  extracts the step's script from the workflow and executes it against a
+  stubbed `gh`, nine cases, one child process each. Extracting rather than
+  retyping is the point: a copy of the logic would prove only that the copy
+  works. It runs in CI on every pull request, so the gate is not a shipped
+  script that nothing ever executed — the defect class #61 records.
+
+  It earned its keep immediately. The first implementation matched the marker
+  with `\s*`, which swallows the newline after an empty `env-change:`; the
+  marker then read as absent and the author got the generic "add a line"
+  message instead of "your line states no reason". The exit code was right and
+  the diagnosis was wrong, which is exactly the kind of defect that survives
+  review and dies in a decision table.
+
 - **Formatting is now a gate, not a suggestion (#124).** `run-lint.ps1` is the
   mandated lint runner — *"all agents MUST use this script instead of calling
   ruff directly"* — and it ran `ruff check` only. `ruff format --check` was

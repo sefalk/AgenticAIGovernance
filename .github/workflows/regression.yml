@@ -96,6 +96,91 @@ jobs:
           Write-Host "::error::This pull request changes files under flavors/github-copilot/.github/hooks/. test-hooks-integration.ps1 covers them and CI cannot run it. Run it locally, then add this line to the pull request body and re-run this job: $marker"
           exit 1
 
+      # The files that govern this repository's own development -- editor
+      # settings, the installed pre-commit hook, and CI itself -- are where an
+      # unintended change is least likely to be read, because reviewers read
+      # the payload diff. #123 records a subagent that returned nothing and had
+      # modified .vscode/settings.json anyway. It was caught by a hand-run
+      # `git status`, and nothing required that to happen.
+      #
+      # Payload hooks under flavors/ are deliberately not covered: they have
+      # their own gate above. The prefixes are exact for that reason --
+      # `flavors/github-copilot/.github/...` does not start with `.github/`.
+      #
+      # Like the attestation, this is a declaration gate. It proves somebody
+      # wrote down why the environment changed. It does not review the change,
+      # and it must not be cited as though it had.
+      #
+      # It runs even when the step above failed, so that an author learns about
+      # both problems in one run rather than in two round trips.
+      - name: Require declaration for environment changes
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          $prefixes = @('.vscode/', '.githooks/', '.github/')
+
+          $files = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER/files" --paginate --jq '.[].filename'
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Could not list the changed files. Failing rather than passing on an unanswered question."
+            exit 1
+          }
+
+          $envFiles = @($files | Where-Object {
+            $path = $_
+            @($prefixes | Where-Object { $path.StartsWith($_) }).Count -gt 0
+          })
+          if ($envFiles.Count -eq 0) {
+            Write-Host "No files under .vscode/, .githooks/ or root .github/ -- declaration not required."
+            exit 0
+          }
+
+          # Read the body from the API rather than the event payload, so that
+          # adding the line and re-running this job is enough to clear the
+          # check. A re-run replays the payload as it was when triggered.
+          $body = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER" --jq '.body'
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Could not read the pull request body. Failing rather than passing on an unanswered question."
+            exit 1
+          }
+
+          # The template carries the marker commented out, and a template
+          # nobody edited must not satisfy a check about work somebody did.
+          $body = [regex]::Replace([string]$body, '(?s)<!--.*?-->', '')
+
+          # A bare marker would be a checkbox, and a checkbox gets ticked. The
+          # reason is the part a reviewer actually needs, so it is required.
+          #
+          # The horizontal-whitespace class is deliberate: `\s*` would swallow
+          # the newline after an empty `env-change:` and the marker would read
+          # as absent, which costs the author the specific error message.
+          # Every match is considered, so a template line left empty above a
+          # filled-in one does not mask the real declaration.
+          $markerMatches = [regex]::Matches($body, '(?m)^[ \t]*env-change:[ \t]*(.*)$')
+          $reason = ''
+          foreach ($m in $markerMatches) {
+            $candidate = $m.Groups[1].Value.Trim()
+            if ($candidate.Length -ge 10) { $reason = $candidate; break }
+          }
+
+          if ($reason) {
+            Write-Host "Environment change declared: $reason"
+            Write-Host "Declared, not reviewed."
+            exit 0
+          }
+
+          Write-Host "Changed under the environment paths:"
+          $envFiles | ForEach-Object { Write-Host "  $_" }
+          if ($markerMatches.Count -gt 0) {
+            Write-Host "::error::The env-change: line states no reason. Say why this pull request changes the environment, in at least 10 characters, then re-run this job."
+            exit 1
+          }
+          Write-Host "::error::This pull request changes files that govern this repository's own development environment. Add a line to the pull request body saying why, then re-run this job: env-change: <reason>"
+          exit 1
+
       - name: Check out
         uses: actions/checkout@v4
         with:
@@ -125,6 +210,15 @@ jobs:
           git config --global user.email "ci@example.invalid"
           git config --global user.name "Regression CI"
           git config --global init.defaultBranch main
+
+      # The declaration gate above is a PowerShell block inside this file, so
+      # run-all-tests.ps1 does not cover it -- that sweep is for the payload
+      # under flavors/. This runs the gate's decision table, extracting the
+      # step's own script and driving it against a stubbed `gh`, so that CI's
+      # own machinery is not a shipped script nobody ever executed.
+      - name: Test the env-change declaration gate
+        shell: powershell
+        run: python .github\scripts\test-env-change-gate.py
 
       # test-hooks-integration.ps1 is excluded on purpose. It does not test the
       # payload: it reads VS Code's own hook log under %APPDATA%\Code\logs to
