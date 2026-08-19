@@ -37,13 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   post-merge sweep on `dev`. The pull-request run is unaffected and is the one
   the ruleset requires. Stated here rather than found later.
 
-  The merge passes `--delete-branch` explicitly. The repository setting
-  *Automatically delete head branches* did not remove the head branch of the
-  first automated merge, so the automation would otherwise leave behind exactly
-  the stale branches someone had just finished cleaning up. A cleanup that
-  lives only in a settings page is invisible from the code and drifts without
-  anyone noticing — the same reason the branch rulesets are versioned in
-  `docs/rulesets/`. Closes #150.
+  The merge also passes `--delete-branch`, which does **not** work and is
+  tracked in #153. `gh pr merge --auto` returns as soon as auto-merge is armed,
+  so the client-side deletion never runs — the flag is inert while the job
+  reports success. It was written against a diagnosis nobody had verified, and
+  both automated merges left their head branch behind regardless. Closes #150.
 
 - **An agent may now open a GitHub pull request, and cannot merge the one
   branch where merging would close issues.** The merge gate from #143 made
@@ -85,6 +83,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in its return rather than implying a guarantee it does not have. Closes #146.
 
 ### Changed
+
+- **A green check on `dev` now describes the branch you are actually merging
+  into.** Arming auto-merge (#150) removed a guarantee nobody had written down.
+  `dev` had two independent signals: the pull-request run, testing the merge
+  result before it lands, and `Regression Suites` on `push: [dev]`, testing
+  `dev` as it ends up. The second is gone for automated merges, because work
+  performed with `GITHUB_TOKEN` does not trigger further workflow runs —
+  measured, not assumed: the human merge of #149 produced
+  `Regression Suites #6: Commit b6459c4 pushed by sefalk`, and the bot merge
+  that produced `42b78d0` produced no run at all.
+
+  On its own that is survivable, since the pull-request run already tests the
+  merge commit. It stopped being survivable in combination with
+  `strict_required_status_checks_policy: false`, which let a pull request merge
+  on a check measured against a base that had since moved. Two pull requests
+  opened against the same commit, both green, one merges — and the second lands
+  on a `dev` that no run has ever seen. Only hand-serialised merges kept that
+  from firing.
+
+  `dev-branch-ruleset.json` now sets the policy to `true`, which makes the
+  failure unreachable rather than detected afterwards: a pull request whose
+  base has moved must take the new base and re-run before it can merge, and the
+  `synchronize` event that follows is already known to produce a run. The cost
+  is that auto-merge stalls if nothing updates the branch — visible, and
+  preferable to a gate reporting green about a state that was never built.
+
+  `main` keeps `false`. It moves only on release pull requests that a human
+  merges, so there is no concurrency for a check to be stale against.
+  Closes #154.
 
 - **The context budget has two owners now, so it stops failing on arrival.**
   One ceiling covered the framework's instruction files and the consuming
