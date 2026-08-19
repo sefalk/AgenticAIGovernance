@@ -55,6 +55,7 @@ Consult these skills when relevant to the task:
 - **error-handling** (`skills/error-handling/SKILL.md`) — exception hierarchies, retry patterns
 - **design-patterns** (`skills/design-patterns/SKILL.md`) — pattern selection, SOLID
 - **static-analysis** (`skills/static-analysis/SKILL.md`) — lint, type check, complexity
+- **test-execution** (`skills/test-execution/SKILL.md`) — task labels, scoping, test budget, test log
 - **dependency-management** (`skills/dependency-management/SKILL.md`) — when adding packages
 - **human-escalation** (`skills/human-escalation/SKILL.md`) — halt protocol when blocked or uncertain
 - **notebook-execution** (`skills/notebook-execution/SKILL.md`) — use the notebook tools for `.ipynb`, never terminal scripts
@@ -161,14 +162,35 @@ changed). One `all` run at the very end only.
 
 **Rule:** Never call pytest directly. Use `run_task` for pre-defined scenarios.
 Use `runTests` with `files` or `testNames` args for file- or test-scoped runs.
-`createAndRunTask` is **last resort** — only when no pre-defined task or
-`runTests` covers the need. You do NOT have terminal access — use Pylance MCP
-for syntax/import checks.
+`createAndRunTask` is for invocations a fixed label cannot express — not a
+lighter-scrutiny route around the terminal you do not have. The same PreToolUse
+classifier inspects it, and it may only invoke scripts under
+`AF_TASK_SCRIPT_DIRS`; a bare binary or an inline `-Command` payload is denied.
+Use Pylance MCP for syntax/import checks.
 
 ## Return Format
 
+### On success (all tests pass, no HARD gate failed)
+
+Under `OUTPUT_VERBOSITY=standard` or `lean` (`af-env.conf`):
+
 ```markdown
-## Implementation Summary
+## Implementation Summary: COMPLETED
+
+Subtasks {done}/{total}. Tests {passed}/{total}. Coverage {line}% line / {branch}% branch.
+
+### Files Changed
+- `{path}` — {what changed}
+```
+
+Under `lean`, list the paths without descriptions — but never drop the list
+itself: the code-critic reviews exactly those files. Under `full`, emit the
+complete structure below.
+
+### On PARTIAL, FAILED, or any failed/BLOCKED HARD gate — full detail, all modes
+
+```markdown
+## Implementation Summary: {COMPLETED | PARTIAL | FAILED}
 
 ### Completed Subtasks
 - [x] {Subtask 1}: {description}
@@ -183,3 +205,28 @@ for syntax/import checks.
 ### Issues Encountered
 - {Any problems or deviations from the plan}
 ```
+
+Always report deviations from the plan, an unmet acceptance criterion, or a
+HARD gate you could not verify — in every mode. A silent deviation is the one
+thing the coordinator cannot recover from.
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| All tests pass | HARD | Run test suite, verify zero failures | Standard+ |
+| Zero syntax/import errors | HARD | Run syntax checker | Standard+ |
+| Python type hints complete (changed source files) | HARD | Verify all public functions have full argument+return annotations in changed `SRC_DIR/**/*.py` files | Standard+ |
+| Python docstrings present and structured (changed source files) | HARD | Verify changed public functions include non-trivial docstrings with parameters/returns sections when applicable | Standard+ |
+| Ignore statements justified | HARD | Reject `# noqa` / `# type: ignore` / `# pyright: ignore` without explicit rule code and justification comment, across `SRC_DIR/**/*.py` **and** `tests/**/*.py` — the acknowledgement path for inherited lint debt runs through test files. Same rule for a new `ignore` / `per-file-ignores` entry in the project's ruff config — the linting gate honours those, so each needs a comment stating why. | Standard+ |
+| Linting clean (branch delta, source **and** tests) | HARD | Run `check-python-linting.py` on `SRC_DIR/**/*.py` **and** `tests/**/*.py` across the branch delta (`merge-base(HEAD, BASE_BRANCH)..HEAD`), not just the current step — files committed in an earlier phase ship on merge too. Rule set determined by `LINTING_STRICTNESS` in `af-env.conf`. Gate is BLOCKED (not fail) if `ruff` is not installed. Mirrored from the refactorer because the Refactor step is optional. | Standard+ |
+| Line coverage ≥ threshold | HARD | Run coverage tool, compare to MANIFEST § 5 thresholds: Domain ≥ 90%, Ports ≥ 80%, Adapters ≥ 60%, Utilities ≥ 85% | Standard+ |
+| No secrets in changed files | HARD | Grep for credential patterns, API keys | Standard+ |
+| New deps declared in spec file | HARD | If a new package was `import`ed, verify it appears in the project dep file (`af-env.conf` → `DEP_FILE` / `DEP_DEV_FILE`) | Standard+ |
+| Provenance markers on new/modified files | HARD | Verify markers present | Standard+ |
+| Skills read declaration | SOFT | `Skills Read:` line in Gate Summary (critic flags if missing) | Standard+ |
+| Architecture boundaries respected | SOFT | code-critic reviews | Standard+ |
+| Complexity ≤ threshold | SOFT | code-critic verifies: Domain ≤ 10, Ports ≤ 5, Adapters ≤ 15, Utilities ≤ 8 | Deep |

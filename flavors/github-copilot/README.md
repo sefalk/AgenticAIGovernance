@@ -142,7 +142,7 @@ Use two deployment modes to balance speed and safety:
 | **1** | Use `@coordinator` for small tasks — try `/af-quick-fix` or `/af-trivial-fix` |
 | **2** | Run a feature with `/af-tdd-feature`. Watch the subagent calls in the chat |
 | **3** | Customise `copilot-instructions.md` and `architecture.instructions.md` for your project |
-| **4** | Review workflow logs in `.github/logs/` and retro snippets in `retros/auto/` |
+| **4** | Review workflow logs in `.github/logs/` and retro snippets in `.github/retros/auto/` |
 
 ## How It Works
 
@@ -296,9 +296,9 @@ CHANGELOG.md                               # Release history (Keep a Changelog f
 ├── instructions/                          # Auto-applied instruction files
 │   ├── architecture.instructions.md       # Architecture map (customise!)
 │   ├── copilot-authoring.instructions.md  # Rules for authoring copilot files
-│   ├── git-workflow.instructions.md       # Branch lifecycle, atomic commits, plan files
+│   ├── git-workflow.instructions.md       # Core git rules (depth: git-workflow skill)
 │   ├── provenance.instructions.md         # AI traceability markers
-│   ├── quality-gates.instructions.md      # Gate taxonomy, tiers, per-agent exit gates
+│   ├── quality-gates.instructions.md      # Gate taxonomy, tiers, exit protocol
 │   └── testing.instructions.md            # TDD and test conventions
 ├── templates/                             # Structured document templates
 │   ├── PLAN.md                            # Plan template (persisted as {type}-{date}-{slug}.md in docs/plans/)
@@ -326,9 +326,11 @@ CHANGELOG.md                               # Release history (Keep a Changelog f
 │   ├── review-code.prompt.md              # /af-review-code → code review only
 │   ├── smoke-test.prompt.md               # /af-smoke-test → verify framework health
 │   └── workflow-summary.prompt.md         # /af-workflow-summary → log summary
-├── logs/                                  # Workflow handoff logs (gitignored)
+├── logs/                                  # Workflow handoff logs (local only)
+│   ├── .gitignore                          # ships the rule — keeps logs out of git
 │   └── README.md
 └── retros/                                # Retrospective documents
+    ├── auto/.gitignore                     # agent-generated snippets stay local
     └── README.md
 ```
 

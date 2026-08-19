@@ -57,6 +57,7 @@ Consult these skills when relevant to the task:
 - **design-patterns** (`skills/design-patterns/SKILL.md`) — when to apply/avoid patterns
 - **hexagonal-architecture** (`skills/hexagonal-architecture/SKILL.md`) — layer boundaries for move-function decisions
 - **pydantic** (`skills/pydantic/SKILL.md`) — when converting dataclasses/dicts to Pydantic models
+- **test-execution** (`skills/test-execution/SKILL.md`) — task labels, scoping, test budget, test log
 - **human-escalation** (`skills/human-escalation/SKILL.md`) — halt protocol when blocked or uncertain
 - **notebook-execution** (`skills/notebook-execution/SKILL.md`) — use the notebook tools for `.ipynb`, never terminal scripts
 <!-- AF:MANAGED:curated-skills:START -->
@@ -135,17 +136,38 @@ Consult the **human-escalation** skill for the full halt protocol.
    when you finish. Running it yourself wastes ~20 minutes.
 
 **Rule:** Use `run_task` for `tests: domain`. Use `runTests` for file-scoped
-runs. `createAndRunTask` is **last resort** — only when no pre-defined task or
-`runTests` covers the need. Accept the stop hook as your full-suite validation.
-You do NOT have terminal access.
+runs. `createAndRunTask` is for invocations a fixed label cannot express — not a
+lighter-scrutiny route around the terminal you do not have. The same PreToolUse
+classifier inspects it, and it may only invoke scripts under
+`AF_TASK_SCRIPT_DIRS`; a bare binary or an inline `-Command` payload is denied.
+Accept the stop hook as your full-suite validation.
 
 The SubagentStop hard gate also enforces Python quality on changed source files
 via `.github/scripts/check-python-quality.py`.
 
 ## Return Format
 
+### On COMPLETED
+
+Under `OUTPUT_VERBOSITY=standard` or `lean` (`af-env.conf`):
+
 ```markdown
-## Refactoring Summary: {COMPLETED | PARTIAL | FAILED}
+## Refactoring Summary: COMPLETED
+
+{One line per change: what and why.}
+Tests {passed}/{total} before and after — unchanged.
+
+### Files Changed
+- `{path}` — {description}
+```
+
+Under `lean`, list the paths without descriptions. Under `full`, emit the
+complete structure below.
+
+### On PARTIAL or FAILED — full detail, all modes
+
+```markdown
+## Refactoring Summary: {PARTIAL | FAILED}
 
 ### Changes Made
 1. {What and why}
@@ -154,9 +176,29 @@ via `.github/scripts/check-python-quality.py`.
 - Before: {passed}/{total}
 - After: {passed}/{total} (must be identical)
 
-### Skipped Refactorings (if PARTIAL or FAILED)
+### Skipped Refactorings
 - {What was attempted and why it broke tests}
 
 ### Files Changed
 - `{path}` — {description}
 ```
+
+A skipped refactoring is never omitted — it is the record of a structural
+problem someone still has to decide about.
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| All tests still pass after each step | HARD | Run test suite after each refactoring | Standard+ |
+| Zero syntax/import errors | HARD | Run syntax checker | Standard+ |
+| Python type hints remain complete (changed source files) | HARD | Verify all changed public functions in `SRC_DIR/**/*.py` retain full annotations | Standard+ |
+| Python docstrings remain complete (changed source files) | HARD | Verify changed public functions retain structured docstrings | Standard+ |
+| Ignore statements justified | HARD | Reject `# noqa` / `# type: ignore` / `# pyright: ignore` without explicit rule code and justification comment, across `SRC_DIR/**/*.py` **and** `tests/**/*.py` — the acknowledgement path for inherited lint debt runs through test files. Same rule for a new `ignore` / `per-file-ignores` entry in the project's ruff config — the linting gate honours those, so each needs a comment stating why. | Standard+ |
+| No new files created (refactoring only) | HARD | Self-check: only existing files modified | Standard+ |
+| Linting clean (branch delta, source **and** tests) | HARD | Run `check-python-linting.py` on `SRC_DIR/**/*.py` **and** `tests/**/*.py` across the branch delta (`merge-base(HEAD, BASE_BRANCH)..HEAD`), not just the current step. Rule set determined by `LINTING_STRICTNESS` in `af-env.conf` (`minimal`/`standard`/`strict`). Gate is BLOCKED (not fail) if `ruff` is not installed. | Standard+ |
+| Skills read declaration | SOFT | `Skills Read:` line in Gate Summary (critic flags if missing) | Standard+ |
+| Complexity reduced or unchanged | ADVISORY | Run complexity tool, compare before/after | Standard+ |

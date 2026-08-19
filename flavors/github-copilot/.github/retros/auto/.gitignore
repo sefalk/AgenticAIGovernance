@@ -1,0 +1,14 @@
+# Agent-generated retro snippets, kept out of version control BY DEFAULT --
+# not because they are unsafe to publish, but because changing an existing
+# project's history on upgrade would be worse than an over-cautious default.
+#
+# This file only governs THIS directory. The destination is `RETRO_DIR` in
+# af-env.conf; point it at a tracked directory (e.g. docs/retros) and retros
+# become reviewable project history, and this rule stops applying to them.
+#
+# The workflow logs are a different case: they embed the user request verbatim,
+# and they stay local unconditionally.
+#
+# Hand-written retrospectives live one level up and stay the project's choice.
+*
+!.gitignore

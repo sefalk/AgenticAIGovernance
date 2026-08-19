@@ -18,6 +18,18 @@
 
 set -euo pipefail
 
+# The shipped commit guards live with the payload, at
+# flavors/github-copilot/.github/hooks/, and resolve themselves relative to
+# $repo_root/.github -- a directory this repo does not have. Until this line
+# existed they therefore ran in every consumer project and in none of the
+# commits that wrote them, which is how the context budget drifted 273 tokens
+# past its own ceiling unobserved (issue #85). Run them first, so a blocked
+# commit does not leave a bumped VERSION staged behind it.
+PAYLOAD_HOOK="flavors/github-copilot/.github/hooks/git/pre-commit"
+if [ -f "$PAYLOAD_HOOK" ]; then
+    sh "$PAYLOAD_HOOK" || exit 1
+fi
+
 VERSION_FILE="flavors/github-copilot/VERSION"
 
 # Nothing to do if the VERSION file is missing.

@@ -1,0 +1,7 @@
+# Workflow logs are local self-improvement instrumentation, never product code.
+# They also embed the user request verbatim (`trigger:`), so committing them
+# leaks whatever was pasted into a prompt. Scoped to this directory so it can
+# never clobber the project's own .gitignore.
+*
+!.gitignore
+!README.md

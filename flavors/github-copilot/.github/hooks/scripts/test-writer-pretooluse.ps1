@@ -12,6 +12,8 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+. "$PSScriptRoot/_common.ps1"
+
 # Worktree-aware path resolution (see ideas/feature-git-worktrees.md §12).
 $mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
 $codeRoot = $mainRoot
@@ -40,13 +42,20 @@ try {
 
 # Only inspect file-modifying tools (not read/search tools that contain 'File')
 $toolName = $inputData.tool_name
-if ($toolName -notmatch 'editFile|createFile|createDir|editNotebook') {
+if (-not (Test-AfWriteTool $toolName)) {
     Write-Output '{}'
     exit 0
 }
 
 # Branch context proof -- block file edits if not on an agent/* branch
 $currentBranch = git -C $codeRoot branch --show-current 2>$null
+if (-not $currentBranch) {
+    # Detached HEAD is not an agent branch either; outside a repo there is
+    # nothing to prove, so stay silent there.
+    if ((git -C $codeRoot rev-parse --is-inside-work-tree 2>$null) -eq 'true') {
+        $currentBranch = '(detached HEAD)'
+    }
+}
 if ($currentBranch -and $currentBranch -notmatch '^agent/') {
     @{
         hookSpecificOutput = @{
@@ -58,28 +67,27 @@ if ($currentBranch -and $currentBranch -notmatch '^agent/') {
     exit 0
 }
 
-# Extract the file path from tool input
-$filePath = $inputData.tool_input.filePath
-if (-not $filePath) {
-    # Try alternate property names
-    $filePath = $inputData.tool_input.path
-}
-if (-not $filePath) {
+# Extract every file path the call refers to. A batched edit names several,
+# and one production path among them is still a production edit.
+$filePaths = @(Get-AfWritePaths $inputData.tool_input)
+if ($filePaths.Count -eq 0) {
     Write-Output '{}'
     exit 0
 }
 
-# Resolve to absolute path and check against production source directory
+# Resolve to absolute paths and check against the production source directory
 try {
-    $resolved = [System.IO.Path]::GetFullPath($filePath)
     $prodRoot = [System.IO.Path]::GetFullPath($SRC_DIR)
 
-    if ($resolved.StartsWith($prodRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    foreach ($filePath in $filePaths) {
+        $resolved = [System.IO.Path]::GetFullPath($filePath)
+        if (-not $resolved.StartsWith($prodRoot, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+
         @{
             hookSpecificOutput = @{
                 hookEventName      = 'PreToolUse'
                 permissionDecision = 'deny'
-                permissionDecisionReason = "TDD phase isolation: test-writer cannot modify production code under $SRC_DIR/. Only test files should be created or edited during the Red phase."
+                permissionDecisionReason = "TDD phase isolation: test-writer cannot modify production code under $SRC_DIR/ (offending path: $filePath). Only test files should be created or edited during the Red phase."
             }
         } | ConvertTo-Json -Depth 3 -Compress
         exit 0

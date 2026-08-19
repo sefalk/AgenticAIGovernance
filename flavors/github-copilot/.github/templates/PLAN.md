@@ -5,6 +5,15 @@
 <!-- Location: docs/plans/ (or project-specific convention discovered by coordinator) -->
 <!-- The coordinator determines the filename and persists this file. -->
 
+<!-- SIZE: budgeted per complexity tier in .github/af-env.conf and enforced on
+     commit by check-plan-budget.py. Trivial: no plan file at all. Standard:
+     PLAN_BUDGET_STANDARD_TOKENS. Deep: PLAN_BUDGET_DEEP_TOKENS.
+
+     Sections marked [Deep] below are omitted at Standard tier. Do not add
+     sections this template does not define -- if a plan needs one, the finding
+     it carries belongs in Risks, in a subtask, or in an investigation document.
+     Measured across 19 Standard plans, invented sections were 45% of the text. -->
+
 **Workflow:** <!-- Feature Development | Bug Fix | Refactoring -->
 **Branch:** `agent/<!-- workflow-id -->`
 **Status:** <!-- DRAFT | APPROVED | IN_PROGRESS | COMPLETED -->
@@ -12,8 +21,8 @@
 
 ## Context
 
-<!-- What is being built/fixed and why. Include the user's original request
-     or a summary of the triggering issue.
+<!-- What is being built/fixed and why, in a few sentences. Do not restate the
+     issue or the code -- link to them.
      Use blockquotes (>) for non-obvious decisions, caveats, or "why not X?" reasoning. -->
 
 ## References
@@ -32,13 +41,17 @@
 
 ## Current Baseline (optional)
 
-<!-- Fill only for coverage expansion, refactoring, or performance work.
+<!-- [Deep] Fill only for coverage expansion, refactoring, or performance work.
      Capture metrics that the acceptance criteria will compare against.
      Delete this section if not applicable. -->
 
 ## Subtasks
 
 ### 1. <!-- Subtask title -->
+
+<!-- The largest section in every plan measured, so it is the one to keep tight:
+     one line per field. The acceptance criteria are what the implementer and the
+     critics act on; the prose around them is not read. -->
 
 - **Action:** <!-- what to do -->
 - **Files:** <!-- which files to create or modify -->
@@ -62,7 +75,8 @@
 
 ## Implementation Sequence
 
-<!-- Ordered list showing the dependency chain -->
+<!-- [Deep] Ordered list showing the dependency chain. At Standard tier the
+     subtask order and their Dependencies fields already say this. -->
 1. <!-- Subtask → Subtask → ... -->
 
 ## Quality Gates

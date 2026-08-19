@@ -3,19 +3,26 @@
 # Input:  JSON via stdin (common fields + source)
 # Output: JSON with additionalContext
 
+# Root and interpreter come from this script's location, never from the cwd
+# the agent happens to run in (issue #54).
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
 # Consume stdin (required even if unused)
 cat > /dev/null
 
 # Gather context
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 commit=$(git log -1 --format='%h %s' 2>/dev/null || echo "unknown")
-py_ver=$(python3 --version 2>/dev/null || python --version 2>/dev/null || echo "unknown")
-project=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || echo "unknown")
+if [ -n "$AF_PYTHON" ]; then
+    py_ver=$("$AF_PYTHON" --version 2>/dev/null || echo "unknown")
+else
+    py_ver="unknown"
+fi
+project=$(basename "$AF_CODE_ROOT" 2>/dev/null || echo "unknown")
 
-# Test log summary — pure bash
+# Test log summary -- pure bash
 test_log_summary=""
-repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
-test_log_path="$repo_root/.github/test-log.json"
+test_log_path="$AF_MAIN_ROOT/.github/test-log.json"
 if [[ -f "$test_log_path" ]]; then
     _now_epoch=$(date +%s)
     _flat=$(tr -d '\n\r' < "$test_log_path" | tr -s ' ')

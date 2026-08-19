@@ -1,0 +1,83 @@
+# Regression gate for the framework payload.
+#
+# This is the check that gives "all conditions are met" a meaning. Until it
+# exists, the 15 regression suites run only on a maintainer's laptop and
+# GitHub has no way to know whether a pull request is sound -- which makes
+# auto-merge indistinguishable from merging on the author's say-so.
+#
+# Windows is not a preference here. The suites are Windows PowerShell 5.1
+# scripts and the hooks they exercise ship in .ps1/.sh pairs; ubuntu runners
+# have no `powershell`.
+
+name: Regression Suites
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suites:
+    # The branch rulesets require this string as their status check context.
+    # Renaming it does not fail the gate -- it stalls every pull request on a
+    # check that no longer reports. See docs/rulesets/README.md.
+    name: Regression suites (Windows PowerShell 5.1)
+    runs-on: windows-latest
+    # Measured: 5 min 59 s on the runner against 16 minutes for the same sweep
+    # on a maintainer's laptop. The ceiling is far above both so that a hang is
+    # caught by the per-suite timeout rather than by the job budget.
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ruff and PyYAML are prerequisites of individual suites. Without them
+      # those suites print "SKIP: ..." and exit 0 -- green while asserting
+      # nothing. -FailOnSkip below turns that into a hard failure, so these
+      # installs are load-bearing, not convenience.
+      - name: Install suite prerequisites
+        shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ruff pyyaml
+
+      # Several suites build throwaway git repositories and commit inside them.
+      # A fresh runner has no global git identity, so those commits would fail
+      # for a reason that has nothing to do with the code under test.
+      - name: Configure git identity for throwaway repos
+        shell: powershell
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "Regression CI"
+          git config --global init.defaultBranch main
+
+      # test-hooks-integration.ps1 is excluded on purpose. It does not test the
+      # payload: it reads VS Code's own hook log under %APPDATA%\Code\logs to
+      # confirm that hooks actually fired during a real agent session on a
+      # developer's machine. A hosted runner has no such log, so it exits 2.
+      # Excluding it is honest; leaving it in would fail every run for a reason
+      # unrelated to the code under review.
+      - name: Run all regression suites
+        shell: powershell
+        run: |
+          .\flavors\github-copilot\.github\scripts\run-all-tests.ps1 `
+            -FailOnSkip `
+            -Exclude test-hooks-integration.ps1 `
+            -TimeoutSeconds 1200

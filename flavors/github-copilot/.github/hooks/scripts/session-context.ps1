@@ -7,6 +7,10 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Root and interpreter come from this script's location, never from the cwd
+# the agent happens to run in (issue #54).
+. "$PSScriptRoot/_common.ps1"
+
 # Consume stdin (required even if we don't use the input)
 try { [Console]::In.ReadToEnd() | Out-Null } catch {}
 
@@ -17,15 +21,15 @@ if (-not $branch) { $branch = 'unknown' }
 $commit  = (git log -1 --format='%h %s' 2>$null)
 if (-not $commit) { $commit = 'unknown' }
 
-$pyVer   = (python --version 2>&1)
+$pyVer   = if ($AfPython) { & $AfPython --version 2>&1 } else { 'unknown' }
 if (-not $pyVer) { $pyVer = 'unknown' }
 
-$repoRoot = (git rev-parse --show-toplevel 2>$null)
+$repoRoot = $AfCodeRoot
 $project  = if ($repoRoot) { Split-Path $repoRoot -Leaf } else { 'unknown' }
 
 # Test log summary
 $testLogSummary = ''
-$testLogPath = Join-Path (git rev-parse --show-toplevel 2>$null) '.github/test-log.json' 2>$null
+$testLogPath = Join-Path $AfMainRoot '.github/test-log.json'
 if ($testLogPath -and (Test-Path $testLogPath -ErrorAction SilentlyContinue)) {
     try {
         $log = Get-Content $testLogPath -Raw | ConvertFrom-Json

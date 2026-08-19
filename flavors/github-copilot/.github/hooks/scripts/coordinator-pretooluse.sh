@@ -9,10 +9,17 @@
 
 set -euo pipefail
 
-RAW=$(cat)
-[ -z "$RAW" ] && echo '{}' && exit 0
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54).
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 
-TOOL_NAME=$(echo "$RAW" | python3 -c "
+RAW=$(cat)
+# `A && B && exit` returns 1 when A is false, which under `set -e` aborts the
+# hook instead of falling through. Explicit `if` blocks do not.
+if [ -z "$RAW" ]; then echo '{}'; exit 0; fi
+if [ -z "$AF_PYTHON" ]; then echo '{}'; exit 0; fi
+
+TOOL_NAME=$(echo "$RAW" | "$AF_PYTHON" -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -30,9 +37,11 @@ case "$TOOL_NAME" in
 esac
 
 # Intercept terminal tool calls -- block pytest, validate git commit message quality
+# `case` is case-sensitive: the real tool name is `runInTerminal`, so a
+# lowercase-only pattern matched nothing and this whole branch was dead.
 case "$TOOL_NAME" in
-    *terminal*)
-        COMMAND=$(echo "$RAW" | python3 -c "
+    *terminal*|*Terminal*)
+        COMMAND=$(echo "$RAW" | "$AF_PYTHON" -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -43,10 +52,8 @@ except Exception:
     print('')
 " 2>/dev/null)
         # Config: PROJECT_LANGUAGE and PY_ENV_BOOTSTRAP from af-env.conf
-        PROJECT_LANGUAGE=$(grep '^PROJECT_LANGUAGE=' .github/af-env.conf 2>/dev/null | cut -d= -f2 | xargs)
-        BOOTSTRAP_MODE=$(grep '^PY_ENV_BOOTSTRAP=' .github/af-env.conf 2>/dev/null | cut -d= -f2 | xargs)
-        : "${PROJECT_LANGUAGE:=python}"
-        : "${BOOTSTRAP_MODE:=ask}"
+        PROJECT_LANGUAGE=$(af_conf_get PROJECT_LANGUAGE python)
+        BOOTSTRAP_MODE=$(af_conf_get PY_ENV_BOOTSTRAP ask)
 
         # Bootstrap env for non-pytest Python commands when .venv is missing
         IS_PYTEST=false
@@ -83,12 +90,11 @@ except Exception:
 
         # Validate git worktree add preconditions
         if echo "$COMMAND" | grep -qE 'git[[:space:]]+worktree[[:space:]]+add'; then
-            WT_DIR=$(grep '^WORKTREE_DIR=' .github/af-env.conf 2>/dev/null | cut -d= -f2 | xargs)
-            : "${WT_DIR:=../wt}"
+            WT_DIR=$(af_conf_get WORKTREE_DIR '../wt')
             # Extract branch name after -b flag
             BRANCH=$(echo "$COMMAND" | grep -oP '(?<=-b )\S+' || true)
             if [ -n "$BRANCH" ] && ! echo "$BRANCH" | grep -qE '^agent/[a-z0-9][a-z0-9-]*$'; then
-                printf '%s\n' "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Worktree branch name '${BRANCH}' is invalid. Must match '^agent/[a-z0-9-]+' (e.g. agent/feat-auth, agent/fix-db-pool). See git-workflow.instructions.md Worktree Lifecycle.\"}}"
+                printf '%s\n' "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Worktree branch name '${BRANCH}' is invalid. Must match '^agent/[a-z0-9-]+' (e.g. agent/feat-auth, agent/fix-db-pool). See skills/git-worktrees/SKILL.md.\"}}"
                 exit 0
             fi
             # Extract worktree path (first arg after 'add')
@@ -99,22 +105,30 @@ except Exception:
             fi
             # Check repo health
             if ! git status --porcelain >/dev/null 2>&1; then
-                printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Main repository is not healthy (\'git status\' failed). Fix repository state before creating a worktree."}}'
+                printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Main repository is not healthy ('\''git status'\'' failed). Fix repository state before creating a worktree."}}'
                 exit 0
             fi
-        fi        # Validate git commit message quality -- reject generic phase-only messages
+        fi
+
+        # Validate git commit message quality -- reject generic phase-only messages
         # Required format: [agent:name] phase: {description >= 10 chars}
         if echo "$COMMAND" | grep -qE 'git[[:space:]]+commit'; then
-            MSG=$(echo "$COMMAND" | python3 << 'PYEOF'
-import sys, re
-cmd = sys.stdin.read()
-m = re.search(r'-m\s+["\']([^"\']+)["\']', cmd)
-print(m.group(1).strip() if m else '')
+            # The heredoc *is* python's stdin, so a pipe into it is discarded
+            # and the script always saw an empty command. Pass it in the
+            # environment instead, which leaves the quoted heredoc intact.
+            MSG=$(AF_RAW_COMMAND="$COMMAND" "$AF_PYTHON" << 'PYEOF'
+import os, re
+cmd = os.environ.get('AF_RAW_COMMAND', '')
+m = re.search(r'-m\s+(["\'])(.+?)\1', cmd)
+print(m.group(2).strip() if m else '')
 PYEOF
 )
             if [ -n "$MSG" ]; then
-                if ! echo "$MSG" | grep -qE '^\[agent:[^\]]+\][[:space:]]+(WIP checkpoint|task cancelled|justify ignore)'; then
-                    if ! echo "$MSG" | grep -qE '^\[agent:[^\]]+\][[:space:]]+[^:]+:[[:space:]]+.{10,}'; then
+                # A backslash is literal inside an ERE bracket list, so the
+                # former '[^\]]' demanded two closing brackets and never
+                # matched. A leading ']' after '^' is the portable spelling.
+                if ! echo "$MSG" | grep -qE '^\[agent:[^]]+\][[:space:]]+(WIP checkpoint|task cancelled|justify ignore)'; then
+                    if ! echo "$MSG" | grep -qE '^\[agent:[^]]+\][[:space:]]+[^:]+:[[:space:]]+.{10,}'; then
                         printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Commit message too generic. Required format: '\''[agent:name] phase: {description >= 10 chars}'\''. E.g.: '\''[agent:test-writer] failing tests: ColumnMeta validation -- null CRC and negative threshold edge cases'\''. See git-workflow.instructions.md Commit Rule 4."}}'
                         exit 0
                     fi
@@ -125,15 +139,10 @@ PYEOF
 esac
 
 # Only inspect file-modifying tools
-case "$TOOL_NAME" in
-    *edit*|*create*|*write*|*file*|*Edit*|*Create*|*Write*|*File*)
-        # Allow createTerminal (not a file operation)
-        case "$TOOL_NAME" in
-            *terminal*|*Terminal*) echo '{}'; exit 0 ;;
-        esac
-        ;;
-    *) echo '{}'; exit 0 ;;
-esac
+if ! af_is_write_tool "$TOOL_NAME"; then
+    echo '{}'
+    exit 0
+fi
 
 # Block: coordinator must not edit or create files directly
 cat <<'EOF'

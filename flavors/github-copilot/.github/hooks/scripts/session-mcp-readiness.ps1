@@ -4,15 +4,19 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54).
+. "$PSScriptRoot/_common.ps1"
+
 try { [void][Console]::In.ReadToEnd() } catch {}
 
-$repoRoot = (git rev-parse --show-toplevel 2>$null)
+$repoRoot = $AfMainRoot
 if (-not $repoRoot) {
     Write-Output '{}'
     exit 0
 }
 
-$confPath = Join-Path $repoRoot '.github/af-env.conf'
+$confPath = $AfConfPath
 $mode = 'off'
 $missing = New-Object System.Collections.Generic.List[string]
 $advisories = New-Object System.Collections.Generic.List[string]
@@ -87,10 +91,8 @@ if (Test-Path $agentsDir) {
 if ($mode -ne 'off') {
     $checker = Join-Path $repoRoot '.github/scripts/check-mcp-tool-ids.py'
     if (Test-Path $checker) {
-        $py = Get-Command python -ErrorAction SilentlyContinue
-        if (-not $py) { $py = Get-Command python3 -ErrorAction SilentlyContinue }
-        if ($py) {
-            $checkOut = & $py.Source $checker --root (Join-Path $repoRoot '.github') --quiet 2>$null
+        if ($AfPython) {
+            $checkOut = & $AfPython $checker --root (Join-Path $repoRoot '.github') --quiet 2>$null
             if ($LASTEXITCODE -eq 1) {
                 $count = if ("$checkOut" -match '(\d+) legacy') { $Matches[1] } else { 'some' }
                 $advisories.Add("$count legacy azure-devops-mcp tool id(s) present -- ADO agents will silently lose tools (run .github/scripts/check-mcp-tool-ids.py)")

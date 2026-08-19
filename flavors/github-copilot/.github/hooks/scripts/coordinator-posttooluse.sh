@@ -11,18 +11,19 @@
 
 set -euo pipefail
 
-# Load project config
-SRC_DIR="src"
-_conf=".github/af-env.conf"
-if [ -f "$_conf" ]; then
-    _val=$(grep -E '^SRC_DIR=' "$_conf" | head -1 | cut -d= -f2-)
-    [ -n "$_val" ] && SRC_DIR="$_val"
-fi
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54).
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
+SRC_DIR=$(af_conf_get SRC_DIR src)
 
 RAW=$(cat)
-[ -z "$RAW" ] && echo '{}' && exit 0
+# `A && B && exit` returns 1 when A is false, which under `set -e` aborts the
+# hook instead of falling through. Explicit `if` blocks do not.
+if [ -z "$RAW" ]; then echo '{}'; exit 0; fi
+if [ -z "$AF_PYTHON" ]; then echo '{}'; exit 0; fi
 
-TOOL_NAME=$(echo "$RAW" | python3 -c "
+TOOL_NAME=$(echo "$RAW" | "$AF_PYTHON" -c "
 import sys, json
 try:
     d = json.load(sys.stdin)

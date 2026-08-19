@@ -12,6 +12,8 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+. "$PSScriptRoot/_common.ps1"
+
 # Worktree-aware path resolution (see ideas/feature-git-worktrees.md §12).
 $mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
 $codeRoot = $mainRoot
@@ -32,8 +34,15 @@ try {
 
 # Branch context proof -- block file edits if not on agent/* branch
 $toolName = $inputData.tool_name
-if ($toolName -match 'editFile|createFile|createDir|editNotebook') {
+if (Test-AfWriteTool $toolName) {
     $currentBranch = git -C $codeRoot branch --show-current 2>$null
+    if (-not $currentBranch) {
+        # Detached HEAD is not an agent branch either; outside a repo there is
+        # nothing to prove, so stay silent there.
+        if ((git -C $codeRoot rev-parse --is-inside-work-tree 2>$null) -eq 'true') {
+            $currentBranch = '(detached HEAD)'
+        }
+    }
     if ($currentBranch -and $currentBranch -notmatch '^agent/') {
         @{
             hookSpecificOutput = @{
@@ -46,15 +55,17 @@ if ($toolName -match 'editFile|createFile|createDir|editNotebook') {
     }
 }
 
-# Only inspect file/directory creation tools
-$toolName = $inputData.tool_name
-if ($toolName -notmatch 'create|Create') {
-    Write-Output '{}'
-    exit 0
-}
-
-# Block createFile and createDirectory (but allow createTerminal etc.)
-if ($toolName -match 'file|File|directory|Directory') {
+# Block file and directory creation. Editing an existing file is the whole
+# point of the Refactor phase, so only the creating tools are refused --
+# matched by name rather than by a substring, which used to let
+# `create_and_run_task` into the same branch as `create_file`.
+$creationTools = @(
+    'create_file'
+    'create_directory'
+    'create_new_jupyter_notebook'
+    'createFile', 'createDirectory', 'createDir'
+)
+if ($creationTools -contains $toolName) {
     @{
         hookSpecificOutput = @{
             hookEventName      = 'PreToolUse'

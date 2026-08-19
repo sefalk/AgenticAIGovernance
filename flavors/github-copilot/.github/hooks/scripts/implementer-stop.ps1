@@ -15,27 +15,15 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-# Worktree-aware path resolution (see ideas/feature-git-worktrees.md §12).
-# $mainRoot: main checkout where .github/ is deployed (derived from script location).
-# $codeRoot: active worktree if .active-worktree sentinel exists, else $mainRoot.
-$mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
-$codeRoot = $mainRoot
-$sentinel = Join-Path $mainRoot '.github/.active-worktree'
-if (Test-Path $sentinel) {
-    $p = (Get-Content $sentinel -Raw -ErrorAction SilentlyContinue).Trim()
-    if ($p -and (Test-Path $p)) { $codeRoot = $p }
-}
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54). $mainRoot/$codeRoot keep
+# their names so the rest of the hook is untouched.
+. "$PSScriptRoot/_common.ps1"
+$mainRoot = $AfMainRoot
+$codeRoot = $AfCodeRoot
 
-# Load project config
-$SRC_DIR = 'src'
-$BASE_BRANCH = ''
-$confPath = Join-Path $mainRoot '.github/af-env.conf'
-if (Test-Path $confPath) {
-    $m = Select-String -Path $confPath -Pattern '^SRC_DIR=(.+)$'
-    if ($m) { $SRC_DIR = $m.Matches[0].Groups[1].Value.Trim() }
-    $b = Select-String -Path $confPath -Pattern '^BASE_BRANCH=(.+)$'
-    if ($b) { $BASE_BRANCH = $b.Matches[0].Groups[1].Value.Trim() }
-}
+$SRC_DIR = Get-AfConfig -Key 'SRC_DIR' -Default 'src'
+$BASE_BRANCH = Get-AfConfig -Key 'BASE_BRANCH' -Default ''
 
 # Linting scope is wider than the quality scope: type hints and NumPy
 # docstrings do not apply to test functions, but ruff violations in tests/ are
@@ -107,11 +95,45 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
         }
     } catch {}
 
+    # The unit of accountability is the branch delta: what the merge will add.
+    # Resolved here rather than at each gate so provenance, quality and hygiene
+    # all speak about the same base.
+    $mergeBase = $null
+    foreach ($ref in @($BASE_BRANCH, "origin/$BASE_BRANCH")) {
+        if (-not $BASE_BRANCH) { break }
+        $mergeBase = @(git -C $codeRoot merge-base HEAD $ref 2>$null)[0]
+        if ($mergeBase) { break }
+    }
+    $diffBaseArgs = @()
+    if ($mergeBase) { $diffBaseArgs = @('--diff-base', $mergeBase) }
+
+    # Resolve Python once -- the authorship filter and both gates need it.
+    $pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
+    if (-not (Test-Path $pythonExe)) {
+        $pythonExe = if ($AfPython) { $AfPython } else { $null }
+    }
+    $qualityScript = Join-Path $mainRoot '.github/scripts/check-python-quality.py'
+
+    # A provenance marker is a claim of authorship, so it may only be demanded
+    # of files the agent authored. `ruff format` rewrites every line of a file
+    # without writing a word of it, and a diff cannot tell the two apart
+    # (issue #86). If the query cannot run, keep the whole diff: an
+    # unanswerable question must not silence the gate.
+    $authoredPy = @($changedPy | Where-Object { $_ })
+    if ($mergeBase -and $pythonExe -and (Test-Path $qualityScript) -and $authoredPy.Count -gt 0) {
+        Push-Location $codeRoot
+        $authoredOut = & $pythonExe $qualityScript @diffBaseArgs --list-authored --files @($authoredPy) 2>$null
+        $authoredExit = $LASTEXITCODE
+        Pop-Location
+        if ($authoredExit -eq 0) {
+            $authoredPy = @($authoredOut | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })
+        }
+    }
+
     $missingMarkers = @()
-    foreach ($f in $changedPy) {
+    foreach ($f in $authoredPy) {
         if ($f -and (Test-Path (Join-Path $codeRoot $f))) {
-            $firstLines = Get-Content (Join-Path $codeRoot $f) -TotalCount 5 -ErrorAction SilentlyContinue | Out-String
-            if ($firstLines -and $firstLines -notmatch 'copilot:(generated|modified)') {
+            if (-not (Test-AfProvenanceMarker -Path (Join-Path $codeRoot $f))) {
                 $missingMarkers += $f
             }
         }
@@ -123,7 +145,7 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
             hookSpecificOutput = @{
                 hookEventName = "Stop"
                 decision = "block"
-                reason = "Provenance gate: these changed .py files lack copilot:generated or copilot:modified markers in their first 5 lines: $fileList. Add provenance markers per instructions/provenance.instructions.md before completing."
+                reason = "Provenance gate: these changed .py files carry no copilot:generated or copilot:modified marker anywhere: $fileList. Add a marker in the position instructions/provenance.instructions.md prescribes before completing."
             }
         } | ConvertTo-Json -Compress -Depth 3
         Write-Output $output
@@ -143,14 +165,7 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
     # Files committed in an EARLIER phase of this workflow appear in neither
     # diff above -- the coordinator commits the test files at the end of the Red
     # phase, so they were invisible here and shipped unlinted (issue #13).
-    # The unit of accountability is the branch delta: what the merge will add.
     $inheritedLintPy = @()
-    $mergeBase = $null
-    foreach ($ref in @($BASE_BRANCH, "origin/$BASE_BRANCH")) {
-        if (-not $BASE_BRANCH) { break }
-        $mergeBase = @(git -C $codeRoot merge-base HEAD $ref 2>$null)[0]
-        if ($mergeBase) { break }
-    }
     if ($mergeBase) {
         $branchDelta = git -C $codeRoot diff --name-only --diff-filter=AM "$mergeBase..HEAD" -- '*.py' 2>$null
         $inheritedLintPy = @($branchDelta | Where-Object {
@@ -159,12 +174,6 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
         })
     }
 
-    # Resolve Python once -- the quality gate and the linting gate both need it.
-    $pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
-    if (-not (Test-Path $pythonExe)) {
-        $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-        $pythonExe = if ($pythonCmd) { $pythonCmd.Source } else { $null }
-    }
 
     if ($changedSrcPy.Count -gt 0) {
         $qualityScript = Join-Path $mainRoot '.github/scripts/check-python-quality.py'
@@ -193,7 +202,7 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
         }
 
         Push-Location $codeRoot
-        $qualityResult = & $pythonExe $qualityScript --files @($changedSrcPy) 2>&1
+        $qualityResult = & $pythonExe $qualityScript @diffBaseArgs --files @($changedSrcPy) 2>&1
         $qualityExit = $LASTEXITCODE
         Pop-Location
         if ($qualityExit -ne 0) {
@@ -233,7 +242,7 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
         }
 
         Push-Location $codeRoot
-        $hygieneResult = & $pythonExe $qualityScript --files @($hygienePy) --checks ignore-hygiene 2>&1
+        $hygieneResult = & $pythonExe $qualityScript @diffBaseArgs --checks ignore-hygiene --files @($hygienePy) 2>&1
         $hygieneExit = $LASTEXITCODE
         Pop-Location
         if ($hygieneExit -ne 0) {

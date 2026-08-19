@@ -1,16 +1,42 @@
-# PreToolUse hook: three-tier terminal command classifier (allow / ask / deny).
+# PreToolUse hook: three-tier terminal command classifier (allow / ask / deny),
+# plus two task-launch classifiers (creation and execution).
 #
-# Tiers:
+# Tiers (runInTerminal shape):
 #   deny  -> hard-block destructive/irreversible commands (+ agent notice)
 #   allow -> auto-approve safe commands (read-only, tests, feature-branch git),
 #            gated by AUTONOMY_LEVEL / AUTONOMY_CAT_* in .github/af-env.conf
 #   ask   -> prompt for durable-change commands
 #   {}    -> defer to the user's approval settings (fail-safe default)
 #
+# A task is a second way to execute a command line, so it is classified twice,
+# at both points where the danger can enter (issue #74):
+#
+#   CREATION -- `create_and_run_task` (the agent authors the task). Allowlist:
+#     task.command must resolve (after path normalisation) inside a directory
+#     listed in AF_TASK_SCRIPT_DIRS -- a bare binary (git, ruff, pytest, ...)
+#     never can, since it has no path segment to match, so the hard-deny tier
+#     is covered as a consequence. See the $isTaskShaped block below.
+#
+#   EXECUTION -- `run_task` (a task already in .vscode/tasks.json runs). The
+#     payload carries only {id, workspaceFolder}: a name, not a command. The
+#     task is resolved out of tasks.json and its reconstructed command line is
+#     put through the SAME three tiers as a terminal command -- blocklist, not
+#     the creation allowlist, because tasks.json is human-authored and
+#     legitimately calls bare binaries. Checked separately from creation
+#     because a task that was acceptable when written may not be acceptable
+#     now: policy, protected branches and categories all move underneath it.
+#
 # Fail-safe: on any parse ambiguity or unexpected shape the hook returns {}
-# (prompt) -- it never accidentally auto-approves.
+# (prompt) -- it never accidentally auto-approves. The creation allowlist is
+# stricter still: any unrecognised task shape denies (fail closed). An
+# unresolvable run_task answers 'ask', never silence: silence is what a gate
+# that cannot run and a gate with nothing to say have in common (issue #68).
 
 $ErrorActionPreference = 'SilentlyContinue'
+
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54).
+. "$PSScriptRoot/_common.ps1"
 
 # Read and parse stdin
 $raw = [Console]::In.ReadToEnd()
@@ -21,29 +47,186 @@ try {
     exit 0
 }
 
-# Only inspect terminal tool calls
+# Only inspect terminal tool calls, or the two task-launch tools.
+# `create_and_run_task` and `run_task` are the names VS Code actually sends;
+# the camelCase spellings never occur in a captured payload and are kept only
+# so a rename upstream degrades to a stale alias rather than to an inert gate.
 $toolName = $inputData.tool_name
-if ($toolName -notmatch 'terminal|Terminal') {
+$isTaskShaped = ($toolName -eq 'create_and_run_task' -or $toolName -eq 'createAndRunTask')
+$isTaskRun = ($toolName -eq 'run_task' -or $toolName -eq 'runTask')
+if ($toolName -notmatch 'terminal|Terminal' -and -not $isTaskShaped -and -not $isTaskRun) {
     Write-Output '{}'
     exit 0
 }
 
-# Extract the command string
+if ($isTaskShaped) {
+    # -----------------------------------------------------------------------
+    # createAndRunTask allowlist. A task's `command` must resolve, after path
+    # normalisation, inside one of the AF_TASK_SCRIPT_DIRS directories -- a
+    # bare binary (git, ruff, pytest, databricks, ...) never can, since it has
+    # no path segment to match. An interpreter (powershell/cmd/bash/python/...)
+    # is checked by its PAYLOAD instead (-File / -c / a positional script
+    # path), because that is what actually runs and the interpreter binary
+    # itself is never inside the repo. Everything unrecognised fails closed.
+    # -----------------------------------------------------------------------
+    function Emit-Task([string]$decision, [string]$reason) {
+        @{
+            hookSpecificOutput = @{
+                hookEventName            = 'PreToolUse'
+                permissionDecision       = $decision
+                permissionDecisionReason = $reason
+            }
+        } | ConvertTo-Json -Depth 3 -Compress
+        exit 0
+    }
+
+    $sanctioned = "Point 'command' at a reviewed script under AF_TASK_SCRIPT_DIRS (default .github/scripts), e.g. .github/scripts/run-tests.ps1, or run the command yourself in the terminal."
+
+    # Whole-payload scan for interactive input variables -- these block on a
+    # prompt an unattended agent can never answer. Scanned against the raw
+    # stdin text (single-quoted match: a double-quoted literal containing
+    # ${input: would interpolate as a drive-scoped variable and throw).
+    foreach ($v in @('${input:', '${command:', '${config:')) {
+        if ($raw.Contains($v)) {
+            Emit-Task 'deny' ("Policy hard-deny: task payload contains a '$v...}' variable. Its value is produced elsewhere -- a prompt an agent cannot answer, a VS Code command that executes to yield it, or a setting -- so the payload cannot be classified. Pass a literal argument instead. $sanctioned")
+        }
+    }
+
+    $task = $inputData.tool_input.task
+    if (-not $task) {
+        Emit-Task 'deny' ("Policy hard-deny: unrecognised task payload shape (no task object); fail-closed. $sanctioned")
+    }
+
+    # A folderOpen task executes later, outside any hook's view.
+    if ($task.runOptions -and ([string]$task.runOptions.runOn) -eq 'folderOpen') {
+        Emit-Task 'deny' ("Policy hard-deny: runOptions.runOn 'folderOpen' registers a task that runs automatically the next time the folder is opened, outside any hook's view. $sanctioned")
+    }
+
+    $taskRepo = $AfCodeRoot
+    $taskConfLines = @()
+    if ($AfConfFound) { $taskConfLines = Get-Content $AfConfPath }
+    function Get-AfEnvTask([string]$key, [string]$default) {
+        foreach ($l in $taskConfLines) {
+            if ($l -match "^\s*$([regex]::Escape($key))=(.*)$") { return $Matches[1].Trim() }
+        }
+        return $default
+    }
+    $allowedDirsRaw = @((Get-AfEnvTask 'AF_TASK_SCRIPT_DIRS' '.github/scripts') -split ',' |
+            ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($allowedDirsRaw.Count -eq 0) { $allowedDirsRaw = @('.github/scripts') }
+
+    function Resolve-TaskPath([string]$p) {
+        if (-not $taskRepo -or -not $p) { return $null }
+        $expanded = [System.Environment]::ExpandEnvironmentVariables($p)
+        $expanded = $expanded.Replace('${workspaceFolder}', $taskRepo).Replace('${workspaceRoot}', $taskRepo)
+        try {
+            # Substitution and %VAR% expansion both yield absolute paths, which
+            # must not be joined onto the repo root again.
+            if ([System.IO.Path]::IsPathRooted($expanded)) { return [System.IO.Path]::GetFullPath($expanded) }
+            return [System.IO.Path]::GetFullPath((Join-Path $taskRepo $expanded))
+        }
+        catch { return $null }
+    }
+    $allowedDirsFull = @($allowedDirsRaw | ForEach-Object {
+            $r = Resolve-TaskPath $_
+            if ($r) { $r.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar }
+        } | Where-Object { $_ })
+    function Test-InAllowlist([string]$p) {
+        $full = Resolve-TaskPath $p
+        if (-not $full) { return $false }
+        foreach ($dir in $allowedDirsFull) {
+            if ($full.StartsWith($dir, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        }
+        return $false
+    }
+
+    # Interpreters are classified by their PAYLOAD, not their own path -- the
+    # binary itself (powershell, python, ...) is never inside the repo, so
+    # requiring it to resolve inside AF_TASK_SCRIPT_DIRS would be meaningless.
+    $interpreterNames = @('powershell', 'pwsh', 'cmd', 'bash', 'sh', 'zsh', 'python', 'python3', 'node', 'perl', 'ruby', 'wscript', 'cscript')
+
+    # Returns a deny reason, or $null when the command/args pair is acceptable.
+    function Get-CommandDenyReason([string]$cmd, $argList) {
+        if (-not $cmd) {
+            return "Policy hard-deny: unrecognised task payload shape (no usable 'command' found); fail-closed. $sanctioned"
+        }
+        # `type: shell` hands `command` to the shell verbatim, so it may be a
+        # whole command line. Metacharacters survive path normalisation, which
+        # would let anything ride along behind an allowlisted script name.
+        if ($cmd -match '[;&|\r\n`]' -or $cmd.Contains('$(')) {
+            return "Policy hard-deny: task command '$cmd' contains a shell metacharacter, so it is a command line rather than a path to a reviewed script. $sanctioned"
+        }
+        $taskArgs = @()
+        if ($argList) { $taskArgs = @($argList) }
+        $cmdBase = ([System.IO.Path]::GetFileNameWithoutExtension($cmd)).ToLower()
+
+        if ($interpreterNames -contains $cmdBase) {
+            $inlinePayload = $false
+            $fileTarget = $null
+            $sawFileFlag = $false
+            for ($i = 0; $i -lt $taskArgs.Count; $i++) {
+                $a = [string]$taskArgs[$i]
+                if ($a -match '(?i)^(-Command|-c|/c|-EncodedCommand)$') { $inlinePayload = $true; break }
+                if ($a -match '(?i)^-File$') {
+                    $sawFileFlag = $true
+                    if (($i + 1) -lt $taskArgs.Count) { $fileTarget = [string]$taskArgs[$i + 1] }
+                    break
+                }
+            }
+            if ($inlinePayload) {
+                return "Policy hard-deny: '$cmd' invoked with an inline command payload (-Command/-c/-EncodedCommand) that is not visible to the task classifier. $sanctioned"
+            }
+            if (-not $sawFileFlag) {
+                $fileTarget = $taskArgs | Where-Object { $_ -and -not ([string]$_).StartsWith('-') } | Select-Object -First 1
+            }
+            if (-not $fileTarget -or -not (Test-InAllowlist ([string]$fileTarget))) {
+                return "Policy hard-deny: '$cmd' payload '$fileTarget' does not resolve inside an AF_TASK_SCRIPT_DIRS directory (unrecognised or external script). $sanctioned"
+            }
+            return $null
+        }
+        if (-not (Test-InAllowlist $cmd)) {
+            return "Policy hard-deny: task command '$cmd' does not resolve inside an AF_TASK_SCRIPT_DIRS directory. $sanctioned"
+        }
+        return $null
+    }
+
+    # An OS-specific scope overrides the task scope, so every variant present
+    # must clear the bar -- checking only `command` classifies a decoy.
+    $scopes = @(@{ n = 'task'; o = $task })
+    foreach ($os in @('windows', 'linux', 'osx')) {
+        if ($task.$os) { $scopes += @{ n = $os; o = $task.$os } }
+    }
+    foreach ($s in $scopes) {
+        $o = $s.o
+        if ($o.options -and $o.options.shell) {
+            Emit-Task 'deny' ("Policy hard-deny: the '$($s.n)' scope overrides options.shell, which moves the executed payload into the shell's own arguments where the task classifier cannot see it. $sanctioned")
+        }
+        $effectiveCmd = if ($o.command) { [string]$o.command } else { [string]$task.command }
+        $effectiveArgs = if ($null -ne $o.args) { $o.args } else { $task.args }
+        $reason = Get-CommandDenyReason $effectiveCmd $effectiveArgs
+        if ($reason) {
+            if ($s.n -ne 'task') { $reason = "[$($s.n) override] $reason" }
+            Emit-Task 'deny' $reason
+        }
+    }
+    Emit-Task 'allow' 'Safe: every task scope resolves to a reviewed script under AF_TASK_SCRIPT_DIRS.'
+}
+
+# Extract the command string (runInTerminal / terminal shape only, from here).
+# For run_task the command is not in the payload at all -- it is resolved from
+# tasks.json further down, once Emit is defined.
 $command = [string]$inputData.tool_input.command
-if (-not $command) {
+if (-not $command -and -not $isTaskRun) {
     Write-Output '{}'
     exit 0
 }
 
 # ---------------------------------------------------------------------------
-# Load autonomy config from .github/af-env.conf (read once).
+# Load autonomy config (path resolved by the shared preamble, read once).
 # ---------------------------------------------------------------------------
-$repo = (git rev-parse --show-toplevel 2>$null)
+$repo = $AfMainRoot
 $confLines = @()
-if ($repo) {
-    $conf = Join-Path $repo '.github/af-env.conf'
-    if (Test-Path $conf) { $confLines = Get-Content $conf }
-}
+if ($AfConfFound) { $confLines = Get-Content $AfConfPath }
 function Get-AfEnv([string]$key, [string]$default) {
     foreach ($l in $confLines) {
         if ($l -match "^\s*$([regex]::Escape($key))=(.*)$") { return $Matches[1].Trim() }
@@ -129,7 +312,144 @@ $denyTail = "The agent will not run this. If it is genuinely required, either (a
     "decision to relax the autonomy policy in .github/af-env.conf."
 
 # ===========================================================================
+# run_task -- resolve the launch into a command line before classifying it.
+#
+# The payload names a task; a name is not a command. The command lives in the
+# project's .vscode/tasks.json, so it is read back here and every scope is
+# reconstructed into a command line. From that point on a task launch is
+# classified by exactly the same tiers as a terminal command -- which is the
+# point: `run_task` was a hole straight through the classifier.
+#
+# Anything that cannot be resolved answers 'ask', never silence. The gate says
+# "I could not judge this" instead of producing the same bytes as consent.
+# ===========================================================================
+if ($isTaskRun) {
+    $askTail = "The task launch could not be classified, so this needs a human decision. Check what the task runs in .vscode/tasks.json."
+    $wsFolder = [string]$inputData.tool_input.workspaceFolder
+    $taskId = [string]$inputData.tool_input.id
+    if (-not $wsFolder -or -not $taskId) {
+        Emit 'ask' "Unclassified task launch: the payload carries no workspaceFolder/id, so the task cannot be looked up. $askTail"
+    }
+    $tasksPath = Join-Path $wsFolder '.vscode/tasks.json'
+    if (-not (Test-Path $tasksPath)) {
+        Emit 'ask' "Unclassified task launch: no .vscode/tasks.json under '$wsFolder', so task '$taskId' cannot be resolved to a command. $askTail"
+    }
+    $tasksDoc = $null
+    try {
+        $tasksDoc = (Get-Content $tasksPath -Raw -ErrorAction Stop) | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        # tasks.json accepts JSONC in VS Code, so a comment or trailing comma
+        # parses here as nothing at all. Unreadable is not the same as safe.
+        Emit 'ask' "Unclassified task launch: .vscode/tasks.json is not strict JSON (comments or trailing commas), so task '$taskId' cannot be resolved. $askTail"
+    }
+    # VS Code addresses a task as '{type}: {label}' -- captured ids look like
+    # 'shell: tests: all'. Only the first type prefix is stripped; the label
+    # itself may contain a colon.
+    $bareId = $taskId -replace '^[A-Za-z]+:\s+', ''
+    $taskDef = $null
+    foreach ($t in @($tasksDoc.tasks)) {
+        if (-not $t) { continue }
+        $lbl = [string]$t.label
+        if ($lbl -and ($lbl -eq $taskId -or $lbl -eq $bareId)) { $taskDef = $t; break }
+    }
+    if (-not $taskDef) {
+        Emit 'ask' "Unclassified task launch: no task labelled '$bareId' in .vscode/tasks.json. $askTail"
+    }
+    # Variables whose value is produced elsewhere (a prompt, a VS Code command,
+    # a setting) hide the payload from the classifier.
+    $taskText = $taskDef | ConvertTo-Json -Depth 10 -Compress
+    foreach ($v in @('${input:', '${command:', '${config:')) {
+        if ($taskText.Contains($v)) {
+            Emit 'ask' "Unclassified task launch: task '$bareId' contains a '$v...}' variable, so its effective command line is not visible here. $askTail"
+        }
+    }
+    # An OS-specific scope overrides the task scope, so every variant present
+    # must be classified -- reading only `command` classifies a decoy.
+    $runScopes = @($taskDef)
+    foreach ($os in @('windows', 'linux', 'osx')) {
+        if ($taskDef.$os) { $runScopes += $taskDef.$os }
+    }
+    $cmdLines = @()
+    foreach ($o in $runScopes) {
+        if ($o.options -and $o.options.shell) {
+            Emit 'ask' "Unclassified task launch: task '$bareId' overrides options.shell, which moves the executed payload into the shell's own arguments where it cannot be classified. $askTail"
+        }
+        $c = if ($o.command) { [string]$o.command } else { [string]$taskDef.command }
+        $a = if ($null -ne $o.args) { $o.args } else { $taskDef.args }
+        if (-not $c) { continue }
+        $line = if ($a) { ($c + ' ' + ((@($a) | ForEach-Object { [string]$_ }) -join ' ')) } else { $c }
+        $cmdLines += $line.Trim()
+    }
+    $cmdLines = @($cmdLines | Where-Object { $_ })
+    if ($cmdLines.Count -eq 0) {
+        Emit 'ask' "Unclassified task launch: task '$bareId' declares no command (composite or extension-provided task). $askTail"
+    }
+    # Newline-joined: the deny tier scans the whole string and the allow tier
+    # splits on newlines, so every scope must clear the bar independently.
+    $command = $cmdLines -join "`n"
+}
+
+# ---------------------------------------------------------------------------
+# Scan units -- what the DENY tier matches against.
+#
+# The raw command string conflates two things: text that will be executed and
+# text that is merely data. Matching deny patterns against it blocked real work
+# (issue #62): a commit message containing "--force", a probe whose JSON test
+# data contained "Remove-Item -Recurse -Force". Worse, `(\S+\s+)*` in the git
+# rules matched across a `;`, so a genuine `git add` in one statement joined up
+# with prose in the next.
+#
+# Stripping quotes globally would be the wrong fix: the payload of `bash -c
+# "..."` lives inside quotes, and blinding the deny tier to it defeats its
+# purpose. So each statement becomes its own unit, quoted arguments that are
+# themselves executed are promoted to units of their own, and quoted text is
+# dropped only where it is unambiguously prose.
+# ---------------------------------------------------------------------------
+
+# Command words whose quoted arguments are prose, not commands.
+$dataCarrierRe = '^\s*(echo|printf|Write-Host|Write-Output|Write-Error|Write-Verbose|Write-Debug)\b|^\s*git\s+(commit|tag|notes|stash)\b'
+# Flags and commands whose quoted argument is executed.
+$payloadRe = '(?:^|\s)(?:-c|--command|-Command|-e|--eval|-ScriptBlock|-ArgumentList|-Args|/c|/k|iex|Invoke-Expression|eval)\s+(?:"([^"]*)"|''([^'']*)'')'
+
+function Remove-QuotedData([string]$seg) {
+    # An interpolation inside quotes still executes, so those quotes are not data.
+    if ($seg -match '\$\(' -or $seg -match '`') { return $seg }
+    return ($seg -replace '"[^"]*"', '' -replace "'[^']*'", '')
+}
+
+function Get-ScanUnits([string]$cmd) {
+    $units = New-Object System.Collections.Generic.List[string]
+    foreach ($seg in (Split-TopLevel $cmd)) {
+        if (-not $seg.Trim()) { continue }
+        $isBareLiteral = $seg -match '^\s*("[^"]*"|''[^'']*'')\s*$'
+        if ($isBareLiteral -or $seg -match $dataCarrierRe) {
+            $units.Add((Remove-QuotedData $seg))
+        } else {
+            $units.Add($seg)
+        }
+        foreach ($m in [regex]::Matches($seg, $payloadRe)) {
+            $payload = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
+            foreach ($p in (Split-TopLevel $payload)) { if ($p.Trim()) { $units.Add($p) } }
+        }
+    }
+    if ($units.Count -eq 0) { $units.Add($cmd) }
+    return , $units.ToArray()
+}
+
+$scanUnits = Get-ScanUnits $command
+
+function Test-AnyUnit([string]$pattern, [switch]$CaseSensitive) {
+    foreach ($u in $scanUnits) {
+        if ($CaseSensitive) { if ($u -cmatch $pattern) { return $true } }
+        elseif ($u -match $pattern) { return $true }
+    }
+    return $false
+}
+
+# ===========================================================================
 # TIER 1 -- DENY (hard, level-independent). Checked first.
+# Rules are matched per scan unit unless marked raw = $true, which is reserved
+# for rules about structure or payload content that legitimately spans units.
 # ===========================================================================
 $denyRules = @(
     @{ p = 'git\s+push\b.*(--force|-f)\b';            why = 'force push (remote history rewrite)' }
@@ -148,25 +468,26 @@ $denyRules = @(
     @{ p = 'mkfs\.';                                  why = 'filesystem format' }
     @{ p = 'format\s+[A-Za-z]:';                      why = 'drive format' }
     @{ p = 'chmod\s+-R\s+777';                        why = 'world-writable permissions' }
-    @{ p = '\|\s*(bash|sh|iex|Invoke-Expression)\b';  why = 'pipe-to-shell execution' }
-    @{ p = 'DROP\s+(TABLE|DATABASE)';                 why = 'destructive SQL' }
-    @{ p = 'TRUNCATE\s+TABLE';                        why = 'destructive SQL' }
+    @{ p = '\|\s*(bash|sh|iex|Invoke-Expression)\b';  why = 'pipe-to-shell execution'; raw = $true }
+    @{ p = 'DROP\s+(TABLE|DATABASE)';                 why = 'destructive SQL'; raw = $true }
+    @{ p = 'TRUNCATE\s+TABLE';                        why = 'destructive SQL'; raw = $true }
 )
 foreach ($r in $denyRules) {
-    if ($command -match $r.p) {
+    $hit = if ($r.raw) { $command -match $r.p } else { Test-AnyUnit $r.p }
+    if ($hit) {
         Emit 'deny' ("Policy hard-deny: $($r.why). $denyTail")
     }
 }
 # Branch force-deletion (-D) needs a CASE-SENSITIVE check so that the safe
 # lowercase -d (which git only allows for already-merged branches) is not denied.
-if ($command -cmatch 'git\s+branch\s+(\S+\s+)*-D(\s|$)') {
+if (Test-AnyUnit 'git\s+branch\s+(\S+\s+)*-D(\s|$)' -CaseSensitive) {
     Emit 'deny' ("Policy hard-deny: force branch deletion (-D deletes unmerged commits). $denyTail")
 }
 # Category-scoped deny (when autonomy policy sets a category to 'deny').
-if ($catPkg -eq 'deny' -and ($command -match '(?i)\bpip3?\s+(install|uninstall)\b' -or $command -match '(?i)\bconda\s+(install|remove)\b')) {
+if ($catPkg -eq 'deny' -and (Test-AnyUnit '(?i)\bpip3?\s+(install|uninstall)\b|(?i)\bconda\s+(install|remove)\b')) {
     Emit 'deny' ("Policy hard-deny: package management (AUTONOMY_CAT_PKG_INSTALL=deny). $denyTail")
 }
-if ($catDatabricks -eq 'deny' -and $command -match '(?i)\bdatabricks\b') {
+if ($catDatabricks -eq 'deny' -and (Test-AnyUnit '(?i)\bdatabricks\b')) {
     Emit 'deny' ("Policy hard-deny: Databricks CLI (AUTONOMY_CAT_DATABRICKS=deny). $denyTail")
 }
 
@@ -292,25 +613,55 @@ if ($strippedForGuard -notmatch '[`({]') {
 
 # ===========================================================================
 # TIER 3 -- ASK (durable change, confirm).
+#
+# A confirmation prompt is a question put to a human, and a question that does
+# not say what it is about cannot be answered -- it can only be waved through.
+# The whole tier used to share one sentence ("This command makes a durable
+# change") for eleven different rules, naming neither the rule that fired nor
+# the command it fired on, while the deny tier next door has been specific all
+# along (issue #78). Each rule now says what it will actually do, and the
+# command is echoed so the answer is about the command rather than about the
+# category.
+#
+# Emitting 'ask' also preempts Copilot's own assessment, which categorises the
+# command and describes in plain language what it will do -- better than any
+# fixed sentence we can write here. So the tier is scoped to what we know that
+# VS Code cannot: repository and branch state, autonomy policy, effects that
+# land outside git. Four rules were handed back on that basis (issue #78a):
+#
+#   pip install/uninstall, conda install/remove   an ordinary environment
+#   ruff format                                   change, or a repo-local
+#   New-Item / mkdir / Copy-Item / Move-Item      rewrite git can undo
+#
+# Handing a rule back is not the same as approving it. Returning {} defers to
+# the user's chat.tools.terminal.autoApprove settings; where those do not cover
+# the command -- which is the normal case -- the result is a *better* prompt,
+# not a missing one. Where they do cover it, the user has already said what he
+# wants and our sentence was overriding him.
+#
+# Deletion stays ours because git cannot undo it; checkout/switch stays because
+# its path form discards uncommitted work and 'git checkout' is a plausible
+# autoApprove prefix; tag, databricks and az stay because their effect reaches
+# past this working tree.
 # ===========================================================================
 $askRules = @(
-    'git\s+merge\b'
-    'git\s+(checkout|switch)\b'
-    'git\s+tag\b'
-    '(?i)\bpip3?\s+(install|uninstall)\b'
-    '(?i)\bconda\s+(install|remove)\b'
-    '(?i)\bruff\s+format\b'
-    '(?i)\bdatabricks\b.*\b(submit|run|create|update|delete|import|export|deploy)\b'
-    '(?i)\baz\b.*\b(create|set|delete|update|deploy)\b'
-    '(?i)Remove-Item\b'
-    '(?i)(^|\s)rm\b'
-    '(?i)(Move-Item|Copy-Item|New-Item|mkdir|mv|cp)\b'
+    @{ p = 'git\s+merge\b';      why = "'git merge' rewrites the working tree and may leave conflict markers in tracked files" }
+    @{ p = 'git\s+(checkout|switch)\b'; why = "'git checkout'/'git switch' changes the checked-out branch, and with a path argument it discards uncommitted changes to that path" }
+    @{ p = 'git\s+tag\b';        why = "'git tag' creates or moves a tag, which is a release marker others may already rely on" }
+    @{ p = '(?i)\bdatabricks\b.*\b(submit|run|create|update|delete|import|export|deploy)\b'; why = 'this Databricks CLI call acts on a remote workspace, where the effect is outside this repository and outside git' }
+    @{ p = '(?i)\baz\b.*\b(create|set|delete|update|deploy)\b'; why = 'this Azure CLI call changes cloud resources, where the effect is outside this repository and may cost money' }
+    @{ p = '(?i)Remove-Item\b';  why = "'Remove-Item' deletes files or directories" }
+    @{ p = '(?i)(^|\s)rm\b';     why = "'rm' deletes files or directories" }
 )
+# Echoing the command is the point of the prompt, but an unbounded string in a
+# dialog is its own way of hiding information.
+$shown = $command -replace '\s+', ' '
+if ($shown.Length -gt 300) { $shown = $shown.Substring(0, 297) + '...' }
 # Scan the quote-stripped command so quoted literals (e.g. a commit message
 # mentioning "databricks ... export") do not falsely trigger an ASK rule.
-foreach ($p in $askRules) {
-    if ($strippedForGuard -match $p) {
-        Emit 'ask' 'This command makes a durable change. Please confirm it is intentional.'
+foreach ($r in $askRules) {
+    if ($strippedForGuard -match $r.p) {
+        Emit 'ask' ("Durable change: $($r.why). Confirm it is intentional. Command: $shown")
     }
 }
 

@@ -32,25 +32,32 @@
 | 21 | `unit-testing` | Verify correctness of individual units of code in isolation. AAA pattern, test doubles, language-specific guidance, edge cases, and coverage quality gates. | test-writer, test-critic |
 | 22 | `git-worktrees` | Create, manage, and remove git worktrees for parallel agent task execution. Lifecycle commands, context verification, troubleshooting, and recovery procedures. | coordinator |
 | 23 | `notebook-execution` | Interact with local Jupyter / `.ipynb` notebooks via the VS Code notebook tools (run/edit cells, kernel selection, read outputs) instead of terminal scripts. | coordinator, implementer, refactorer, code-critic, test-writer |
+| 24 | `git-workflow` | Git autonomy boundary, integration paths (pure git vs request-based), branch/work-item association (R-SD-08), phase-to-commit mapping, planning document lifecycle, and pre-commit guards. | coordinator, planner, documenter |
+| 25 | `tdd-orchestration` | The coordinator's execution runbook — workflow state machine, git phase checkpoints, subagent context injection, the Step 1–7b delegation prompts with their retry and escalation policies, per-return protocols, and interruption/cancellation recovery. | coordinator |
+| 26 | `test-execution` | Run tests and lint from an agent — pre-defined task labels, phase-specific scoping, expected runtimes, the per-workflow test budget, and the shared test log. | test-writer, test-critic, implementer, refactorer, code-critic |
+| 27 | `copilot-authoring` | Reference depth for authoring Copilot customisation files — subagent pattern, model tiers, managed regions, built-in tool names, hooks JSON, prompt features, skill visibility, custom tool sets. | `copilot-authoring.instructions.md` (any agent editing a customisation file) |
+| 28 | `gh-issue` | GitHub issue lifecycle — repository routing (project vs framework upstream), duplicate search before create, evidence-grounded framework defect reports, sub-issue linking, and degraded-mode fallback. | gh-issue-manager |
 
 ## Agent Skill Matrix
 
 | Agent | Skills |
 |-------|--------|
-| **planner** | task-decomposition, risk-management, design-patterns |
-| **coordinator** | git-worktrees, databricks-execution-patterns, notebook-execution |
-| **test-writer** | unit-testing, property-testing, error-handling, human-escalation, notebook-execution |
-| **test-critic** | unit-testing, code-review, property-testing |
-| **implementer** | hexagonal-architecture, pydantic, error-handling, design-patterns, static-analysis, dependency-management, human-escalation, databricks-execution-patterns, notebook-execution |
-| **code-critic** | code-review, static-analysis, metrics, secure-coding, hexagonal-architecture, dependency-management, notebook-execution |
-| **refactorer** | refactoring, design-patterns, hexagonal-architecture, pydantic, human-escalation, notebook-execution |
-| **documenter** | documentation |
+| **planner** | task-decomposition, risk-management, design-patterns, git-workflow |
+| **coordinator** | tdd-orchestration, git-workflow, git-worktrees, databricks-execution-patterns, notebook-execution |
+| **test-writer** | unit-testing, property-testing, test-execution, error-handling, human-escalation, notebook-execution |
+| **test-critic** | unit-testing, code-review, property-testing, test-execution |
+| **implementer** | hexagonal-architecture, pydantic, error-handling, design-patterns, static-analysis, dependency-management, test-execution, human-escalation, databricks-execution-patterns, notebook-execution |
+| **code-critic** | code-review, static-analysis, metrics, secure-coding, hexagonal-architecture, dependency-management, test-execution, notebook-execution |
+| **refactorer** | refactoring, design-patterns, hexagonal-architecture, pydantic, test-execution, human-escalation, notebook-execution |
+| **documenter** | documentation, git-workflow |
 | **arbiter** | human-escalation, design-patterns, hexagonal-architecture |
 | **researcher** | data-pipeline-design, data-modeling, data-quality |
 | **compliance-checker** | *(no skills — process checkpoint agent)* |
 | **ado-work-item-manager** | ado-workitem, ado-shared, databricks-execution-patterns |
 | **ado-wiki-manager** | ado-wiki, ado-shared |
 | **ado-pr-manager** | ado-pr, ado-shared |
+| **gh-issue-manager** | gh-issue |
+| **gh-pr-manager** | git-workflow |
 
 ## Available for Activation (34 skills in `skills/_available/`)
 

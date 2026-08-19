@@ -4,15 +4,19 @@
 
 set -euo pipefail
 
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54).
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
 cat > /dev/null
 
-repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+repo_root="$AF_MAIN_ROOT"
 if [[ -z "$repo_root" ]]; then
     printf '{}\n'
     exit 0
 fi
 
-conf_path="$repo_root/.github/af-env.conf"
+conf_path="$AF_CONF"
 mode="off"
 missing=()
 advisories=()
@@ -20,11 +24,10 @@ project=""
 wiki_identifier=""
 
 get_conf_value() {
-    local key="$1"
-    grep -E "^${key}=" "$conf_path" 2>/dev/null | head -1 | cut -d'=' -f2- | xargs || true
+    af_conf_get "$1" ""
 }
 
-if [[ ! -f "$conf_path" ]]; then
+if [[ "$AF_CONF_FOUND" -ne 1 ]]; then
     missing+=(".github/af-env.conf")
 else
     mode="$(get_conf_value ADO_CAPABILITY_MODE)"
@@ -79,12 +82,7 @@ done < <(find "$repo_root/.github/agents" -maxdepth 1 -name '*.agent.md' -type f
 if [[ "$mode" != "off" ]]; then
     checker="$repo_root/.github/scripts/check-mcp-tool-ids.py"
     if [[ -f "$checker" ]]; then
-        py=""
-        if command -v python3 >/dev/null 2>&1; then
-            py="python3"
-        elif command -v python >/dev/null 2>&1; then
-            py="python"
-        fi
+        py="$AF_PYTHON"
         if [[ -n "$py" ]]; then
             check_rc=0
             check_out=$("$py" "$checker" --root "$repo_root/.github" --quiet 2>/dev/null) || check_rc=$?
@@ -125,7 +123,9 @@ if [[ -n "$wiki_identifier" ]]; then
     msg="$msg | wiki=$wiki_identifier"
 fi
 
-msg_escaped=${msg//"/\"}
+# Backslashes first -- escaping quotes before backslashes would re-escape the
+# backslash this step just introduced.
+msg_escaped=$(printf '%s' "$msg" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$msg_escaped"
 
 exit 0

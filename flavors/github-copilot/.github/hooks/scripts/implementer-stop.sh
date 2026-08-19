@@ -16,16 +16,12 @@
 
 set -uo pipefail
 
-# Load project config
-SRC_DIR="src"
-BASE_BRANCH=""
-_conf=".github/af-env.conf"
-if [ -f "$_conf" ]; then
-    _val=$(grep -E '^SRC_DIR=' "$_conf" | head -1 | cut -d= -f2-)
-    [ -n "$_val" ] && SRC_DIR="$_val"
-    _val=$(grep -E '^BASE_BRANCH=' "$_conf" | head -1 | cut -d= -f2-)
-    [ -n "$_val" ] && BASE_BRANCH="$_val"
-fi
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54).
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
+SRC_DIR=$(af_conf_get SRC_DIR src)
+BASE_BRANCH=$(af_conf_get BASE_BRANCH '')
 
 # Read stdin (hook input JSON — required by protocol)
 cat > /dev/null
@@ -84,20 +80,53 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
         changed_py=$(git diff --name-only HEAD --diff-filter=AM -- '*.py' 2>/dev/null)
     fi
 
+    # The unit of accountability is the branch delta: what the merge will add.
+    # Resolved here rather than at each gate so provenance, quality and hygiene
+    # all speak about the same base.
+    merge_base=""
+    if [ -n "$BASE_BRANCH" ]; then
+        merge_base=$(git merge-base HEAD "$BASE_BRANCH" 2>/dev/null | head -1)
+        [ -z "$merge_base" ] && merge_base=$(git merge-base HEAD "origin/$BASE_BRANCH" 2>/dev/null | head -1)
+    fi
+    diff_base_args=""
+    [ -n "$merge_base" ] && diff_base_args="--diff-base $merge_base"
+
+    # Resolve Python once -- the authorship filter and both gates need it.
+    python_exe=""
+    if [ -x ".venv/bin/python" ]; then
+        python_exe=".venv/bin/python"
+    elif [ -x ".venv/Scripts/python.exe" ]; then
+        python_exe=".venv/Scripts/python.exe"
+    else
+        python_exe="$AF_PYTHON"
+    fi
+    quality_script=".github/scripts/check-python-quality.py"
+
+    # A provenance marker is a claim of authorship, so it may only be demanded
+    # of files the agent authored. `ruff format` rewrites every line of a file
+    # without writing a word of it, and a diff cannot tell the two apart
+    # (issue #86). If the query cannot run, keep the whole diff: an
+    # unanswerable question must not silence the gate.
+    authored_py="$changed_py"
+    if [ -n "$changed_py" ] && [ -n "$merge_base" ] && [ -n "$python_exe" ] && [ -f "$quality_script" ]; then
+        if authored_out=$(echo "$changed_py" | xargs "$python_exe" "$quality_script" $diff_base_args --list-authored --files 2>/dev/null); then
+            authored_py="$authored_out"
+        fi
+    fi
+
     missing=""
-    if [ -n "$changed_py" ]; then
+    if [ -n "$authored_py" ]; then
         while IFS= read -r f; do
             if [ -f "$f" ]; then
-                first_lines=$(head -n 5 "$f" 2>/dev/null || true)
-                if [ -n "$first_lines" ] && ! echo "$first_lines" | grep -qE 'copilot:(generated|modified)'; then
+                if ! af_has_provenance_marker "$f"; then
                     missing="${missing:+$missing, }$f"
                 fi
             fi
-        done <<< "$changed_py"
+        done <<< "$authored_py"
     fi
 
     if [ -n "$missing" ]; then
-        echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Provenance gate: these changed .py files lack copilot:generated or copilot:modified markers in their first 5 lines: ${missing}. Add provenance markers per instructions/provenance.instructions.md before completing.\"}}"
+        echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Provenance gate: these changed .py files carry no copilot:generated or copilot:modified marker anywhere: ${missing}. Add a marker in the position instructions/provenance.instructions.md prescribes before completing.\"}}"
         exit 0
     fi
 
@@ -120,13 +149,7 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
     # Files committed in an EARLIER phase of this workflow appear in neither
     # diff above -- the coordinator commits the test files at the end of the Red
     # phase, so they were invisible here and shipped unlinted (issue #13).
-    # The unit of accountability is the branch delta: what the merge will add.
     inherited_lint_py=""
-    merge_base=""
-    if [ -n "$BASE_BRANCH" ]; then
-        merge_base=$(git merge-base HEAD "$BASE_BRANCH" 2>/dev/null | head -1)
-        [ -z "$merge_base" ] && merge_base=$(git merge-base HEAD "origin/$BASE_BRANCH" 2>/dev/null | head -1)
-    fi
     if [ -n "$merge_base" ]; then
         branch_delta=$(git diff --name-only --diff-filter=AM "${merge_base}..HEAD" -- '*.py' 2>/dev/null)
         if [ -n "$branch_delta" ]; then
@@ -140,18 +163,7 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
         fi
     fi
 
-    # Resolve Python once -- quality gate and linting gate both need it.
-    python_exe=""
-    if [ -x ".venv/bin/python" ]; then
-        python_exe=".venv/bin/python"
-    elif [ -x ".venv/Scripts/python.exe" ]; then
-        python_exe=".venv/Scripts/python.exe"
-    elif command -v python &>/dev/null; then
-        python_exe="python"
-    fi
-
     if [ -n "$changed_src_py" ]; then
-        quality_script=".github/scripts/check-python-quality.py"
         if [ ! -f "$quality_script" ]; then
             echo '{"hookSpecificOutput": {"hookEventName": "Stop", "decision": "block", "reason": "Python quality gate: .github/scripts/check-python-quality.py not found. Cannot verify type hints/docstrings/ignore hygiene."}}'
             exit 0
@@ -162,7 +174,7 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
             exit 0
         fi
 
-        quality_output=$(echo "$changed_src_py" | xargs "$python_exe" "$quality_script" --files 2>&1)
+        quality_output=$(echo "$changed_src_py" | xargs "$python_exe" "$quality_script" $diff_base_args --files 2>&1)
         quality_exit=$?
         if [ "$quality_exit" -ne 0 ]; then
             summary=$(echo "$quality_output" | head -10 | tr '\n' ' ' | sed 's/"/\\"/g')
@@ -190,7 +202,7 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
             echo '{"hookSpecificOutput": {"hookEventName": "Stop", "decision": "block", "reason": "Ignore hygiene gate unavailable: check-python-quality.py or a Python executable is missing."}}'
             exit 0
         fi
-        hygiene_output=$(echo "$hygiene_py" | xargs "$python_exe" "$quality_script" --checks ignore-hygiene --files 2>&1)
+        hygiene_output=$(echo "$hygiene_py" | xargs "$python_exe" "$quality_script" $diff_base_args --checks ignore-hygiene --files 2>&1)
         hygiene_exit=$?
         if [ "$hygiene_exit" -ne 0 ]; then
             summary=$(echo "$hygiene_output" | head -10 | tr '\n' ' ' | sed 's/"/\\"/g')

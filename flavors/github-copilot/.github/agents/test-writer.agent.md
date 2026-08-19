@@ -53,6 +53,7 @@ express requirements **before** any production code is written. This is the
 
 Consult these skills when relevant to the task:
 - **unit-testing** (`skills/unit-testing/SKILL.md`) — test structure, patterns, fixtures
+- **test-execution** (`skills/test-execution/SKILL.md`) — task labels, scoping, test budget, test log
 - **property-testing** (`skills/property-testing/SKILL.md`) — property categories, strategies, discovery checklist
 - **error-handling** (`skills/error-handling/SKILL.md`) — error classification for writing error-path tests
 - **human-escalation** (`skills/human-escalation/SKILL.md`) — halt protocol when blocked or uncertain
@@ -140,6 +141,30 @@ have terminal access.
 
 ## Return Format
 
+### On success (all new tests fail for the right reason, 0 errors)
+
+Under `OUTPUT_VERBOSITY=standard` or `lean` (`af-env.conf`):
+
+```markdown
+## Test Suite Summary (Red Phase)
+
+{F} failing (expected), {P} passing (pre-existing), 0 errors.
+
+### Tests Created
+- `{path}` — {count} tests covering {what}
+
+### Coverage of Acceptance Criteria
+- [x] {Criterion 1} → tested by `test_{name}`
+- [ ] {Criterion 3} → not testable at unit level
+```
+
+The acceptance-criteria map is what the test-critic reviews — it is never
+shortened, in any mode. `Tests Created` already names every file, so no
+separate `Files Changed` list is needed. Under `full`, emit the complete
+structure below.
+
+### On errors > 0, or any criterion left untested — full detail, all modes
+
 ```markdown
 ## Test Suite Summary (Red Phase)
 
@@ -158,3 +183,17 @@ have terminal access.
 ### Files Changed
 - `{path}` — {description}
 ```
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| All new tests FAIL (Red phase) | HARD | Run test suite, verify non-zero exit code for new tests | Standard+ |
+| Zero syntax/import errors in test files | HARD | Run syntax checker (Pylance, `py_compile`) | Standard+ |
+| Provenance marker on new test files | HARD | Verify `copilot:generated` header present | Standard+ |
+| Skills read declaration | SOFT | `Skills Read:` line in Gate Summary (critic flags if missing) | Standard+ |
+| Edge cases covered per acceptance criteria | SOFT | test-critic reviews | Standard+ |
+| Property tests for wide input spaces | SOFT | test-critic reviews | Deep |

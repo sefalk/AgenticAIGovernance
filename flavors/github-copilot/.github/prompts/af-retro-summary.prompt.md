@@ -8,9 +8,9 @@ tools:
 
 # /af-retro-summary — Pull Workflow History
 
-Aggregate and summarise recent retro snippets from `retros/auto/` to inform
-the current workflow. This is a **pull model** — only invoked on demand, not
-auto-injected into every session.
+Aggregate and summarise recent retro snippets from the project's retro directory
+to inform the current workflow. This is a **pull model** — only invoked on
+demand, not auto-injected into every session.
 
 ## When to Use
 
@@ -23,10 +23,15 @@ auto-injected into every session.
 
 ### Step 1 — Discover Snippets
 
-Search for all files in `.github/retros/auto/`:
+Read `RETRO_DIR` from `.github/af-env.conf` — it defaults to
+`.github/retros/auto`, but a project may point it at a tracked directory such
+as `docs/retros`. Searching the default when the project moved it returns
+nothing, which reads as "no lessons" rather than "looked in the wrong place".
+
+Then search for all files in it:
 
 ```
-file_search: .github/retros/auto/*.md
+file_search: {RETRO_DIR}/*.md
 ```
 
 If no snippets exist, report "No auto-retro snippets found yet" and stop.

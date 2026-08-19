@@ -19,12 +19,21 @@ af-env.conf                                              [customizable]
 
 # Hooks
 hooks/
+hooks/scripts/_common.ps1
+hooks/scripts/_common.sh
 hooks/scripts/researcher-pretooluse.ps1
 hooks/scripts/researcher-pretooluse.sh
+hooks/scripts/planner-pretooluse.ps1
+hooks/scripts/planner-pretooluse.sh
 hooks/scripts/coordinator-postmerge.ps1
 hooks/scripts/coordinator-postmerge.sh
 hooks/scripts/check-large-files.py
 hooks/scripts/check-strict-json.py
+hooks/scripts/check-scratch-tasks.py
+hooks/scripts/check-context-budget-staged.py
+hooks/scripts/check-plan-budget.py
+hooks/scripts/check-plan-structure.py
+hooks/scripts/check-workflow-log.py
 hooks/git/pre-commit
 
 # Scripts (canonical test and lint runners)
@@ -43,6 +52,7 @@ scripts/test-hooks.ps1
 scripts/check-python-quality.py
 scripts/check-python-linting.py
 scripts/check-mcp-tool-ids.py
+scripts/check-hook-resolution.py
 scripts/setup-worktree.ps1
 scripts/setup-worktree.sh
 scripts/cleanup-worktree.ps1
@@ -50,6 +60,19 @@ scripts/cleanup-worktree.sh
 scripts/test-worktree-scripts.ps1
 scripts/test-large-file-guard.ps1
 scripts/test-lint-gate.ps1
+scripts/test-quality-gate.ps1
+scripts/test-run-tests.ps1
+scripts/check-context-budget.py
+scripts/test-context-budget.ps1
+scripts/test-plan-budget.ps1
+scripts/test-plan-structure.ps1
+scripts/collect-session-cost.py
+scripts/test-session-cost.ps1
+scripts/analyze-retry-economy.py
+scripts/test-retry-economy.ps1
+scripts/test-workflow-log-schema.ps1
+scripts/test-planner-write-scope.ps1
+scripts/run-all-tests.ps1
 
 # Instructions
 instructions/
@@ -60,7 +83,11 @@ prompts/
 # Skills
 skills/
 skills/INDEX.md                                          [customizable]
+skills/git-workflow/SKILL.md
 skills/git-worktrees/SKILL.md
+skills/tdd-orchestration/SKILL.md
+skills/test-execution/SKILL.md
+skills/copilot-authoring/SKILL.md
 skills/curated-assignments.json                          [customizable, optional]
 
 # Templates

@@ -15,7 +15,7 @@ it silently removed an agent's ability to do its job.
 
 VS Code accepts JSONC in `tasks.json`, but the `createAndRunTask` tool **cannot
 parse it**. A single `//` line disables the documented fallback path for
-restricted agents (`testing.instructions.md` § Agent Test Execution).
+restricted agents (`skills/test-execution/SKILL.md`).
 
 Do not add comments. Put per-task explanation in the `detail` field — it is
 data, survives tooling round-trips, and is shown in the task picker. Put
@@ -62,7 +62,41 @@ pass parameters. Every distinct invocation needs its own task
 (`tests: domain`, `tests: domain + coverage`, `lint: ruff check tests`, …).
 
 Do not use `${input:...}` prompts in agent-facing tasks; they block autonomous
-execution waiting for human input.
+execution waiting for human input. The PreToolUse classifier **denies**
+`${input:}`, `${command:}` and `${config:}` in a `createAndRunTask` payload —
+they resolve to content the classifier never saw, so what is reviewed is not
+what runs.
+
+## A label names a script, never an invocation
+
+The `command` identifies *what runs*; `args` identify *how it is called this
+time*. A label that encodes the invocation — `check-file-x`, `probe-run-v2`,
+`parse-check-v3` — multiplies entries for one script and turns a curated
+surface into scratch.
+
+One script, varying arguments, one label per meaningful scope. If you find
+yourself appending `v2` to a label, you are parameterising by copy.
+
+`createAndRunTask` writes its payload into `.vscode/tasks.json` as a side
+effect. Treat that file as a **cache of what agents may run**, not an audit
+trail of what they did — the record of execution lives in the workflow log and
+the hook decisions, and leftover scratch labels should be cleaned up rather than
+read as history.
+
+The documenter stop hook reports the leftovers at workflow end
+(`.github/hooks/scripts/check-scratch-tasks.py`). It is advisory and never
+blocks: it lists entries that could not be created today — inline interpreter
+payloads and prompt-resolved variables — so a human can prune them.
+
+## Only reviewed scripts are callable
+
+`AF_TASK_SCRIPT_DIRS` in `af-env.conf` lists the directories a task may invoke.
+The classifier rejects bare binaries (`git`, `ruff`, `pytest`, `databricks`),
+inline interpreter payloads (`powershell -Command …`, `bash -c …`), shell
+metacharacters, `options.shell` overrides and OS-specific `command` overrides.
+
+If a task needs something outside that set, the answer is a reviewed script in
+`.github/scripts/` — not a longer command string.
 
 ## Required boilerplate on every task
 
@@ -83,3 +117,5 @@ output separable.
 - [ ] No bare Python-tool executables as `command`
 - [ ] No renamed or deleted labels without updating all references
 - [ ] Arguments are literal — no `${input:...}`
+- [ ] `command` points at a script under `AF_TASK_SCRIPT_DIRS`, and the label
+      names that script rather than this particular invocation

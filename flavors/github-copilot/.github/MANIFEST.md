@@ -137,7 +137,8 @@ until escalation.
 Every gate is classified as **HARD** (automated, blocks handoff),
 **SOFT** (judgment-based, reviewer decides), or **ADVISORY** (informational,
 never blocks). See `instructions/quality-gates.instructions.md` for the
-full gate system, per-agent exit gates, and complexity tiers.
+full gate system and complexity tiers; each agent's own exit gate table is
+in `agents/{agent}.agent.md`.
 
 ### Complexity Tiers
 
@@ -240,7 +241,9 @@ Every agent operates under a distinct, verifiable identity:
 Agents receive only the tools and permissions needed for their role:
 
 - Tool sets in `.vscode/toolsets.jsonc` scope each agent's capabilities
-- Read-only agents (planner, critics, arbiter) cannot edit files
+- Read-only agents (critics, arbiter) cannot edit files
+- The planner writes exactly one file, its own plan document; every other path
+  is denied by `planner-pretooluse` (issue #130)
 - No agent is granted credentials capable of mutating production environments
   unless following a certified deployment workflow
 - Scoped, temporary credentials are preferred over long-lived tokens
@@ -269,7 +272,8 @@ Agents receive only the tools and permissions needed for their role:
   three-tier classifier (auto-approve safe / prompt durable / hard-deny
   destructive), tuned via `AUTONOMY_LEVEL` / `AUTONOMY_CAT_*` in `af-env.conf`
 - One atomic commit per workflow phase (plan, tests, implementation, docs)
-- See `instructions/git-workflow.instructions.md` for the full protocol
+- See `instructions/git-workflow.instructions.md` for the core rules and
+  `skills/git-workflow/SKILL.md` for the full protocol
 
 ### Planning Documents
 
@@ -282,6 +286,24 @@ first commit on the feature branch and is updated throughout the workflow
 as a living document.
 
 ### Workflow Logs
+
+The documenter writes one YAML log per workflow to `.github/logs/{workflow-id}.yaml`
+(schema in `agents/documenter.agent.md`). Logs are local instrumentation: the
+directory ships a `.gitignore`, because `trigger:` holds the user request
+verbatim.
+
+The documenter Stop hook then appends an **ADVISORY** `cost:` block measuring
+what the workflow actually cost — billed requests, tokens and credits for the
+parent session *and* its subagents, broken down by model. It comes from the chat
+debug log via `scripts/collect-session-cost.py`; the hook appends the script's
+output verbatim, so the numbers never pass through a language model and no agent
+ever reads the log (tens of megabytes, every prompt verbatim).
+
+Its source is an experiment-flagged vendor setting, so the block **may be absent
+or `available: false` at any time, and nothing may gate on it**. A `coverage`
+field qualifies every total; when the log lost its start, no total is emitted
+rather than a number that looks complete but is biased downward. Details:
+`logs/README.md`.
 
 ## 8. Agent Hooks (Deterministic Enforcement)
 
@@ -298,6 +320,7 @@ Configuration lives in `.github/hooks/*.json`.
 | `PreToolUse` | Safety Gate | Three-tier classifier: auto-approve safe commands, prompt durable changes, hard-deny `rm -rf`/`DROP TABLE`/force push/etc. |
 | `PostToolUse` | Secret Scan | Scans edited files for hardcoded secrets (gitleaks or regex fallback) |
 | `Stop` | Test Gate | Runs `pytest tests/ -q --tb=line` before session ends |
+| `SubagentStop` | Documenter Artifact Gate | Blocks on a missing workflow log or retro snippet, then appends the ADVISORY `cost:` block to the log |
 
 ### Hook Output Control
 
@@ -320,7 +343,7 @@ until one is available. This optimises cost and speed:
 
 | Worker Type | Model Strategy | Rationale |
 |---|---|---|
-| Read-only (planner, critics, arbiter) | Fast/efficient models first | Only analysis, no edits |
+| Analysis (planner, critics, arbiter) | Fast/efficient models first | No code edits |
 | Editing (test-writer, implementer, refactorer) | Most capable model | Code quality matters |
 | Documenter | Efficient model | Structured log writing |
 
@@ -527,6 +550,6 @@ escalation context (see `templates/WIP.md` § Escalation Context).
 |---|---|---|---|
 | Plan file (`docs/plans/{type}-{date}-{slug}.md`) | Planner -> Coordinator | Implementer, Documenter | Permanent (human-readable documentation) |
 | WIP.md (`docs/plans/WIP.md`) | Coordinator (on interrupt) | Coordinator (on resume) | Branch-scoped, deleted on completion |
-| Workflow YAML log | Documenter | Human, audit | 30-day retention |
+| Workflow YAML log | Documenter | Human, audit | Local only, never committed; 30-day retention |
 | Provenance markers | All producing agents | Documenter (verification) | Permanent in source |
 | ADRs | Human / Code-critic | All agents | Permanent in docs/ |

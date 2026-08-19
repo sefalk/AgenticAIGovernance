@@ -32,6 +32,7 @@ tests are meaningful and return a structured verdict.
 
 Consult these skills when relevant to the task:
 - **unit-testing** (`skills/unit-testing/SKILL.md`) — test structure, patterns, naming conventions
+- **test-execution** (`skills/test-execution/SKILL.md`) — why test-critic runs nothing, and how to read the test log
 - **code-review** (`skills/code-review/SKILL.md`) — anti-gaming detection, review checklist patterns
 - **property-testing** (`skills/property-testing/SKILL.md`) — property categories for validating test quality
 <!-- AF:MANAGED:curated-skills:START -->
@@ -102,10 +103,34 @@ Consult these skills when relevant to the task:
 
 ## Return Format
 
-Return your verdict in this exact format so the coordinator can parse it:
+The verdict header is a HARD gate — emit it exactly, always:
 
 ```markdown
 ## Test Review Verdict: {APPROVED | REJECTED | ESCALATE}
+```
+
+### On APPROVED
+
+Under `OUTPUT_VERBOSITY=standard` (`af-env.conf`) return the header, a 1–2
+sentence summary, the suite counts, and the Gate Summary — no checklists:
+
+```markdown
+## Test Review Verdict: APPROVED
+
+{1–2 sentences: what the suite covers and why it is meaningful.}
+{N} test files / {M} functions ({U} unit, {P} property, {Z} parametrized). Attempt {N} of 3.
+{Unresolved SHOULD-FIX / ADVISORY items, one line each — omit if none.}
+```
+
+Under `lean`, drop the prose sentence and keep the counts. Under `full`, emit
+the complete structure below.
+
+### On REJECTED or ESCALATE — full detail, all modes
+
+A retry can only be as good as the feedback it receives. Never compress this:
+
+```markdown
+## Test Review Verdict: {REJECTED | ESCALATE}
 
 ### Summary
 {1–3 sentence overview}
@@ -120,14 +145,25 @@ Return your verdict in this exact format so the coordinator can parse it:
 - [x] Edge cases covered
 - [x] No anti-patterns detected
 
-### Issues Found (if REJECTED)
+### Issues Found
 1. **{file}:{line}** — **{BLOCKING | SHOULD-FIX | ADVISORY}** — {description}
    - Suggested fix: {actionable guidance}
 
-### Rejection Detail (REJECTED only)
+### Rejection Detail
 - **blocking_count:** {N}
 - **retry_guidance:** {1-2 sentences of actionable direction for the maker's retry}
 
 ### Review Attempt
 - Attempt: {1 | 2 | 3} of 3
 ```
+
+## Exit Gates
+
+Verify these before returning. Gate types, complexity tiers, and the Gate
+Summary format are in `instructions/quality-gates.instructions.md`.
+
+| Gate | Type | How to Verify | Tier |
+|---|---|---|---|
+| All checklist items evaluated | SOFT | Self-check: checklist completed | Standard+ |
+| Verdict header is parseable | HARD | Verify `## Test Review Verdict: {V}` format | Standard+ |
+| Anti-gaming scan performed | SOFT | Self-check: anti-pattern list checked | Standard+ |

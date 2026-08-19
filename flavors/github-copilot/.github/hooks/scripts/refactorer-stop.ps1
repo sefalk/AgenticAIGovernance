@@ -15,27 +15,16 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-# Worktree-aware path resolution (see ideas/feature-git-worktrees.md §12).
-# $mainRoot: main checkout where .github/ is deployed (derived from script location).
-# $codeRoot: active worktree if .active-worktree sentinel exists, else $mainRoot.
-$mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
-$codeRoot = $mainRoot
-$sentinel = Join-Path $mainRoot '.github/.active-worktree'
-if (Test-Path $sentinel) {
-    $p = (Get-Content $sentinel -Raw -ErrorAction SilentlyContinue).Trim()
-    if ($p -and (Test-Path $p)) { $codeRoot = $p }
-}
 
-# Load project config
-$SRC_DIR = 'src'
-$BASE_BRANCH = ''
-$confPath = Join-Path $mainRoot '.github/af-env.conf'
-if (Test-Path $confPath) {
-    $m = Select-String -Path $confPath -Pattern '^SRC_DIR=(.+)$'
-    if ($m) { $SRC_DIR = $m.Matches[0].Groups[1].Value.Trim() }
-    $b = Select-String -Path $confPath -Pattern '^BASE_BRANCH=(.+)$'
-    if ($b) { $BASE_BRANCH = $b.Matches[0].Groups[1].Value.Trim() }
-}
+# Root, config and interpreter come from this script's location, never from
+# the cwd the agent happens to run in (issue #54). $mainRoot/$codeRoot keep
+# their names so the rest of the hook is untouched.
+. "$PSScriptRoot/_common.ps1"
+$mainRoot = $AfMainRoot
+$codeRoot = $AfCodeRoot
+
+$SRC_DIR = Get-AfConfig -Key 'SRC_DIR' -Default 'src'
+$BASE_BRANCH = Get-AfConfig -Key 'BASE_BRANCH' -Default ''
 
 # Read stdin (hook input JSON -- required by protocol)
 $null = [Console]::In.ReadToEnd()
@@ -167,12 +156,17 @@ if ($mergeBase) {
     })
 }
 
+# The quality gate reports per changed function, not per changed file (issue
+# #45). It reuses the base resolved above rather than deriving its own, so the
+# framework keeps one base-branch resolver.
+$diffBaseArgs = @()
+if ($mergeBase) { $diffBaseArgs = @('--diff-base', $mergeBase) }
+
 # Resolve Python once -- Gate 3 and Gate 5 both need it. Gate 5 must still run
 # when only tests/ changed, so this cannot live inside the Gate 3 branch.
 $pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
 if (-not (Test-Path $pythonExe)) {
-    $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-    $pythonExe = if ($pythonCmd) { $pythonCmd.Source } else { $null }
+    $pythonExe = if ($AfPython) { $AfPython } else { $null }
 }
 
 # ---------- Gate 3: Python quality on changed source files ----------
@@ -204,7 +198,7 @@ if ($changedSrcPy.Count -gt 0) {
     }
 
     Push-Location $codeRoot
-    $qualityResult = & $pythonExe $qualityScript --files @($changedSrcPy) 2>&1
+    $qualityResult = & $pythonExe $qualityScript @diffBaseArgs --files @($changedSrcPy) 2>&1
     $qualityExit = $LASTEXITCODE
     Pop-Location
     if ($qualityExit -ne 0) {
@@ -244,7 +238,7 @@ if ($hygienePy.Count -gt 0) {
     }
 
     Push-Location $codeRoot
-    $hygieneResult = & $pythonExe $qualityScript --files @($hygienePy) --checks ignore-hygiene 2>&1
+    $hygieneResult = & $pythonExe $qualityScript @diffBaseArgs --checks ignore-hygiene --files @($hygienePy) 2>&1
     $hygieneExit = $LASTEXITCODE
     Pop-Location
     if ($hygieneExit -ne 0) {

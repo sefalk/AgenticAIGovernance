@@ -7,6 +7,1864 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.22.0] -- 2026-08-19
+
+### Added
+
+- **The merge nobody was there to arm.** `gh-pr-manager` can open a pull
+  request and cannot finish, because GitHub's auto-merge is opt-in per pull
+  request and the MCP server exposes no tool for arming it. PR #149 was the
+  demonstration: `conclusion: success`, `mergeable_state: "clean"`, and it
+  waited for a human click. Every condition the gate exists to check was met
+  and nothing happened.
+
+  `.github/workflows/arm-auto-merge.yml` arms it. This does not weaken the
+  gate — auto-merge waits for the required status check, so a red or pending
+  check still never merges; the workflow only presses the button. It uses
+  `pull_request` rather than `pull_request_target`, because the latter runs
+  with the base branch's token and would hand write permissions to code from a
+  fork, and this repository is public. Three further conditions gate the job:
+  same repository, author is the repository owner, base is `dev`. The base is
+  filtered twice, in the trigger and in the job, so that widening one does not
+  silently widen the other — the same allowlist reasoning as `gh-pr-manager`,
+  and `main` is never armed because merging into the default branch is where
+  `Closes #N` fires.
+
+  A failure to arm fails the job deliberately. Arming quietly would leave a
+  pull request waiting forever for something nobody is doing, which is the
+  failure shape of #125 and #98 rather than a lesser version of it.
+
+  One documented cost: work performed with `GITHUB_TOKEN` does not trigger
+  further workflow runs, so a merge armed by this token may not produce the
+  post-merge sweep on `dev`. The pull-request run is unaffected and is the one
+  the ruleset requires. Stated here rather than found later.
+
+  The merge does not clean up after itself, and cannot: `--delete-branch` is
+  inert with `--auto`, because `gh` returns once auto-merge is armed and the
+  merge happens minutes later inside GitHub. `prune-merged-branches.yml` does
+  it on a schedule instead. Closes #150.
+
+- **An agent may now open a GitHub pull request, and cannot merge the one
+  branch where merging would close issues.** The merge gate from #143 made
+  `dev` and `main` enforceable, but no agent could open a pull request against
+  them: `ado-pr-manager` speaks only Azure DevOps, and the coordinator's
+  integration path had no GitHub equivalent. `gh-pr-manager` fills that gap,
+  gated by `GH_PR_CAPABILITY_MODE` and defaulting to `off`.
+
+  It is not a port of `ado-pr-manager`, because the assumption underneath that
+  agent does not hold here. Azure DevOps has autocomplete — set a flag, and the
+  platform merges later once policies pass. **The GitHub MCP server exposes no
+  such tool.** The only merge tool attempts the merge immediately, and the
+  ruleset refuses it while a required check is unfinished. So a refusal is a
+  normal outcome rather than an error, and the agent reports
+  `NEEDS_CHECK_COMPLETION` and returns instead of polling — one attempt per
+  invocation, no waiting, no burning context on information a later invocation
+  gets for free. That status is deliberately distinct from `NEEDS_HUMAN_MERGE`:
+  the first means the work is fine and the platform is still deciding, the
+  second means no agent may decide at all, and a coordinator that confuses them
+  either waits forever or re-invokes against a branch it may not touch.
+
+  Which branch it may merge is an **allowlist** (`GH_PR_AUTOMERGE_BRANCHES`,
+  default `dev`), not a denylist. A denylist fails open, and the branch most
+  likely to be missing from it is a release branch created next month. The
+  default branch is refused even when explicitly listed, because GitHub honours
+  `Closes #123` only on a merge into the default branch — measured on issue
+  #143, where a pull request into `dev` carrying that keyword left
+  `closed_by_pull_requests` at `total_count: 0`. That coupling is what makes
+  "this worker never closes an issue" a property rather than an intention, and
+  it is the GitHub analogue of `ado-pr-manager`'s mandatory
+  `transitionWorkItems: false`. Closing an issue requires someone to have read
+  its acceptance criteria, which is not a judgment this agent makes.
+
+  The agent file states what configuration cannot enforce: `Allow auto-merge`
+  is repository-wide with no per-branch form, and a single maintainer cannot
+  require an approving review on the default branch without deadlocking it,
+  since GitHub forbids approving your own pull request. The human-only boundary
+  therefore rests on this policy, not on the platform — and the agent says so
+  in its return rather than implying a guarantee it does not have. Closes #146.
+
+### Changed
+
+- **Branch cleanup stopped depending on the merge event, because three
+  mechanisms that depend on it all fail here.** Automated merges left their
+  head branch on the remote every time: #151, #152 and #155, the last still
+  present 27 minutes afterwards. *Settings → Automatically delete head
+  branches* was enabled throughout, and toggled off and on again in between.
+
+  `gh pr merge --delete-branch` cannot help — `gh` returns as soon as
+  auto-merge is armed, so the client-side deletion never runs, and the flag
+  reported success while doing nothing. A `pull_request: closed` cleanup
+  workflow cannot help either: work performed with `GITHUB_TOKEN` triggers no
+  further workflow runs, the same rule that produced the problem.
+
+  What the three share is the merge event. `prune-merged-branches.yml` uses
+  `schedule:` instead, so who merged and how stops mattering. It deletes an
+  `agent/` branch only when `dev` already contains every one of its commits,
+  which is true once its pull request has merged and false while work is
+  outstanding — so an abandoned branch with unmerged commits is left alone, and
+  a branch abandoned *after* merging is finally cleaned up, which the
+  repository setting never covered.
+
+  The cause of GitHub's own deletion not firing is not established, and this
+  does not depend on establishing it. That is the point: `--delete-branch` was
+  a fix written against an unverified diagnosis and cost a pull request to
+  learn nothing.
+
+  **It is inert until the release.** `schedule` and `workflow_dispatch` trigger
+  only from the default branch. This file lives on `dev`, and `main` has no
+  `.github/workflows` directory at all while sitting 233 commits behind — so
+  there is no nightly run, no Run workflow button, and the workflow is not even
+  listed in the Actions tab, which is how this was caught. Recorded in the file
+  itself rather than left as a surprise. #153 stays open until a run is observed
+  deleting something. Refs #153.
+
+- **A green check on `dev` now describes the branch you are actually merging
+  into.** Arming auto-merge (#150) removed a guarantee nobody had written down.
+  `dev` had two independent signals: the pull-request run, testing the merge
+  result before it lands, and `Regression Suites` on `push: [dev]`, testing
+  `dev` as it ends up. The second is gone for automated merges, because work
+  performed with `GITHUB_TOKEN` does not trigger further workflow runs —
+  measured, not assumed: the human merge of #149 produced
+  `Regression Suites #6: Commit b6459c4 pushed by sefalk`, and the bot merge
+  that produced `42b78d0` produced no run at all.
+
+  On its own that is survivable, since the pull-request run already tests the
+  merge commit. It stopped being survivable in combination with
+  `strict_required_status_checks_policy: false`, which let a pull request merge
+  on a check measured against a base that had since moved. Two pull requests
+  opened against the same commit, both green, one merges — and the second lands
+  on a `dev` that no run has ever seen. Only hand-serialised merges kept that
+  from firing.
+
+  `dev-branch-ruleset.json` now sets the policy to `true`, which makes the
+  failure unreachable rather than detected afterwards: a pull request whose
+  base has moved must take the new base and re-run before it can merge, and the
+  `synchronize` event that follows is already known to produce a run. The cost
+  is that auto-merge stalls if nothing updates the branch — visible, and
+  preferable to a gate reporting green about a state that was never built.
+
+  `main` keeps `false`. It moves only on release pull requests that a human
+  merges, so there is no concurrency for a check to be stale against.
+  Closes #154.
+
+- **The context budget has two owners now, so it stops failing on arrival.**
+  One ceiling covered the framework's instruction files and the consuming
+  project's together. The framework's own always-on files spend 3,461 tokens of
+  it, which left the project 1,489 to describe itself in — and AF's own
+  `copilot-instructions.md` template invites about 2,000. Issue #107 measured a
+  fresh consumer failing all three budgets on the day it was deployed, before
+  anyone had drifted anywhere.
+
+  A gate that fails on arrival has two available responses, and both destroy
+  it. Raise the numbers until it passes, and a drift detector becomes a rubber
+  stamp whose passing verdict carries no information — the same failure shape
+  as #98 and #27. Or shrink the project's own self-description to fit the
+  framework's leftovers, which is what the consumer in question actually did:
+  its `copilot-instructions.md` went from 2,051 tokens to 1,405, a 31% cut to
+  the file that tells every agent what the project *is*. It passes today with
+  84 tokens of headroom.
+
+  So the ceilings are split by author. `AF_CONTEXT_BUDGET_TOKENS`,
+  `AF_CONDITIONAL_BUDGET_TOKENS` and `AF_AGENT_CONTEXT_BUDGET_TOKENS` now cover
+  only what the framework ships and controls, and were **tightened** to match:
+  4,950 → 3,500, 5,500 → 3,850, 10,900 → 9,450, each the measured framework
+  share plus the headroom it already carried. The project's files are charged
+  to two new keys, `AF_PROJECT_CONTEXT_BUDGET_TOKENS` and
+  `AF_PROJECT_CONDITIONAL_BUDGET_TOKENS`, seeded from what the project actually
+  has — so the gate detects drift from the project's own baseline instead of
+  from a number the framework invented for someone else's repository.
+
+  Ownership is not guessed. `[customizable]` in `.af-manifest` marks the files
+  AF ships as templates and invites the project to rewrite; `.af-hashes` shows
+  what AF deployed at all, which is how a project's own instruction file is
+  told apart from AF's in the same directory. Checked against a real consumer,
+  the annotation is exactly accurate: only the customizable files had diverged,
+  the rest were byte-identical. Without `.af-manifest` the check is **BLOCKED**,
+  not passed — charging the wrong share to the wrong owner is how this defect
+  started.
+
+  Per-agent totals no longer include the project's always-on set. An agent that
+  fits must not stop fitting because the consuming project wrote itself a
+  longer overview. The real total is still printed as the worst case.
+
+  `deploy.ps1` and `deploy.sh` seed the project ceilings on a **fresh** install
+  only — on an update `af-env.conf` is a baseline somebody chose, and
+  overwriting it would erase the drift the ceiling exists to detect. Where no
+  Python is available deploy says so and names the command. Existing consumers
+  never receive the keys at all (`af-env.conf` is protected on update); until
+  they are seeded the project share is measured, printed as `UNBUDGETED` and
+  left ungated, because a project that never stated a baseline has not drifted
+  from one.
+
+- **The token divisor is a measurement now, not a rule of thumb.**
+  `check-context-budget.py` estimates tokens as `characters / 4`, and the code
+  said outright that the 4 "has not been calibrated against a tokenizer for
+  this payload". Issue #59 expected that to be wrong in the unsafe direction:
+  dense markdown was thought to run 3–3.5 characters per token, which would
+  mean every budget understated real consumption by 15–30%.
+
+  It was measured, against all 24 files the gate covers, with tiktoken
+  `o200k_base` cross-checked against `cl100k_base`:
+
+  ```
+  183,317 chars → 44,602 real tokens = 4.110 chars/token
+  per file 3.83 – 4.29 (median 4.111)
+  ```
+
+  **The suspicion was wrong.** `characters/4` lands within −4.2%/+7.2% per file
+  (+2.8% median) and it errs *high* — it reports slightly more tokens than
+  exist, which is the safe direction for a ceiling. By group: always-on +3.6%,
+  conditional +1.7%, agents +2.8%.
+
+  So the constant does not move and the **budgets are not restated**. Changing
+  4 to 4.11 would shift every figure by under 3% — inside the noise this gate
+  exists to ignore — and would relax all three ceilings for no gain. What
+  changes is the justification: the calibration date, the tokenizers, the
+  ratio, the per-file band and the direction of the error are now recorded
+  beside the constant and beside the budgets in `af-env.conf`, where somebody
+  deciding whether to raise a ceiling will actually be looking.
+
+### Added
+
+- **The fifteen regression suites ran only on a maintainer's laptop, so GitHub
+  had no way to tell a sound pull request from a broken one.** There was no
+  `.github/workflows` directory and no `.github` directory at the repository
+  root at all; `dev` and `main` both reported `"protected": false` with an
+  empty `required_status_checks.contexts`. Every suite result reached the
+  project as a claim in a chat transcript and nothing else, which is why the
+  question "may this pull request merge automatically once all conditions are
+  met" had no answer: there were no conditions, so a pull request was mergeable
+  the instant it was opened.
+
+  Two things had to be settled before a workflow could mean anything. Ten of
+  the fifteen suites end their preflight with `Write-Host 'SKIP: ...'` followed
+  by `exit 0` when Python, ruff or PyYAML is missing — correct on a developer
+  machine, and on a bare runner a green gate that asserted nothing, the same
+  shape as #125. And `test-hooks-integration.ps1` does not test the payload at
+  all: it reads VS Code's own hook log under `%APPDATA%\Code\logs` to confirm
+  hooks fired during a real session, so on a hosted runner it exits 2.
+
+  So `scripts/run-all-tests.ps1` gives the suites the single entry point and
+  single exit code a CI job needs, and classifies each one as PASS, SKIP,
+  BLOCKED or TIMEOUT by reading its output rather than trusting its exit code.
+  Under `-FailOnSkip`, which the workflow passes, a suite that asserted nothing
+  fails the run. `.github/workflows/regression.yml` runs it on `windows-latest`
+  — not a preference, since the suites are Windows PowerShell 5.1 scripts and
+  hosted Linux runners have no `powershell` — installs the prerequisites, and
+  configures a git identity, because several suites commit inside throwaway
+  repositories and a fresh runner has none. `test-hooks-integration.ps1` is
+  excluded explicitly, with the reason stated at the exclusion.
+
+  Baseline on the maintainer machine: 15 passed, 0 skipped, 0 failed, 956
+  seconds. This is a prerequisite, not the feature — branch protection,
+  auto-merge, automatic head-branch deletion and automatic issue closing remain
+  separate decisions, and each of them is only safe once this check exists and
+  is trusted. Closes #143.
+
+- **The plan was written three times before it reached disk, because the agent
+  that produced it was forbidden to save it.** The planner returned the plan,
+  the coordinator repeated it verbatim inside a delegation prompt, and the
+  documenter emitted it a third time as the argument to `createFile`. All three
+  are output emissions — `createFile` takes the file body as an argument, so
+  persisting is not free either. Measured over the 66 plans in this framework
+  and one consuming project, the plan is a median 1,747 tokens when it first
+  lands (mean 2,951, max 8,410, 194,793 in total), so the two redundant passes
+  cost a median 3,494 and a mean 5,902 output tokens per workflow — roughly
+  390,000 across the corpus, for text that already existed.
+
+  The cause was a least-privilege rule applied by agent rather than by path:
+  the planner was read-only, so the only way to disk ran through an agent that
+  had no reason to read the document. The planner now holds `edit/createFile`
+  and writes its own plan, confined by a new `planner-pretooluse` hook to `.md`
+  files under a `plans/` directory. The hook is an allowlist, not a denylist
+  like `test-writer-pretooluse`: the planner's legitimate write surface is one
+  directory, so everything outside it is refused by default rather than
+  enumerated. Path traversal, absolute paths, non-`.md` payloads smuggled into
+  the plan directory, one bad path hidden in a batch of good ones, and pathless
+  writes are all denied — asserted by 20 cases in
+  `scripts/test-planner-write-scope.ps1`, of which 14 are attempts to escape.
+
+  The coordinator reads the plan file for its § 4 review gate instead of
+  reviewing a copy in its context, and the same change removes the same relay
+  from the Quick Fix investigation document. Critics and the arbiter remain
+  read-only; the planner still edits no code. Closes #130.
+
+- **The workflow log had a schema and no reader, so 16 of 55 logs speak a
+  language the framework does not.** `documenter.agent.md` has always given the
+  log a vocabulary — `status` is COMPLETED, FAILED or ESCALATED; a step verdict
+  is one of the five in MANIFEST § 13 — and nothing has ever read a log back
+  against it. Measured across the 55 logs in a consuming project: two are not
+  valid YAML at all, six carry verdicts from outside the set (`PASS`, `SKIPPED`,
+  `SUBMITTED_FOR_REVIEW`, `PROCEEDED`, `PASSED`), and six carry statuses from
+  outside it (`DRAFT`, `IN_PROGRESS`, `IN-PROGRESS`, one a whole sentence). A
+  schema nobody enforces records an intention; the corpus records the habit.
+
+  `check-workflow-log.py` runs from the documenter's Stop hook and **blocks** on
+  vocabulary, because vocabulary is a choice the documenter can correct. It is
+  stdlib-only for the scan and reaches for PyYAML only to answer "does this
+  parse", declaring the rule unrun rather than passing it when the library is
+  absent. A block scalar's body is skipped, so a `description: |` that quotes
+  `verdict: "PROCEEDED"` cannot invent a violation out of prose.
+
+  `summary.retries` and `summary.escalations` are handled the other way: they
+  are **derived from the steps and stamped by the hook**, and the documenter is
+  told to write `0`. In the same corpus, 25 of 53 readable summaries contradict
+  their own steps — 23 retries self-reported against 63 counted. That is not
+  dishonesty and not a rule violation, it is a model doing arithmetic over a
+  list at the end of a long context, and the fix for a number a model can get
+  wrong is not to validate the number, it is to stop asking for it. Issue #91
+  established the precedent with `completed:`, where a documenter wrote a
+  timestamp six hours in the future in the same output that declared zero
+  fabricated data. The derivation uses the same definition of a retry as
+  `analyze-retry-economy.py`, verified against the corpus, so the two tools
+  cannot disagree about what they are counting.
+
+  The mechanism was corrected before it was built. The issue proposed a
+  pre-commit guard over staged logs; `.github/logs/.gitignore` ignores `*`, so
+  such a guard could never have fired once. It would have been the #125 failure
+  mode — a check that passes because it never runs — proposed by an agent that
+  had read #125. `ALLOW_WORKFLOW_LOG_SCHEMA=1` stands the gate down for a human
+  who disagrees with it, and still prints what it found. 26 regression tests in
+  `test-workflow-log-schema.ps1`. Closes #137.
+
+- **The retry budget was set per agent without ever counting a retry.**
+  MANIFEST § 4 gives every agent the same two attempts before escalation, and
+  that number has never been checked against a workflow. `analyze-retry-economy.py`
+  reads the `.github/logs/*.yaml` the documenter already writes and answers the
+  question the budget assumes: who actually retries, how often, and why.
+
+  Issue #43 named `transcripts/*.jsonl` as the source. They were measured first
+  and rejected: 143 MB across four workspace-storage directories, uncommitted,
+  machine-local, and a retry only inferrable from the shape of a `runSubagent`
+  call. The workflow logs are the framework's own record, they are versioned
+  with the project, and a retry is visible in them structurally — the same
+  agent appearing twice in one `steps` list.
+
+  Against a 55-log corpus the tool reports what the flat budget hides. The
+  implementer runs 75 times and retries 33 of them, 0.44 per step, in 43% of
+  the workflows it appears in; the refactorer and the compliance-checker never
+  retry at all. Two agents carry the retry cost and the rest pay the same
+  allowance. The distribution matters more than the mean: 27 of 53 workflows
+  have no retry whatsoever, and one has six — an average of 1.2 retries per
+  workflow describes neither.
+
+  Causes are attributed from the steps in between, and the tool states its
+  heuristic in the output before it prints a number. A `REJECTED` or `ESCALATE`
+  verdict in between is `critic-rejected`; a step below its hard-gate count is
+  `gate-failed`; nothing in between at all is `consecutive-pass`. Tool errors,
+  the third cause the issue asks for, are not derivable from these logs — no
+  step records them — so the tool says the column is missing rather than
+  printing zero. The largest single finding is that 19 of the implementer's 33
+  retries are `consecutive-pass`: the most expensive agent's most common repeat
+  is a second run with no reviewer between the two.
+
+  The tool refuses to be quiet about its own blind spots, per the #12 lesson.
+  An empty or missing log directory exits 2 — a framework with no evidence is
+  not a framework with no retries. A corpus where nothing parses exits 2. Any
+  log that fails to parse is named and excluded, and the count of what was
+  excluded is printed next to the count of what was read.
+
+  Reading the record exposed the record. In the corpus, 25 of 53 workflows have
+  a `summary` that contradicts their own `steps` — self-reported retries total
+  23 against 63 counted structurally, and `summary.escalations` is 0 in all 55
+  logs while a step verdict says `ESCALATE` once. Six verdicts fall outside the
+  MANIFEST closed set (`PASS`, `PASSED`, `SKIPPED`, `PROCEEDED`,
+  `SUBMITTED_FOR_REVIEW`, `APPROVED-WITH-ISSUES`). Two logs are not valid YAML
+  at all. Nothing had ever read them, so nothing had ever noticed. The tool
+  reports all three as drift and exits 1; fixing the record is a separate
+  problem from being able to read it.
+
+  `test-retry-economy.ps1` adds 20 checks over synthetic corpora, each proving
+  one claim by constructing the log that would break it — the empty directory,
+  the unparsable log, the lying summary, the verdict outside the set.
+  Closes #43.
+
+
+  Two layers now stand where the count stood, and neither is a new agent.
+
+  `check-plan-structure.py` runs in the existing pre-commit shim, over the same
+  scope as the budget guard, and blocks a staged plan that has fields left as
+  template placeholders, headings the templates do not define, a subtask
+  without acceptance criteria, files, or an exit criterion, an unstated
+  complexity tier, or no subtasks at all. Both document kinds in the plans
+  directory are recognised: `PLAN.md` and `INVESTIGATION.md` are checked
+  against their own section sets, chosen by the title, so an investigation is
+  not rejected for lacking subtasks it was never supposed to have. `DRAFT`
+  stands the guard down — and is named in the output, so DRAFT cannot quietly
+  become the way out. Override: `ALLOW_PLAN_STRUCTURE=1`.
+
+  What it deliberately does not do is reject a Standard plan for containing a
+  section the template reserves for Deep. Length is already paid for by the
+  budget guard, and a rule that punished thoroughness would be teaching authors
+  to write less than they know.
+
+  It also cannot judge whether an acceptance criterion is *useful*, which is why
+  the second layer is a question and not a regex. The coordinator's gate in
+  `tdd-orchestration` § 4 now asks five things about the plan already in its
+  context — are the criteria decidable, does every subtask name files and an
+  exit criterion, is the tier justified against the layer-override rule rather
+  than asserted, can the subtasks be executed in the order given, is anything
+  in the plan untraceable to the request. A "no" returns the plan to the
+  planner once; the second failure escalates. The escalation triggers are
+  unchanged; this adds the reasons, it does not replace them.
+
+  The coordinator commissioned the plan, so those answers are a self-check, and
+  a self-check nobody reads stops happening. They are persisted as
+  `plan_review` in the workflow log and the compliance-checker's post-flight
+  bookend — already independent, already reading workflow artifacts — reports
+  their absence. An absent block means the gate was skipped, not passed.
+
+  Measured against the framework's own 34 plan documents, exactly one passes.
+  The other 33 predate the template that #26 tightened, and they are not
+  rewritten: the guard reads the staged blob, so it judges what is written from
+  here on. But the ratio is the finding. A template that nothing enforced was
+  followed by one document in thirty-four, and every one of those was written
+  by an agent instructed to follow it.
+
+  Guard: `.github/hooks/scripts/check-plan-structure.py`
+  Regression suite: `.github/scripts/test-plan-structure.ps1` (25 checks).
+  Whether a dedicated plan-critic is needed on top of this is deliberately not
+  decided here — issue #133 holds it until the retry cost it would prevent has
+  been measured. Closes #132.
+
+- **Plan documents are budgeted by complexity tier, and the budget is checked
+  on commit.** The plan is the largest artifact a workflow writes and the one
+  nobody re-reads. Measured across 29 plans in a consuming project (768 KB):
+  Standard tier averaged 20,555 characters — about 5,100 tokens — and Deep
+  averaged 9,710 tokens, with the largest single plan at 87,696 characters.
+
+  The obvious remedy was to cut narrative sections out of the template. The
+  measurement says that would not have worked: the template is 4 KB, so it is
+  not the scaffolding that is expensive, and **45% of Standard-plan text sat in
+  sections the template never defines** — invented per plan, one at a time.
+  Deleting every droppable template section would have left the average at
+  ~3,900 tokens, still above the 3,000 the issue asked for. A template cannot
+  hold a limit, because nothing in a template says *and no more than this*.
+
+  So the limit is a number, in `af-env.conf`, enforced by a new pre-commit
+  guard against the staged blob:
+
+  ```conf
+  PLAN_BUDGET_TRIVIAL_TOKENS=0
+  PLAN_BUDGET_STANDARD_TOKENS=3000
+  PLAN_BUDGET_DEEP_TOKENS=12000
+  ```
+
+  - **Trivial is zero** because a Trivial fix is chartered to have no plan file.
+    That rule already existed; nothing enforced it, so nothing could tell
+    whether it held.
+  - **Deep is generous on purpose.** It leaves the average Deep plan untouched
+    and exists for the tail — the 87 KB plan no reviewer read.
+  - **An unstated tier is charged Standard.** Silence is not a licence for an
+    unbounded document. The template's own `<!-- Trivial / Standard / Deep -->`
+    placeholder is a comment and states nothing, which the guard asserts
+    directly rather than assuming.
+
+  The template and the planner now say the same thing in words: sections marked
+  `[Deep]` are omitted at Standard, subtask fields are one line each (subtasks
+  are the largest named section at ~6,600 characters), and no section outside
+  the template. The planner's return format stopped restating the whole template
+  and now references it — two copies of one structure had already drifted.
+
+  Also documented, because it was never written down: the plan text is emitted
+  **three times** before it reaches disk — the planner returns it, the
+  coordinator repeats it verbatim in the documenter's delegation prompt, and the
+  documenter writes the file. That is the price of the planner being read-only,
+  charged per workflow at the full size of the plan, and it means a plan kept
+  inside its budget is worth roughly three times its own size.
+
+  Guard: `.github/hooks/scripts/check-plan-budget.py`
+  (override `ALLOW_PLAN_BUDGET=1`). Regression suite:
+  `.github/scripts/test-plan-budget.ps1`, 18 checks.
+
+  Closes #26.
+
+- **`check-context-budget.py --verify-tokenizer`.** A measured constant that
+  nobody can re-derive decays back into folklore the moment the payload's
+  character mix drifts. The flag re-runs the calibration and prints per-file
+  and aggregate drift against the divisor in use.
+
+  It imports tiktoken lazily, inside the handler, so the gate itself acquires
+  no third-party dependency — asserted on the source, because an import test
+  passes for the wrong reason on a host that has the package. It exits 1 when
+  the aggregate error exceeds 10%, since these figures are quoted to humans as
+  "tokens" in plans and pull requests. Without tiktoken it exits **2
+  (BLOCKED)**, not 0: a verification that could not run is an unknown result,
+  and "calibration fine" reported on the strength of a missing import is the
+  failure this framework keeps closing.
+
+  The regression case runs it against the **real** payload rather than a
+  fixture, which makes the calibration itself a live gate: if the character
+  mix ever drifts past 10%, the suite goes red. A synthetic fixture cannot do
+  this job — fixture text is a run of filler characters, which BPE collapses to
+  a handful of tokens, so it measures the fixture generator and fails a correct
+  divisor.
+
+  Known limitation, stated rather than buried: tiktoken is an OpenAI tokenizer,
+  and this payload is consumed by Claude, whose BPE is not available here. The
+  agreement between the two OpenAI vocabularies suggests the ratio is robust
+  for English markdown, but that is an inference, not a measurement of the
+  tokenizer that bills.
+
+- **The retro destination is now a project decision (`RETRO_DIR`).** Agent
+  retros were classed with the workflow logs and gitignored on that basis.
+  The classification was checked and does not hold.
+
+  `retros/README.md` justified the exclusion by saying the two are "the same
+  class of artifact", and `documenter.agent.md` gave the operative reason:
+  *the log embeds the user request verbatim*. That is a property of the **log**.
+  Measured on a real 55-file consumer corpus, the agent retros contained zero
+  credential values, zero personal or absolute paths and zero URLs — the three
+  `secret` hits all named the Databricks Secrets API and secret *names*. The
+  56 workflow logs, by contrast, carry a verbatim `trigger:` in 55 of them
+  (40–420 characters, averaging 104). One of the two is unsafe to publish, and
+  it is not the retro.
+
+  So the destination becomes configurable while the **default does not move**:
+
+  ```conf
+  RETRO_DIR=.github/retros/auto
+  ```
+
+  A consumer that upgrades without touching `af-env.conf` observes byte-for-byte
+  the behaviour it had before the key existed — asserted directly, in both
+  dialects, rather than assumed. Point it at a tracked directory such as
+  `docs/retros` and retros become reviewable project history that survives a
+  fresh clone.
+
+  What does **not** become configurable:
+
+  - **There is still exactly one destination.** The gates resolve the same key
+    the documenter writes to, so a retro in the wrong place is still detected
+    rather than tolerated — the property #98 established, now derived from
+    config instead of a literal. The override cases assert the inverse too: with
+    `RETRO_DIR` pointed elsewhere, the old path stops satisfying the gate. A key
+    that only ever *added* an acceptable location would have re-created the
+    ambiguity it was meant to preserve against.
+  - **The logs stay local, unconditionally.** The verbatim-request argument is
+    true of them.
+
+  Resolution lives in one function per dialect (`Get-AfRetroDir`,
+  `af_retro_dir`), because a key honoured by `.ps1` and ignored by `.sh` is a
+  gate whose verdict depends on who ran it — the shape #93 lived in for weeks.
+  Both normalise trailing slashes and backslashes, and both fall back to the
+  default on an empty value rather than treating `''` as the repository root,
+  which would have made every retro satisfy the gate.
+
+  Revises the reasoning shipped with #98/#27, and is the constructive half of
+  #109: a migration that moves records into a gitignored directory is only safe
+  once the directory does not have to be gitignored.
+
+  Closes #117.
+
+### Fixed
+
+- **The context budget guard was inert wherever `.github/` was gitignored, and
+  inert looked exactly like passing.** The guard measures the *staged* payload,
+  which is the right scope: it is why an ordinary commit pays nothing. But a
+  project that blanket-ignores `.github/` can never stage a budget input, so
+  the guard was installed, wired, dispatched on every commit — and structurally
+  unable to fire. It emitted nothing. Nothing is also what a passing guard
+  emits, so for months the absence of complaints read as consent. When the
+  payload was finally tracked, the guard's first run reported three
+  simultaneous breaches (always-on 562 over, conditional 161 over, coordinator
+  636 over) that no single commit had introduced.
+
+  The guard now distinguishes *"this commit stages no budget input"* — the
+  ordinary case, still silent, because whatever it would measure was already
+  measured when it was committed — from *"git holds no budget input at all"*,
+  which is not that case: there was no such commit and there cannot be one.
+  In the second case it prints `NOT GATED`, names how many files it can see on
+  disk but not in git, says whether a gitignore rule is the cause, and gives
+  the command that measures them by hand.
+
+  Partial tracking gets the same treatment, because it is the same defect
+  wearing a passing verdict: half an unignored `.github/` is not half a gate,
+  it is a gate that measures a subset and reports it as the total. Untracked
+  budget inputs are listed as `PARTIALLY GATED` when nothing is staged, and on
+  a payload commit the measurement is labelled a floor rather than a total.
+
+  Where the index is blind, the reading is taken from disk. Copilot loads
+  instruction files from the working tree; whether git holds them changes
+  nothing about what they cost, so the index is the right basis for a *verdict*
+  — it is what the commit is made of — and the wrong basis for a *number*. The
+  blind-spot report therefore carries an actual measurement, marked advisory.
+  Measuring the working tree on *every* commit was considered and declined: it
+  would report breaches the committer did not stage and cannot act on, and a
+  repository whose payload is fully tracked would pay for a second reading that
+  can only repeat the first. The measurement runs exactly where the index
+  cannot answer.
+
+  Blindness is reported, never blocked. An exit code is a statement about the
+  commit in front of the guard; untracked files are a statement about the
+  repository. Charging one to the other would make an unrelated commit pay for
+  a configuration defect, and would leave a project that deliberately keeps its
+  payload local no way forward except disabling the guard entirely.
+
+  Closes #125.
+
+- **Two gate scripts decoded git and ruff output with the platform default
+  encoding.** On a German Windows host that default is `cp1252`, so a valid
+  UTF-8 byte sequence containing `0x81` — Cyrillic `Ё` in a commit subject, for
+  instance — raised `UnicodeDecodeError`. The exception is raised inside
+  `subprocess`'s reader thread, so it never reaches the caller: `subprocess.run`
+  returns `returncode=0` with `stdout=None`. Git *succeeded*; the script simply
+  never learned what it said.
+
+  The two consumers in `check-python-quality.py` fail differently, and the
+  second is the reason this is filed as a defect rather than a nuisance:
+
+  - `_changed_line_ranges` guards with `if code != 0`, which is false, then
+    calls `out.splitlines()` on `None` → `AttributeError`, loud and visible.
+  - `_read_base_source` guards with `if code != 0`, which is false, then
+    returns `None` — and `None` is that function's documented value for *"the
+    base has no such blob"*. A failed read is indistinguishable from a file
+    that did not exist before, so the gate silently loses its comparison
+    baseline and reports on a premise that is not true.
+
+  `check-python-linting.py` had the same call shape around `ruff`, where a
+  decode failure surfaces as `LINTING_GATE_ERROR: failed to run ruff` — an
+  encoding bug wearing a tooling bug's label. Both now pass
+  `encoding="utf-8", errors="replace"`; a gate must not crash on, or quietly
+  misread, the content it exists to inspect. Most sibling scripts already
+  decoded explicitly, so this closes an incomplete rollout rather than
+  introducing a convention.
+
+### Changed
+
+- **The provider registry is no longer always-on (issue #115).** Five provider
+  workers exist against eleven core agents, which looked like agent
+  proliferation. Measurement said otherwise: agent files load on demand, so a
+  sixth worker costs nothing for any workflow that does not invoke it. What did
+  cost was the *registry* — 511 tokens of `coordinator.agent.md` documenting
+  capabilities whose shipped defaults are all `off`, paid on every turn of every
+  workflow, including pure-git projects where none of them will ever fire.
+
+  Twenty-three of those lines duplicated `ado-shared` §§ 180–267 — the same
+  section the coordinator was being told to go and read. Five delegation rows
+  became one; the duplicated sequences became a pointer. The integration-path
+  rule stayed inline, because it is mandatory for *every* workflow including
+  pure git, and a mandatory rule moved into an on-demand skill is a rule that
+  can silently fail to load. Coordinator own prompt 6,011 → 5,765 tok; headroom
+  against the agent budget 24 → 270.
+
+  Two alternatives were measured and rejected. A provider *manager* with
+  subagents saves ~135 always-on tokens and costs ~6,400 per provider operation
+  for the extra invocation — and adds a delegation hop, where acceptance
+  criteria that must be copied verbatim can quietly stop being. One agent per
+  provider with capabilities selected by skill fails harder: tool grants are
+  static and per-agent, so the union of the four ADO workers (36 grants) would
+  put `pipelines_write` and `repo_pull_request_write` in scope for a wiki edit —
+  the exact over-grant #113 had just removed — and the four workers' mandatory
+  guards would have to move into on-demand skills to fit the budget.
+
+### Added
+
+- **A consumer can report a framework defect without being granted the tools to
+  do it (issue #113).** Filing #104–#112 from a consumer project required
+  hand-editing 22 `github/*` MCP grants into that project's
+  `coordinator.agent.md` — a local divergence in an AF-owned file, reported as a
+  conflict by every subsequent deploy, with a grant list that drifts unreviewed.
+  The name for the fix already existed: `quality-gates.instructions.md` lists
+  `gh-issue-manager` in its provider-worker table. Only the worker was missing.
+
+  `gh-issue-manager` follows the `ado-*` pattern — MCP only, no git, no
+  terminal — and carries an issue-lifecycle tool set rather than the general
+  repository surface the ad-hoc grant had accumulated. Two routes share it:
+  `project` for the project's own tracker (`GH_CAPABILITY_MODE`, `GH_OWNER`,
+  `GH_REPOSITORY`) and `upstream` for defects in the framework itself
+  (`AF_UPSTREAM_REPORTING`, `AF_UPSTREAM_REPO`). The gates are independent on
+  purpose: a project tracking work items in Azure DevOps previously had no path
+  to report a framework defect at all, short of a human copying text between two
+  systems.
+
+  Two properties matter more than the plumbing. When the gate is `off` — the
+  default — the worker still returns the drafted issue body, because suppressing
+  the write must not suppress the finding; a defect noticed and never recorded is
+  indistinguishable from a defect never noticed. And an upstream report is
+  verified against the framework *source* before it is filed, not against the
+  consumer's deployed copy, since a deployed copy may carry local modifications
+  and a defect observed there may be a divergence the consumer introduced. The
+  coordinator holds no `github/*` tools; it delegates.
+
+### Fixed
+
+- **The retro has one destination, and is owed only when the run had something
+  to teach (issues #98, #27).** The destination contradiction #98 reported was
+  already gone from the source — every agent file names
+  `.github/retros/auto/`. What survived was the gate underneath: both hooks
+  accepted the retro at the canonical path *or* at the legacy root path. That
+  does not resolve an ambiguity, it preserves it — a documenter writing to the
+  wrong place was indistinguishable from one writing to the right place, and
+  the file it left behind sat outside the `.gitignore` that exists to keep
+  generated retros out of the repository. The legacy path is no longer
+  accepted, and a file found there is named in the block message rather than
+  ignored: silent rejection is as unhelpful as silent acceptance when the only
+  person who can move the file has to be told where it is.
+
+  The second half is #27. Every workflow was made to write a retro, including
+  runs with nothing to report, so the corpus filled with files recording that
+  nothing happened — and `/af-retro-summary` reads them back as input. A retro
+  is now owed only when the workflow log records retries, escalations, an
+  adverse step verdict, or a status other than COMPLETED.
+
+  The condition is derived by the hook from the log, never declared by the
+  documenter: "it was clean, so I skipped it" is the self-report channel #91
+  closed for timestamps, and it would be reopened here for a strictly larger
+  prize. The default is REQUIRED, so a log that is missing, empty, or still
+  carrying the unfilled `retries: <number>` template licenses nothing —
+  absence of evidence is not evidence of a clean run. Every condition matches a
+  *field*, because the log quotes the user request verbatim in `trigger:`,
+  where "blocked" and "rejected" appear as ordinary prose.
+
+  When the exemption applies, the hook says so (`no retro required (retries 0,
+  escalations 0, status COMPLETED, no adverse verdict)`). An exemption applied
+  in silence cannot be reviewed, and looks exactly like a gate that was never
+  reached.
+
+  `deploy.ps1` now warns when a target has `.github/retros/auto/` without the
+  `.gitignore` that belongs next to it — the documenter creates that directory
+  at run time, `retros/` is optional in the manifest, and the directory
+  existing is not evidence that the ignore came with it. Measured in a consumer
+  repo: generated retros staged as if they were authored source.
+
+- **The test log now actually merges on Windows, and a log the runner cannot
+  read is announced instead of overwritten (issue #93).** `run-tests.ps1` read
+  `.github/test-log.json` with `ConvertFrom-Json -AsHashtable`, a parameter
+  that exists only in PowerShell 6+. Windows PowerShell 5.1 is the default host
+  for the shipped VS Code tasks, so on Windows the read always threw, a silent
+  `catch` reset the accumulator, and the file was rewritten with only the scope
+  that had just run. Measured here: a `domain` run followed by a `contracts`
+  run left `scopes=[contracts]`. Exit code 0 throughout.
+
+  The lost merge is the symptom. The defect is the `catch`, which converted a
+  hard interpreter incompatibility into a plausible-looking artifact — the same
+  failure as #73 in the same file, and the same shape as everything else in
+  this release: a mechanism that fails silently produces output that cannot be
+  distinguished from success. It matters because `testing.instructions.md`
+  tells every agent to consult this log before running anything, and acceptance
+  criteria are routinely phrased as "green at the same pass count as before".
+  An agent establishing that baseline found the other scope missing, with no
+  way to tell a regression from a parser it could not run.
+
+  `run-tests.sh` already merged correctly. So this was never a missing feature;
+  it was two runners documented as interchangeable disagreeing about what their
+  shared artifact means, with nothing asserting that they agree. There is now a
+  case that runs both and compares.
+
+  The read no longer uses the parameter at all rather than branching on the
+  host version — one path, not two, and not one that would go untested on a
+  maintainer's PowerShell 7 machine. An absent log stays silent, because a
+  first run is legitimate and a warning on every one of them would be noise. A
+  log that exists and will not parse is data loss: it is reported with the
+  parser's own message and copied to `test-log.json.unreadable` before being
+  replaced, so the evidence outlives the run that tripped over it. A new guard
+  scans every shipped `.ps1` for PowerShell 6-only constructs — `-AsHashtable`
+  was the only one in the payload, and nothing was stopping the next one.
+
+- **The hook harness no longer certifies what it never observed (issues #95,
+  #96).** Two defects in the instrument every quality claim in this framework
+  is read through.
+
+  A hook is supposed to make exactly one statement per invocation. Because the
+  harness searched its output for the expected answer, a hook that decided
+  correctly and then contradicted itself was certified as correct — while a
+  last-wins consumer would act on the second statement. Measured, not inferred:
+  `run_case` reported `pass` for a deny-then-allow emitter and `stop_case`
+  reported `pass` for a block-then-pass one. The issue predicted the same for
+  PowerShell; it does not reproduce there, because `ConvertFrom-Json` on 5.1
+  happens to throw on two concatenated objects. That is protection by parser
+  version, not by design, and it reported the failure as `unparsable` — naming
+  the wrong cause. Both harnesses now count top-level JSON values
+  (`Get-JsonStatementCount`, `af_json_statements`) and treat more than one as
+  its own outcome. A top-level array is still one value; prose printed beside
+  the JSON is not a clean statement either. `Get-StopDecision` had its own
+  parse path and now routes through a shared `Resolve-StopDecision`, so the
+  rule cannot hold in one half of the harness and not the other.
+
+  The second defect: `$null -notmatch '2099'` is `$true`. Every negative
+  content assertion passed when the thing it examined was empty, so the
+  read-back channel added for #91 could have returned nothing for every case
+  while the suite stayed green. The neighbouring assertions were saved by
+  accident — `-match` on `$null` is false, and a match count of 0 is not 1 —
+  which made "does this assertion survive an empty subject" a coincidence of
+  operator choice. `Assert-Contains`/`Assert-NotContains` and
+  `assert_contains`/`assert_not_contains` now take the subject itself and fail
+  when it is empty; `Assert-True` gained an optional `-Subject` for compound
+  conditions. Passing the subject in is the whole point: once the caller has
+  collapsed it to a boolean there is nothing left for a guard to inspect.
+
+  Both harnesses now self-check the read-back channel as well as the verdict
+  channel, and they do it by asserting that certain assertions *fail* —
+  PowerShell by snapshotting the tally around a probe, bash by running the
+  probe in a subshell. Suites: `test-hooks.ps1` 213 → 233 checks,
+  `test-hooks.sh` 106 → 120, both green. Mutation evidence: breaking the
+  read-back turns nine cases red including the `-notmatch` one; disabling the
+  statement count turns the contradiction cases red in both harnesses;
+  removing the empty-subject guard turns the vacuous cases red.
+
+  The test-critic gained the question this defect answers to: would this
+  assertion still pass if the thing under test produced nothing?
+
+- **The context budget is enforced at commit time instead of being asked for
+  politely (issue #85).** `check-context-budget.py` could always measure the
+  payload; nothing ever asked it to. Its only reference anywhere in the
+  repository was a checklist line — one that told the reader to run a Python
+  script with `pwsh`, so it had never been executed as written. The result was
+  visible on `dev`: the conditional instruction set sat 273 tokens past its own
+  ceiling, and `test-context-budget.ps1` case `J_real_payload_within_budget`
+  was red for the whole period. A red test in a suite nobody runs is
+  indistinguishable from a green one.
+
+  A new pre-commit checker, `check-context-budget-staged.py`, exports the
+  staged payload out of the index into a temporary tree and hands it to the
+  existing measurement — globs, budgets and `applyTo` semantics keep exactly
+  one definition, and what is measured is what would be committed rather than
+  whatever happens to be on disk. It runs only when the commit stages
+  `copilot-instructions.md`, `instructions/*.md`, `agents/*.agent.md`, or the
+  `af-env.conf` that sets the ceiling, so every other commit pays nothing. It
+  blocks rather than warns: the budgets carry deliberate headroom, so the
+  ceiling is meant to be reached by the change that crosses it, while its
+  author still has the context to decide what should have been narrowed or
+  moved. One-off escape hatch: `ALLOW_CONTEXT_BUDGET=1 git commit ...`.
+
+  Two things had to be fixed for that guard to reach the repository that needs
+  it. The AF source repo's hook path is `.githooks/`, whose `pre-commit` only
+  bumped `VERSION`, while the shipped guards resolve themselves under
+  `$repo_root/.github` — a directory this repo does not have. The framework's
+  own commit guards therefore ran in every consumer project and in none of the
+  commits that wrote them. `.githooks/pre-commit` now dispatches the payload
+  shim first, so a blocked commit does not leave a bumped `VERSION` staged
+  behind it, and the shim resolves its checkers relative to itself instead of
+  assuming the deployed layout. The shim's interpreter probe also trusted
+  `command -v python`, which on Windows answers with the Microsoft Store alias
+  that then refuses to run; a candidate must now report a `--version`. A broken
+  interpreter probe is indistinguishable from a payload that is genuinely over
+  budget, and it blocked every commit rather than none.
+
+  The checklist line is gone. `copilot-authoring.instructions.md` now points at
+  the gate that runs instead of asking a human to remember one.
+  `test-context-budget.ps1` grows from 39 to 54 checks covering scoping,
+  staged-versus-working-tree, the override, BLOCKED propagation, consumer
+  budgets, the nested source-repo layout, and both wiring call sites.
+
+- **Workflow-log timestamps are measured by the Stop hook, not authored by the
+  documenter (issue #91).** The log is the only durable record of when a
+  workflow ran, and its `started:`/`completed:` fields were filled in by the
+  model. Measured: a documenter wrote `completed: "2026-08-07T16:30:00Z"` for a
+  workflow that finished at 09:59Z — six and a half hours in the future — and
+  `started:` an hour before any commit on the branch, in the same output that
+  declared "zero fabricated data". Nothing rejected it. Every gate that looks
+  at the log checks the field is *present*, and an invented value is present.
+
+  The fix is the one the `cost:` block already uses: take the numbers out of
+  the model's hands rather than validate them afterwards. A range check would
+  have caught this particular timestamp and accepted any lie inside the range.
+  `documenter-stop` now stamps both fields after its artifact gate passes —
+  `completed:` is the moment the hook fires, which is the moment the documenter
+  finished, and `started:` is the branch's oldest commit, the same
+  approximation the cost collector already uses for `--workflow-start`. Values
+  the documenter left behind are replaced rather than joined: two `completed:`
+  keys is a YAML file whose meaning depends on which one the parser reaches
+  last. A call made while the workflow is still running is not stamped at all,
+  because it never reaches the artifact gate.
+
+  Both fields are gone from the log schema in `documenter.agent.md`. Leaving
+  them there and arguing against them in prose is what produced the fabrication
+  in the first place — the schema is the instruction.
+
+- **Artifact existence is now a filesystem question, not a search result
+  (issue #87).** The compliance-checker post-flight verified that the workflow
+  log and retro snippet exist by searching for them. Search tools honour
+  `.gitignore`, so in any project that gitignores `.github/` — the normal setup
+  for a project consuming a deployed payload rather than versioning it — every
+  post-flight reported both artifacts MISSING and returned BLOCKED, whatever
+  was on disk. Measured in a consumer repo: a 2922-byte workflow log, two hours
+  old and independently validated afterwards, reported as missing.
+
+  The fix is a capability removal, not a warning. The invoking prompt had
+  already warned the agent that `.github/` was gitignored there and that it had
+  to verify on the filesystem; it reached for the ignore-aware tool anyway. The
+  compliance-checker therefore no longer holds `search/codebase`,
+  `search/textSearch` or `search/fileSearch` at all — it never needed them,
+  because every artifact it checks sits at a path derived from the workflow id
+  and the changed files are handed to it in the prompt. Opening the file is now
+  the existence proof, and a failed read is the absence.
+
+  Every MISSING it reports must name the path it probed. A bare MISSING cannot
+  be told apart from a false negative by anyone downstream — and downstream is
+  where files get recreated.
+
+  The remediation path is guarded independently of the cause. Step 7b now
+  requires the coordinator, which has a terminal the checker deliberately does
+  not, to confirm each reported path is genuinely absent before recreating
+  anything, and never to overwrite an existing non-empty artifact. This matters
+  because the documenter cannot distinguish "write fresh" from "replace
+  verified content": applied to a false negative, the documented remediation
+  destroyed correct evidence instead of restoring missing evidence. Any future
+  false negative is now a no-op.
+
+### Changed
+
+- **The ask tier was scoped to what the framework knows and VS Code does not
+  (issue #78a).** Returning `permissionDecision: "ask"` renders our reason
+  verbatim and suppresses Copilot's own assessment — the one that categorises
+  the command and describes in plain language what it will do. For a generic
+  durable change our fixed sentence is simply the worse of the two prompts, and
+  emitting it cost the user the better one. Four rules now return `{}` instead:
+  `pip install/uninstall`, `conda install/remove`, `ruff format`, and the
+  filesystem create/move/copy rule (`New-Item`, `mkdir`, `Copy-Item`,
+  `Move-Item`, `mv`, `cp`). All of them are ordinary environment changes or
+  repo-local rewrites git can undo, and none carry repository context the
+  native assessment lacks.
+
+  Deferring is not approving. `{}` hands the decision to
+  `chat.tools.terminal.autoApprove`; where that setting does not cover the
+  command — the normal case — the result is a *better* prompt, not a missing
+  one, and where it does cover it the user had already said what he wants.
+
+  Seven rules stay ours, each for a reason the native assessment cannot reach:
+  `git merge` and `git checkout`/`switch` (branch and worktree state — and the
+  path form of checkout discards uncommitted work while `git checkout` is a
+  plausible auto-approve prefix), `git tag` (a release marker others rely on),
+  `databricks` and `az` (effects outside this repository), `Remove-Item` and
+  `rm` (the one durable change git cannot undo). The task-launch asks are
+  untouched: they fire precisely when the command cannot be resolved at all,
+  which is the case that must never go quiet.
+
+  A cross-harness assertion now fails if the PowerShell and bash classifiers
+  retain a different number of rules — a rule kept in one and handed back in
+  the other is a confirmation that appears on one platform only.
+
+### Fixed
+
+- **Gates were scoped to the diff, so a formatter run looked like authorship
+  (issue #86).** The provenance, docstring and ignore-hygiene gates all asked
+  their question of whatever the branch diff listed. A diff answers "which
+  lines moved", and a formatter moves all of them. MPUsageXPTP work item
+  WIT #3121 — `ruff format` across the repository, acceptance criteria "a
+  single dedicated commit" and "no logic change" — came back with 148 hand
+  edits across 68 files: 72 provenance markers, 35 docstring sections and 9
+  suppression justifications, each one mapping onto a gate the agent had to
+  clear to exit. The markers claimed authorship of files nobody authored, and
+  an AST comparison found 11 files carrying authored docstring *content*
+  inside a commit labelled formatting-only. Formatter adoption, import
+  rewrites and codemods had no correct path at all: the implementer and
+  refactorer are gated and the coordinator cannot write code.
+
+  `check-python-quality.py` now answers a different question. `is_authored`
+  compares the file's AST against the base commit's, with docstring
+  whitespace collapsed — `ast.dump` omits line and column attributes, so
+  reflowing, re-quoting and re-bracketing leave the signature untouched,
+  while the words in a docstring do not. Undecidable means authored: no base
+  blob, an unparseable file on either side, or git unable to answer all keep
+  the gate on. Type hints and docstrings are skipped for a file with no
+  authored change, and `--list-authored` reports the authored subset so
+  `implementer-stop.ps1`/`.sh` can scope the provenance gate the same way.
+  If that query cannot run, the gate keeps the whole diff.
+
+  Ignore hygiene is deliberately *not* filtered this way: comments leave no
+  trace in an AST, so a `# noqa` smuggled into a "formatting only" commit
+  would read as mechanical. Instead, ownership there now follows the
+  suppression rather than the line it sits on — inherited suppressions are
+  counted in the base blob, and what is left over is what the branch
+  introduced. This also fixes the converse misfire, where a reformat rewrote
+  the line an inherited suppression sat on and made it blocking. Linting is
+  not scoped by authorship at all, and both hook suites assert statically
+  that no lint invocation references the filter.
+
+- **The provenance gate could not see the marker the instruction prescribes
+  (issue #81).** `provenance.instructions.md` puts a Python marker *after* the
+  module docstring, and the marker for a modified function *inside that
+  function's docstring*. Every gate that enforced it read the first five lines
+  of the file. For a module docstring of four lines or more the two rules
+  cannot both be satisfied; for the function-level placement they never can.
+  The block message named the instruction it was contradicting, so the only
+  move that cleared the gate was to violate the convention it pointed at.
+  MPUsageXPTP work item WIT #3119 carried an acceptance criterion that was
+  unsatisfiable for exactly this reason.
+
+  Detection now lives in one place — `Test-AfProvenanceMarker` in `_common.ps1`
+  and `af_has_provenance_marker` in `_common.sh` — and scans the whole file.
+  All six call sites (`implementer-stop`, `test-writer-stop`, `scan-secrets`,
+  in both shells) and the two rows in `compliance-checker.agent.md` now ask it,
+  and their messages no longer promise a five-line window.
+
+  `-Kind generated` still narrows *what counts* — test-writer's gate is about
+  authorship of a new file, so `copilot:modified` must not satisfy it — but
+  nothing was tightened about the marker's format. Widening where we look must
+  not quietly start blocking work the old window would have passed.
+
+- **The context budget measured the disk, not the content (issue #59).**
+  `check-context-budget.py` estimated tokens as `st_size // 4` — bytes on disk.
+  Bytes move for reasons that leave the content the model reads completely
+  unchanged: CRLF adds one byte per line, so flipping `core.autocrlf` shifted a
+  350-line instruction file by ~87 tokens; `—`, `→` and `≥` cost three bytes and
+  one character, and AF instruction files are full of them; a stray BOM added
+  three more. `architecture.instructions.md` measured **1,966** by bytes and
+  **1,617** by characters — a 20% spread on one file, and enough to put the
+  whole conditional set 273 tokens "over budget" without a single character
+  having been added. A gate whose entire job is detecting real change must not
+  react to changes that are not real.
+
+  The estimator now counts characters read in text mode, with universal
+  newlines and `utf-8-sig`, so line endings, typographic punctuation and BOMs
+  are invisible to it. Counting characters means decoding, and decoding can
+  fail, so a file that is not valid UTF-8 now BLOCKS (exit 2) instead of letting
+  a `UnicodeDecodeError` escape as exit 1 — which would have been
+  indistinguishable from "over budget".
+
+  All three budgets are re-derived against the new scale in the same change —
+  a mixed-estimator state would be worse than either alone. Measured on the
+  character scale: always-on 4,865, conditional 5,387, largest agent 10,753;
+  each budget is that figure plus the headroom it previously had, rounded down
+  to the nearest 50: `AF_CONTEXT_BUDGET_TOKENS` 5000 → **4950**,
+  `AF_AGENT_CONTEXT_BUDGET_TOKENS` 11000 → **10900**,
+  `AF_CONDITIONAL_BUDGET_TOKENS` unchanged at **5500**.
+
+  What the divisor is *not* is now stated where the budgets live: `4` is the
+  rule of thumb for English prose, not a measurement of this payload. These
+  figures are a drift scale, and the budgets are calibrated against that same
+  scale — they are not a tokenizer-derived or billed token count. Calibrating
+  the divisor against a real tokenizer remains open under issue #59.
+
+  Also fixed: the authoring checklist told the reader to run a Python script
+  with `pwsh`.
+
+- **The documenter's Stop gate knew only one question, so it compelled a false
+  answer (issue #72).** The documenter has two chartered jobs: persist plan
+  files mid-workflow (Responsibility 1, Step 1 of Full TDD) and finalise at the
+  end (Responsibilities 2-6). `documenter-stop` fired on both, and blocked
+  unless `.github/logs/{id}.yaml` and `retros/auto/{id}.md` already existed. Its
+  only escape was "not on an `agent/` branch", which never applies during a
+  workflow. So a mid-workflow documenter call had exactly one way to terminate:
+  write a workflow log marked COMPLETED, and a retro, for a workflow still
+  running. The gate mechanically produced the fabrication it existed to
+  prevent — observed three times in a consumer project, most recently with two
+  subtasks still open.
+
+  The damage did not stop at the file. The compliance-checker's post-flight
+  HARD gate checked that those artifacts *exist*, so the premature ones
+  satisfied it vacuously; the artifacts are invisible in review because
+  `.github/` is gitignored in target projects and the documenter is forbidden
+  to stage them; and the premature retro enters the coordinator's retro
+  feedback loop as if it were a lesson.
+
+  A Stop hook receives `session_id` and `transcript_path` and nothing else, so
+  the invocation's intent is not knowable from stdin — it has to be read off
+  the repository. The honest signal is the plan file, because setting its
+  status to COMPLETED *is* the documenter's declaration that it finalised. New
+  shared reader `Get-AfPlanLifecycle` / `af_plan_lifecycle` finds the plan that
+  names `agent/{workflow-id}` and reports its status; the gate now applies only
+  when that status is COMPLETED.
+
+  Two things the reader deliberately refuses to do. It does not match raw
+  text: `templates/PLAN.md` ships `**Status:** <!-- DRAFT | APPROVED |
+  IN_PROGRESS | COMPLETED -->`, so a grep calls an untouched template a
+  finished workflow — HTML comments are stripped first. And it does not accept
+  any plan in the directory: a plan speaks for the one workflow whose branch it
+  names. `stop-tests` had both defects in a worse form, passing if *any* file
+  in `docs/plans/` mentioned COMPLETED anywhere.
+
+  When no plan names the branch, the hook cannot classify the call. It says so
+  and names the enforcement point rather than passing in silence — silence
+  reading as consent is the defect this whole family is about.
+
+  Aligned with it: `stop-tests` now shares the same reader and judges the same
+  condition, differing in force rather than in what it considers wrong
+  (PENDING while the workflow is open, WARNING when a COMPLETED plan is missing
+  its closing artifacts). The compliance-checker's post-flight gates moved from
+  existence to content — the log's `status:` must be COMPLETED with its
+  mandatory fields and a non-empty `steps:` list, the retro must carry an
+  actual lesson. And `documenter.agent.md` now states which responsibilities
+  are mid-workflow and that a plan-persistence call must stop there.
+
+- **Every confirmation prompt asked the same unanswerable question (issue
+  #78, part b).** All eleven ask-tier rules shared one sentence — *"This
+  command makes a durable change. Please confirm it is intentional."* — which
+  named neither the rule that fired nor the command it fired on. `git merge`,
+  `pip install`, `Remove-Item`, `databricks … deploy` and `mkdir` all produced
+  the identical prompt, while the deny tier next door has always said exactly
+  what it objected to and why. A question that does not say what it is about
+  cannot be answered; it can only be waved through, which turns a confirmation
+  into a keystroke and the gate into noise.
+
+  Each rule now states its actual effect — `'Remove-Item' deletes files or
+  directories`, `pip install/uninstall changes the environment for everything
+  that uses it, not just this task`, `this Databricks CLI call acts on a remote
+  workspace, where the effect is outside this repository and outside git` — and
+  the command line itself is echoed (whitespace-collapsed, capped at 300
+  characters), so the human answers about the command rather than the category.
+
+  Carrying the command into the reason meant carrying its quotes and
+  backslashes, so `block-dangerous.sh` now escapes the reason before
+  interpolating it into its hand-built JSON. It did not before; it had simply
+  never been handed a string that needed it. An unparsable verdict is
+  indistinguishable from no verdict, so this would have disarmed the gate at
+  exactly the moment it had something to say. PowerShell goes through
+  `ConvertTo-Json` and was never exposed.
+
+  The same question applied to the file's other emitter turned up a second,
+  older instance: `emit_task` also hand-built its JSON, and its deny reasons
+  quote the offending task command back at the reader — a path, on Windows a
+  backslash path, where `\e` is not a valid JSON escape. The task tier could
+  therefore silence its own deny without any wording change at all. Both
+  emitters now escape, and both are pinned by mutation-tested cases.
+
+  Part (a) of the issue — deciding, rule by rule, which confirmations to hand
+  back to Copilot's own assessment by returning `{}` — is deliberately not in
+  this change: that is a policy decision about auto-approval, not a wording fix.
+- **The deny gate read quoted data as commands (issue #62).** Deny rules were
+  matched against the raw command line, so text an agent was merely *passing*
+  became text the gate believed it was *running*. Three false denies in one
+  session: a read-only probe whose JSON test data contained
+  `Remove-Item -Recurse -Force`, the same harness carrying a force-push string
+  as a fixture, and — the one that cost real work — `git add <file> ;
+  git commit -m "…the negated guard sm --force…"`. That last one is the worst
+  shape of the bug: `(\S+\s+)*` in the `git add --force` rule happily matched
+  across the `;`, joining a genuine `git add` in one statement to prose in the
+  next. The commit message had to be reworded to get past a gate that was
+  objecting to a description of itself.
+
+  A false deny is not a harmless over-reaction. It teaches the agent that the
+  gate is noise, and it pushes work back to the human for no security gain —
+  the same currency a false allow spends, paid in the other direction.
+
+  The fix is a change of unit, not of thresholds: the command line is split
+  into statements, and each statement is scanned on its own, so no rule can
+  span a separator. Quoted text is dropped only where it is unambiguously
+  prose — the arguments of `echo`/`printf`/`Write-*` and of
+  `git commit|tag|notes|stash`, and a segment that is nothing but a quoted
+  literal (the JSON-on-stdin case). Stripping quotes globally would have been
+  the wrong fix, because the payload of `bash -c "…"` lives inside quotes and
+  *is* executed: those payloads are instead promoted to scan units of their
+  own, which also closes an evasion the raw scan had all along —
+  `powershell -Command "git add -A"` never matched `-A(\s|$)` while the closing
+  quote was still glued to the argument. Quotes lose their protection entirely
+  once they contain `$(` or a backtick, since the shell executes inside them.
+  Three rules stay scoped to the whole line because they are about structure
+  rather than a statement: pipe-to-shell, `DROP TABLE`, `TRUNCATE TABLE`.
+
+  Both hooks were changed in lockstep, and twelve cases in each harness pin the
+  three reported false denies alongside the payload promotions. Mutation runs
+  confirm they bind to the gate: reverting to a raw scan reddens the four
+  false-deny cases, disabling payload promotion reddens the two promotion cases.
+
+- **The default test scope ran no tests, and reported it as green (issue #73).**
+  `$scopeMap['all']` was the only entry carrying a trailing separator.
+  `Join-Path` normalises `tests/` to `…\tests\`; because the workspace path
+  contains spaces PowerShell quotes the argument, and the CRT argv parser reads
+  the resulting `\"` as an escaped quote — it loses the closing quote and
+  swallows every following argument into `argv[1]`. pytest received one
+  nonsense path and collected nothing. Since `all` is the *default* scope, a
+  bare `run-tests.ps1` was broken, together with four shipped VS Code tasks.
+  It only reproduces from a path containing spaces, which is every default
+  OneDrive path — hence its long life.
+
+  The second half is the one that mattered. `2>$null` discarded pytest's usage
+  error; with empty stdout no summary line parsed, and the runner wrote
+  `"passed": 0, "failed": 0, "total": 0` to `test-log.json`. A consumer reading
+  `failed: 0` concludes green — and the test-execution skill tells agents that
+  log is the source of truth and that they may *skip* a run when it looks
+  current, so the entry did not merely misinform, it suppressed the run that
+  would have exposed it. This half was never Windows-specific: `run-tests.sh`
+  produced the identical entry, and any runner failure triggers it.
+
+  A run with no parseable summary and a non-zero exit is now recorded with
+  `passed`/`failed`/`errors` as `null` — never `0` — plus `status: "error"` and
+  the interpreter's own error text, which is no longer discarded but shown to
+  the caller. `null` is the point: a consumer testing `failed == 0` now gets a
+  false answer instead of a reassuring one. Both runners were fixed in
+  lockstep, and `test-run-tests.ps1` pins the no-trailing-separator invariant
+  for every scope, the argv survival, and the log's refusal to lie.
+
+- **Task launches were never classified (issue #74).** `block-dangerous`
+  matched `createAndRunTask`; the tools VS Code actually sends are
+  `create_and_run_task` and `run_task`. The creation allowlist built in #56 —
+  bare binaries denied, interpreters checked by payload, OS-scope decoys
+  caught — had therefore never once run in production. It now matches the real
+  name, and its 25 existing cases are joined by three asserting the same
+  verdicts under it.
+
+  `run_task` was worse than misnamed: it was not classified at all. Its
+  payload is `{id, workspaceFolder}` — a name, and a name is not a command.
+  The command lives in the project's `.vscode/tasks.json`, so a task doing
+  `git push --force` launched with the classifier none the wiser. The gate now
+  reads the task back out of `tasks.json`, reconstructs a command line for
+  every scope (including `windows`/`linux`/`osx` overrides, which otherwise
+  let `command` stand as a decoy) and puts it through the same three tiers as
+  a terminal command.
+
+  The two checks are deliberately different in kind. **Creation** keeps the
+  allowlist: the agent is authoring the task, so it must point at a reviewed
+  script. **Execution** uses the blocklist: `tasks.json` is human-authored and
+  legitimately calls `git`, `pytest` and `databricks` directly, so an
+  allowlist there would deny nearly every real task. Both are checked because
+  the danger can enter at either point — a task can be smuggled into
+  `tasks.json` by a file edit that never touches the creation gate, and a task
+  that was acceptable when written may not be acceptable now, since policy,
+  protected branches and autonomy categories all move underneath it.
+
+  Anything unresolvable — no `tasks.json`, JSONC rather than strict JSON, an
+  unknown label, an `${input:}` variable, an `options.shell` override —
+  answers `ask` rather than staying silent. Per #68, silence is what a gate
+  that cannot judge and a gate with no objection have in common.
+
+  Residual gap, deliberately not closed here: a task carrying
+  `runOptions.runOn: folderOpen` that is written straight into `tasks.json` by
+  a file edit runs on the next folder open without passing either gate.
+  Guarding that means classifying partial edits to `tasks.json`, which is a
+  separate problem.
+
+- **The parse gate walked past a stray CR (issue #70).** `bash -n` accepts one:
+  the script parses, and the `\r` becomes part of the last token on every line.
+  On Linux `#!/usr/bin/env bash\r` is `bad interpreter` — the hook exits
+  non-zero having printed nothing, which per #68 is indistinguishable from
+  approval. Both harnesses now assert that no shipped shell script carries a
+  CR, across `hooks/scripts/*.sh`, `scripts/*.sh` and the extensionless
+  `hooks/git/pre-commit` shim; four of the five drifted files sat outside
+  `hooks/scripts/`, which is all the parse gate had been looking at.
+
+  The issue's other two asks turned out to be already satisfied, which was
+  worth testing rather than accepting: the git blobs were always LF,
+  `.gitattributes` already pinned `*.sh text eol=lf`, and `deploy.ps1` stopped
+  copying bytes for text files when EOL/BOM parity landed — `Copy-Item`
+  survives only where UTF-8 decoding fails, i.e. binary assets. A real deploy
+  from a checkout containing five CRLF sources emitted 22 `.sh` files with zero
+  CRs. The deployed copy was already protected twice over; what was missing was
+  anything that made the drift visible.
+
+- **Every write gate matched tool names VS Code never sends (issue #69).** #64
+  was one hook reading `url` where the tool sends `urls`. This asked whether
+  that was a mistake or a habit, against 1935 hook invocations recorded in the
+  chat debug log. It was a habit: `editFiles`, `createFile`, `createDirectory`,
+  `editNotebook` and `writeFile` do not occur once in the corpus, and four
+  hooks were matching on them.
+
+  - **Four gates were inert on every file edit ever made.** The coordinator's
+    delegation gate, the test-writer's TDD isolation gate, the refactorer's
+    no-new-files gate and the secret scan returned `{}` for
+    `replace_string_in_file` (37x), `multi_replace_string_in_file` (25x),
+    `create_file` (10x) and `run_task` (14x). The refactorer's creation deny
+    worked only by accident — `create_file` happens to contain `create` and
+    `file`, which is what its substring heuristic looked for.
+  - **The two platforms failed in opposite directions.** PowerShell matched
+    camelCase and never fired; bash matched `*edit*|*create*|*write*|*file*`
+    and would have **denied `read_file`** on a non-agent branch. Neither
+    surfaced, because the fixtures encoded the same guesses as the code.
+  - **`multi_replace_string_in_file` carries no top-level `filePath`.** The
+    paths are one level down in `replacements[]` — the same nesting that hid
+    #64's `urls`. A batched edit of twenty production files passed every gate
+    without an opinion. One `Test-AfWriteTool` / `af_is_write_tool` and one
+    `Get-AfWritePaths` / `af_write_paths` in `_common` now serve all four
+    gates, on both platforms.
+  - **Two further bugs in the bash secret scan**, found while restructuring it
+    for multiple paths: `result=$(gitleaks ...) || true; if [ $? -ne 0 ]` tests
+    `true`'s exit code, so a detection was always reported as a pass; and the
+    fallback regex `[^\s"']{8,}` excluded the letter *s* rather than
+    whitespace — inside a bracket expression `\` is literal — so the generic
+    secret rule never matched. With gitleaks absent, the fallback is the live
+    path.
+  - Verified by the Red phase (14 gates returning `{}` where a deny was due)
+    and by mutation: disabling the shared classifier turns 9 bash cases red, so
+    the newly written cases test the gate rather than the fixture.
+  - Task launches are a separate problem and were split out as #74:
+    `run_task` sends only `{id, workspaceFolder}`, so classifying it means
+    judging a project's existing `.vscode/tasks.json` — a policy decision, not
+    a name repair.
+
+- **The hook harness read silence as consent (issue #68).** `Assert-Allow` in
+  `test-hooks.ps1` treated `{}` and empty output as an approval, so a hook that
+  examined a request and approved it was indistinguishable from one that never
+  ran, crashed, or read a field the tool does not send. That is not a testing
+  nicety — it is the mechanism by which #65 (unparsable, exited non-zero,
+  printed nothing) and #64 (wrong payload field, returned `{}` on every real
+  fetch) both stayed green while shipping.
+
+  - **One classifier, five outcomes.** `Resolve-Decision` replaces the parse-
+    and-compare copied into each assertion and returns `allow`, `deny`, `ask`,
+    `silent` or `error`. A non-zero exit or unparsable output is `error`: a
+    hook that crashed is credited with no opinion, whatever it printed on the
+    way out.
+  - **`Assert-Silent` states the other claim.** 15 of the 30 `Assert-Allow`
+    sites never meant "approved" — the delegation gate, the branch gates and
+    every "not my tool" case return `{}` by design. They now say so, and the
+    other 15 must produce an explicit `allow`.
+  - **The bash harness judges the exit status too.** `run_case` captured only
+    stdout, so a perfectly formed deny followed by a crash counted as a deny.
+  - Verified by mutation rather than by a green run: making
+    `block-dangerous.ps1`'s auto-approval tier inert turns 9 previously passing
+    cases red, and a bash hook that prints a deny then exits 3 no longer
+    passes. No hook changed behaviour — the blindness was entirely in the
+    instrument.
+
+- **The researcher's fetch hook was reading a payload the fetch tool does not
+  send (issue #64).** It looked for `tool_input.url`; VS Code passes `urls` —
+  an array — beside `query`. So both of its gates were inert: the credential
+  scan never ran and the domain allowlist never ran, and the hook returned `{}`
+  on every real fetch. The suite was green throughout, because the fixtures
+  encoded the implementation's belief about the payload rather than a captured
+  one. The tests now use the real shape, and `Assert-Allow` was deliberately
+  not used for them — it counts `{}` as an allow, which is precisely how an
+  inert hook passes for a year.
+
+  - **Every URL in the array is judged, and one unlisted entry decides the
+    batch.** The tool fetches all of them, so approving on the first match
+    would wave the rest through unseen.
+  - **The sanitiser aborted the hook on exactly the URLs it exists for.** Its
+    `sed` used `|` as both the `s` delimiter and the regex alternation in the
+    same expression, so a credentialed URL exited 1 instead of producing a
+    warning. Delimiter changed; the interpreter resolution now comes from
+    #54's shared preamble on both sides rather than being re-rolled.
+  - **An allowlist bypass, found by probing rather than reading.** The host was
+    taken from before the first `:` in the authority, which is the *userinfo*
+    when one is present: `https://docs.python.org:x@evil.example.com/` was
+    approved as "allowlisted documentation domain". The host is now what
+    follows the last `@`, with the port stripped. This was not in the issue —
+    it surfaced the moment the credential path could run at all.
+  - **`Invoke-HookInFixture` now copies `_common.ps1`**, as the bash harness
+    already does, so a fixture-run hook does not die before its first gate.
+
+- **Two shipped hooks died before their first statement, and nothing noticed
+  (issue #65).** `coordinator-pretooluse.sh` carried `\'git status\'` inside a
+  single-quoted string and `session-mcp-readiness.sh` an unterminated
+  `${msg//"/\"}`; both failed `bash -n`. A hook that cannot be parsed exits
+  non-zero without printing a decision, and **the absence of a decision is how
+  a hook says "no objection"** — so the coordinator's delegation gate, its
+  worktree-branch check and its commit-message rule had been permitting
+  everything, silently, for as long as the defect existed. No harness asserted
+  that the shipped hooks parse.
+
+  - **A parse gate in both harnesses.** `test-hooks.ps1` tokenizes every `.ps1`
+    via `PSParser::Tokenize` and shells out to `bash -n` for the `.sh` side when
+    bash is present; `test-hooks.sh` runs `bash -n` over every shipped hook.
+    Cheap, and it fails on the file that would otherwise fail in production.
+  - **Behavioural coverage found two further silent defects the parse gate
+    could not.** Once the coordinator hook parsed, tests written against what
+    it is supposed to *block* showed it still blocking nothing. Its outer
+    `case` matched `*terminal*` only, but VS Code sends `runInTerminal` — bash
+    `case` is case-sensitive, so the entire terminal branch was unreachable
+    (the inner `case`, one screen below, already spelled both). And the
+    commit-message parser read `sys.stdin` while being fed a quoted heredoc,
+    which *is* python's stdin: the pipe was discarded, the message always came
+    back empty, and the gate never fired. `coordinator-postmerge.sh` had the
+    same heredoc/stdin collision and always reported "No active agent/*
+    worktrees". Both now pass their payload through the environment.
+  - **A bracket list that could not match.** `^\[agent:[^\]]+\]` looks correct
+    and is not: a backslash is literal inside an ERE bracket expression, so the
+    pattern demanded two closing brackets. It rejected every well-formed commit
+    message — invisible while the hook was unparsable, immediate once it ran.
+  - **The harness tripped over the same `$ErrorActionPreference` trap as #54.**
+    `bash -n` writes its diagnostics to stderr, which under `Stop` becomes a
+    terminating PowerShell error; `*> $null` does not prevent it. The parse
+    gate saves and restores the preference around the loop.
+
+  The unifying lesson across #54 and #65: unparsable, unmatched and unfed all
+  fail identically — as silence. Only a test that asserts a hook *speaks* tells
+  them apart.
+
+- **Hooks resolved their roots, config and interpreter from wherever the agent
+  process happened to be standing (issue #54).** A hook is not guaranteed to
+  run from the repo root — under worktrees it routinely does not — yet six
+  `.sh` and two `.ps1` hooks read `.github/af-env.conf` through the cwd, and
+  three more discovered the root via `git rev-parse --show-toplevel`, which
+  misses whenever `.github/` is not at the top level. The read returns nothing
+  and nothing complains, because **an unread config is indistinguishable from
+  an empty one**: every setting silently falls back to its default and the
+  gate stops gating. Measured, not inferred — the same fixture returned
+  `BASE_BRANCH=trunk` from the root and `[]` from one directory down.
+
+  The interpreter lookup had the identical shape. `command -v python3` counts
+  as "found" when it returns a path, and on Windows that path is the 121-byte
+  WindowsApps App Execution Alias: on `PATH`, prints a Microsoft Store advert,
+  runs nothing, exits non-zero. Hooks then took their `[ -z "$PYTHON" ]`
+  fail-open branch and returned no opinion at all. #56 repaired two hooks by
+  hand; five more still carried it. That is the pattern this fix targets — the
+  preamble was copied per file, so each repair landed in one copy and the other
+  nine kept the defect, twice in a row.
+
+  - **One sourced preamble.** `hooks/scripts/_common.sh` and `_common.ps1`
+    derive `AF_MAIN_ROOT` / `AF_CODE_ROOT` from the script's own location,
+    honour the `.active-worktree` sentinel, expose `af_conf_get` /
+    `Get-AfConfig` that distinguish *file missing* from *key absent*, and
+    publish an interpreter that was **proven to run** rather than merely
+    resolved. The accessors always return 0, because a missing key is not an
+    error and callers run under `set -e`. Every hook now sources it.
+  - **A drift guard, because the helper alone would not stop the next hook
+    from being written the old way.** `scripts/check-hook-resolution.py` fails
+    the build on cwd-relative config reads, `--show-toplevel` root discovery,
+    bare `python` lookups and command-position `python3`; `test-hooks.ps1` runs
+    it over the whole tree. Deliberate exceptions carry `af-resolution-ok` and
+    a reason.
+  - **`set -e` abort hazard removed.** Several hooks gated on `A && B && exit 0`,
+    which kills the hook when `A` is simply false. Now explicit `if` blocks.
+  - **The test harness was concealing the defect it existed to catch.**
+    `test-hooks.sh` installed a `python3` shim into the fixture `PATH`, so the
+    bash hooks met a working interpreter under test and the broken alias in
+    production. The shim is gone.
+  - **A missing assertion, not a missing fix, let the interpreter bug survive
+    the helper commit.** Nothing asserted that the resolved interpreter *runs*.
+    The new assertion failed on first execution and exposed that PowerShell 5.1
+    silently drops empty-string arguments to native commands — the probe
+    `& python -c ''` degenerates to `python -c`, so `Find-AfPython` rejected
+    every working interpreter and took the lint gate from 21/21 to 2/21.
+    Probed with `-c 'pass'` now, and asserted both ways: a real interpreter
+    must run, a stub that resolves but exits non-zero must be rejected.
+  - **Findings print to stdout.** Under `$ErrorActionPreference = 'Stop'`,
+    native-command stderr becomes a terminating PowerShell error, so a checker
+    that reported on stderr killed the suite with its own output. The exit code
+    carries the verdict.
+
+  Two adjacent defects were deliberately left alone rather than folded in:
+  `coordinator-pretooluse.sh` and `session-mcp-readiness.sh` fail `bash -n` on
+  `HEAD` already, and `#64` (`researcher-pretooluse` dead on every path) gets
+  its own branch — it will consume this preamble instead of re-rolling the
+  interpreter logic a third time.
+
+- **The task execution path was unclassified, and the instructions pointed at
+  it (issue #56).** `block-dangerous.*` filtered on the tool name before
+  anything else, so the entire hard-deny tier was unenforced through
+  `createAndRunTask`: `git push --force origin main` was denied as a terminal
+  command and allowed as a task. Meanwhile `coordinator.agent.md` rule 3 read
+  *"Prefer tasks over terminal"* and ordered the ladder
+  `run_task → createAndRunTask → terminal`. The framework was instructing
+  agents to prefer the one path no hook inspected.
+
+  Both halves are fixed, because either alone is worthless — closing the hook
+  leaves an instruction pushing agents at a locked door, and rewording the
+  instruction leaves the door unlocked.
+
+  - **Allowlist, not blocklist.** A task may invoke only a script under
+    `AF_TASK_SCRIPT_DIRS` (new in `af-env.conf`, default `.github/scripts`).
+    Bare binaries, inline interpreter payloads and unrecognised shapes deny.
+  - **The effective command is classified, not the declared one.** Reading the
+    VS Code tasks specification exposed three bypasses in the first
+    implementation, all of which its own green test suite had missed: an
+    OS-specific `windows`/`linux`/`osx` scope overrides `command`;
+    `options.shell` moves the payload into the shell's arguments; and a
+    `type: shell` `command` may be an entire command line, so
+    `…/run-tests.ps1; <anything>` matched the allowlisted prefix. It also
+    exposed one false deny — `${workspaceFolder}` substitution is legitimate.
+  - **`lint: changed files` / `-Scope changed`** fills the one capability gap
+    that made ad-hoc tasks genuinely necessary: agents can now lint the branch
+    delta the stop-hook gate actually evaluates.
+  - **The framing is corrected everywhere the tool is granted** — coordinator,
+    implementer, refactorer, code-critic, `TOOLS.md`,
+    `testing.instructions.md`, `tooling.instructions.md` and the
+    test-execution skill. Tasks and terminal are described as one reviewed
+    surface, not as rungs of a freedom ladder.
+  - **Scratch hygiene.** `createAndRunTask` writes every one-off invocation
+    into `.vscode/tasks.json`; `check-scratch-tasks.py` reports the leftovers
+    at workflow end (advisory), and the repo-root scratch file is now ignored.
+
+  Two pre-existing fail-opens in `block-dangerous.sh` surfaced only when the
+  hook was *executed* rather than inspected. On Windows hosts `command -v
+  python3` resolves the 0-byte App Execution Alias: non-empty, so it passed the
+  emptiness check, but it executes nothing — every classification failed
+  silently and the hook returned no opinion for **every** command, terminal
+  included. The whole hook was inert on that host class. Separately, the three
+  matcher helpers passed caller-supplied patterns to `grep` positionally, so a
+  pattern starting with a dash was parsed as an option and the
+  commit-hook-bypass deny rule never fired.
+
+  This is a stopgap for #60, not a resolution: it classifies a payload shape,
+  where the durable fix is to stop having two execution surfaces to keep in
+  sync.
+
+- **The context budget watched the always-on half and ignored the other one
+  (issue #44).** `check-context-budget.py` gated `copilot-instructions.md`
+  plus every `applyTo: '**'` instruction and reported `PASS`. The
+  instruction files with a *narrower* glob were never counted — 9,699 tokens,
+  twice the watched set. A narrow `applyTo` makes a file load less often; it
+  does not make it cheap, and for the agent whose job is to touch matching
+  files it is effectively always-on.
+
+  The checker now prints the conditional set per file with its glob, enforces
+  its total via `AF_CONDITIONAL_BUDGET_TOKENS`, and reports a per-agent
+  **worst case** (own + always-on + all conditional).
+
+  Two deliberate choices:
+
+  - **The worst case is reported, not gated.** Co-occurrence is not
+    computable offline, so the bound adds the same conditional total to every
+    agent. Failing all fifteen for one shared cause is a broken signal, not a
+    strict one; the budget on the *set* attacks that cause once.
+  - **The budget was set after the reduction, not before.** Calibrating to
+    the pre-existing 9,699 would have locked in the problem it was meant to
+    surface.
+
+  Measuring it also corrected the priority: the **coordinator** sits at 97% of
+  its budget before any conditional file loads, and `copilot-authoring`
+  matches `**/*.agent.md` — so it crosses the budget the moment it edits an
+  agent file, while the gate reported `PASS`.
+
+  Reduction followed the #25 pattern (contract inline, reference depth into
+  skills): `testing.instructions.md` 3,671 → 1,304 (execution runbook →
+  `skills/test-execution`; the AAA/test-doubles material was a duplicate of
+  `skills/unit-testing`) and `copilot-authoring.instructions.md` 3,176 → 1,110
+  (subagent pattern, tool-name catalogue, hooks, prompt features, tool sets →
+  `skills/copilot-authoring`). Conditional set 9,699 → 5,262;
+  `AF_CONDITIONAL_BUDGET_TOKENS=5500`. No enforceable rule left the
+  instruction files — a glob audit found all four correctly scoped, so the
+  cost was file size, not glob width.
+
+- **The Python quality gate judged whole files, so an untouched neighbour
+  could block a commit (issue #45).** `check-python-quality.py` received a
+  file list and reported every function in it. In WIT #3105 a one-line
+  registry change therefore demanded ~90 lines of NumPy docstrings on six
+  unrelated methods, blocked three commit attempts, and ended in a recorded
+  deviation — the only alternatives were out-of-scope edits or bypassing a
+  HARD gate.
+
+  The checker now takes `--diff-base REF` and reports only functions whose
+  line span intersects the branch's diff against that ref. Decorator lines
+  count as part of the function, so a decorator-only change is in scope.
+
+  Three deliberate choices:
+
+  - **The default did not change.** The issue proposed diff scoping by
+    default with whole-file behind a flag; that is inverted here. A caller
+    that forgets the flag would otherwise get a silently *weaker* HARD gate.
+    Scoping activates only when a base is passed.
+  - **No second base-branch resolver.** The stop hooks already resolve
+    `merge-base HEAD $BASE_BRANCH` (falling back to `origin/`); they hand
+    that result to the checker. `resolve_base` only verifies the ref.
+  - **Unresolvable history fails wide, not narrow.** A shallow clone, a
+    missing branch, or no repository at all falls back to whole-file scanning
+    with a `NOTICE:` line — never to a silent pass. Untracked files are
+    likewise scanned whole, since no diff can speak for them.
+
+  `# noqa` / `# type: ignore` hygiene follows the same scope, but a
+  suppression that predates the branch is reported as `ADVISORY:` rather than
+  discarded — visible without blocking on inherited debt. A suppression added
+  in an *earlier phase of the same branch* still blocks: it is after the
+  merge-base, so the branch owns it.
+
+  Verified by a new `test-quality-gate.ps1` (15 cases, each in a throwaway
+  repository with a real base branch — the #37 lesson about tests that
+  inherit the developer's working tree) and by mutation: 7/7 mutants killed.
+
+- **Four hook gates were green for the wrong reason, and two hooks never ran
+  at all (issue #37).** The issue reported that the test-writer and refactorer
+  branch guards "never fire". They fire; the *test* never established a branch,
+  so it read whatever branch the developer happened to be on. Filed from an
+  `agent/*` checkout, the assertion inverts — and from `dev` the branch gate
+  answered first for four tests named after a different gate
+  (`test-writer cannot edit production code`, `… create production file`,
+  `refactorer cannot createFile`, `… createDirectory`). Deleting the TDD phase
+  isolation gate outright would have left the suite green.
+
+  `test-hooks.ps1` now runs branch-dependent hooks inside a throwaway git
+  repository checked out on a stated branch, and asserts **both** directions —
+  denied off an agent branch, allowed on one. A test-only environment override
+  was considered and rejected: a guard that a variable can switch off is not a
+  guard. Each gate was then mutation-checked by disabling it one at a time; all
+  five mutants are killed by a named test.
+
+  Three real defects surfaced underneath:
+
+  - **The researcher allowlist was never read.** The hook resolved
+    `af-env.conf` via `git rev-parse --show-toplevel`, which misses whenever
+    `.github/` is not at the repository top level. `WEB_FETCH_ALLOWLIST` came
+    back empty, so *every* domain fell through to a prompt — and "allowlist not
+    found" was indistinguishable from "domain not listed". Resolution is now
+    script-relative and the two cases give different reasons.
+  - **`refactorer-pretooluse.sh` was dead code.** It tested `$PYTHON` without
+    ever defining it; under `set -u` the hook aborted before reaching a single
+    gate. It had no coverage, so nothing noticed.
+  - **A detached HEAD passed as an agent branch.** `git branch --show-current`
+    returns empty when detached, and the guard only denied a *non-empty*
+    non-agent branch — while the framework's own merge-rehearsal advice is
+    `git worktree add --detach`. Detached-inside-a-repo now denies; outside a
+    repository the guard still stays silent, deliberately.
+
+  The bash pendants are no longer mirrors that are only ever reviewed by
+  reading: `scripts/test-hooks.sh` runs them in the same kind of fixture
+  (10 cases, all passing). That harness is how the dead refactorer hook
+  surfaced.
+
+- **`analyze-copilot-usage.py` asserted a foreground coverage figure that has
+  since been disproved.** Both the module docstring and the report footer
+  claimed per-turn foreground usage "is not persisted by VS Code beyond a
+  stable ~2 % sample". Re-measurement on 139 session files gives 49 foreground
+  records — 22.7% of recorded requests and 30.8% of credits, with records
+  present as far back as March. The original reading was wrong: foreground
+  turns are **sampled**, at roughly 0.35 records per session file regardless
+  of session length, not absent.
+
+  The corrected conclusion is unchanged in its practical effect — 0.35 records
+  per session is still far below the one-per-turn density that per-workflow
+  attribution needs — but the reason matters, and a frozen percentage in a
+  docstring is how a stale finding outlives its evidence. The figure is now
+  computed and printed (`0.35 per session file`) instead of asserted, so the
+  tool corrects itself as the data changes.
+
+  Also recorded: the sampled records skew expensive, so their **credit share
+  overstates their share of turns**. Read the record count, not the credit
+  share, before trusting any attribution built on them.
+
+### Added
+
+- **Workflow logs now record what the workflow cost (issue #50).** The framework
+  could describe every step of a workflow but not what any of it cost, so the
+  cost of a gate, a retry or an extra critic pass was a matter of opinion.
+
+  `scripts/collect-session-cost.py` reads the chat debug log of the running
+  session and emits an ADVISORY `cost:` block — billed requests, uncached/cached
+  input tokens, output tokens, credits and a per-model breakdown. The documenter
+  Stop hook appends it to `.github/logs/{workflow-id}.yaml` after the artifact
+  gate passes, appending the script's output **verbatim**: the numbers never pass
+  through a language model, and no agent reads the debug log (30 MB in one
+  session here, every prompt included).
+
+  Four decisions carry the design:
+
+  - **Subagent cost is counted.** Subagent turns are absent from `main.jsonl`
+    and run on different models; the collector sums every `runSubagent-*.jsonl`
+    beside it. Reading only the parent understates every workflow that delegates
+    — which is all of them.
+  - **The session is derived, never guessed.** The hook builds the log path from
+    the `session_id` and `transcript_path` that VS Code passes on stdin, which
+    name the *parent* session even inside a subagent (measured). Picking a
+    session directory by modification time would misattribute silently whenever
+    parallel worktrees run concurrent sessions.
+  - **An incomplete measurement reports as incomplete.** `coverage` is `full`,
+    `partial` (the session began after the workflow did) or `truncated` — and
+    when truncated, **no total is emitted at all**. The log's size cap drops the
+    *oldest* entries, i.e. exactly the plan and Red phases, so a total would look
+    complete while being biased downward.
+  - **It stays ADVISORY, permanently.** The source is an experiment-flagged
+    vendor setting that Microsoft can switch off remotely. A missing block is
+    normal, `available: false` always carries a `reason`, the exit code is `0`
+    on every degraded path, and nothing may gate on the number. Schema drift in
+    the vendor's undocumented fields degrades to `available: false,
+    reason: schema_drift` rather than emitting wrong numbers; a test pins the
+    watched attribute set so that detection cannot be narrowed silently.
+
+  Two measurement traps are handled explicitly: `inputTokens` already includes
+  `cachedTokens` (the block reports `input_uncached`, and the two are never
+  added), and a request without the billing attribute is *not billed* rather
+  than free — those are counted separately as `unbilled_requests` instead of
+  being summed as zero. Only numbers and short identifiers are ever emitted,
+  against an explicit key allowlist, because request payloads carry whatever was
+  pasted into chat. Regression tests: `scripts/test-session-cost.ps1`.
+
+- **The local-only rule for logs and retros is now shipped, not merely
+  documented (issue #49).** The README described `logs/` as gitignored and
+  MANIFEST set a 30-day retention, but nothing enforced either. The rule
+  existed only where a human had happened to add it — and in at least one
+  project a workflow log had been committed anyway, `trigger:` (the verbatim
+  user request) included.
+
+  Two `.gitignore` files now travel with the payload: `.github/logs/.gitignore`
+  and `.github/retros/auto/.gitignore`, each ignoring its directory's contents
+  and re-admitting only itself and the README.
+
+  Design decisions worth recording:
+
+  - **Directory-scoped, not root-scoped.** Appending to the project's own
+    `.gitignore` would mean merging into a file the project owns, with all the
+    clobber and drift questions that `af-env.conf` needed `[customizable]`
+    handling to answer. A `.gitignore` inside the directory it protects is an
+    ordinary payload file: the existing deploy copies it, the existing hash
+    tracking updates it, and the project's `.gitignore` is never touched.
+  - **Split by author, not by topic.** `retros/auto/` is agent-generated and
+    ignored; hand-written retrospectives one level up stay the project's
+    choice. A retrospective a team wrote and agreed on is documentation, not
+    instrumentation, and the framework has no business deciding its fate.
+  - **Untracking is not automated.** A `.gitignore` has no effect on files
+    committed before it existed, so shipping this changes nothing in a project
+    that already tracks logs. `logs/README.md` names the check
+    (`git ls-files .github/logs`) and states plainly that the removal is a
+    human decision — the alternative would be an agent deleting history-tracked
+    files on the strength of a pattern match.
+  - **The retro location had to be settled first.** The agents wrote
+    `retros/auto/`, the documenter's own output section said
+    `.github/retros/auto/`, and the stop hooks accepted either. Predictably,
+    one project ended up with 27 snippets at the repository root and 2 under
+    `.github/` — and only the latter can ever be covered by a rule the
+    framework ships, because the payload cannot place a file outside
+    `.github/`. `.github/retros/auto/` is now stated consistently across the
+    documenter, compliance-checker, coordinator and the retro-summary prompt.
+    The stop hooks still accept the bare path so existing projects keep passing
+    their gates, but they name the canonical one when reporting a miss. Without
+    this, the shipped rule would have protected a directory the agents were not
+    writing to.
+
+  Prerequisite for the cost-logging work under issue #22: writing usage figures
+  into a tracked file would commit usage data.
+
+- **Context budget as a regression gate — `check-context-budget.py`
+  (issue #29).** Issue #23 cut the always-on instruction set from ~13,000 to
+  ~4,800 tokens. Nothing kept it there. Instruction files grow by accretion,
+  and `applyTo: '**'` is the path of least resistance for any rule an author
+  is unsure where to put — so the trim would have silently eroded, one
+  reasonable-looking commit at a time.
+
+  The always-on payload is fully computable offline: parse the `applyTo`
+  glob out of each instruction file's frontmatter, keep the ones that match
+  everything, add the unconditional `copilot-instructions.md`. The checker
+  does exactly that and fails when the sum exceeds `AF_CONTEXT_BUDGET_TOKENS`,
+  printing a per-file breakdown so the offending file is named rather than
+  merely implied. It also checks the largest **per-agent** total (own prompt
+  + always-on set) against `AF_AGENT_CONTEXT_BUDGET_TOKENS`, which is the
+  number that actually bounds a request.
+
+  Design decisions worth recording:
+
+  - **Derived, never hardcoded.** The always-on set comes from the `applyTo`
+    patterns themselves. A file that widens its glob to `**` is caught the
+    moment it does so; a hardcoded file list would have gone stale on exactly
+    the change it exists to detect.
+  - **A missing or empty `applyTo` counts as always-on**, with a warning.
+    That is the conservative direction: the ambiguous case is charged rather
+    than excused.
+  - **BLOCKED (exit 2) is distinct from over-budget (exit 1).** A missing
+    instructions directory, a missing `copilot-instructions.md`, a missing
+    agents directory, or a malformed budget value stops the check with
+    "unknown" — it never falls through to a pass. Silence must not read as
+    success (cf. issue #12).
+  - **Frontmatter only.** `applyTo:` is read from the leading `---` block, so
+    an instruction file that *discusses* `applyTo` in its body cannot
+    false-match itself into or out of the always-on set.
+  - **No dependencies.** Tokens are estimated as bytes ÷ 4, which is accurate
+    enough for a budget ceiling and keeps the gate runnable anywhere.
+  - **Works in both trees.** The `.github` root is derived from the script's
+    own location, so it behaves identically in the framework source tree and
+    in a deployed project.
+
+  Defaults are calibrated against the measured payload with deliberately
+  small headroom — always-on 4,868/5,000 tok, largest agent (coordinator)
+  10,666/11,000 tok, roughly 3% in both cases. That is the point: adding an
+  always-on rule should require removing something, narrowing a glob, or
+  consciously raising the budget, not drifting past it unnoticed.
+
+  Ships with `test-context-budget.ps1` (15 checks over synthetic `.github`
+  fixtures, plus one that holds the real payload to its own budget) and a
+  pre-save checklist entry in `copilot-authoring.instructions.md` — which is
+  itself narrowly scoped, so the guidance loads exactly when someone is
+  editing an instruction file and costs nothing on every other turn.
+
+  **Existing projects:** `af-env.conf` is `[customizable]` and is not
+  overwritten on redeploy. Add `AF_CONTEXT_BUDGET_TOKENS` and
+  `AF_AGENT_CONTEXT_BUDGET_TOKENS` manually to tune them; absent keys fall
+  back to the documented defaults, so the gate works either way.
+
+### Changed
+
+- **Always-on instruction set trimmed from ~13,000 to ~4,800 tokens per
+  request (issue #23).** Three instruction files carry `applyTo: '**'`, so
+  every agent on every request paid for all of their content. Most of it was
+  addressed to exactly one agent.
+
+  The measurement that motivated this: background compaction accounts for
+  97.7% of recorded spend, at ~40.8 credits per compaction with a mean
+  pre-compaction context of ~178k tokens. Always-on overhead is paid on every
+  turn *and* re-paid through the compaction it accelerates, so it compounds.
+
+  Three moves, no rule removed:
+
+  - **`git-workflow.instructions.md` (5,322 → 1,190 tokens).** Only the
+    coordinator runs git, yet every worker loaded the 22-row autonomy boundary
+    table, both integration paths, the planning document lifecycle, the
+    pre-commit guards, and Git LFS guidance. That depth moved to a new
+    **`git-workflow` skill**; the instruction keeps what a worker actually
+    needs — who may run git, the hard-denied operations, branch naming, and
+    the atomic commit contract. Safe because the `block-dangerous` and
+    `coordinator-pretooluse` hooks enforce the boundary mechanically, not via
+    prompt text.
+  - **`quality-gates.instructions.md` (4,979 → 1,375 tokens).** The Per-Agent
+    Exit Gates block held all 15 agents' gate tables; each agent needs one.
+    All 100 gate rows moved verbatim into the `## Exit Gates` section of the
+    corresponding `agents/*.agent.md`, where they load exactly when that agent
+    runs. This follows a pattern `ado-pipeline-manager` already used. The
+    taxonomy, complexity tiers, exit protocol, and Gate Summary format stay
+    always-on because they are genuinely universal.
+  - **`provenance.instructions.md` (1,298 → 818 tokens).** Condensed prose;
+    the marker formats moved into a single table. No rule changed.
+
+  Two duplications surfaced and were resolved rather than carried along: the
+  instruction's Worktree Lifecycle sections were a subset of the existing
+  `git-worktrees` skill and were deleted, and `ado-pipeline-manager`'s local
+  gate table had drifted from the canonical one (it was missing the
+  "never creates/relaxes branch policies" HARD gate) — it is now reconciled.
+
+- **`coordinator.agent.md` modularised from ~11,400 to ~6,000 tokens
+  (issue #25).** The coordinator is the entry point for every task, so its
+  system prompt is a fixed prefix on every coordinator turn — and it had grown
+  into a single file holding routing rules, git procedure, worktree bootstrap,
+  optional ADO sequences, and the verbatim delegation prompt for all nine
+  workflow steps.
+
+  The issue proposed splitting per workflow variant. That axis does not work:
+  Steps 0–8 are largely *shared* across Full TDD, Quick Fix, and Trivial Fix —
+  only which steps run varies — so a per-variant split would duplicate rather
+  than reduce. The split used instead is by **conditionality and frequency of
+  need**: content for features that are off by default, and content needed only
+  once a workflow is actually executing.
+
+  Three extractions:
+
+  - **Worktree bootstrap and cleanup → `git-worktrees` skill § 2.** Steps 0d
+    and 8 are skipped entirely when `WORKTREE_ENABLED=false` (the default) or
+    on a Trivial Fix, yet ~914 + ~356 tokens of procedure were paid on every
+    turn. The coordinator now carries a conditional pointer with the
+    preconditions and the "if dirty, halt — never force-remove" rule inline.
+  - **ADO Sync and ADO Pipeline workflow sequences → `ado-shared` skill.**
+    ~788 tokens describing what happens when `ADO_CAPABILITY_MODE != off`
+    (default: `off`). The pure-git default stays inline because it is what
+    happens in almost every run.
+  - **Execution runbook → new `tdd-orchestration` skill.** The workflow state
+    machine, phase checkpoints, subagent context block, the Step 1–7b
+    delegation prompts, and interruption/cancellation recovery — needed only
+    once a workflow executes, not to decide *whether* to execute one.
+
+  Degradation safety was the design constraint: the agent file keeps the
+  workflow-selection diagrams (which agents, in which order) and a compact
+  control-point table (retry ceilings and escalation branches per step), so a
+  coordinator that never reads the runbook still retains the skeleton. The
+  runbook adds precision, not the basic sequence.
+
+  A documentation drift was fixed on the way: `git-worktrees/SKILL.md` stated
+  a `WORKTREE_DIR` default of `../wt` in two places, while `af-env.conf`
+  documents empty → compute `../{repo}_worktrees`. Two duplicate list-numbering
+  bugs in the moved Step 0d / Step 8 procedures were corrected as well.
+
+- **Subagent return verbosity is now conditional on outcome (issue #24).**
+  Everything a subagent returns enters the coordinator's context and is
+  **re-sent as input with every following coordinator turn**. A verbose success
+  therefore costs far more than the tokens it took to write once — cost scales
+  with the number of remaining turns, not with the size of the return.
+
+  New `OUTPUT_VERBOSITY=full|standard|lean` in `af-env.conf`, **defaulting to
+  `full`** so existing projects are unaffected until they opt in. `af-env.conf`
+  is `[customizable]`, so a redeploy will not inject the key silently — and an
+  absent key resolves to `full`, i.e. today's behaviour.
+
+  **The invariant, in every mode: failure output is never reduced.** REJECTED,
+  ESCALATE, FAILED, BLOCKED, and any failed HARD gate always return full
+  detail, because that is exactly what the retry consumes. Verdict headers
+  (`## Code Review Verdict: {V}` etc.) are HARD gates and are never dropped.
+  Only the path where nothing went wrong gets shorter.
+
+  Applied to the Gate Summary (collapses to one line when all HARD gates pass
+  and nothing is BLOCKED), both critic verdicts, the three producer summaries,
+  the documenter, and both compliance-checker checkpoints. Estimated ~900–1,000
+  tokens of returned output per green Standard workflow, which is re-sent
+  roughly four more times on average.
+
+  Two things were deliberately **not** changed. The **arbiter** is only ever
+  invoked on a dispute, so its entire output is already the failure path.
+  The **planner** could not adopt the issue's "reference the plan file, don't
+  restate it" proposal: the planner is read-only by design and the coordinator
+  persists the plan, so the plan has to travel through chat. Reducing plan size
+  is issue #26's subject, not this one.
+
+  An early draft also shortened the REJECTED path by dropping passing checklist
+  lines. That was reverted — a rule stated as absolute ("failure output is
+  never reduced") survives contact with a weak executor; the same rule with an
+  exception does not.
+
 ### Fixed
 
 - **ADO agents restored after the upstream MCP toolset consolidation

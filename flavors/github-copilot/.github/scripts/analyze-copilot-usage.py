@@ -10,6 +10,15 @@ Two record shapes exist and are reported separately:
 2. ``source: background`` -- context compaction / summarization, billed to a
    separate, usually cheaper model. This is framework overhead, not work.
 
+Foreground turns are *sampled*, not recorded per turn: measurement across 139
+session files found roughly one foreground record per file, regardless of how
+long the session ran. The records that are kept skew expensive, so their share
+of credits far exceeds their share of turns -- read the record count, not the
+credit share, before trusting any per-workflow attribution. Compaction, by
+contrast, is recorded consistently, which makes it the usable signal. Its cost
+scales with context size, so ``contextLengthBefore`` is the metric that
+framework trimming has to move.
+
 Ground truth vs estimate
 ------------------------
 Records carry ``copilot_usage.total_nano_aiu`` -- GitHub's own computed cost in
@@ -23,6 +32,7 @@ Usage:
     python analyze-copilot-usage.py --storage <path>    # explicit chatSessions dir
     python analyze-copilot-usage.py --by-session        # per-session breakdown
     python analyze-copilot-usage.py --json              # machine-readable output
+    python analyze-copilot-usage.py --baseline b.json   # snapshot for regressions
 
 Exit codes:
     0 -- report produced
@@ -48,11 +58,17 @@ from pathlib import Path
 NANO_AIU_PER_CREDIT = 1_000_000_000
 USD_PER_CREDIT = 0.01
 
+# Per-workflow attribution needs a usage record per turn; below that it samples.
+FOREGROUND_ATTRIBUTION_DENSITY = 1.0
+
 USAGE_MARKER = '"usage":{'
 
 RE_TOTAL_NANO_AIU = re.compile(r'"total_nano_aiu"\s*:\s*(\d+)')
 RE_MODEL = re.compile(r'"model"\s*:\s*"([^"]+)"')
 RE_SOURCE = re.compile(r'"source"\s*:\s*"([^"]+)"')
+RE_CONTEXT_BEFORE = re.compile(r'"contextLengthBefore"\s*:\s*(\d+)')
+RE_ROUNDS_SINCE = re.compile(r'"numRoundsSinceLastSummarization"\s*:\s*(\d+)')
+RE_DURATION_MS = re.compile(r'"durationMs"\s*:\s*(\d+)')
 RE_TOKEN_DETAIL = re.compile(
     r'\{"batch_size":(\d+),"cost_per_batch":(\d+),'
     r'"token_count":(\d+),"token_type":"([^"]+)"\}'
@@ -84,7 +100,15 @@ class UsageRecord:
     completion_tokens: int
     reasoning_tokens: int
     nano_aiu: int | None
+    context_before: int = 0
+    rounds_since_summarization: int = 0
+    duration_ms: int = 0
     billed_rates: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def is_compaction(self) -> bool:
+        """True when this record is a background context compaction."""
+        return self.source == "background"
 
     @property
     def uncached_tokens(self) -> int:
@@ -237,6 +261,9 @@ def _parse_window(session: str, window: str) -> UsageRecord | None:
     model_m = RE_MODEL.search(window)
     source_m = RE_SOURCE.search(window)
     nano_m = RE_TOTAL_NANO_AIU.search(window)
+    ctx_m = RE_CONTEXT_BEFORE.search(window)
+    rounds_m = RE_ROUNDS_SINCE.search(window)
+    dur_m = RE_DURATION_MS.search(window)
 
     rates: dict[str, float] = {}
     for batch_size, cost_per_batch, _count, token_type in RE_TOKEN_DETAIL.findall(window):
@@ -256,6 +283,9 @@ def _parse_window(session: str, window: str) -> UsageRecord | None:
             usage.get("completion_tokens_details", {}).get("reasoning_tokens", 0)
         ),
         nano_aiu=int(nano_m.group(1)) if nano_m else None,
+        context_before=int(ctx_m.group(1)) if ctx_m else 0,
+        rounds_since_summarization=int(rounds_m.group(1)) if rounds_m else 0,
+        duration_ms=int(dur_m.group(1)) if dur_m else 0,
         billed_rates=rates,
     )
 
@@ -291,6 +321,68 @@ def deduplicate(records: list[UsageRecord]) -> list[UsageRecord]:
         if existing is None or (existing.source == "unknown" and rec.source != "unknown"):
             best[rec.identity] = rec
     return list(best.values())
+
+
+def _percentile(values: list[int], pct: float) -> int:
+    """Nearest-rank percentile of an unsorted integer list."""
+    if not values:
+        return 0
+    ordered = sorted(values)
+    rank = max(1, min(len(ordered), round(pct / 100 * len(ordered))))
+    return ordered[rank - 1]
+
+
+def compaction_stats(
+    records: list[UsageRecord], table: dict[str, dict[str, float]]
+) -> dict[str, object]:
+    """Profile context compaction, the dominant recorded cost.
+
+    Compaction re-reads the whole conversation, so its cost scales with context
+    size. ``contextLengthBefore`` is therefore the most direct measure of context
+    bloat available locally, and the metric that framework trimming should move.
+    """
+    compactions = [r for r in records if r.is_compaction]
+    if not compactions:
+        return {"count": 0}
+
+    contexts = [r.context_before for r in compactions if r.context_before > 0]
+    gaps = [
+        r.rounds_since_summarization
+        for r in compactions
+        if r.rounds_since_summarization > 0
+    ]
+
+    credits = 0.0
+    per_session: dict[str, dict[str, float]] = defaultdict(
+        lambda: defaultdict(float)  # type: ignore[arg-type]
+    )
+    for rec in compactions:
+        cost = rec.credits_actual
+        if cost is None:
+            cost = estimate_credits(rec, table) or 0.0
+        credits += cost
+        bucket = per_session[rec.session]
+        bucket["compactions"] += 1
+        bucket["credits"] += cost
+        if rec.context_before > 0:
+            bucket["context_sum"] += rec.context_before
+            bucket["context_n"] += 1
+
+    return {
+        "count": len(compactions),
+        "credits": credits,
+        "credits_per_compaction": credits / len(compactions),
+        "context_before_n": len(contexts),
+        "context_before_mean": (sum(contexts) / len(contexts)) if contexts else 0,
+        "context_before_p50": _percentile(contexts, 50),
+        "context_before_p90": _percentile(contexts, 90),
+        "context_before_max": max(contexts) if contexts else 0,
+        "rounds_between_mean": (sum(gaps) / len(gaps)) if gaps else 0,
+        "duration_ms_mean": (
+            sum(r.duration_ms for r in compactions) / len(compactions)
+        ),
+        "by_session": {k: dict(v) for k, v in per_session.items()},
+    }
 
 
 def load_price_table(models_json: Path | None) -> dict[str, dict[str, float]]:
@@ -399,6 +491,7 @@ def build_report(
     return {
         "totals": dict(totals),
         "files_scanned": files_scanned,
+        "compaction": compaction_stats(records, table),
         "by_model": {k: dict(v) for k, v in by_model.items()},
         "by_session": {k: dict(v) for k, v in by_session.items()},
         "by_source": {k: dict(v) for k, v in by_source.items()},
@@ -505,36 +598,91 @@ def print_report(report: dict[str, object], by_session: bool) -> None:
                     listed, delta = 0.0, "n/a"
                 print(f"{model:<24}{kind:<12}{billed:>10,.2f}{listed:>10,.2f}{delta:>9}")
 
+    _print_compaction(report)
     _print_coverage(report)
+
+
+def _print_compaction(report: dict[str, object]) -> None:
+    """Render the compaction profile."""
+    stats = report["compaction"]  # type: ignore[index]
+    assert isinstance(stats, dict)
+    if not stats.get("count"):
+        return
+
+    print()
+    print("-- Compaction profile " + "-" * 55)
+    print(f"Compactions                : {int(stats['count']):,}")
+    print(f"Cost                       : {_fmt(float(stats['credits']))} credits")
+    print(f"  per compaction           : {_fmt(float(stats['credits_per_compaction']))} credits")
+    print(f"Context before compaction  : mean {int(stats['context_before_mean']):,} tok")
+    print(f"  p50 / p90 / max          : {int(stats['context_before_p50']):,}"
+          f" / {int(stats['context_before_p90']):,}"
+          f" / {int(stats['context_before_max']):,} tok")
+    print(f"Rounds between compactions : {float(stats['rounds_between_mean']):.1f}")
+    print(f"Mean duration              : {float(stats['duration_ms_mean']) / 1000:.1f} s")
+    print()
+    print("Context size before compaction is the regression signal: framework")
+    print("trimming should lower the mean and p90, and widen the round gap.")
 
 
 def _print_coverage(report: dict[str, object]) -> None:
     """Warn about the limits of the local telemetry.
 
-    The chat session store is not a billing statement. Background summarization
-    is recorded consistently, but per-turn foreground usage only appears in
-    recent VS Code builds, so a low foreground count means the report covers
-    framework overhead far better than it covers actual agent turns.
+    The chat session store is not a billing statement. Foreground turns are
+    sampled rather than recorded per turn, so the totals describe compaction
+    overhead well and total agent spend poorly. The density is measured here
+    rather than asserted, because the sampling behaviour is an implementation
+    detail of the Copilot Chat extension and may change.
     """
     by_source = report["by_source"]  # type: ignore[index]
-    totals = report["totals"]  # type: ignore[index]
-    assert isinstance(by_source, dict) and isinstance(totals, dict)
+    assert isinstance(by_source, dict)
 
     fg = int(by_source.get("foreground", {}).get("requests", 0))
     bg = int(by_source.get("background", {}).get("requests", 0))
+    files = int(report.get("files_scanned", 0))  # type: ignore[arg-type]
+    per_file = fg / files if files else 0.0
 
     print()
     print("-- Coverage " + "-" * 65)
-    print(f"Session files scanned      : {int(report.get('files_scanned', 0))}")  # type: ignore[arg-type]
-    print(f"Foreground turns recorded  : {fg}")
+    print(f"Session files scanned      : {files}")
+    print(f"Foreground turns recorded  : {fg}  ({per_file:.2f} per session file)")
     print(f"Background summarizations  : {bg}")
-    if fg <= bg:
+    if per_file < FOREGROUND_ATTRIBUTION_DENSITY:
         print()
-        print("NOTE: foreground turns are under-represented. Per-turn usage is only")
-        print("      persisted by recent VS Code builds, so the totals above describe")
-        print("      context-compaction overhead far better than total agent spend.")
-        print("      Reconcile against the organisation usage export before treating")
-        print("      any figure here as a complete account of what was billed.")
+        print("NOTE: foreground turns are sampled, not recorded per turn -- about")
+        print(f"      {per_file:.2f} record(s) per session file, where per-workflow attribution")
+        print("      needs one per turn. The sampled records skew expensive, so their")
+        print("      credit share overstates their share of turns. Treat the totals as")
+        print("      a compaction profile; use the organisation usage export for spend.")
+
+
+BASELINE_SCHEMA_VERSION = 1
+
+
+def build_baseline(report: dict[str, object]) -> dict[str, object]:
+    """Reduce the report to the few figures worth tracking over time.
+
+    Deliberately excludes timestamps and session ids so two snapshots diff to
+    signal rather than noise.
+    """
+    stats = report["compaction"]  # type: ignore[index]
+    totals = report["totals"]  # type: ignore[index]
+    assert isinstance(stats, dict) and isinstance(totals, dict)
+
+    return {
+        "schema_version": BASELINE_SCHEMA_VERSION,
+        "compactions": int(stats.get("count", 0)),
+        "compaction_credits": round(float(stats.get("credits", 0.0)), 2),
+        "credits_per_compaction": round(float(stats.get("credits_per_compaction", 0.0)), 2),
+        "context_before_mean": int(stats.get("context_before_mean", 0)),
+        "context_before_p50": int(stats.get("context_before_p50", 0)),
+        "context_before_p90": int(stats.get("context_before_p90", 0)),
+        "context_before_max": int(stats.get("context_before_max", 0)),
+        "rounds_between_compactions": round(float(stats.get("rounds_between_mean", 0.0)), 1),
+        "tokens_input_uncached": int(totals.get("input", 0)),
+        "tokens_cache_read": int(totals.get("cached", 0)),
+        "tokens_output": int(totals.get("output", 0)),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -553,6 +701,11 @@ def main(argv: list[str] | None = None) -> int:
         "--by-session", action="store_true", help="Include the per-session breakdown"
     )
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of text")
+    parser.add_argument(
+        "--baseline",
+        metavar="PATH",
+        help="Write a deterministic metrics snapshot for regression comparison",
+    )
     args = parser.parse_args(argv)
 
     session_dirs = discover_session_dirs(args.storage)
@@ -581,6 +734,14 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
         print_report(report, args.by_session)
+
+    if args.baseline:
+        snapshot = build_baseline(report)
+        Path(args.baseline).write_text(
+            json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        print()
+        print(f"Baseline snapshot written to {args.baseline}")
     return 0
 
 
