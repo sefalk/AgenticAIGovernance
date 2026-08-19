@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File flavors/github-copilot/.github/hooks/scripts/block-dangerous.ps1",
+            "commandUnix": "bash flavors/github-copilot/.github/hooks/scripts/block-dangerous.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

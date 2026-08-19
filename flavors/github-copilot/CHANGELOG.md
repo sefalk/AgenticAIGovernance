@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The framework now arms one of its own safety guards, without deploying to
+  itself (#61).** The framework ships hooks that hard-deny `git push --force`,
+  `git reset --hard` and `git add -A`, and has been developed without them.
+  Deploying the payload into its own repository was the obvious fix and a bad
+  one: it creates a second copy of every script that can drift from the first,
+  and it makes `deploy.ps1` predict `CONFLICT` and `PROTECT` against the
+  framework's own working files (#105, #106).
+
+  A root `.github/hooks/agent-hooks.json` whose `command` entries point *into*
+  `flavors/` avoids both. Nothing is copied, nothing is deployed, and only
+  `block-dangerous` is armed — no agents, instructions or skills, so the
+  untested question of how two payloads would take precedence never arises.
+
+  What is measured is that the scripts work that way: driven from the
+  repository root with a synthetic `PreToolUse` payload, `block-dangerous.ps1`
+  allowed `git status` and denied force push, hard reset and `git add -A`. It
+  resolves its helpers relative to its own location, not the current
+  directory. What is **not** measured is whether VS Code loads the file at all
+  from a repository that is not itself a deployed payload, and how it resolves
+  the relative paths in a multi-root workspace. That needs a session and a hook
+  log. Until then this is an experiment, and #61 stays open.
+
 - **Formatting is now a gate, not a suggestion (#124).** `run-lint.ps1` is the
   mandated lint runner — *"all agents MUST use this script instead of calling
   ruff directly"* — and it ran `ruff check` only. `ruff format --check` was
