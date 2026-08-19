@@ -16,6 +16,14 @@
 # depend on it, so this runs whatever merged the pull request, and also catches
 # branches abandoned without ever being merged.
 #
+# THIS FILE DOES NOTHING UNTIL IT REACHES THE DEFAULT BRANCH. Both `schedule`
+# and `workflow_dispatch` trigger only from the default branch, so while it
+# lives on `dev` alone there is no nightly run and no Run workflow button --
+# the workflow does not appear in the Actions list at all. On 2026-08-19 `main`
+# had no `.github/workflows` directory whatsoever and `dev` was 233 commits
+# ahead. `regression.yml` and `arm-auto-merge.yml` are unaffected because
+# `push` and `pull_request` run the workflow from the branch involved.
+#
 # See #153.
 
 name: Prune merged branches

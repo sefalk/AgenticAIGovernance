@@ -106,7 +106,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The cause of GitHub's own deletion not firing is not established, and this
   does not depend on establishing it. That is the point: `--delete-branch` was
   a fix written against an unverified diagnosis and cost a pull request to
-  learn nothing. Closes #153.
+  learn nothing.
+
+  **It is inert until the release.** `schedule` and `workflow_dispatch` trigger
+  only from the default branch. This file lives on `dev`, and `main` has no
+  `.github/workflows` directory at all while sitting 233 commits behind — so
+  there is no nightly run, no Run workflow button, and the workflow is not even
+  listed in the Actions tab, which is how this was caught. Recorded in the file
+  itself rather than left as a surprise. #153 stays open until a run is observed
+  deleting something. Refs #153.
 
 - **A green check on `dev` now describes the branch you are actually merging
   into.** Arming auto-merge (#150) removed a guarantee nobody had written down.
