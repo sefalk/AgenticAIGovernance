@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: regression-${{ github.ref }}
@@ -38,6 +39,63 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      # test-hooks-integration.ps1 is excluded from the sweep below because a
+      # hosted runner cannot run it. That left the hooks -- the most
+      # safety-critical part of the payload -- covered by nothing once the
+      # hand-run sweep was replaced by CI. This step does not close that hole;
+      # it makes the hole visible at the moment it matters.
+      #
+      # It is attestation, not verification. It records that someone states
+      # they ran the suite. It cannot prove they did, and nothing built on it
+      # may be described as evidence that the hooks were tested. It is worth
+      # having because the failure it prevents is forgetting, not lying.
+      - name: Require local-check attestation for hook changes
+        if: github.event_name == 'pull_request'
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          $marker = 'local-check: test-hooks-integration.ps1'
+
+          $files = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER/files" --paginate --jq '.[].filename'
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Could not list the changed files. Failing rather than passing on an unanswered question."
+            exit 1
+          }
+
+          $hookFiles = @($files | Where-Object { $_ -like 'flavors/github-copilot/.github/hooks/*' })
+          if ($hookFiles.Count -eq 0) {
+            Write-Host "No files under flavors/github-copilot/.github/hooks/ -- attestation not required."
+            exit 0
+          }
+
+          # Read the body from the API rather than the event payload, so that
+          # adding the marker and re-running this job is enough to clear the
+          # check. A re-run replays the original payload, which would still
+          # carry the body as it was when the run was triggered.
+          $body = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER" --jq '.body'
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Could not read the pull request body. Failing rather than passing on an unanswered question."
+            exit 1
+          }
+
+          # HTML comments are stripped first. The pull request template carries
+          # the marker line commented out, and a template nobody edited must
+          # not satisfy a check about work somebody did.
+          $body = [regex]::Replace([string]$body, '(?s)<!--.*?-->', '')
+
+          if ($body -like "*$marker*") {
+            Write-Host "Attestation present. Recorded, not verified."
+            exit 0
+          }
+
+          Write-Host "Changed under the hooks directory:"
+          $hookFiles | ForEach-Object { Write-Host "  $_" }
+          Write-Host "::error::This pull request changes files under flavors/github-copilot/.github/hooks/. test-hooks-integration.ps1 covers them and CI cannot run it. Run it locally, then add this line to the pull request body and re-run this job: $marker"
+          exit 1
+
       - name: Check out
         uses: actions/checkout@v4
         with:
