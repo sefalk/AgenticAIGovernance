@@ -371,3 +371,4 @@ as a reference for additional hook customisation.
 
 - [Official hooks docs](https://code.visualstudio.com/docs/copilot/customization/hooks)
 - [Agent Team Manifest](../MANIFEST.md) — §9 Agent Hooks
+<!-- probe: deliberate change to exercise the local-check gate. This branch is discarded. -->
