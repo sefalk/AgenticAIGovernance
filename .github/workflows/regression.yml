@@ -141,11 +141,18 @@ jobs:
           # Read the body from the API rather than the event payload, so that
           # adding the line and re-running this job is enough to clear the
           # check. A re-run replays the payload as it was when triggered.
-          $body = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER" --jq '.body'
+          $bodyLines = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER" --jq '.body'
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::error::Could not read the pull request body. Failing rather than passing on an unanswered question."
             exit 1
           }
+
+          # PowerShell hands back a native command's multi-line output as an
+          # array of lines, and casting that array to a string joins it with
+          # spaces -- which collapses the body to one line and defeats every
+          # line anchor below. Measured on #165: the gate did not see its own
+          # declaration. Out-String restores the newlines.
+          $body = $bodyLines | Out-String
 
           # The template carries the marker commented out, and a template
           # nobody edited must not satisfy a check about work somebody did.

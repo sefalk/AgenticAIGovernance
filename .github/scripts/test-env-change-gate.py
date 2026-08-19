@@ -114,6 +114,10 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         for name, files, body, want_exit, want_text in CASES:
+            # The stub returns the body as an array of lines because that is
+            # what PowerShell does with a native command's multi-line output.
+            # A stub that returned one string made this suite pass while CI
+            # failed on the very pull request that added the gate.
             prelude = (
                 "$ErrorActionPreference = 'Stop'\n"
                 "$env:REPO = 'sefalk/AgenticAIGovernance'\n"
@@ -126,7 +130,7 @@ def main() -> int:
                 "    $joined = $args -join ' '\n"
                 "    $global:LASTEXITCODE = 0\n"
                 "    if ($joined -like '*/files*') { return $FILES }\n"
-                "    return $BODY\n"
+                "    return $BODY -split [char]10\n"
                 "}\n\n"
             )
             case_file = work / f"case_{name}.ps1"

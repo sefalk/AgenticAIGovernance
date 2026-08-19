@@ -51,6 +51,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the diagnosis was wrong, which is exactly the kind of defect that survives
   review and dies in a decision table.
 
+  Then the table missed one, and that is the more useful half of the story. It
+  reported nine of nine green while CI failed the very pull request that
+  introduced the gate: the check could not see its own declaration. PowerShell
+  hands back a native command's multi-line output as an *array of lines*, and
+  casting that array to a string joins it with spaces — collapsing the body to
+  a single line and defeating every line anchor. The stub returned one string,
+  so the suite exercised a shape that never occurs. A test double that is
+  tidier than reality tests the double. The stub now splits, the failure
+  reproduces without the fix, and the body is joined with `Out-String`.
+
 - **Formatting is now a gate, not a suggestion (#124).** `run-lint.ps1` is the
   mandated lint runner — *"all agents MUST use this script instead of calling
   ruff directly"* — and it ran `ruff check` only. `ruff format --check` was
