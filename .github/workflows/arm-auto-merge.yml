@@ -58,4 +58,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr merge "$PR_URL" --auto --merge
+        # A pull request whose required check has already passed cannot be
+        # armed -- GitHub rejects the mutation as already clean. Merge it
+        # directly instead. That call is gated by the ruleset too, so the
+        # fallback is not a bypass, and a permissions failure still fails both.
+        run: gh pr merge "$PR_URL" --auto --merge || gh pr merge "$PR_URL" --merge
