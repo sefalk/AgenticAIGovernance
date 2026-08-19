@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Formatting is now a gate, not a suggestion (#124).** `run-lint.ps1` is the
+  mandated lint runner — *"all agents MUST use this script instead of calling
+  ruff directly"* — and it ran `ruff check` only. `ruff format --check` was
+  never run by anything. A consumer project measured the consequence: two
+  agent-authored test files were committed unformatted across two commits, and
+  the gate printed `LINTING_GATE_PASS` with exit 0 every time. The same files
+  were clean on the base branch, so the drift was agent-attributable, and the
+  project standard names both tools while only one was enforced.
+
+  `check-python-linting.py` now runs `ruff format --check` over exactly the
+  file set it already lints. The check sits in the checker rather than in the
+  runner because the checker is what the `implementer-stop` and
+  `refactorer-stop` hard gates execute; fixing only the runner would have left
+  the gate itself unchanged. Formatting is binary, so it applies at every
+  `LINTING_STRICTNESS` level and is unaffected by `project_ignore` — it is not
+  a rule selection. The gate line now carries `format=clean` or
+  `format_drift=N` either way, so the signal is present in the output and not
+  only in the exit code, and a failure names each drifted file plus the one
+  command that clears it. `-Fix` / `--fix` now applies `ruff format` as well,
+  so the remedy the gate names actually works.
+
+  Fails closed: if `ruff format --check` cannot be executed, or ruff itself
+  errors, the gate reports blocked (exit 1) and never clean.
+
+  **Existing projects may see a red gate on the first run after upgrading.**
+  That is the drift this change exists to surface. `run-lint.ps1 -Fix` clears
+  it in one commit.
+
+### Fixed
+
+- **The framework's own lint-gate suite was writing mixed-line-ending files.**
+  Adding the format check turned six previously-green scenarios red, and the
+  cause was the harness, not the gate: `Set-Content` terminates a file with
+  CRLF, the suite is stored with LF endings, so every here-string fixture was
+  written with an LF body and a CRLF last line. `ruff format --check`
+  correctly reports such a file as drift. The fixtures are normalised to CRLF
+  once, at a single place, leaving all ~24 write sites untouched.
+
+  Worth recording as evidence for #124 rather than as an embarrassment: the
+  defect was present in the framework's own test fixtures for as long as they
+  have existed, and no gate noticed until formatting became something that
+  gets checked.
+
+### Changed
+
+- The header comments of `run-lint.ps1` / `run-lint.sh`, `tooling.instructions.md`
+  and the `test-execution` skill now state *why* a direct `ruff` call does not
+  reproduce the gate: `check-python-linting.py` applies the project's own ruff
+  `ignore` / `per-file-ignores` on top of the selected rules, so a bare
+  `ruff check --select=…` can report violations the gate does not have. The
+  issue reports a real wasted edit caused by exactly this, and the standing
+  risk that an agent adds a `# noqa` the project deliberately does not want.
+  Agents route around rules whose cost they cannot see.
+
 - **The suite CI cannot run is no longer covered by nothing.**
   `test-hooks-integration.ps1` reads VS Code's own hook log to confirm hooks
   fired during a real agent session, so a hosted runner cannot run it and

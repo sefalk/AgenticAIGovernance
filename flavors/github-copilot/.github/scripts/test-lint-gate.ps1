@@ -1,4 +1,5 @@
-# Regression tests for the Python linting hard gate (issues #6, #10, #12, #13, #18).
+# Regression tests for the Python linting hard gate (issues #6, #10, #12, #13,
+# #18, #124).
 #
 # #6 -- the defect: LINTING_STRICTNESS was configured, yet violations shipped.
 # Root cause was wiring, not the checker -- the gate's git pathspec covered
@@ -21,6 +22,12 @@
 # was never checked for a rule code or a reason. #13 routes the acknowledgement
 # of inherited debt through exactly those files, so hygiene now covers the
 # whole lint set.
+#
+# #124 -- `ruff check` was the only formatting-adjacent signal; `ruff format
+# --check` was never run, so unformatted files passed with exit 0. Formatting
+# is now a blocking gate, binary and independent of LINTING_STRICTNESS and of
+# project_ignore, surfaced as `format=clean` / `format_drift=N` in the gate
+# line either way.
 #
 # These tests build throwaway git repos, plant a real ruff violation in
 # tests/, and drive the actual stop hooks end to end. Run from anywhere:
@@ -272,6 +279,43 @@ def test_add():
     assert add(1, 2) == 3
 '@
 
+# Issue #124: lint-clean under E,F,I (single quotes trip no selected rule --
+# quote style is a formatter concern, not a pycodestyle one) but NOT what
+# `ruff format` would produce, so `ruff format --check` must still fail it.
+$BADLY_FORMATTED_CLEAN_TEST = @'
+"""Tests for the sample module."""
+# copilot:generated | tester | 2026-07-29
+
+from src.app import add
+
+
+def test_add():
+    label = 'sum'
+    assert add(1, 2) == 3, label
+'@
+
+# Issue #124: normalise every Python fixture to CRLF before it is written.
+#
+# `Set-Content` terminates the file it writes with CRLF. This script is stored
+# with LF endings, so a here-string piped straight into it produces a file with
+# an LF body and a CRLF final line -- mixed endings. `ruff format --check`
+# correctly reports such a file as drift (measured on ruff 0.16.1: it reports
+# the last line as needing reformatting), which would fail six scenarios whose
+# fixtures are supposed to be clean.
+#
+# The fixtures are not testing line endings, so normalising them here keeps
+# every one of the ~24 write sites unchanged and leaves exactly one place that
+# knows about this. If the script is ever checked out with CRLF endings the
+# substitution is a no-op, so the fix holds under either `core.autocrlf`.
+foreach ($fixture in @(
+    'CLEAN_SRC', 'CLEAN_TEST', 'DIRTY_TEST', 'CLEAN_TEST_EXTENDED', 'DIRTY_SRC',
+    'UNDEFINED_TEST', 'CLEAN_SRC_EXTENDED', 'ACKNOWLEDGED_TEST', 'BARE_NOQA_TEST',
+    'UNJUSTIFIED_NOQA_TEST', 'BADLY_FORMATTED_CLEAN_TEST'
+)) {
+    $value = (Get-Variable -Name $fixture -ValueOnly) -replace "`r?`n", "`r`n"
+    Set-Variable -Name $fixture -Value $value
+}
+
 # -BaseBranch builds the workflow topology: a `dev` base plus a feature branch
 # checked out on top, so merge-base resolves and a phase commit is inherited.
 function New-GateRepo {
@@ -375,6 +419,22 @@ function Test-Blocked {
     $d = $Result.Json.hookSpecificOutput.decision
     if ($d -ne 'block') { return $false }
     return ($Result.Json.hookSpecificOutput.reason -match $ReasonMatch)
+}
+
+# Runs check-python-linting.py directly (not through a stop hook) and returns
+# its raw stdout + exit code. The stop hooks only surface a PASS as the fixed
+# literal "clean" in systemMessage -- the gate's own "format=clean" /
+# "format_drift=" text (issue #124) is only visible by calling the script.
+function Invoke-LintCheck {
+    param([string]$Repo, [string[]]$Files)
+    Push-Location $Repo
+    try {
+        $out = & $python '.github/scripts/check-python-linting.py' --files @Files 2>&1
+        $exit = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+    return @{ Text = ($out | Out-String).Trim(); Exit = $exit }
 }
 
 $results = [ordered]@{}
@@ -597,6 +657,30 @@ try {
     $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
     $results['hygiene_accepts_justified_noqa_in_tests'] = ($r.Json.hookSpecificOutput.decision -ne 'block')
     $details['hygiene_accepts_justified_noqa_in_tests'] = $r.Text
+
+    # --- Issue #124: `ruff format --check` is a blocking gate ---
+    # Before the fix, check-python-linting.py never ran `ruff format --check`
+    # at all, so an unformatted file passed with LINTING_GATE_PASS and exit 0.
+
+    # 22. A correctly formatted, lint-clean file: the gate line must say so.
+    $repo = New-GateRepo; $repos += $repo
+    $CLEAN_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    $r = Invoke-LintCheck -Repo $repo -Files @('tests/test_app.py')
+    $results['format_clean_reports_in_gate_line'] = ($r.Exit -eq 0) -and ($r.Text -match 'format=clean')
+    $details['format_clean_reports_in_gate_line'] = $r.Text
+
+    # 23. Lint-clean (single quotes trip no selected rule) but not what `ruff
+    #     format` would produce: must exit 2, name the file, and the remedy.
+    $repo = New-GateRepo; $repos += $repo
+    $BADLY_FORMATTED_CLEAN_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    $r = Invoke-LintCheck -Repo $repo -Files @('tests/test_app.py')
+    $results['format_drift_blocks_and_names_file'] =
+        ($r.Exit -eq 2) -and
+        ($r.Text -match 'format_drift=1') -and
+        ($r.Text -match 'test_app\.py') -and
+        ($r.Text -match 'run-lint\.ps1 -Fix') -and
+        ($r.Text -match 'run-lint\.sh --fix')
+    $details['format_drift_blocks_and_names_file'] = $r.Text
 } finally {
     $env:PATH = $origPath
     foreach ($r in $repos) {
