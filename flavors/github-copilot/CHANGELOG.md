@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The merge nobody was there to arm.** `gh-pr-manager` can open a pull
+  request and cannot finish, because GitHub's auto-merge is opt-in per pull
+  request and the MCP server exposes no tool for arming it. PR #149 was the
+  demonstration: `conclusion: success`, `mergeable_state: "clean"`, and it
+  waited for a human click. Every condition the gate exists to check was met
+  and nothing happened.
+
+  `.github/workflows/arm-auto-merge.yml` arms it. This does not weaken the
+  gate — auto-merge waits for the required status check, so a red or pending
+  check still never merges; the workflow only presses the button. It uses
+  `pull_request` rather than `pull_request_target`, because the latter runs
+  with the base branch's token and would hand write permissions to code from a
+  fork, and this repository is public. Three further conditions gate the job:
+  same repository, author is the repository owner, base is `dev`. The base is
+  filtered twice, in the trigger and in the job, so that widening one does not
+  silently widen the other — the same allowlist reasoning as `gh-pr-manager`,
+  and `main` is never armed because merging into the default branch is where
+  `Closes #N` fires.
+
+  A failure to arm fails the job deliberately. Arming quietly would leave a
+  pull request waiting forever for something nobody is doing, which is the
+  failure shape of #125 and #98 rather than a lesser version of it.
+
+  One documented cost: work performed with `GITHUB_TOKEN` does not trigger
+  further workflow runs, so a merge armed by this token may not produce the
+  post-merge sweep on `dev`. The pull-request run is unaffected and is the one
+  the ruleset requires. Stated here rather than found later. Closes #150.
+
 - **An agent may now open a GitHub pull request, and cannot merge the one
   branch where merging would close issues.** The merge gate from #143 made
   `dev` and `main` enforceable, but no agent could open a pull request against
