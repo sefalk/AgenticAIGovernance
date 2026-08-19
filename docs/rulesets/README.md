@@ -5,8 +5,26 @@ Exports of the rulesets that govern `dev` and `main`. Both branches report
 
 | File | Target | What it enforces |
 |---|---|---|
-| `dev-branch-ruleset.json` | `refs/heads/dev` | Pull request required, status check required, merge commits only, no force-push, no deletion |
-| `main-branch-ruleset.json` | `~DEFAULT_BRANCH` | The same, on the release branch |
+| `dev-branch-ruleset.json` | `refs/heads/dev` | Pull request required, status check required and strict, merge commits only, no force-push, no deletion |
+| `main-branch-ruleset.json` | `~DEFAULT_BRANCH` | The same, on the release branch, without the strict policy |
+
+## What `dev` guarantees, and what it does not
+
+Every commit on `dev` has been through `Regression suites (Windows PowerShell
+5.1)` **against the base it actually landed on**. That second half is what
+`strict_required_status_checks_policy: true` buys, and it is not decoration:
+since #150 an armed pull request merges itself, and since a merge performed
+with `GITHUB_TOKEN` triggers no further workflow runs, the `push: [dev]` run
+that used to re-test the result no longer happens for automated merges. Without
+the strict policy, a pull request could merge on a check measured against a
+base that had moved, and nothing would ever test the combination.
+
+The cost lands on concurrency: when the base moves, an armed pull request stops
+until its branch is updated. It stalls visibly instead of merging something
+untested.
+
+`main` does not carry the strict policy. It moves only on release pull requests
+that a human merges, so there is nothing for a check to be stale against.
 
 ## These files are a record, not the source of truth
 
