@@ -27,11 +27,14 @@ concurrency:
 
 jobs:
   suites:
+    # The branch rulesets require this string as their status check context.
+    # Renaming it does not fail the gate -- it stalls every pull request on a
+    # check that no longer reports. See docs/rulesets/README.md.
     name: Regression suites (Windows PowerShell 5.1)
     runs-on: windows-latest
-    # The full sweep takes about 16 minutes on a maintainer's machine; a hosted
-    # runner is slower, so the ceiling is set well above the measured time
-    # rather than just above it.
+    # Measured: 5 min 59 s on the runner against 16 minutes for the same sweep
+    # on a maintainer's laptop. The ceiling is far above both so that a hang is
+    # caught by the per-suite timeout rather than by the job budget.
     timeout-minutes: 60
 
     steps:
