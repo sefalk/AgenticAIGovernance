@@ -62,4 +62,9 @@ jobs:
         # armed -- GitHub rejects the mutation as already clean. Merge it
         # directly instead. That call is gated by the ruleset too, so the
         # fallback is not a bypass, and a permissions failure still fails both.
-        run: gh pr merge "$PR_URL" --auto --merge || gh pr merge "$PR_URL" --merge
+        #
+        # --delete-branch is explicit because the repository setting did not
+        # remove the head branch of PR #151, which this workflow merged. A
+        # cleanup that lives only in a settings page is invisible from the code
+        # and drifts silently; this one is reviewable.
+        run: gh pr merge "$PR_URL" --auto --merge --delete-branch || gh pr merge "$PR_URL" --merge --delete-branch

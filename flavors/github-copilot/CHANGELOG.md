@@ -35,7 +35,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   One documented cost: work performed with `GITHUB_TOKEN` does not trigger
   further workflow runs, so a merge armed by this token may not produce the
   post-merge sweep on `dev`. The pull-request run is unaffected and is the one
-  the ruleset requires. Stated here rather than found later. Closes #150.
+  the ruleset requires. Stated here rather than found later.
+
+  The merge passes `--delete-branch` explicitly. The repository setting
+  *Automatically delete head branches* did not remove the head branch of the
+  first automated merge, so the automation would otherwise leave behind exactly
+  the stale branches someone had just finished cleaning up. A cleanup that
+  lives only in a settings page is invisible from the code and drifts without
+  anyone noticing — the same reason the branch rulesets are versioned in
+  `docs/rulesets/`. Closes #150.
 
 - **An agent may now open a GitHub pull request, and cannot merge the one
   branch where merging would close issues.** The merge gate from #143 made
