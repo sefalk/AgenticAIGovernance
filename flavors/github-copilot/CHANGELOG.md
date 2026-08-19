@@ -37,11 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   post-merge sweep on `dev`. The pull-request run is unaffected and is the one
   the ruleset requires. Stated here rather than found later.
 
-  The merge also passes `--delete-branch`, which does **not** work and is
-  tracked in #153. `gh pr merge --auto` returns as soon as auto-merge is armed,
-  so the client-side deletion never runs — the flag is inert while the job
-  reports success. It was written against a diagnosis nobody had verified, and
-  both automated merges left their head branch behind regardless. Closes #150.
+  The merge does not clean up after itself, and cannot: `--delete-branch` is
+  inert with `--auto`, because `gh` returns once auto-merge is armed and the
+  merge happens minutes later inside GitHub. `prune-merged-branches.yml` does
+  it on a schedule instead. Closes #150.
 
 - **An agent may now open a GitHub pull request, and cannot merge the one
   branch where merging would close issues.** The merge gate from #143 made
@@ -83,6 +82,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in its return rather than implying a guarantee it does not have. Closes #146.
 
 ### Changed
+
+- **Branch cleanup stopped depending on the merge event, because three
+  mechanisms that depend on it all fail here.** Automated merges left their
+  head branch on the remote every time: #151, #152 and #155, the last still
+  present 27 minutes afterwards. *Settings → Automatically delete head
+  branches* was enabled throughout, and toggled off and on again in between.
+
+  `gh pr merge --delete-branch` cannot help — `gh` returns as soon as
+  auto-merge is armed, so the client-side deletion never runs, and the flag
+  reported success while doing nothing. A `pull_request: closed` cleanup
+  workflow cannot help either: work performed with `GITHUB_TOKEN` triggers no
+  further workflow runs, the same rule that produced the problem.
+
+  What the three share is the merge event. `prune-merged-branches.yml` uses
+  `schedule:` instead, so who merged and how stops mattering. It deletes an
+  `agent/` branch only when `dev` already contains every one of its commits,
+  which is true once its pull request has merged and false while work is
+  outstanding — so an abandoned branch with unmerged commits is left alone, and
+  a branch abandoned *after* merging is finally cleaned up, which the
+  repository setting never covered.
+
+  The cause of GitHub's own deletion not firing is not established, and this
+  does not depend on establishing it. That is the point: `--delete-branch` was
+  a fix written against an unverified diagnosis and cost a pull request to
+  learn nothing. Closes #153.
 
 - **A green check on `dev` now describes the branch you are actually merging
   into.** Arming auto-merge (#150) removed a guarantee nobody had written down.
