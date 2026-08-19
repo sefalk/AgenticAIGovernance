@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The suite CI cannot run is no longer covered by nothing.**
+  `test-hooks-integration.ps1` reads VS Code's own hook log to confirm hooks
+  fired during a real agent session, so a hosted runner cannot run it and
+  `regression.yml` excludes it by name. Before CI existed, a maintainer's
+  hand-run sweep covered it. After CI, the hand-run sweep is the thing CI
+  replaced — so the suite stopped being run at all, while the code it covers
+  is the most safety-critical part of the payload.
+
+  A step in `regression.yml` now fails the job when a pull request changes
+  files under `flavors/github-copilot/.github/hooks/` and its body does not
+  contain `local-check: test-hooks-integration.ps1`. The error message names
+  the exact line to add. Pull requests touching nothing under that directory
+  are unaffected.
+
+  **This is attestation, not verification.** It records that someone states
+  they ran the suite; it cannot prove they did, and it may never be cited as
+  evidence that the hooks were tested. It is worth having because the failure
+  it prevents is forgetting, not lying — and forgetting is the failure that
+  actually occurred.
+
+  Two details are load-bearing. The body is read from the API rather than the
+  event payload, because a re-run replays the original payload and would still
+  see the body as it was when the run started — adding the marker would never
+  clear the check. And HTML comments are stripped before the search, because
+  `.github/pull_request_template.md` carries the marker commented out: a
+  template nobody edited must not satisfy a check about work somebody did.
+  Both `gh api` calls fail the step on a non-zero exit rather than falling
+  through to a pass, so the step cannot report green about a question it never
+  got an answer to. Refs #145.
+
+### Changed
+
+- **Sharding the regression suites across parallel jobs: rejected.** Recorded
+  as a decision rather than left open. The full sweep measures 5 min 59 s on
+  the runner, of which `test-deploy-flags.ps1` (331 s locally) and
+  `test-hooks.ps1` (299 s locally) dominate, and most pull requests touch
+  neither. A path-based case distinction would save roughly three minutes.
+
+  It cannot be built as "skip the job for these paths", because a required
+  check that does not run does not fail — it stays pending and stops
+  asserting. The only sound shape is one job that always runs and decides
+  internally which suites to execute, with the full sweep retained on
+  `push: dev` as the backstop. Three minutes does not justify machinery whose
+  failure mode is a gate that quietly covers less than it claims. Refs #145.
+
 ## [1.22.0] -- 2026-08-19
 
 ### Added
