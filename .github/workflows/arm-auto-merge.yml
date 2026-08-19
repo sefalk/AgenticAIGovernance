@@ -1,0 +1,65 @@
+# Arms GitHub's auto-merge on agent-opened pull requests.
+#
+# The repository setting "Allow auto-merge" only makes the control exist.
+# Auto-merge is opt-in per pull request, and the GitHub MCP server exposes no
+# tool for arming it -- so gh-pr-manager can open a pull request and then
+# cannot finish. PR #149 showed the gap: green check, mergeable_state "clean",
+# and it sat there until a human clicked. See issue #150.
+#
+# This does not weaken the gate. Auto-merge waits for the required status
+# check; a red or pending check never merges. This workflow only arms.
+#
+# Known cost: work performed with GITHUB_TOKEN does not trigger further
+# workflow runs, so a merge armed by this token may not produce the
+# post-merge "Regression Suites" run on push to dev. The pull-request run is
+# unaffected and is the one the ruleset requires. Swap GH_TOKEN for a PAT if
+# the post-merge sweep is ever needed as more than a backstop.
+
+name: Arm Auto-Merge
+
+on:
+  pull_request:
+    # Not pull_request_target. That variant runs with the base branch's token
+    # and would hand write permissions to code from a fork.
+    types: [opened, reopened, ready_for_review]
+    branches: [dev]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  arm:
+    # Three independent conditions, because this repository is public and the
+    # cost of a wrong arm is an outsider's code merged unattended:
+    #   - same repository: a fork's pull request is never armed
+    #   - author is the owner
+    #   - base is dev: main is the default branch, where `Closes #N` fires, so
+    #     no automation may merge into it. Same allowlist as gh-pr-manager.
+    # The base is already filtered by the trigger above; it is repeated here so
+    # that editing one does not silently widen the other.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login == github.repository_owner &&
+      github.event.pull_request.base.ref == 'dev' &&
+      github.event.pull_request.draft == false
+    name: Arm auto-merge
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # No checkout: gh needs the API, not the tree.
+      #
+      # A failure here fails the job on purpose. Arming quietly is worse than
+      # not arming: the pull request would wait forever for something nobody
+      # is doing, which is the failure shape of #125 and #98 -- a green result
+      # that carries no information.
+      - name: Enable auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        # A pull request whose required check has already passed cannot be
+        # armed -- GitHub rejects the mutation as already clean. Merge it
+        # directly instead. That call is gated by the ruleset too, so the
+        # fallback is not a bypass, and a permissions failure still fails both.
+        run: gh pr merge "$PR_URL" --auto --merge || gh pr merge "$PR_URL" --merge
