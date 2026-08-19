@@ -23,6 +23,19 @@ forgetting, not lying.
 
 <!-- local-check: test-hooks-integration.ps1 -->
 
+<!--
+Required only when this pull request changes .vscode/, .githooks/ or the
+repository's own .github/ -- the files that decide which guards run and what
+CI enforces. Payload hooks under flavors/ are covered by the line above
+instead.
+
+Uncomment and state why, in your own words. The regression job fails on an
+empty reason, because a marker with nothing after it is a checkbox, and a
+checkbox gets ticked.
+-->
+
+<!-- env-change: -->
+
 ## Closes
 
 <!--
