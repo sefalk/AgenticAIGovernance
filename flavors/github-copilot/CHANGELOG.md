@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **An agent may now open a GitHub pull request, and cannot merge the one
+  branch where merging would close issues.** The merge gate from #143 made
+  `dev` and `main` enforceable, but no agent could open a pull request against
+  them: `ado-pr-manager` speaks only Azure DevOps, and the coordinator's
+  integration path had no GitHub equivalent. `gh-pr-manager` fills that gap,
+  gated by `GH_PR_CAPABILITY_MODE` and defaulting to `off`.
+
+  It is not a port of `ado-pr-manager`, because the assumption underneath that
+  agent does not hold here. Azure DevOps has autocomplete — set a flag, and the
+  platform merges later once policies pass. **The GitHub MCP server exposes no
+  such tool.** The only merge tool attempts the merge immediately, and the
+  ruleset refuses it while a required check is unfinished. So a refusal is a
+  normal outcome rather than an error, and the agent reports
+  `NEEDS_CHECK_COMPLETION` and returns instead of polling — one attempt per
+  invocation, no waiting, no burning context on information a later invocation
+  gets for free. That status is deliberately distinct from `NEEDS_HUMAN_MERGE`:
+  the first means the work is fine and the platform is still deciding, the
+  second means no agent may decide at all, and a coordinator that confuses them
+  either waits forever or re-invokes against a branch it may not touch.
+
+  Which branch it may merge is an **allowlist** (`GH_PR_AUTOMERGE_BRANCHES`,
+  default `dev`), not a denylist. A denylist fails open, and the branch most
+  likely to be missing from it is a release branch created next month. The
+  default branch is refused even when explicitly listed, because GitHub honours
+  `Closes #123` only on a merge into the default branch — measured on issue
+  #143, where a pull request into `dev` carrying that keyword left
+  `closed_by_pull_requests` at `total_count: 0`. That coupling is what makes
+  "this worker never closes an issue" a property rather than an intention, and
+  it is the GitHub analogue of `ado-pr-manager`'s mandatory
+  `transitionWorkItems: false`. Closing an issue requires someone to have read
+  its acceptance criteria, which is not a judgment this agent makes.
+
+  The agent file states what configuration cannot enforce: `Allow auto-merge`
+  is repository-wide with no per-branch form, and a single maintainer cannot
+  require an approving review on the default branch without deadlocking it,
+  since GitHub forbids approving your own pull request. The human-only boundary
+  therefore rests on this policy, not on the platform — and the agent says so
+  in its return rather than implying a guarantee it does not have. Closes #146.
+
 ### Changed
 
 - **The context budget has two owners now, so it stops failing on arrival.**

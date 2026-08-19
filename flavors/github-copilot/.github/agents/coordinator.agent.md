@@ -28,6 +28,7 @@ agents:
    - ado-pr-manager
    - ado-pipeline-manager
    - gh-issue-manager
+   - gh-pr-manager
    - planner
    - test-writer
    - test-critic
@@ -231,6 +232,9 @@ work-item-first contract, and post-merge reconciliation live there, not here:
 - `ado-*` → `skills/ado-shared/SKILL.md` § Coordinator Workflow Sequences
 - `gh-issue-manager` → `skills/gh-issue/SKILL.md`, which also covers framework
   defect reports — those never go to the project's own tracker.
+- `gh-pr-manager` → gated by `GH_PR_CAPABILITY_MODE`. GitHub has no autocomplete:
+  it merges now or reports that the platform refused. It never merges into the
+  default branch, because that is the only branch where `Closes #N` fires.
 
 ### Review Only (user asks to review existing code)
 
