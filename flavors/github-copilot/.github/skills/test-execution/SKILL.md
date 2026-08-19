@@ -44,7 +44,13 @@ All `lint:` tasks call `.github/scripts/run-lint.ps1`, which resolves the venv
 interpreter itself and derives the rule set from `LINTING_STRICTNESS` in
 `af-env.conf`. **Never invoke `ruff` directly** — task shells do not activate
 the venv, so a bare `ruff` command fails with `CommandNotFoundException`, and a
-direct call would bypass the configured strictness.
+direct call would bypass the configured strictness. It also would not
+reproduce the gate's verdict even with the right `--select`:
+`check-python-linting.py` applies the project's own ruff `ignore` /
+`per-file-ignores` on top of the selected rules (visible as `project_ignore=`
+in its output), so a direct `ruff check --select=...` call can show violations
+the gate does not have — a wasted edit, and pressure to add a `# noqa` the
+project never asked for (issue #124).
 
 ### Checking the gate's own file set
 

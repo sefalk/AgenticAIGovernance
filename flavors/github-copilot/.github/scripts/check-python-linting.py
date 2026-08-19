@@ -14,10 +14,15 @@ project *explicitly* ignores in its own ruff config wins. A rule the project
 merely does not `select` is not an exception -- the floor still applies. See
 CORE_RULES for the part no project may switch off.
 
+Formatting (`ruff format --check`) is a second, independent gate over the same
+file set as the lint check. It is binary and runs at every strictness level --
+it is not part of STRICTNESS_RULES and not affected by project_ignore. Drift
+is a violation like any other (issue #124).
+
 Exit codes:
-  0  PASS  — no violations
-  1  BLOCKED — ruff not installed (hooks treat as advisory skip, not block)
-  2  FAIL  — lint violations found
+  0  PASS  — no violations, formatting clean
+  1  BLOCKED — ruff not installed, or format check could not be executed
+  2  FAIL  — lint violations found and/or formatting drift
 """
 
 from __future__ import annotations
@@ -250,6 +255,81 @@ def _strip_core(codes: list[str]) -> tuple[list[str], list[str]]:
     return kept, rejected
 
 
+# ruff names the files it would reformat differently across versions, so both
+# shapes are matched and drift is never silently missed on a ruff upgrade.
+# Measured on ruff 0.16.1:
+#     unformatted: File would be reformatted
+#      --> C:\path\to\file.py:1:6
+# Older releases print a single line instead:
+#     Would reformat: path/to/file.py
+_FORMAT_DRIFT_RES = (
+    re.compile(r"^Would reformat:\s*(.+)$"),
+    re.compile(r"^-->\s*(.+?):\d+:\d+$"),
+)
+
+
+def _check_formatting(ruff_exe: str, files: list[str]) -> tuple[bool, list[str]]:
+    """Run ``ruff format --check`` over the exact lint file set.
+
+    Formatting is binary and independent of ``LINTING_STRICTNESS`` and of any
+    project ``ignore`` -- it is not a rule selection, so neither applies.
+    Fails closed: any inability to execute the check is reported as blocked
+    (the caller maps that to exit 1), never as clean.
+
+    Parameters
+    ----------
+    ruff_exe : str
+        Path to the resolved ruff executable.
+    files : list[str]
+        Exactly the file set passed to ``ruff check``.
+
+    Returns
+    -------
+    tuple[bool, list[str]]
+        ``(blocked, drifted_files)``. ``blocked`` is True if the check could
+        not be executed or ruff itself errored. ``drifted_files`` lists the
+        files that would be reformatted (only meaningful when not blocked).
+    """
+    try:
+        result = subprocess.run(
+            [ruff_exe, "format", "--check"] + files,
+            capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+    except Exception as exc:
+        print(f"LINTING_GATE_ERROR: failed to run ruff format --check: {exc}")
+        return True, []
+
+    # ruff format --check: 0 = clean, 1 = would reformat, >=2 = ruff itself failed.
+    if result.returncode not in (0, 1):
+        print(f"LINTING_GATE_ERROR: ruff format --check exited {result.returncode}")
+        if result.stdout.strip():
+            print(result.stdout.strip())
+        if result.stderr.strip():
+            print(result.stderr.strip())
+        return True, []
+
+    if result.returncode == 0:
+        return False, []
+
+    drifted: list[str] = []
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        for pattern in _FORMAT_DRIFT_RES:
+            m = pattern.match(stripped)
+            if m:
+                path = m.group(1).strip()
+                if path not in drifted:
+                    drifted.append(path)
+                break
+
+    # ruff reported drift (exit 1) but the message format didn't match what we
+    # parse for -- fail closed rather than silently report zero drifted files.
+    if not drifted:
+        drifted = list(files)
+
+    return False, drifted
+
+
 def main() -> int:
     """CLI entry point for hard-gate linting validation.
 
@@ -380,6 +460,11 @@ def main() -> int:
             if stream.strip():
                 outputs.append(stream.strip())
 
+    # --- Formatting: binary, independent of strictness and project_ignore ---
+    format_blocked, format_drift_files = _check_formatting(ruff_exe, files)
+    if format_blocked:
+        return 1
+
     # --- Report ---
     # Applied exceptions are printed so that precedence stays visible in the
     # stop-hook output, the workflow log and to the reviewing critic.
@@ -391,8 +476,12 @@ def main() -> int:
         summary.append("project_ignore=" + ",".join(sorted(set(applied))))
     if rejected:
         summary.append("core_override_rejected=" + ",".join(sorted(set(rejected))))
+    if format_drift_files:
+        summary.append(f"format_drift={len(format_drift_files)}")
+    else:
+        summary.append("format=clean")
 
-    if not failed:
+    if not failed and not format_drift_files:
         summary.append(f"files={len(files)}")
         print(f"LINTING_GATE_PASS ({', '.join(summary)})")
         return 0
@@ -400,6 +489,13 @@ def main() -> int:
     print(f"LINTING_GATE_FAIL ({', '.join(summary)})")
     for output in outputs:
         print(output)
+    if format_drift_files:
+        for path in format_drift_files:
+            print(f"LINTING_GATE_FORMAT_DRIFT: {path}")
+        print(
+            "Remedy: .github/scripts/run-lint.ps1 -Fix   (PowerShell)  |  "
+            ".github/scripts/run-lint.sh --fix   (POSIX)"
+        )
     return 2
 
 

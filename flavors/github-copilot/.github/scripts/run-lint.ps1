@@ -1,7 +1,13 @@
 # Canonical lint runner for agent workflows.
 # All agents MUST use this script instead of calling ruff directly, so that the
 # rule set always comes from LINTING_STRICTNESS in .github/af-env.conf and the
-# executable is always resolved from the project venv.
+# executable is always resolved from the project venv. A direct
+# `ruff check --select=...` call also will not reproduce this gate's verdict:
+# check-python-linting.py applies the project's own ruff `ignore` /
+# `per-file-ignores` on top of the selected rules (see project_ignore= in its
+# output), so a bare ruff invocation can show violations the gate does not
+# have, or vice versa if the project ignore is broader than the selection
+# implies (issue #124 finding 2).
 #
 # The hard gate in implementer-stop / refactorer-stop lints only *changed*
 # files. This script is the repo-wide counterpart: it is what you run to find
@@ -10,18 +16,22 @@
 # -Scope changed reproduces the gate's own file set, so you can see what the
 # gate will say before it says it.
 #
+# check-python-linting.py also runs `ruff format --check` over that same file
+# set -- formatting is blocking at every strictness level, independent of
+# rule selection and project_ignore (issue #124). -Fix applies both.
+#
 # Usage:
 #   .github/scripts/run-lint.ps1                    # Lint SRC_DIR/ and tests/
 #   .github/scripts/run-lint.ps1 -Scope src         # Lint SRC_DIR/ only
 #   .github/scripts/run-lint.ps1 -Scope tests       # Lint tests/ only
 #   .github/scripts/run-lint.ps1 -Scope changed     # Lint the branch delta + working tree
-#   .github/scripts/run-lint.ps1 -Fix               # Apply ruff's safe fixes
+#   .github/scripts/run-lint.ps1 -Fix               # Apply ruff's safe fixes + ruff format
 #   .github/scripts/run-lint.ps1 -Strictness strict # Override af-env.conf
 #
 # Exit codes (identical to check-python-linting.py):
-#   0 = clean
+#   0 = clean (lint and formatting)
 #   1 = blocked (venv python or ruff missing, or bad configuration)
-#   2 = lint violations found
+#   2 = lint violations found and/or formatting drift
 
 param(
     [ValidateSet('all', 'src', 'tests', 'changed')]
@@ -175,10 +185,18 @@ try {
         }
 
         & $ruff check "--select=$($strictnessRules[$level])" --fix @files
-        $ruffExit = $LASTEXITCODE
+        $checkExit = $LASTEXITCODE
+
+        # Formatting is blocking regardless of strictness (issue #124), so
+        # -Fix must apply it too -- otherwise the remedy this gate names does
+        # not actually clear the gate in one command.
+        & $ruff format @files
+        $formatExit = $LASTEXITCODE
+
         # ruff exits 1 when violations remain after fixing -- map to the
-        # documented contract (2 = violations).
-        $exitCode = if ($ruffExit -eq 0) { 0 } else { 2 }
+        # documented contract (2 = violations). ruff format itself only fails
+        # (non-zero) on an unparsable file, which is a violation too.
+        $exitCode = if ($checkExit -eq 0 -and $formatExit -eq 0) { 0 } else { 2 }
     } else {
         # --- Check mode: delegate to the gate's own checker ---
         $lintScript = Join-Path $workspaceRoot '.github/scripts/check-python-linting.py'
