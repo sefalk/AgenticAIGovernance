@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Working state now lives on the tracker, not in an agent's context (#186).**
+  Every issue in this repository read exactly as it did on the day it was filed.
+  What had been delivered, what was blocked, and what had been decided lived in
+  a context window; when the context ended, so did the knowledge. #167 was fully
+  delivered and its issue said nothing about it. The reasoning for keeping #170
+  open survived only because a human asked for it to be written down.
+
+  The new `work-item-state` skill is provider-agnostic and binds both
+  `gh-issue-manager` and `ado-work-item-manager`. It puts the *current* state in
+  a marked block at the end of the issue body and the *reasoning* in dated,
+  append-only comments — because those two artifacts have different properties
+  and neither substitutes for the other.
+
+  Which artifact holds what was decided by measurement, not taste. On this MCP
+  server `issue_read` `method: get` returns the body and no comment count;
+  `list_issues` returns eight fields per issue and no count either, its
+  `totalCount` being the number of issues. So the default read shows the body
+  alone, which is why current state has to live there — and, since no count
+  exists to branch on, `get_comments` is unconditional rather than conditional
+  on a signal that does not exist. #186's own body assumed that signal; the
+  correction is recorded on the issue.
+
+  The body block is deliberately capped at six lines and carries an index of
+  the decision comments. It makes the second call targeted; it never makes it
+  optional. Two new HARD gates make both halves checkable, and the trigger stays
+  narrow: an issue whose state actually changed, not a status banner on
+  everything.
+
+  The Azure DevOps half of § 6 is marked unmeasured. Whether an ADO description
+  field renders Markdown, and whether its default read returns comments, has not
+  been probed here, and the GitHub answer is not assumed to transfer.
+
 - **The formatting rule the framework enforces on consumers now applies to the
   framework (#167).** #124 made `ruff format --check` a hard gate for consumer
   projects. The framework itself had no repository-level ruff configuration at
