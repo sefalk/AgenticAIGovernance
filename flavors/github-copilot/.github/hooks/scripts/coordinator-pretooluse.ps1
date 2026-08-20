@@ -181,6 +181,20 @@ if ($toolName -match 'terminal') {
             }
         }
     }
+    # Baseline for the PostToolUse check: what was already dirty before this
+    # command ran. Without it that hook can only see presence, so it fired on
+    # every call while subagents legitimately held uncommitted work (#172).
+    $snapDir = git -C $AfCodeRoot rev-parse --absolute-git-dir 2>$null | Select-Object -First 1
+    if ($snapDir -and (Test-Path -LiteralPath $snapDir)) {
+        $srcDir = Get-AfConfig -Key 'SRC_DIR' -Default 'src'
+        $baseline = git -C $AfCodeRoot status --porcelain -- "$srcDir/" tests/ 2>$null
+        # Only on success: a failed status would write an empty baseline, and an
+        # empty baseline makes every existing change look new.
+        if ($LASTEXITCODE -eq 0) {
+            Set-Content -LiteralPath (Join-Path $snapDir 'af-delegation.snapshot') -Value ($baseline -join "`n")
+        }
+    }
+
     # Terminal commands allowed (git, investigation, etc.)
     Write-Output '{}'
     exit 0

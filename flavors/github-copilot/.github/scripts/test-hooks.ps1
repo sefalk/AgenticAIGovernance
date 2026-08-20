@@ -1192,6 +1192,85 @@ Assert-Deny "coordinator cannot run pytest through uv" `
 
 Write-Output ""
 
+# ── 2b. coordinator-posttooluse.ps1 ──────────────────────────────────────
+
+Write-Output "## coordinator-posttooluse.ps1"
+
+# This hook makes a claim about causality: did *this* terminal call change the
+# file? Presence cannot answer that, and answering it with presence accused the
+# coordinator on every call for the whole span between phase commits, while
+# subagents legitimately held uncommitted work (#172). The baseline PreToolUse
+# leaves behind is the only evidence available, so what is tested here is what
+# the hook does with it, without it, and when it already accounts for the change.
+#
+# git collapses a wholly untracked directory into one porcelain entry, so these
+# cases separate baseline from delta by directory, not by file name.
+$postSrcDir = 'src'
+$postConf = Join-Path $githubDir 'af-env.conf'
+if (Test-Path $postConf) {
+    $postMatch = Select-String -Path $postConf -Pattern '^SRC_DIR=(.+)$'
+    if ($postMatch) { $postSrcDir = $postMatch.Matches[0].Groups[1].Value.Trim() }
+}
+
+function Invoke-PostToolUse {
+    param([hashtable]$Files, [string]$Tool = 'run_in_terminal')
+    return (Invoke-Hook -Script 'coordinator-posttooluse.ps1' `
+        -JsonInput ('{"tool_name":"' + $Tool + '","tool_input":{"command":"git status --porcelain"}}') `
+        -Branch 'agent/172-x' -Files $Files)
+}
+
+$postNoBaseline = Invoke-PostToolUse -Files @{ 'tests/alpha.py' = 'x = 1' }
+Assert-True "posttooluse stays silent when no baseline was recorded" `
+    ($postNoBaseline.Output -eq '{}') `
+    "no baseline is no evidence of causality, and a guard that accuses without evidence is the defect; got: $($postNoBaseline.Output)" `
+    $postNoBaseline.Output
+
+$postCovered = Invoke-PostToolUse -Files @{
+    'tests/alpha.py'              = 'x = 1'
+    '.git/af-delegation.snapshot' = '?? tests/'
+}
+Assert-True "posttooluse stays silent when the baseline already holds the change" `
+    ($postCovered.Output -eq '{}') `
+    "this is the #172 false positive verbatim: the change predates the call; got: $($postCovered.Output)" `
+    $postCovered.Output
+
+$postDelta = Invoke-PostToolUse -Files @{
+    'tests/alpha.py'              = 'x = 1'
+    "$postSrcDir/beta.py"         = 'y = 2'
+    '.git/af-delegation.snapshot' = '?? tests/'
+}
+Assert-Contains "posttooluse reports what appeared during the call" `
+    $postDelta.Output "$postSrcDir/" `
+    "the entry absent from the baseline is the attributable one"
+
+Assert-NotContains "posttooluse does not report what the baseline already held" `
+    $postDelta.Output 'tests/' `
+    "reporting it is exactly the false positive #172 filed"
+
+Assert-NotContains "posttooluse does not advise discarding uncommitted work" `
+    $postDelta.Output 'git checkout' `
+    "destructive remediation for a warning that can still be wrong (#172)"
+
+$postNonTerminal = Invoke-PostToolUse -Tool 'create_file' -Files @{
+    'tests/alpha.py'              = 'x = 1'
+    '.git/af-delegation.snapshot' = '?? tests/'
+}
+Assert-True "posttooluse ignores non-terminal tools" `
+    ($postNonTerminal.Output -eq '{}') `
+    "the hook is scoped to terminal calls; got: $($postNonTerminal.Output)" `
+    $postNonTerminal.Output
+
+# The baseline exists only because PreToolUse writes one before allowing the call.
+$postBaselineWrite = Invoke-Hook -Script 'coordinator-pretooluse.ps1' `
+    -JsonInput '{"tool_name":"run_in_terminal","tool_input":{"command":"git diff --stat"}}' `
+    -Branch 'agent/172-x' -Files @{ 'tests/alpha.py' = 'x = 1' } `
+    -ReadBack '.git/af-delegation.snapshot'
+Assert-Contains "pretooluse records a baseline before an allowed terminal call" `
+    $postBaselineWrite.ReadBack 'tests/' `
+    "without it the PostToolUse check has nothing to attribute against (#172)"
+
+Write-Output ""
+
 # ── 3. test-writer-pretooluse.ps1 ────────────────────────────────────────
 
 Write-Output "## test-writer-pretooluse.ps1"
