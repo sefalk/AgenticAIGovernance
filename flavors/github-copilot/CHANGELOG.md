@@ -26,10 +26,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repository root with a synthetic `PreToolUse` payload, `block-dangerous.ps1`
   allowed `git status` and denied force push, hard reset and `git add -A`. It
   resolves its helpers relative to its own location, not the current
-  directory. What is **not** measured is whether VS Code loads the file at all
-  from a repository that is not itself a deployed payload, and how it resolves
-  the relative paths in a multi-root workspace. That needs a session and a hook
-  log. Until then this is an experiment, and #61 stays open.
+  directory.
+
+  And it loads. In a reloaded window, 13 runs of the `flavors/` command were
+  recorded with `cwd` set to this repository — so VS Code reads a root hooks
+  file from a folder that is not a deployed payload, and resolves the relative
+  `command` path against the folder that declares it. Every `PreToolUse` ran
+  exactly two hooks, one from each workspace folder, with no duplication and
+  neither suppressing the other; `PostToolUse` ran one, because this file
+  declares none. Cost is about 1.9 s per tool call, which is PowerShell
+  startup rather than analysis.
+
+  Still untested: that the guard *denies* in this arrangement. Every observed
+  run returned allow, because no dangerous command was issued. #61 stays open.
 
 - **A pull request that changes this repository's own environment must now say
   so (#164).** `.vscode/`, `.githooks/` and the root `.github/` decide which
