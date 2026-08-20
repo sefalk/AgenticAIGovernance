@@ -438,6 +438,42 @@ function Get-ScanUnits([string]$cmd) {
 
 $scanUnits = Get-ScanUnits $command
 
+# Raw-scanned rules match the whole command line, because the thing they look
+# for spans units. That must not make quoting meaningless for them alone: the
+# same literal was data for every other rule and a command for these (#122).
+# Two strengths, because the two rules have different threat models.
+function Get-InterpreterPayloads([string]$cmd) {
+    $found = New-Object System.Collections.Generic.List[string]
+    foreach ($m in [regex]::Matches($cmd, $payloadRe)) {
+        $v = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
+        if ($v) { $found.Add($v) }
+    }
+    return , $found.ToArray()
+}
+
+# 'exec'  -- every quoted literal is data unless an interpreter executes it. A
+#            `|` inside quotes is not a pipe; only an interpreter makes it one.
+# 'prose' -- only recognised prose carriers are exempted. SQL clients take a
+#            statement positionally (`sqlite3 db "DROP TABLE x"`) as well as
+#            behind a flag, so blanket stripping would launder the real case.
+function Get-RawTargets([string]$cmd, [string]$Strength) {
+    $payloads = Get-InterpreterPayloads $cmd
+    if ($cmd -match '\$\(' -or $cmd -match '`') { return , (@($cmd) + $payloads) }
+    $stripped = if ($Strength -eq 'prose') {
+        ((Split-TopLevel $cmd | ForEach-Object {
+            if ($_ -match $dataCarrierRe -or $_ -match '^\s*("[^"]*"|''[^'']*'')\s*$') { Remove-QuotedData $_ } else { $_ }
+        }) -join ' ; ')
+    } else {
+        $t = $cmd
+        foreach ($pl in $payloads) { $t = $t.Replace('"' + $pl + '"', ' ').Replace("'" + $pl + "'", ' ') }
+        ($t -replace '"[^"]*"', '' -replace "'[^']*'", '')
+    }
+    return , (@($stripped) + $payloads)
+}
+
+$rawTargetsExec = Get-RawTargets $command 'exec'
+$rawTargetsProse = Get-RawTargets $command 'prose'
+
 function Test-AnyUnit([string]$pattern, [switch]$CaseSensitive) {
     foreach ($u in $scanUnits) {
         if ($CaseSensitive) { if ($u -cmatch $pattern) { return $true } }
@@ -448,8 +484,9 @@ function Test-AnyUnit([string]$pattern, [switch]$CaseSensitive) {
 
 # ===========================================================================
 # TIER 1 -- DENY (hard, level-independent). Checked first.
-# Rules are matched per scan unit unless marked raw = $true, which is reserved
-# for rules about structure or payload content that legitimately spans units.
+# Rules are matched per scan unit unless marked rawScan, which is reserved for
+# rules about structure or payload content that legitimately spans units. Those
+# still respect quoting -- see Get-RawTargets for the two strengths.
 # ===========================================================================
 $denyRules = @(
     @{ p = 'git\s+push\b.*(--force|-f)\b';            why = 'force push (remote history rewrite)' }
@@ -468,12 +505,15 @@ $denyRules = @(
     @{ p = 'mkfs\.';                                  why = 'filesystem format' }
     @{ p = 'format\s+[A-Za-z]:';                      why = 'drive format' }
     @{ p = 'chmod\s+-R\s+777';                        why = 'world-writable permissions' }
-    @{ p = '\|\s*(bash|sh|iex|Invoke-Expression)\b';  why = 'pipe-to-shell execution'; raw = $true }
-    @{ p = 'DROP\s+(TABLE|DATABASE)';                 why = 'destructive SQL'; raw = $true }
-    @{ p = 'TRUNCATE\s+TABLE';                        why = 'destructive SQL'; raw = $true }
+    @{ p = '\|\s*(bash|sh|iex|Invoke-Expression)\b';  why = 'pipe-to-shell execution'; rawScan = 'exec' }
+    @{ p = 'DROP\s+(TABLE|DATABASE)';                 why = 'destructive SQL'; rawScan = 'prose' }
+    @{ p = 'TRUNCATE\s+TABLE';                        why = 'destructive SQL'; rawScan = 'prose' }
 )
 foreach ($r in $denyRules) {
-    $hit = if ($r.raw) { $command -match $r.p } else { Test-AnyUnit $r.p }
+    $hit = if ($r.rawScan) {
+        $targets = if ($r.rawScan -eq 'prose') { $rawTargetsProse } else { $rawTargetsExec }
+        [bool]($targets | Where-Object { $_ -match $r.p })
+    } else { Test-AnyUnit $r.p }
     if ($hit) {
         Emit 'deny' ("Policy hard-deny: $($r.why). $denyTail")
     }

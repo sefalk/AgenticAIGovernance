@@ -428,12 +428,13 @@ matches_stripped() { echo "$stripped_guard" | grep -qEi -e "$1"; }
 # unambiguously prose.
 #
 # Splitting and classification are delegated to Python (already a hard
-# dependency here) because both need quote-aware scanning. Mode "segments"
-# yields plain statements (TIER 2); mode "units" yields the deny-tier units.
+# dependency here) because both need quote-aware scanning. One invocation
+# returns every view the tiers need, RS-separated: 1 deny-tier units,
+# 2 raw exec targets, 3 raw prose targets, 4 plain statements (TIER 2).
 # ---------------------------------------------------------------------------
 SPLIT_PY='import sys, re
-mode = sys.argv[1] if len(sys.argv) > 1 else "segments"
-s = sys.stdin.read()
+# A command may not contain the section separator, or it could forge a break.
+s = sys.stdin.read().replace("\x1e", " ")
 
 def split_top(t):
     out=[];cur=[];q=None;i=0
@@ -455,9 +456,6 @@ def split_top(t):
     return [x.replace("\n"," ") for x in out]
 
 segs = split_top(s)
-if mode == "segments":
-    sys.stdout.write("\n".join(segs))
-    sys.exit(0)
 
 DATA = re.compile(r"^\s*(echo|printf|Write-Host|Write-Output|Write-Error|Write-Verbose|Write-Debug)\b|^\s*git\s+(commit|tag|notes|stash)\b", re.I)
 PAYLOAD = re.compile(r"(?:^|\s)(?:-c|--command|-Command|-e|--eval|-ScriptBlock|-ArgumentList|-Args|/c|/k|iex|Invoke-Expression|eval)\s+(?:\"([^\"]*)\"|\x27([^\x27]*)\x27)", re.I)
@@ -468,28 +466,85 @@ def strip_quoted(seg):
         return seg
     return re.sub(r"\x27[^\x27]*\x27", "", re.sub(r"\"[^\"]*\"", "", seg))
 
-units=[]
-for seg in segs:
-    if not seg.strip():
-        continue
-    units.append(strip_quoted(seg) if (BARE.match(seg) or DATA.search(seg)) else seg)
-    for m in PAYLOAD.finditer(seg):
-        payload = m.group(1) if m.group(1) is not None else m.group(2)
-        for p in split_top(payload):
-            if p.strip():
-                units.append(p)
-if not units:
-    units=[s]
-sys.stdout.write("\n".join(units))'
+def payloads_of(text):
+    out=[]
+    for m in PAYLOAD.finditer(text):
+        p = m.group(1) if m.group(1) is not None else m.group(2)
+        if p:
+            out.append(p)
+    return out
 
-split_command() { printf '%s' "$1" | "$PYTHON" -c "$SPLIT_PY" "$2"; }
+# Targets for the rules that scan the whole command line. They span units, but
+# that must not make quoting meaningless for them alone (#122). "exec":
+# a quoted literal is data unless an interpreter executes it. "prose":
+# only recognised prose carriers are exempted, because SQL clients take a
+# statement positionally as well as behind a flag.
+def build_raw(strength):
+    pls = payloads_of(s)
+    if "$(" in s or "`" in s:
+        return [s] + pls
+    if strength == "exec":
+        t = s
+        for p in pls:
+            t = t.replace("\"" + p + "\"", " ").replace("\x27" + p + "\x27", " ")
+        t = re.sub(r"\x27[^\x27]*\x27", "", re.sub(r"\"[^\"]*\"", "", t))
+        return [t] + pls
+    parts = [strip_quoted(seg) if (BARE.match(seg) or DATA.search(seg)) else seg for seg in segs]
+    return [" ; ".join(parts)] + pls
 
-scan_units=$(split_command "$command_str" units)
+def build_units():
+    units=[]
+    for seg in segs:
+        if not seg.strip():
+            continue
+        units.append(strip_quoted(seg) if (BARE.match(seg) or DATA.search(seg)) else seg)
+        for m in PAYLOAD.finditer(seg):
+            payload = m.group(1) if m.group(1) is not None else m.group(2)
+            for p in split_top(payload):
+                if p.strip():
+                    units.append(p)
+    return units or [s]
+
+# One interpreter start per hook invocation, not one per scan: process startup
+# dominates the cost of this hook, and it runs before every terminal call.
+# Sections are separated by a lone RS (0x1e), which the input can no longer
+# contain -- it is stripped above, so a command cannot forge a section break.
+def flat(rows):
+    return "\n".join(x.replace("\n", " ") for x in rows)
+
+sys.stdout.write("\n\x1e\n".join([
+    flat(build_units()), flat(build_raw("exec")), flat(build_raw("prose")), flat(segs),
+]))'
+
+split_command() { printf '%s' "$1" | "$PYTHON" -c "$SPLIT_PY"; }
+
+# Section n of the splitter output, separated by a lone RS. Pure parameter
+# expansion, so this stays portable and costs no extra process.
+RS=$(printf '\036')
+all_scan=$(split_command "$command_str")
+section() {
+    local rest="$all_scan" i=1
+    while [ "$i" -lt "$1" ]; do rest="${rest#*"$RS"}"; i=$((i + 1)); done
+    printf '%s' "${rest%%"$RS"*}"
+}
+
+nonblank() { [ -n "$(printf %s "$1" | tr -d '[:space:]')" ]; }
+
+scan_units=$(section 1)
 # Never let a splitter failure blind the deny tier: fall back to the raw string.
-[ -z "$(printf %s "$scan_units" | tr -d '[:space:]')" ] && scan_units="$command_str"
+nonblank "$scan_units" || scan_units="$command_str"
 # grep matches line by line, so a unit is exactly one line and `$` in a pattern
 # anchors to the end of that unit.
 matches_unit() { printf '%s\n' "$scan_units" | grep -qEi -e "$1"; }
+
+# Quote-aware targets for the raw-scanned rules, same fallback for the same
+# reason.
+raw_exec_targets=$(section 2)
+nonblank "$raw_exec_targets" || raw_exec_targets="$command_str"
+raw_prose_targets=$(section 3)
+nonblank "$raw_prose_targets" || raw_prose_targets="$command_str"
+matches_raw_exec() { printf '%s\n' "$raw_exec_targets" | grep -qEi -e "$1"; }
+matches_raw_prose() { printf '%s\n' "$raw_prose_targets" | grep -qEi -e "$1"; }
 
 # ===================== TIER 1 -- DENY (hard) =====================
 deny_msg="Policy hard-deny. The agent will not run this. If genuinely required, either (a) run it yourself -- the agent can prepare the exact command for you to paste and execute -- or (b) make a conscious decision to relax the autonomy policy in .github/af-env.conf."
@@ -512,19 +567,25 @@ deny_patterns=(
     'chmod\s+-R\s+777'
 )
 # Rules about structure or payload content that legitimately spans units, and
-# so stay scoped to the raw command line. Destructive SQL is deliberately here:
-# SQL clients take it as a quoted argument, and a false deny on a commit message
-# that mentions DROP TABLE is the lesser evil.
-deny_patterns_raw=(
+# so stay scoped to the raw command line -- but still quote-aware (#122).
+# Destructive SQL gets the stricter "prose" treatment: SQL clients take a
+# statement positionally (sqlite3 db "DROP TABLE x") as well as behind a flag,
+# so only recognised prose carriers are exempted there.
+deny_patterns_raw_exec=(
     '\|\s*(bash|sh|iex|Invoke-Expression)\b'
+)
+deny_patterns_raw_prose=(
     'DROP\s+(TABLE|DATABASE)'
     'TRUNCATE\s+TABLE'
 )
 for p in "${deny_patterns[@]}"; do
     if matches_unit "$p"; then emit deny "$deny_msg"; fi
 done
-for p in "${deny_patterns_raw[@]}"; do
-    if matches "$p"; then emit deny "$deny_msg"; fi
+for p in "${deny_patterns_raw_exec[@]}"; do
+    if matches_raw_exec "$p"; then emit deny "$deny_msg"; fi
+done
+for p in "${deny_patterns_raw_prose[@]}"; do
+    if matches_raw_prose "$p"; then emit deny "$deny_msg"; fi
 done
 # Branch force-deletion (-D) needs a CASE-SENSITIVE check (grep without -i) so
 # that the safe lowercase -d (merged-only) is not denied.
@@ -643,7 +704,7 @@ is_safe_segment() {
 # so conventional-commit messages like "fix(scope): ..." are not falsely blocked.
 stripped_guard=$(printf '%s' "$command_str" | sed -E 's/"[^"]*"//g' | sed -E "s/'[^']*'//g")
 if ! printf '%s' "$stripped_guard" | grep -qE '[`({]'; then
-    seg_lines=$(split_command "$command_str" segments)
+    seg_lines=$(section 4)
     any=0; allsafe=1
     while IFS= read -r seg; do
         [ -z "$(printf '%s' "$seg" | tr -d '[:space:]')" ] && continue
