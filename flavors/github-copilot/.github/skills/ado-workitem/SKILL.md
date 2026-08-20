@@ -41,6 +41,10 @@ and items may appear on an unexpected board/team:
 - Append or targeted rewrite only.
 - Preserve prior context and ownership unless explicitly instructed.
 - Prefer dedicated fields over generic description text.
+- Maintain the working-state block and post decision records as comments —
+  `skills/work-item-state/SKILL.md`. Its § 1 measurements are GitHub-specific;
+  probe the equivalent Azure DevOps read behaviour once and record it there
+  rather than assuming the answer transfers.
 
 ## Linking Strategy
 

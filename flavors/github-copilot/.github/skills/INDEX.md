@@ -37,6 +37,7 @@
 | 26 | `test-execution` | Run tests and lint from an agent — pre-defined task labels, phase-specific scoping, expected runtimes, the per-workflow test budget, and the shared test log. | test-writer, test-critic, implementer, refactorer, code-critic |
 | 27 | `copilot-authoring` | Reference depth for authoring Copilot customisation files — subagent pattern, model tiers, managed regions, built-in tool names, hooks JSON, prompt features, skill visibility, custom tool sets. | `copilot-authoring.instructions.md` (any agent editing a customisation file) |
 | 28 | `gh-issue` | GitHub issue lifecycle — repository routing (project vs framework upstream), duplicate search before create, evidence-grounded framework defect reports, sub-issue linking, and degraded-mode fallback. | gh-issue-manager |
+| 29 | `work-item-state` | Provider-agnostic tracker working state — the body-resident working-state block, dated decision records as comments, the read-both/update-on-landing rule, and the narrow trigger. | gh-issue-manager, ado-work-item-manager |
 
 ## Agent Skill Matrix
 
@@ -53,10 +54,10 @@
 | **arbiter** | human-escalation, design-patterns, hexagonal-architecture |
 | **researcher** | data-pipeline-design, data-modeling, data-quality |
 | **compliance-checker** | *(no skills — process checkpoint agent)* |
-| **ado-work-item-manager** | ado-workitem, ado-shared, databricks-execution-patterns |
+| **ado-work-item-manager** | ado-workitem, ado-shared, work-item-state, databricks-execution-patterns |
 | **ado-wiki-manager** | ado-wiki, ado-shared |
 | **ado-pr-manager** | ado-pr, ado-shared |
-| **gh-issue-manager** | gh-issue |
+| **gh-issue-manager** | gh-issue, work-item-state |
 | **gh-pr-manager** | git-workflow |
 
 ## Available for Activation (34 skills in `skills/_available/`)

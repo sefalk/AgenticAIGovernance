@@ -37,6 +37,8 @@ Gates) instead of assuming availability.
 
 Consult these skills when relevant to the task:
 - **gh-issue** (`skills/gh-issue/SKILL.md`)
+- **work-item-state** (`skills/work-item-state/SKILL.md`) — required before any
+  read of, or write to, an existing issue
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 
@@ -89,6 +91,8 @@ that leaves no artifact is a silently dropped finding.
 - **Route:** {project | upstream}
 - **Repository:** {owner/name}
 - **Issues:** {#number — url, one line each, or "none"}
+- **Read:** {per issue touched: `get (comments: n) + get_comments (n)`, or `get (comments: 0 — field absent)`, or "n/a — create only"}
+- **Working state:** {per issue touched: updated | not required (no state change) | n/a}
 - **Duplicate search:** {query run} -> {n results, decision}
 - **Source verification:** {upstream route only: verified in framework source / local divergence / n/a}
 - **Redactions applied:** {list, or "none"}
@@ -101,7 +105,7 @@ that leaves no artifact is a silently dropped finding.
 - **ADVISORY:** issues_written = {count}
 - **BLOCKED gates:** {list, or "none"}
 - **Failed HARD gates:** {list, or "none"}
-- **Skills Read:** skills/gh-issue/SKILL.md
+- **Skills Read:** skills/gh-issue/SKILL.md, skills/work-item-state/SKILL.md
 ```
 
 ## Exit Gates
@@ -119,4 +123,6 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Redaction sweep on upstream writes | HARD | Redactions field is populated or explicitly `none` after a check | Standard+ |
 | Gate `off` => drafted body returned | HARD | `SKIPPED` returns include the full body | Trivial+ |
 | Required unavailable => BLOCKED | HARD | Operation halts with escalation | Standard+ |
+| Comments fetched whenever the count is non-zero | HARD | `Read` field shows the `comments` count and a matching `get_comments`; an absent count is reported as an inferred zero, not left silent | Trivial+ |
+| Working-state block updated when the issue's state changed | HARD | `Working state` field is `updated`, or names why no state changed | Standard+ |
 | Report actionable without session context | SOFT | Reviewer checks the body stands alone | Standard+ |

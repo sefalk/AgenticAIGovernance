@@ -9,6 +9,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Working state now lives on the tracker, not in an agent's context (#186).**
+  Every issue in this repository read exactly as it did on the day it was filed.
+  What had been delivered, what was blocked, and what had been decided lived in
+  a context window; when the context ended, so did the knowledge. #167 was fully
+  delivered and its issue said nothing about it. The reasoning for keeping #170
+  open survived only because a human asked for it to be written down.
+
+  The new `work-item-state` skill is provider-agnostic and binds both
+  `gh-issue-manager` and `ado-work-item-manager`. It puts the *current* state in
+  a block under its own `## Working state` heading at the end of the issue body,
+  and the *reasoning* in dated, append-only comments — because those two
+  artifacts have different properties and neither substitutes for the other.
+
+  Which artifact holds what was decided by measurement, not taste. On this MCP
+  server `issue_read` `method: get` returns the body — so current state has to
+  live there, because that is what a default read shows. Comments need a second
+  call, and whether to make it is decided by the `comments` count that both
+  `get` and `list_issues` return.
+
+  That count took two measurements to establish, and the first was misleading:
+  the field is **omitted entirely when it is zero**, so an issue read before any
+  comment existed looks like a surface with no count at all. Reading #186 again
+  after a comment was posted showed `comments: 1` on both calls. The rule is
+  therefore: non-zero means the fetch is mandatory; an absent field means the
+  agent inferred a zero and must say so in its return, because absence is not
+  self-describing and the inference should fail loudly if the serialisation ever
+  changes. Both the wrong first conclusion and the correction are recorded on
+  #186 rather than quietly overwritten.
+
+  The body block is deliberately capped at six lines and carries an index of
+  the decision comments. It makes the second call targeted; it never makes it
+  optional. Two new HARD gates make both halves checkable, and the trigger stays
+  narrow: an issue whose state actually changed, not a status banner on
+  everything.
+
+  Two further behaviours were found by applying the convention to #186 itself
+  and checking what landed. `<!-- af:working-state:START -->` markers, which the
+  first draft used as the splice anchor, **do not survive the round trip** — the
+  block came back without them. And a stored `agent's` reads back as
+  `agent&#39;s`, so a body written back verbatim stores the literal entity for
+  every human to see. The anchor is therefore a visible `## Working state`
+  heading, entities are decoded before writing, and the procedure ends with a
+  re-read rather than an assumption.
+
+  The Azure DevOps half of § 6 is marked unmeasured. Whether an ADO description
+  field renders Markdown, and whether its default read returns comments, has not
+  been probed here, and the GitHub answer is not assumed to transfer.
+
 - **The formatting rule the framework enforces on consumers now applies to the
   framework (#167).** #124 made `ruff format --check` a hard gate for consumer
   projects. The framework itself had no repository-level ruff configuration at

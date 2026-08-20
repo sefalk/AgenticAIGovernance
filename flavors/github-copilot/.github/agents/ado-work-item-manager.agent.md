@@ -26,6 +26,8 @@ lifecycle operations for the active workflow.
 Consult these skills when relevant to the task:
 - **ado-workitem** (`skills/ado-workitem/SKILL.md`)
 - **ado-shared** (`skills/ado-shared/SKILL.md`)
+- **work-item-state** (`skills/work-item-state/SKILL.md`) — required before any
+  read of, or write to, an existing work item
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 
@@ -170,6 +172,7 @@ stories (`NEEDS_CONFIRMATION`), and keep it open.
 - **Decision path:** {auto-link | user-confirmed | explicit-id | created | fallback}
 - **Actions performed:** {searched | asked | created | updated | linked}
 - **AC coverage map posted:** {yes | no (not a closure step)}
+- **Working state:** {updated | not required (no state change) | n/a}
 - **Closure decision:** {resolved: pending merge | closed: merged + all AC covered | kept-active: AC unmet | close-pending-merge | n/a}
 - **Multi-phase handling:** {n/a | closed child story #id | feature kept open (children pending) | proposed phase child (NEEDS_CONFIRMATION)}
 - **Blocking issue:** {none or reason}
@@ -181,7 +184,7 @@ stories (`NEEDS_CONFIRMATION`), and keep it open.
 - **ADVISORY:** confidence = {value}
 - **BLOCKED gates:** {list, or "none"}
 - **Failed HARD gates:** {list, or "none"}
-- **Skills Read:** skills/ado-workitem/SKILL.md, skills/ado-shared/SKILL.md
+- **Skills Read:** skills/ado-workitem/SKILL.md, skills/ado-shared/SKILL.md, skills/work-item-state/SKILL.md
 ```
 
 ## Exit Gates
@@ -201,6 +204,8 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | No Close at finalize (Resolve only, pre-merge) | HARD | Finalize never sets Closed; item is Resolved or kept Active | Standard+ |
 | AC coverage map posted before any closure transition | HARD | Verify an AC->evidence map comment exists for the item | Standard+ |
 | Closure only against merged evidence | HARD | Closed only post-merge; otherwise `CLOSE_PENDING_MERGE` or `BLOCKED_CLOSURE` | Standard+ |
+| Working-state block updated when the item's state changed | HARD | `Working state` field is `updated`, or names why no state changed (`skills/work-item-state/SKILL.md` § 5) | Standard+ |
+| Existing comments read before acting on an existing item | SOFT | Reviewer checks the comment trail was fetched, not assumed empty — HARD once the ADO read behaviour in `skills/work-item-state/SKILL.md` § 6 has been probed | Standard+ |
 | AC fully covered (map correctness) | SOFT | Reviewer checks each AC maps to real evidence | Standard+ |
 | No bulk-close of linked work items | HARD | Each linked item closed only after its own AC verification | Standard+ |
 | Multi-phase detection is deterministic; child closed not parent | HARD | Feature/tag/child signal used; Feature stays open, delivered phase closed via child story | Standard+ |
