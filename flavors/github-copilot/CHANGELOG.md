@@ -23,13 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and neither substitutes for the other.
 
   Which artifact holds what was decided by measurement, not taste. On this MCP
-  server `issue_read` `method: get` returns the body and no comment count;
-  `list_issues` returns eight fields per issue and no count either, its
-  `totalCount` being the number of issues. So the default read shows the body
-  alone, which is why current state has to live there — and, since no count
-  exists to branch on, `get_comments` is unconditional rather than conditional
-  on a signal that does not exist. #186's own body assumed that signal; the
-  correction is recorded on the issue.
+  server `issue_read` `method: get` returns the body — so current state has to
+  live there, because that is what a default read shows. Comments need a second
+  call, and whether to make it is decided by the `comments` count that both
+  `get` and `list_issues` return.
+
+  That count took two measurements to establish, and the first was misleading:
+  the field is **omitted entirely when it is zero**, so an issue read before any
+  comment existed looks like a surface with no count at all. Reading #186 again
+  after a comment was posted showed `comments: 1` on both calls. The rule is
+  therefore: non-zero means the fetch is mandatory; an absent field means the
+  agent inferred a zero and must say so in its return, because absence is not
+  self-describing and the inference should fail loudly if the serialisation ever
+  changes. Both the wrong first conclusion and the correction are recorded on
+  #186 rather than quietly overwritten.
 
   The body block is deliberately capped at six lines and carries an index of
   the decision comments. It makes the second call targeted; it never makes it

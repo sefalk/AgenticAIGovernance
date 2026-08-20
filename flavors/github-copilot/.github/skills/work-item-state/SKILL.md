@@ -20,9 +20,9 @@ Measured against the GitHub MCP server on 2026-08-20:
 
 | Call | Returns |
 |---|---|
-| `issue_read` `method: get` | the issue **body**, and no comment count |
+| `issue_read` `method: get` | the issue **body**, plus `comments: N` — see below |
 | `issue_read` `method: get_comments` | the comments — a separate, second call |
-| `list_issues` | `number, title, body, state, user, assignees, created_at, updated_at` per issue. No comment count. Its `totalCount` counts *issues*. |
+| `list_issues` | `number, title, body, state, user, assignees, created_at, updated_at`, plus `labels` and `comments` when non-empty. Its `totalCount` counts *issues*. |
 
 An agent that reads an issue the obvious way therefore sees the body alone. A
 convention that keeps delivery status only in comments is invisible to that
@@ -30,25 +30,41 @@ read: the agent gets a description months out of date and no signal that
 anything else exists. That is not a preference about formatting — it decides
 where the state has to live.
 
-### There is no count to branch on
+### The count exists, but only when it is non-zero
 
-The obvious economy — read the comment count, fetch the comments only when it
-is non-zero — is **not available on this surface**. #186 assumed `list_issues`
-exposed such a count. It does not: a three-issue page returned eight fields per
-issue, none of them a count, and the `totalCount: 45` alongside them is the
-number of open issues.
+There **is** a count to branch on, and getting to it took two measurements
+because the first one was misleading. #186 was read before and after a comment
+was posted to it:
 
-Two consequences, and they point the same way:
+| Moment | Comments | `comments` field |
+|---|---|---|
+| before | 0 | **absent** from both `issue_read get` and `list_issues` |
+| after | 1 | `comments: 1` present in both |
 
-1. **`get_comments` is unconditional.** There is no cheap signal that would let
-   you skip it. An agent that skips it is not avoiding a call it knew was empty
-   — it is asserting there is nothing there without having looked.
-2. **The body block therefore has to carry the index.** Its `Decisions` line is
-   what tells a reader which comments matter and what they settled. The block
-   makes the second call *targeted*; it never makes it optional.
+The server omits empty fields rather than sending zeros. #183, which has no
+comments but does carry labels, returns `labels` and no `comments` — the same
+serialisation, seen on a different field. Reading only issues that happened to
+have no comments is what produced the earlier, wrong conclusion that no count
+existed anywhere; that is recorded on #186 rather than quietly fixed.
 
-That is the division of labour: the body stays small and points; the comments
-hold the volume. Neither is a summary of the other.
+The fetch rule follows:
+
+| Observation | Action |
+|---|---|
+| `comments: N`, N ≥ 1 | `get_comments` is **mandatory** — no exceptions, no sampling |
+| field absent | treat as zero, and **say so in the return**: `comments: 0 (field absent)` |
+
+The second row is an inference, not a reading. Absence is not self-describing:
+it is sound only while the server omits empty fields, which the table above
+establishes on two different calls and two different fields. Recording the
+inference is what keeps it honest — if that serialisation ever changes, the
+returns show exactly which decisions rested on it, instead of comments silently
+going unread and nobody noticing.
+
+So the count says **whether** to fetch. The body block's `Decisions` line says
+**which** comments matter and what they settled — that is what makes the second
+call targeted rather than exploratory. The count never licenses skipping a
+non-zero fetch, and the block never substitutes for one.
 
 Comments are still necessary. They are ordered, attributable and append-only,
 which the body is not. So the two carry different things:
@@ -129,10 +145,11 @@ Issue #170 carries a worked example.
 
 Either half alone fails, so both are binding:
 
-- **Before acting on an issue, read the body _and_ the comments.** Two calls,
-  `get` then `get_comments`, and the second is not conditional on anything (§ 1).
-  Acting on the body alone means acting on state that may be superseded — and the
-  default read gives you exactly that, with nothing to warn you.
+- **Before acting on an issue, read the body _and_ its comments.** `get` first;
+  then `get_comments` whenever the `comments` count it returned is non-zero, and
+  when the field is absent, record the zero you inferred (§ 1). Acting on the
+  body alone means acting on state that may be superseded, and the body carries
+  nothing to warn you that it is.
 - **Any workflow that lands work touching an issue updates that issue's
   working-state block before it finishes** — the same standing obligation as the
   CHANGELOG entry, and for the same reason.
@@ -170,9 +187,11 @@ the block is the one sanctioned exception to "prefer comments over body edits".
 
 Decision records use `add_issue_comment`.
 
-Reporting: state both calls in the return — `read: get + get_comments (n)`. A
-return that names only `get` is a declared partial read, and § 4 makes it a gate
-failure rather than a detail.
+Reporting: state what the count said and what you did about it —
+`read: get (comments: 3) + get_comments (3)`, or
+`read: get (comments: 0 — field absent)`. A return that names only `get` while
+the count was non-zero is a partial read, and § 4 makes it a gate failure rather
+than a detail.
 
 ### Azure DevOps (`ado-work-item-manager`)
 

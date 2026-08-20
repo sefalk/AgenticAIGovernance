@@ -127,10 +127,10 @@ Rules:
 ## 5. Non-Destructive Update Rules
 
 - Read before update (`issue_read`) — never overwrite a body you have not read.
-- **Read the comments too.** `method: get` returns the body and no comment
-  count, and `list_issues` carries no count either, so there is no signal that
-  would justify skipping `method: get_comments`. Make the call every time.
-  Measurements and the rule: `skills/work-item-state/SKILL.md` § 1.
+- **Read the comments too.** `method: get` returns the body plus a `comments`
+  count — omitted entirely when it is zero. Non-zero means `method: get_comments`
+  is mandatory; an absent field means you inferred zero and must say so in the
+  return. Measurements and the rule: `skills/work-item-state/SKILL.md` § 1.
 - Prefer `add_issue_comment` over editing the body. The body is the original
   report; comments are the trail. The **one** sanctioned body edit is the
   working-state block (`skills/work-item-state/SKILL.md` § 2), which is required
