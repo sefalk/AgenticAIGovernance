@@ -127,8 +127,15 @@ Rules:
 ## 5. Non-Destructive Update Rules
 
 - Read before update (`issue_read`) — never overwrite a body you have not read.
+- **Read the comments too.** `method: get` returns the body and no comment
+  count, and `list_issues` carries no count either, so there is no signal that
+  would justify skipping `method: get_comments`. Make the call every time.
+  Measurements and the rule: `skills/work-item-state/SKILL.md` § 1.
 - Prefer `add_issue_comment` over editing the body. The body is the original
-  report; comments are the trail.
+  report; comments are the trail. The **one** sanctioned body edit is the
+  working-state block (`skills/work-item-state/SKILL.md` § 2), which is required
+  whenever the issue's state actually changed — work landed, a criterion
+  evaluated, a blocker found.
 - Closing: only close an issue you can evidence is resolved (merge commit,
   released version). Record the evidence in the closing comment.
 - Never close an issue filed by someone else without explicit instruction.
