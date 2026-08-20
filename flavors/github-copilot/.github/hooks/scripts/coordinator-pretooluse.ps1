@@ -49,7 +49,19 @@ if ($toolName -match 'terminal') {
     $bootstrapMode = (Get-AfConfig -Key 'PY_ENV_BOOTSTRAP' -Default 'ask').ToLower()
 
     $isPyTerminalCommand = $command -match '(\.github/scripts/(run-tests|run-deps|run-metrics)\.ps1)|(\.venv/Scripts/python\.exe)|(^|\s)(python|pip|ruff|mypy)(\s|$)'
-    $isPytestViaTerminal = $command -match '\bpytest\b|\bpy\.test\b'
+
+    # Match a pytest *invocation*, not the word. The gate used to test the bare
+    # substring '\bpytest\b', which denied read-only commands that merely name
+    # it -- grepping the config header '[tool.pytest' was a hard deny (#183).
+    # Anchoring to a statement start also closes the reverse hole: a pytest run
+    # hidden after a separator in an otherwise innocent command.
+    $stmtStart  = '(?:^|[;&|`(){}]|\r?\n)\s*(?:&\s*)?'
+    $pathPrefix = '(?:[''"])?(?:[^\s;&|''"]*[\\/])?'
+    $isPytestViaTerminal =
+        ($command -match ($stmtStart + $pathPrefix + '(?:pytest|py\.test)(?:\.exe)?(?:[''"])?(?:\s|;|$)')) -or
+        ($command -match ($stmtStart + $pathPrefix + '(?:python3?|py)(?:\.exe)?(?:[''"])?\s(?:[^;&|\r\n]*\s)?-m\s+pytest(?:\s|;|$)')) -or
+        ($command -match ('(?:^|[;&|`(){}]|\r?\n)\s*(?:uv|uvx|poetry|pdm|hatch|pipenv|nox|tox|conda)\s[^;&|\r\n]*\spytest(?:\s|;|$)'))
+
     $venvPython = Join-Path $AfCodeRoot '.venv/Scripts/python.exe'
 
     # Bootstrap only for non-pytest Python commands; pytest via terminal is denied below anyway.

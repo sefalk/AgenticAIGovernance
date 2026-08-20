@@ -55,9 +55,17 @@ except Exception:
         PROJECT_LANGUAGE=$(af_conf_get PROJECT_LANGUAGE python)
         BOOTSTRAP_MODE=$(af_conf_get PY_ENV_BOOTSTRAP ask)
 
-        # Bootstrap env for non-pytest Python commands when .venv is missing
+        # Bootstrap env for non-pytest Python commands when .venv is missing.
+        # Match a pytest *invocation*, not the word: the gate used to test the
+        # bare substring, so a read-only command that merely names it -- e.g.
+        # grepping the config header '[tool.pytest' -- was a hard deny (#183).
+        # Quotes are stripped first so a quoted path invocation reads the same.
         IS_PYTEST=false
-        if echo "$COMMAND" | grep -qE '\bpytest\b|\bpy\.test\b'; then
+        CMD_UNQUOTED=$(printf '%s\n' "$COMMAND" | tr -d '\042\047')
+        PYTEST_DIRECT='(^|[;&|`(){}])[[:space:]]*(&[[:space:]]*)?([^[:space:];&|]*[/\\])?(pytest|py\.test)(\.exe)?([[:space:];]|$)'
+        PYTEST_MODULE='(^|[;&|`(){}])[[:space:]]*(&[[:space:]]*)?([^[:space:];&|]*[/\\])?(python3?|py)(\.exe)?[[:space:]]([^;&|]*[[:space:]])?-m[[:space:]]+pytest([[:space:];]|$)'
+        PYTEST_RUNNER='(^|[;&|`(){}])[[:space:]]*(uv|uvx|poetry|pdm|hatch|pipenv|nox|tox|conda)[[:space:]][^;&|]*[[:space:]]pytest([[:space:];]|$)'
+        if printf '%s\n' "$CMD_UNQUOTED" | grep -qE "$PYTEST_DIRECT|$PYTEST_MODULE|$PYTEST_RUNNER"; then
             IS_PYTEST=true
         fi
 
