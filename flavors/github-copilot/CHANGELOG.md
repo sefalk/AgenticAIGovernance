@@ -18,9 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   The new `work-item-state` skill is provider-agnostic and binds both
   `gh-issue-manager` and `ado-work-item-manager`. It puts the *current* state in
-  a marked block at the end of the issue body and the *reasoning* in dated,
-  append-only comments — because those two artifacts have different properties
-  and neither substitutes for the other.
+  a block under its own `## Working state` heading at the end of the issue body,
+  and the *reasoning* in dated, append-only comments — because those two
+  artifacts have different properties and neither substitutes for the other.
 
   Which artifact holds what was decided by measurement, not taste. On this MCP
   server `issue_read` `method: get` returns the body — so current state has to
@@ -43,6 +43,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   optional. Two new HARD gates make both halves checkable, and the trigger stays
   narrow: an issue whose state actually changed, not a status banner on
   everything.
+
+  Two further behaviours were found by applying the convention to #186 itself
+  and checking what landed. `<!-- af:working-state:START -->` markers, which the
+  first draft used as the splice anchor, **do not survive the round trip** — the
+  block came back without them. And a stored `agent's` reads back as
+  `agent&#39;s`, so a body written back verbatim stores the literal entity for
+  every human to see. The anchor is therefore a visible `## Working state`
+  heading, entities are decoded before writing, and the procedure ends with a
+  re-read rather than an assumption.
 
   The Azure DevOps half of § 6 is marked unmeasured. Whether an ADO description
   field renders Markdown, and whether its default read returns comments, has not

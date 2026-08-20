@@ -80,11 +80,9 @@ reasoning nobody fetches.
 
 ## 2. The working-state block
 
-Appended to the **end** of the issue body, inside a marker pair so an updater
-can replace exactly one region and touch nothing else:
+Appended to the **end** of the issue body, anchored on its own heading:
 
 ```markdown
-<!-- af:working-state:START -->
 ## Working state
 
 - **Updated:** 2026-08-20 — coordinator, branch `agent/183-pytest-guard-invocation`
@@ -93,15 +91,15 @@ can replace exactly one region and touch nothing else:
 - **Blocked on:** nothing
 - **Next step:** close at the next `dev` → `main` promotion (`Closes #N` cannot fire from `dev` — #160)
 - **Decisions:** comment 5355802160 (why acceptance criterion 2 stays unmet)
-<!-- af:working-state:END -->
 ```
 
 Rules:
 
-1. **One block per issue**, always at the end of the body, always between the
-   markers. Never a second block, never the same content restated above it.
+1. **One block per issue**, always the last section of the body, introduced by
+   exactly one `## Working state` heading. That heading is the anchor: from it
+   to the end of the body is the block; everything above it is not touched.
 2. **The original description is never rewritten.** The block is appended to it.
-   The body above the `START` marker is the report as filed and stays that way.
+   The body above the heading is the report as filed and stays that way.
 3. **`Updated` carries a date and an actor.** A block without them cannot be
    judged stale, and a block that cannot be judged stale is worse than no block:
    it reads as current forever.
@@ -120,9 +118,15 @@ Rules:
    it exists to solve — an unbounded body that every reader pays for on every
    read.
 
-The marker is deliberately `af:working-state`, not the `AF:MANAGED:` prefix used
-inside payload files. Those regions belong to the deploy tooling and are scanned
-on disk; this one lives in a tracker field and must not be confused with them.
+**Why a visible heading and not an HTML comment.** A marker pair such as
+`<!-- af:working-state:START -->` is the better anchor when it survives, and the
+first version of this skill used one. It does not survive: a body written with
+that pair read back without it, the surrounding blank lines left in place.
+Whether the markers are stripped on write or only hidden on read cannot be
+distinguished with these tools — and it makes no difference, because an agent
+working through this surface cannot see them either way, so it cannot splice on
+them. A heading every reader can see is the anchor that actually works, and its
+visibility to humans is not a cost for a section humans are meant to read.
 
 ## 3. Decision records as comments
 
@@ -176,10 +180,22 @@ not an instruction to put a status banner on every issue.
 `issue_write` `method: update` **replaces** the body; it does not patch it.
 Therefore, always:
 
-1. `issue_read` `method: get` — take the current body verbatim.
-2. Splice: replace the text between the markers, or append a whole block if the
-   markers are absent.
+1. `issue_read` `method: get` — take the current body.
+2. Splice: replace everything from the `## Working state` heading to the end, or
+   append a whole block if that heading is absent.
 3. `issue_write` `method: update` with the complete new body.
+4. **Re-read and check what landed.** Steps 1–3 have two measured ways to go
+   wrong, below.
+
+Step 1 is not a formality — two platform behaviours turn a naive round trip into
+corruption:
+
+- **Apostrophes come back escaped.** A stored `agent's` reads back as
+  `agent&#39;s`. Write that back verbatim and the literal entity is what every
+  human then sees on the issue. Decode `&#39;`, `&amp;`, `&quot;`, `&lt;` and
+  `&gt;` before writing, and confirm on the re-read.
+- **HTML comments do not survive the round trip** (§ 2), which is why the anchor
+  is a heading.
 
 Writing a body you have not just read overwrites whatever changed in between.
 This is the existing non-destructive rule in `skills/gh-issue/SKILL.md` § 5, and
