@@ -44,16 +44,56 @@ git add -A                                    -> deny
 where it sits, not to the current directory, so running it from a root that
 has no payload beneath it changes nothing about its behaviour.
 
-## Not yet measured
+## It works, and this is the evidence
 
-Whether VS Code loads this file at all from a repository that is not itself a
-deployed payload, and whether it resolves the relative `command` paths against
-this folder in a multi-root workspace. Both are answerable only by opening a
-session and reading the hook log. Until that is done, treat this file as an
-experiment, not as a guard you can rely on.
+VS Code does load this file, from a repository that is not itself a deployed
+payload. Measured in a reloaded window whose workspace holds this repository
+alongside an unrelated project that has the payload deployed the normal way:
+
+```
+  14x  PreToolUse: 2 hook(s)
+  12x  PostToolUse: 1 hook(s)
+
+  13x  1925ms avg  PreToolUse  [AgenticAIGovernance]
+                   ... -File flavors/github-copilot/.github/hooks/scripts/block-dangerous.ps1
+  13x  2034ms avg  PreToolUse  [MP Usage XP at Teamplay]
+                   ... -File .github\hooks\scripts\block-dangerous.ps1
+  12x  1948ms avg  PostToolUse [MP Usage XP at Teamplay]
+                   ... -File .github\hooks\scripts\scan-secrets.ps1
+```
+
+Three things follow, and only the first was in doubt:
+
+- **The relative `command` path resolves against the folder that declares it.**
+  The hook ran with `cwd` set to this repository, not to the folder of the file
+  being edited. That is what makes pointing into `flavors/` viable at all.
+- **Hooks from different workspace folders compose additively.** Every
+  `PreToolUse` ran exactly two hooks, one per folder, with no duplication and
+  no folder suppressing the other.
+- **`PostToolUse` ran one hook**, because this file declares none. The absence
+  is as informative as the presence: nothing is being inherited that was not
+  declared here.
 
 `chat.useCustomAgentHooks` must be `true` in `.vscode/settings.json` for any of
 it to run. That setting is tracked, for exactly this reason.
+
+## What it costs, and what it does not prove
+
+Roughly 1.9 s per tool call, spent before the tool runs. That is PowerShell
+startup, not analysis. In a window that also has a payload deployed, the two
+guards together add about 4 s to every `PreToolUse`.
+
+Not proven: that the guard *denies* in this arrangement. Every run above
+returned allow, because no dangerous command was issued. The deny paths were
+demonstrated by driving the script directly, above — which is evidence about
+the script, not about VS Code's handling of a non-zero hook decision from a
+folder-scoped hook. Treat a live deny as untested until one is observed.
+
+Note also that this hook sees **every** tool call in the window, including
+calls that concern the other workspace folder, and it sees them with its own
+`cwd`. For a guard that classifies the command string that is harmless, and
+arguably desirable. For any future hook here that inspects the working tree, it
+would not be.
 
 ## Deliberately not here
 
