@@ -10,6 +10,7 @@ See ``.github/instructions/tooling.instructions.md``.
 
 Exit codes: 0 pass, 1 blocked, 2 internal error.
 """
+
 from __future__ import annotations
 
 import json
@@ -25,24 +26,28 @@ GUARDED_PARENT = ".vscode"
 
 def _staged_files() -> list[str]:
     result = subprocess.run(
-        ["git", "-c", "core.quotePath=false", "diff", "--cached", "-z",
-         "--name-only", "--diff-filter=ACMR"],
-        capture_output=True, text=True, encoding="utf-8", check=True,
+        ["git", "-c", "core.quotePath=false", "diff", "--cached", "-z", "--name-only", "--diff-filter=ACMR"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     return [entry for entry in result.stdout.split("\0") if entry]
 
 
 def _is_guarded(path: str) -> bool:
     return (
-        posixpath.basename(path) in GUARDED_BASENAMES
-        and posixpath.basename(posixpath.dirname(path)) == GUARDED_PARENT
+        posixpath.basename(path) in GUARDED_BASENAMES and posixpath.basename(posixpath.dirname(path)) == GUARDED_PARENT
     )
 
 
 def _staged_blob_text(path: str) -> str | None:
     ls_result = subprocess.run(
         ["git", "ls-files", "-s", "--", f":(literal){path}"],
-        capture_output=True, text=True, encoding="utf-8", check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     line = ls_result.stdout.strip()
     if not line:
@@ -52,7 +57,10 @@ def _staged_blob_text(path: str) -> str | None:
         return None
     cat_result = subprocess.run(
         ["git", "cat-file", "blob", parts[1]],
-        capture_output=True, text=True, encoding="utf-8", check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     return cat_result.stdout
 

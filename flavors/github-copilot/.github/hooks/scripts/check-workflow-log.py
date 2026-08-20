@@ -145,9 +145,7 @@ def _derive(sections: dict[str, list[tuple[int, str]]]) -> tuple[int, int]:
             retries += 1
         seen.add(agent)
 
-    escalations = sum(
-        1 for _, verdict in _keys(steps, "verdict") if verdict.strip().upper().startswith("ESCALATE")
-    )
+    escalations = sum(1 for _, verdict in _keys(steps, "verdict") if verdict.strip().upper().startswith("ESCALATE"))
     # A recorded `escalation:` block is an escalation the steps may not carry a
     # verdict for -- a deferral to a human reads as prose, not as ESCALATE. The
     # two kinds are conflated here rather than one of them being lost, and the
@@ -189,8 +187,7 @@ def _findings(text: str) -> tuple[list[str], list[str]]:
         number, value = _keys(sections["status"], "status")[0]
         if value.upper() not in STATUS_VALUES:
             violations.append(
-                f"line {number}: status {value!r} is outside the schema's set "
-                f"({' | '.join(STATUS_VALUES)})"
+                f"line {number}: status {value!r} is outside the schema's set ({' | '.join(STATUS_VALUES)})"
             )
 
     steps = sections.get("steps", [])
@@ -205,8 +202,7 @@ def _findings(text: str) -> tuple[list[str], list[str]]:
         # is a different word. analyze-retry-economy.py draws the line here too.
         if not any(upper == name or upper.startswith((name + " ", name + "(")) for name in VERDICT_VALUES):
             violations.append(
-                f"line {number}: verdict {value!r} is outside the MANIFEST closed set "
-                f"({'/'.join(VERDICT_VALUES)})"
+                f"line {number}: verdict {value!r} is outside the MANIFEST closed set ({'/'.join(VERDICT_VALUES)})"
             )
 
     return violations, unchecked

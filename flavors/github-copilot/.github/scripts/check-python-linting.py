@@ -41,9 +41,9 @@ except ModuleNotFoundError:  # Python < 3.11
     tomllib = None  # type: ignore[assignment]
 
 STRICTNESS_RULES: dict[str, str] = {
-    "minimal":  "F8",
+    "minimal": "F8",
     "standard": "E,F,I",
-    "strict":   "E,F,I,B,UP,SIM,C90",
+    "strict": "E,F,I,B,UP,SIM,C90",
 }
 
 DEFAULT_STRICTNESS = "standard"
@@ -108,8 +108,8 @@ def _find_ruff() -> str | None:
         Absolute path to ruff executable, or None if not found.
     """
     for candidate in [
-        Path(".venv/Scripts/ruff.exe"),   # Windows venv
-        Path(".venv/bin/ruff"),            # Unix venv
+        Path(".venv/Scripts/ruff.exe"),  # Windows venv
+        Path(".venv/bin/ruff"),  # Unix venv
     ]:
         if candidate.exists():
             return str(candidate)
@@ -223,9 +223,7 @@ def _read_project_overrides(config_path: Path) -> tuple[list[str], dict[str, lis
         if isinstance(value, dict):
             for pattern, codes in value.items():
                 if isinstance(codes, list):
-                    per_file.setdefault(pattern, []).extend(
-                        str(code).strip() for code in codes if str(code).strip()
-                    )
+                    per_file.setdefault(pattern, []).extend(str(code).strip() for code in codes if str(code).strip())
 
     return ignores, per_file, notices
 
@@ -292,8 +290,7 @@ def _check_formatting(ruff_exe: str, files: list[str]) -> tuple[bool, list[str]]
     """
     try:
         result = subprocess.run(
-            [ruff_exe, "format", "--check"] + files,
-            capture_output=True, text=True, encoding="utf-8", errors="replace"
+            [ruff_exe, "format", "--check"] + files, capture_output=True, text=True, encoding="utf-8", errors="replace"
         )
     except Exception as exc:
         print(f"LINTING_GATE_ERROR: failed to run ruff format --check: {exc}")
@@ -341,33 +338,25 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Hard-gate linting checks via ruff",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="\n".join([
-            "Strictness levels (LINTING_STRICTNESS in af-env.conf):",
-            "  minimal   F8                  -- pyflakes only",
-            "  standard  E,F,I               -- + pycodestyle + isort",
-            "  strict    E,F,I,B,UP,SIM,C90  -- + bugbear, pyupgrade, simplify, complexity",
-        ]),
+        epilog="\n".join(
+            [
+                "Strictness levels (LINTING_STRICTNESS in af-env.conf):",
+                "  minimal   F8                  -- pyflakes only",
+                "  standard  E,F,I               -- + pycodestyle + isort",
+                "  strict    E,F,I,B,UP,SIM,C90  -- + bugbear, pyupgrade, simplify, complexity",
+            ]
+        ),
     )
-    parser.add_argument("--files", nargs="+", required=True,
-                        help="Python files to lint")
-    parser.add_argument("--conf", default=None,
-                        help="Path to af-env.conf (auto-detected if omitted)")
-    parser.add_argument("--strictness", default=None,
-                        help="Override strictness from af-env.conf")
+    parser.add_argument("--files", nargs="+", required=True, help="Python files to lint")
+    parser.add_argument("--conf", default=None, help="Path to af-env.conf (auto-detected if omitted)")
+    parser.add_argument("--strictness", default=None, help="Override strictness from af-env.conf")
     args = parser.parse_args()
 
     # --- Resolve strictness ---
     conf_path = Path(args.conf) if args.conf else _find_conf()
-    strictness = (
-        args.strictness
-        or _read_conf(conf_path, "LINTING_STRICTNESS")
-        or DEFAULT_STRICTNESS
-    )
+    strictness = args.strictness or _read_conf(conf_path, "LINTING_STRICTNESS") or DEFAULT_STRICTNESS
     if strictness not in STRICTNESS_RULES:
-        print(
-            f"LINTING_GATE_ERROR: unknown LINTING_STRICTNESS '{strictness}'. "
-            f"Valid: {list(STRICTNESS_RULES)}"
-        )
+        print(f"LINTING_GATE_ERROR: unknown LINTING_STRICTNESS '{strictness}'. Valid: {list(STRICTNESS_RULES)}")
         return 1
 
     rules = STRICTNESS_RULES[strictness]
@@ -390,9 +379,7 @@ def main() -> int:
 
     notices: list[str] = []
     if tomllib is None:
-        notices.append(
-            "tomllib unavailable (Python < 3.11); project lint exceptions are not honoured."
-        )
+        notices.append("tomllib unavailable (Python < 3.11); project lint exceptions are not honoured.")
 
     # --- Group files by the ruff config that governs them ---
     # One group in virtually every repo; nested configs are handled correctly
@@ -421,7 +408,8 @@ def main() -> int:
         # 0.9. Passing it makes ruff exit 2 on every run, which the gate would
         # otherwise report as "violations found" on a clean tree.
         cmd = [
-            ruff_exe, "check",
+            ruff_exe,
+            "check",
             f"--select={rules}",
             f"--extend-select={CORE_RULES}",
             "--output-format=concise",
@@ -436,9 +424,7 @@ def main() -> int:
         cmd += group_files
 
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         except Exception as exc:
             print(f"LINTING_GATE_ERROR: failed to run ruff: {exc}")
             return 1
@@ -493,8 +479,7 @@ def main() -> int:
         for path in format_drift_files:
             print(f"LINTING_GATE_FORMAT_DRIFT: {path}")
         print(
-            "Remedy: .github/scripts/run-lint.ps1 -Fix   (PowerShell)  |  "
-            ".github/scripts/run-lint.sh --fix   (POSIX)"
+            "Remedy: .github/scripts/run-lint.ps1 -Fix   (PowerShell)  |  .github/scripts/run-lint.sh --fix   (POSIX)"
         )
     return 2
 
