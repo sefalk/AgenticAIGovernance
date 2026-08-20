@@ -59,6 +59,7 @@ VALID_SIGNAL_KEYS = {"python_packages", "js_packages", "file_patterns", "af_conf
 # YAML parsing (minimal — avoid external dependency)
 # ---------------------------------------------------------------------------
 
+
 def parse_frontmatter(content: str) -> dict | None:
     """Extract YAML frontmatter from markdown content.
 
@@ -74,6 +75,7 @@ def parse_frontmatter(content: str) -> dict | None:
     # Try PyYAML first
     try:
         import yaml  # noqa: PLC0415
+
         return yaml.safe_load(raw)
     except ImportError:
         pass
@@ -96,21 +98,18 @@ def parse_frontmatter(content: str) -> dict | None:
 # Validators
 # ---------------------------------------------------------------------------
 
+
 def validate_name(name: str, dir_name: str) -> list[str]:
     """Validate the name field."""
     errors: list[str] = []
     if len(name) > MAX_NAME_LEN:
         errors.append(f"name '{name}' exceeds {MAX_NAME_LEN} chars ({len(name)})")
     if not NAME_RE.match(name):
-        errors.append(
-            f"name '{name}' must be lowercase letters, numbers, and hyphens"
-        )
+        errors.append(f"name '{name}' must be lowercase letters, numbers, and hyphens")
     if XML_TAG_RE.search(name):
         errors.append(f"name '{name}' must not contain XML tags")
     if name != dir_name:
-        errors.append(
-            f"name '{name}' does not match directory name '{dir_name}'"
-        )
+        errors.append(f"name '{name}' does not match directory name '{dir_name}'")
     return errors
 
 
@@ -120,9 +119,7 @@ def validate_description(description: str) -> list[str]:
     if not description or not description.strip():
         errors.append("description must not be empty")
     if len(description) > MAX_DESC_LEN:
-        errors.append(
-            f"description exceeds {MAX_DESC_LEN} chars ({len(description)})"
-        )
+        errors.append(f"description exceeds {MAX_DESC_LEN} chars ({len(description)})")
     if XML_TAG_RE.search(description):
         errors.append("description must not contain XML tags")
     return errors
@@ -132,9 +129,7 @@ def validate_argument_hint(hint: str) -> list[str]:
     """Validate the optional argument-hint field."""
     errors: list[str] = []
     if len(hint) > MAX_HINT_LEN:
-        errors.append(
-            f"argument-hint exceeds {MAX_HINT_LEN} chars ({len(hint)})"
-        )
+        errors.append(f"argument-hint exceeds {MAX_HINT_LEN} chars ({len(hint)})")
     return errors
 
 
@@ -154,10 +149,7 @@ def validate_activation(
     if priority is None:
         errors.append("activation: missing 'priority' field")
     elif str(priority) not in VALID_PRIORITIES:
-        errors.append(
-            f"activation.priority '{priority}' must be one of: "
-            + ", ".join(sorted(VALID_PRIORITIES))
-        )
+        errors.append(f"activation.priority '{priority}' must be one of: " + ", ".join(sorted(VALID_PRIORITIES)))
 
     # agents
     agents = activation.get("agents")
@@ -167,10 +159,7 @@ def validate_activation(
         for agent in agents:
             agent_str = str(agent)
             if known_agents is not None and agent_str not in known_agents:
-                errors.append(
-                    f"activation.agents: '{agent_str}' does not match "
-                    "any .agent.md file"
-                )
+                errors.append(f"activation.agents: '{agent_str}' does not match any .agent.md file")
     else:
         errors.append("activation.agents must be a list")
 
@@ -181,8 +170,7 @@ def validate_activation(
             unknown_keys = set(signals.keys()) - VALID_SIGNAL_KEYS
             for key in sorted(unknown_keys):
                 errors.append(
-                    f"activation.signals: unknown key '{key}' "
-                    f"(valid: {', '.join(sorted(VALID_SIGNAL_KEYS))})"
+                    f"activation.signals: unknown key '{key}' (valid: {', '.join(sorted(VALID_SIGNAL_KEYS))})"
                 )
         else:
             errors.append("activation.signals must be a mapping")
@@ -247,9 +235,7 @@ def validate_skill_dir(
     if not deep:
         # Light scan: just verify name field exists and matches dir
         if "name" in fm and str(fm["name"]) != skill_dir.name:
-            errors.append(
-                f"{prefix}: name '{fm['name']}' does not match directory"
-            )
+            errors.append(f"{prefix}: name '{fm['name']}' does not match directory")
         return errors, warnings
 
     # --- Deep validation ---
@@ -278,9 +264,7 @@ def validate_skill_dir(
     if isinstance(metadata, dict) and "activation" in metadata:
         activation = metadata["activation"]
         if isinstance(activation, dict):
-            act_errors, act_warnings = validate_activation(
-                activation, known_agents=known_agents
-            )
+            act_errors, act_warnings = validate_activation(activation, known_agents=known_agents)
             for err in act_errors:
                 errors.append(f"{prefix}: {err}")
             for warn in act_warnings:
@@ -304,6 +288,7 @@ def validate_skill_dir(
 # INDEX.md cross-reference
 # ---------------------------------------------------------------------------
 
+
 def parse_index_skills(index_path: Path) -> tuple[set[str], set[str]]:
     """Parse INDEX.md and return (active_skills, available_skills).
 
@@ -320,17 +305,13 @@ def parse_index_skills(index_path: Path) -> tuple[set[str], set[str]]:
     content = index_path.read_text(encoding="utf-8")
 
     # Active: rows like | 1 | `skill-name` | description | agents |
-    for m in re.finditer(
-        r"\|\s*\d+\s*\|\s*`([^`]+)`\s*\|", content
-    ):
+    for m in re.finditer(r"\|\s*\d+\s*\|\s*`([^`]+)`\s*\|", content):
         active.add(m.group(1))
 
     # Available: comma-separated list after "Available for Activation"
     # The list is a block of comma-separated skill names (lowercase-hyphenated).
     # We identify it by finding lines where most tokens are valid skill names.
-    avail_section = re.search(
-        r"Available for Activation.*?\n([\s\S]+?)$", content
-    )
+    avail_section = re.search(r"Available for Activation.*?\n([\s\S]+?)$", content)
     if avail_section:
         # Find the comma-separated block: lines with ≥2 comma-separated
         # tokens that all look like skill names
@@ -394,9 +375,7 @@ def validate_index_consistency(
     # Available: phantom entries
     phantom_avail = idx_available - available_dirs
     for name in sorted(phantom_avail):
-        errors.append(
-            f"INDEX phantom: '{name}' listed as available but no directory"
-        )
+        errors.append(f"INDEX phantom: '{name}' listed as available but no directory")
 
     return errors
 
@@ -405,13 +384,10 @@ def validate_index_consistency(
 # Main
 # ---------------------------------------------------------------------------
 
+
 def discover_skill_dirs(path: Path) -> set[str]:
     """Return set of skill directory names under a path."""
-    return {
-        d.name
-        for d in path.iterdir()
-        if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith(".")
-    }
+    return {d.name for d in path.iterdir() if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith(".")}
 
 
 def discover_agent_names(github_dir: Path) -> set[str]:
@@ -419,11 +395,7 @@ def discover_agent_names(github_dir: Path) -> set[str]:
     agents_dir = github_dir / "agents"
     if not agents_dir.is_dir():
         return set()
-    return {
-        f.stem.removesuffix(".agent")
-        for f in agents_dir.iterdir()
-        if f.is_file() and f.name.endswith(".agent.md")
-    }
+    return {f.stem.removesuffix(".agent") for f in agents_dir.iterdir() if f.is_file() and f.name.endswith(".agent.md")}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -469,9 +441,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- Discover directories ---
     active_dirs = discover_skill_dirs(skills_root)
-    available_dirs = (
-        discover_skill_dirs(available_root) if available_root.is_dir() else set()
-    )
+    available_dirs = discover_skill_dirs(available_root) if available_root.is_dir() else set()
 
     # --- Discover agent names (for activation.agents validation) ---
     known_agents = discover_agent_names(github_dir)
@@ -482,9 +452,7 @@ def main(argv: list[str] | None = None) -> int:
     # --- Validate active skills (deep) ---
     for name in sorted(active_dirs):
         skill_dir = skills_root / name
-        errs, warns = validate_skill_dir(
-            skill_dir, deep=True, known_agents=known_agents
-        )
+        errs, warns = validate_skill_dir(skill_dir, deep=True, known_agents=known_agents)
         errors.extend(errs)
         warnings.extend(warns)
 
@@ -492,9 +460,7 @@ def main(argv: list[str] | None = None) -> int:
     deep_avail = args.deep_available
     for name in sorted(available_dirs):
         skill_dir = available_root / name
-        errs, warns = validate_skill_dir(
-            skill_dir, deep=deep_avail, known_agents=known_agents
-        )
+        errs, warns = validate_skill_dir(skill_dir, deep=deep_avail, known_agents=known_agents)
         if deep_avail:
             errors.extend(errs)
             warnings.extend(warns)
@@ -508,9 +474,7 @@ def main(argv: list[str] | None = None) -> int:
             warnings.extend(warns)
 
     # --- INDEX.md cross-reference ---
-    errors.extend(
-        validate_index_consistency(skills_root, active_dirs, available_dirs)
-    )
+    errors.extend(validate_index_consistency(skills_root, active_dirs, available_dirs))
 
     # --- Report ---
     total_skills = len(active_dirs) + len(available_dirs)

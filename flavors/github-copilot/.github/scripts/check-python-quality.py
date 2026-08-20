@@ -391,7 +391,9 @@ def _check_ignore_hygiene(
         m = IGNORE_RE.search(line)
         if m:
             if not IGNORE_CODE_RE.search(line):
-                sink.append(f"{file_label}:{idx}: type ignore must include explicit rule code, e.g. type: ignore[reportGeneralTypeIssues]")
+                sink.append(
+                    f"{file_label}:{idx}: type ignore must include explicit rule code, e.g. type: ignore[reportGeneralTypeIssues]"
+                )
             tail = m.group("suffix")
             parts = tail.split("#", 1)
             if len(parts) < 2 or len(parts[1].strip()) < 8:
@@ -411,7 +413,9 @@ def _check_ignore_hygiene(
             tail = nq.group("suffix")
             parts = tail.split("#", 1)
             if len(parts) < 2 or len(parts[1].strip()) < 8:
-                sink.append(f"{file_label}:{idx}: noqa requires justification comment (min 8 chars after # noqa: CODE  # reason)")
+                sink.append(
+                    f"{file_label}:{idx}: noqa requires justification comment (min 8 chars after # noqa: CODE  # reason)"
+                )
     return issues, advisories
 
 

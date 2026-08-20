@@ -18,6 +18,7 @@ authors to write less than they know.
 
 Exit codes: 0 pass, 1 blocked, 2 internal error.
 """
+
 from __future__ import annotations
 
 import os
@@ -30,21 +31,36 @@ TAG = "[plan-structure]"
 
 # Section names the templates define. Anything else is a heading invented for one
 # document -- measured at 45% of the text across 19 Standard plans (#26).
-PLAN_SECTIONS = frozenset({
-    "context", "references", "scope assessment", "current baseline", "subtasks",
-    "implementation sequence", "quality gates", "plan approval", "open findings",
-    "follow-up", "change log",
-})
-INVESTIGATION_SECTIONS = frozenset({
-    "trigger", "root cause analysis", "fix description", "alternatives considered",
-    "validation approach", "quality gates", "change log",
-})
-INVESTIGATION_REQUIRED = ("trigger", "root cause analysis", "fix description",
-                          "validation approach")
+PLAN_SECTIONS = frozenset(
+    {
+        "context",
+        "references",
+        "scope assessment",
+        "current baseline",
+        "subtasks",
+        "implementation sequence",
+        "quality gates",
+        "plan approval",
+        "open findings",
+        "follow-up",
+        "change log",
+    }
+)
+INVESTIGATION_SECTIONS = frozenset(
+    {
+        "trigger",
+        "root cause analysis",
+        "fix description",
+        "alternatives considered",
+        "validation approach",
+        "quality gates",
+        "change log",
+    }
+)
+INVESTIGATION_REQUIRED = ("trigger", "root cause analysis", "fix description", "validation approach")
 
 # The document's own title, in the shapes the templates and the planner produce.
-TITLE = re.compile(r"^(implementation plan\b.*|investigation\b.*|plan\s*[:\u2014-].*)$",
-                   re.IGNORECASE)
+TITLE = re.compile(r"^(implementation plan\b.*|investigation\b.*|plan\s*[:\u2014-].*)$", re.IGNORECASE)
 
 # `### 1. Extract the mapping` / `#### 2) ...` -- a subtask block, not a section.
 SUBTASK = re.compile(r"^\d+[.)]")
@@ -60,8 +76,7 @@ FIELD = re.compile(r"^\s*(?:[-*]\s*)?\*\*(?P<field>[^*]+?):?\*\*")
 
 BULLET = re.compile(r"^\s+[-*]\s+\S")
 
-SCOPE_FIELDS = ("files affected", "layers touched", "complexity tier",
-                "estimated size", "risks")
+SCOPE_FIELDS = ("files affected", "layers touched", "complexity tier", "estimated size", "risks")
 SUBTASK_FIELDS = ("acceptance criteria", "files", "exit criterion")
 
 TIER = re.compile(r"complexity\s+tier[\s*]*[:|][\s*]*(trivial|standard|deep)", re.IGNORECASE)
@@ -72,16 +87,21 @@ COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 def _repo_root() -> Path:
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True, text=True, encoding="utf-8", check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     return Path(result.stdout.strip())
 
 
 def _staged_files() -> list[str]:
     result = subprocess.run(
-        ["git", "-c", "core.quotePath=false", "diff", "--cached", "-z",
-         "--name-only", "--diff-filter=ACMR"],
-        capture_output=True, text=True, encoding="utf-8", check=True,
+        ["git", "-c", "core.quotePath=false", "diff", "--cached", "-z", "--name-only", "--diff-filter=ACMR"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     return [entry for entry in result.stdout.split("\0") if entry]
 
@@ -96,7 +116,10 @@ def _is_plan(path: str) -> bool:
 def _staged_text(path: str) -> str | None:
     listed = subprocess.run(
         ["git", "ls-files", "-s", "--", f":(literal){path}"],
-        capture_output=True, text=True, encoding="utf-8", check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     line = listed.stdout.strip()
     if not line:
@@ -106,7 +129,8 @@ def _staged_text(path: str) -> str | None:
         return None
     blob = subprocess.run(
         ["git", "cat-file", "blob", fields[1]],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     return blob.stdout.decode("utf-8", errors="replace")
 
@@ -190,7 +214,7 @@ def _has_criteria(lines: list[str]) -> bool:
             rest = line.split("**", 2)[-1].strip()
             if rest and not rest.startswith("<!--"):
                 return True
-            for follower in lines[index + 1:]:
+            for follower in lines[index + 1 :]:
                 if not follower.strip():
                     continue
                 return bool(BULLET.match(follower))
@@ -203,9 +227,7 @@ def _findings(text: str) -> list[str]:
     findings: list[str] = []
 
     placeholders = [
-        match.group("field").strip()
-        for match in (PLACEHOLDER_FIELD.match(line) for line in text.splitlines())
-        if match
+        match.group("field").strip() for match in (PLACEHOLDER_FIELD.match(line) for line in text.splitlines()) if match
     ]
     if placeholders:
         findings.append("fields left as template placeholders: " + _list(placeholders))
@@ -215,8 +237,7 @@ def _findings(text: str) -> list[str]:
         findings.append(f"sections {kind} documents do not define: " + _list(unknown))
 
     if kind == "investigation":
-        present = {_normalise(m.group(2)) for m in
-                   (HEADING.match(line) for line in text.splitlines()) if m}
+        present = {_normalise(m.group(2)) for m in (HEADING.match(line) for line in text.splitlines()) if m}
         missing = [name for name in INVESTIGATION_REQUIRED if name not in present]
         if missing:
             findings.append("investigation is missing: " + ", ".join(missing))

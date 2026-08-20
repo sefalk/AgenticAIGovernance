@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The formatting rule the framework enforces on consumers now applies to the
+  framework (#167).** #124 made `ruff format --check` a hard gate for consumer
+  projects. The framework itself had no repository-level ruff configuration at
+  all, so everything outside `mcp-deploy` was measured against ruff's defaults
+  — a width nobody had chosen — and 19 of its 36 tracked Python files did not
+  meet it.
+
+  Three separate commits, because a reformat mixed into anything else is
+  unreviewable:
+
+  1. A root `ruff.toml`. `line-length = 120` is not a preference: it is the
+     only ruff decision already made in this repository (`mcp-deploy`'s
+     `pyproject.toml`) and it reformats the fewest files — 19, against 30 at
+     ruff's default 88. `line-ending = "lf"` is explicit because "auto" writes
+     CRLF on Windows into files git stores as LF, which git normalises away
+     locally and leaves for a consumer's working tree to discover.
+  2. The reformat alone: 19 files, +317/−324, listed in
+     `.git-blame-ignore-revs` so `git blame` and GitHub's blame view skip it.
+  3. The gate, plus a `ruff==0.16.2` pin. An unpinned formatter turns a
+     routine ruff release into a red build on a pull request that changed no
+     Python at all.
+
+  The gate takes its file list from `git ls-files` rather than a glob, so a new
+  file is covered the moment it is tracked, and an empty list fails loudly
+  instead of passing silently.
+
+  Not included, and measured rather than assumed: under the rule selection this
+  config declares, `ruff check` reports 28 findings (15 auto-fixable). Those are
+  lint, not formatting, and are left visible and ungated rather than quietly
+  fixed inside a formatting change.
+
 - **The framework now arms one of its own safety guards, without deploying to
   itself (#61).** The framework ships hooks that hard-deny `git push --force`,
   `git reset --hard` and `git add -A`, and has been developed without them.

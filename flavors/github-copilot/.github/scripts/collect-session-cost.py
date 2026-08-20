@@ -228,10 +228,7 @@ def render(result: dict[str, Any]) -> str:
         lines.append(f"    {model}: {{ requests: {bucket['requests']}, credits: {credits} }}")
     if not (totals and totals.by_model):
         lines[-1] = "  by_model: {}"
-    lines.append(
-        f"  environment: {{ vscode: {_scalar(env['vscode'])}, "
-        f"copilot_chat: {_scalar(env['copilot_chat'])} }}"
-    )
+    lines.append(f"  environment: {{ vscode: {_scalar(env['vscode'])}, copilot_chat: {_scalar(env['copilot_chat'])} }}")
     return "\n".join(lines) + "\n"
 
 

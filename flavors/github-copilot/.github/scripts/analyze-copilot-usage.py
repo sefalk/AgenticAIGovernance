@@ -279,9 +279,7 @@ def _parse_window(session: str, window: str) -> UsageRecord | None:
         prompt_tokens=int(usage.get("prompt_tokens", 0)),
         cached_tokens=int(usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)),
         completion_tokens=int(usage.get("completion_tokens", 0)),
-        reasoning_tokens=int(
-            usage.get("completion_tokens_details", {}).get("reasoning_tokens", 0)
-        ),
+        reasoning_tokens=int(usage.get("completion_tokens_details", {}).get("reasoning_tokens", 0)),
         nano_aiu=int(nano_m.group(1)) if nano_m else None,
         context_before=int(ctx_m.group(1)) if ctx_m else 0,
         rounds_since_summarization=int(rounds_m.group(1)) if rounds_m else 0,
@@ -332,9 +330,7 @@ def _percentile(values: list[int], pct: float) -> int:
     return ordered[rank - 1]
 
 
-def compaction_stats(
-    records: list[UsageRecord], table: dict[str, dict[str, float]]
-) -> dict[str, object]:
+def compaction_stats(records: list[UsageRecord], table: dict[str, dict[str, float]]) -> dict[str, object]:
     """Profile context compaction, the dominant recorded cost.
 
     Compaction re-reads the whole conversation, so its cost scales with context
@@ -346,11 +342,7 @@ def compaction_stats(
         return {"count": 0}
 
     contexts = [r.context_before for r in compactions if r.context_before > 0]
-    gaps = [
-        r.rounds_since_summarization
-        for r in compactions
-        if r.rounds_since_summarization > 0
-    ]
+    gaps = [r.rounds_since_summarization for r in compactions if r.rounds_since_summarization > 0]
 
     credits = 0.0
     per_session: dict[str, dict[str, float]] = defaultdict(
@@ -378,9 +370,7 @@ def compaction_stats(
         "context_before_p90": _percentile(contexts, 90),
         "context_before_max": max(contexts) if contexts else 0,
         "rounds_between_mean": (sum(gaps) / len(gaps)) if gaps else 0,
-        "duration_ms_mean": (
-            sum(r.duration_ms for r in compactions) / len(compactions)
-        ),
+        "duration_ms_mean": (sum(r.duration_ms for r in compactions) / len(compactions)),
         "by_session": {k: dict(v) for k, v in per_session.items()},
     }
 
@@ -400,8 +390,7 @@ def load_price_table(models_json: Path | None) -> dict[str, dict[str, float]]:
         if not prices:
             continue
         table[entry.get("id", "")] = {
-            kind: float(prices.get(field_name, 0) or 0)
-            for kind, field_name in PRICE_FIELDS.items()
+            kind: float(prices.get(field_name, 0) or 0) for kind, field_name in PRICE_FIELDS.items()
         }
     return table
 
@@ -521,10 +510,7 @@ def print_report(report: dict[str, object], by_session: bool) -> None:
     print()
     print(f"Total cost    : {_fmt(effective)} credits  (${_fmt(effective * USD_PER_CREDIT)})")
     print(f"  billed telemetry         : {_fmt(actual)} credits")
-    print(
-        f"  list-price estimate      : "
-        f"{_fmt(effective - actual)} credits (no telemetry available)"
-    )
+    print(f"  list-price estimate      : {_fmt(effective - actual)} credits (no telemetry available)")
     if unpriced:
         print(f"  WARNING: {unpriced} request(s) could be neither billed nor estimated")
 
@@ -532,10 +518,7 @@ def print_report(report: dict[str, object], by_session: bool) -> None:
     if paired > 0 and actual > 0:
         delta = (paired - actual) / actual * 100
         print()
-        print(
-            f"Reconciliation: where both exist, the list price overstates the "
-            f"billed cost by {delta:+.1f}%"
-        )
+        print(f"Reconciliation: where both exist, the list price overstates the billed cost by {delta:+.1f}%")
         print(f"  billed {_fmt(actual)} credits vs list-price {_fmt(paired)} credits")
 
     # foreground = real work, background = context compaction overhead
@@ -546,9 +529,7 @@ def print_report(report: dict[str, object], by_session: bool) -> None:
         print("-- By source " + "-" * 64)
         print(f"{'source':<14}{'req':>6}{'credits':>14}{'share':>9}")
         total_src = sum(float(v.get("credits_effective", 0.0)) for v in by_source.values())
-        for name, vals in sorted(
-            by_source.items(), key=lambda kv: -float(kv[1].get("credits_effective", 0.0))
-        ):
+        for name, vals in sorted(by_source.items(), key=lambda kv: -float(kv[1].get("credits_effective", 0.0))):
             c = float(vals.get("credits_effective", 0.0))
             share = (c / total_src * 100) if total_src else 0.0
             print(f"{name:<14}{int(vals['requests']):>6}{_fmt(c):>14}{share:>8.1f}%")
@@ -558,9 +539,7 @@ def print_report(report: dict[str, object], by_session: bool) -> None:
     print()
     print("-- By model " + "-" * 65)
     print(f"{'model':<24}{'req':>5}{'input':>12}{'cached':>12}{'output':>11}{'credits':>11}")
-    for name, vals in sorted(
-        by_model.items(), key=lambda kv: -float(kv[1].get("credits_effective", 0.0))
-    ):
+    for name, vals in sorted(by_model.items(), key=lambda kv: -float(kv[1].get("credits_effective", 0.0))):
         print(
             f"{name:<24}{int(vals['requests']):>5}{int(vals['input']):>12,}"
             f"{int(vals['cached']):>12,}{int(vals['output']):>11,}"
@@ -573,9 +552,7 @@ def print_report(report: dict[str, object], by_session: bool) -> None:
         print()
         print("-- By session " + "-" * 63)
         print(f"{'session':<12}{'req':>5}{'input':>12}{'cached':>12}{'output':>11}{'credits':>11}")
-        for name, vals in sorted(
-            by_sess.items(), key=lambda kv: -float(kv[1].get("credits_effective", 0.0))
-        ):
+        for name, vals in sorted(by_sess.items(), key=lambda kv: -float(kv[1].get("credits_effective", 0.0))):
             print(
                 f"{name:<12}{int(vals['requests']):>5}{int(vals['input']):>12,}"
                 f"{int(vals['cached']):>12,}{int(vals['output']):>11,}"
@@ -615,9 +592,11 @@ def _print_compaction(report: dict[str, object]) -> None:
     print(f"Cost                       : {_fmt(float(stats['credits']))} credits")
     print(f"  per compaction           : {_fmt(float(stats['credits_per_compaction']))} credits")
     print(f"Context before compaction  : mean {int(stats['context_before_mean']):,} tok")
-    print(f"  p50 / p90 / max          : {int(stats['context_before_p50']):,}"
-          f" / {int(stats['context_before_p90']):,}"
-          f" / {int(stats['context_before_max']):,} tok")
+    print(
+        f"  p50 / p90 / max          : {int(stats['context_before_p50']):,}"
+        f" / {int(stats['context_before_p90']):,}"
+        f" / {int(stats['context_before_max']):,} tok"
+    )
     print(f"Rounds between compactions : {float(stats['rounds_between_mean']):.1f}")
     print(f"Mean duration              : {float(stats['duration_ms_mean']) / 1000:.1f} s")
     print()
@@ -692,14 +671,10 @@ def build_baseline(report: dict[str, object]) -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     """Parse arguments, collect usage records, and print the report."""
-    parser = argparse.ArgumentParser(
-        description="Report Copilot token usage and AI credit cost."
-    )
+    parser = argparse.ArgumentParser(description="Report Copilot token usage and AI credit cost.")
     parser.add_argument("--storage", help="Path to a chatSessions directory")
     parser.add_argument("--models-json", help="Path to models.json price table")
-    parser.add_argument(
-        "--by-session", action="store_true", help="Include the per-session breakdown"
-    )
+    parser.add_argument("--by-session", action="store_true", help="Include the per-session breakdown")
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of text")
     parser.add_argument(
         "--baseline",
@@ -737,9 +712,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.baseline:
         snapshot = build_baseline(report)
-        Path(args.baseline).write_text(
-            json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
+        Path(args.baseline).write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print()
         print(f"Baseline snapshot written to {args.baseline}")
     return 0

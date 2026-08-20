@@ -47,18 +47,12 @@ RULES: list[tuple[str, re.Pattern[str], str]] = [
     (
         "AF001",
         re.compile(r"\.github[/\\]af-env\.conf"),
-        (
-            "config path is not anchored to the script location -- "
-            "source _common and use af_conf_get / Get-AfConfig"
-        ),
+        ("config path is not anchored to the script location -- source _common and use af_conf_get / Get-AfConfig"),
     ),
     (
         "AF002",
         re.compile(r"Join-Path\s+\(Get-Location\)|Join-Path\s+\$PWD|\$\(pwd\)"),
-        (
-            "path built from the current working directory -- "
-            "hooks do not control the cwd they are invoked from"
-        ),
+        ("path built from the current working directory -- hooks do not control the cwd they are invoked from"),
     ),
     (
         "AF003",
@@ -115,9 +109,7 @@ def check_file(path: Path) -> list[str]:
         for code, pattern, hint in RULES:
             if not pattern.search(line):
                 continue
-            if code == "AF001" and (
-                ROOT_ANCHORS.search(line) or not PATH_USE.search(line)
-            ):
+            if code == "AF001" and (ROOT_ANCHORS.search(line) or not PATH_USE.search(line)):
                 continue
             found.append(f"{path}:{lineno}: {code} {hint}\n    {line.strip()}")
     return found
@@ -129,9 +121,7 @@ def iter_targets(paths: list[str]) -> list[Path]:
     for raw in paths:
         p = Path(raw)
         if p.is_dir():
-            targets.extend(
-                sorted(q for q in p.rglob("*") if q.suffix in (".sh", ".ps1"))
-            )
+            targets.extend(sorted(q for q in p.rglob("*") if q.suffix in (".sh", ".ps1")))
         elif p.is_file():
             targets.append(p)
     return targets

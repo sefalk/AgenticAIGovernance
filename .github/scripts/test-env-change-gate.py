@@ -98,16 +98,12 @@ def ps_array(items: list[str]) -> str:
 
 
 def main() -> int:
-    workflow = yaml.safe_load(
-        (REPO / ".github/workflows/regression.yml").read_text(encoding="utf-8")
-    )
+    workflow = yaml.safe_load((REPO / ".github/workflows/regression.yml").read_text(encoding="utf-8"))
     steps = workflow["jobs"]["suites"]["steps"]
     run_text = next((s["run"] for s in steps if s.get("name") == STEP_NAME), None)
     if run_text is None:
         print(f"FAIL: no step named '{STEP_NAME}' in regression.yml.")
-        print(
-            "The gate was renamed or removed; this suite tests nothing until it is pointed at the new name."
-        )
+        print("The gate was renamed or removed; this suite tests nothing until it is pointed at the new name.")
         return 2
 
     failures = 0
@@ -151,9 +147,7 @@ def main() -> int:
             out = proc.stdout + proc.stderr
             passed = proc.returncode == want_exit and want_text in out
             failures += 0 if passed else 1
-            print(
-                f"[{'PASS' if passed else 'FAIL'}] {name}: exit={proc.returncode} (want {want_exit})"
-            )
+            print(f"[{'PASS' if passed else 'FAIL'}] {name}: exit={proc.returncode} (want {want_exit})")
             if not passed:
                 for line in out.splitlines():
                     if line.strip():

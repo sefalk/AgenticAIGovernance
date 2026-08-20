@@ -47,6 +47,7 @@ calibration wherever tiktoken is installed.
 
 Exit codes: 0 pass, 1 over budget, 2 blocked (required input missing/unreadable).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -299,9 +300,7 @@ def _instruction_sets(
     root_instructions = github_dir / "copilot-instructions.md"
     if not root_instructions.is_file():
         raise Blocked(f"copilot-instructions.md not found in {github_dir}")
-    always_on.append(
-        (root_instructions.name, _tokens(root_instructions), ownership.is_project(root_instructions.name))
-    )
+    always_on.append((root_instructions.name, _tokens(root_instructions), ownership.is_project(root_instructions.name)))
 
     instructions_dir = github_dir / "instructions"
     if not instructions_dir.is_dir():
@@ -362,8 +361,11 @@ def _print_split(af_total: int, af_budget: int, project_total: int, project_budg
 
 
 def _print_breakdown(
-    entries: list[tuple[str, int, bool]], af_total: int, af_budget: int,
-    project_total: int, project_budget: int | None,
+    entries: list[tuple[str, int, bool]],
+    af_total: int,
+    af_budget: int,
+    project_total: int,
+    project_budget: int | None,
 ) -> None:
     print(f"{TAG} always-on set -- sent with every chat request:")
     for name, tokens, is_project in sorted(entries, key=lambda row: row[1], reverse=True):
@@ -448,8 +450,11 @@ def _verify_tokenizer(github_dir: Path) -> int:
 
 
 def _print_conditional(
-    entries: list[tuple[str, int, str, bool]], af_total: int, af_budget: int,
-    project_total: int, project_budget: int | None,
+    entries: list[tuple[str, int, str, bool]],
+    af_total: int,
+    af_budget: int,
+    project_total: int,
+    project_budget: int | None,
 ) -> None:
     print(f"{TAG} conditional set -- loaded when a matching file is in context:")
     for name, tokens, glob, is_project in sorted(entries, key=lambda row: row[1], reverse=True):
@@ -457,9 +462,7 @@ def _print_conditional(
     _print_split(af_total, af_budget, project_total, project_budget)
 
 
-def _print_agents(
-    totals: list[tuple[str, int, int, int]], agent_budget: int, af_always_on: int
-) -> None:
+def _print_agents(totals: list[tuple[str, int, int, int]], agent_budget: int, af_always_on: int) -> None:
     print(f"{TAG} per-agent context (own + AF always-on {af_always_on:,}, gated):")
     for name, own, af_total, worst in totals:
         print(f"  {af_total:6,} tok  {name:<24} (own {own:,}, worst case {worst:,})")
@@ -477,9 +480,7 @@ def _seed_value(measured: int) -> int:
     return max(50, ((int(measured * (1 + PROJECT_SEED_HEADROOM)) + 49) // 50) * 50)
 
 
-def _seed_project_budget(
-    conf_path: Path, budgets: Budgets, always_on: int, conditional: int, force: bool
-) -> int:
+def _seed_project_budget(conf_path: Path, budgets: Budgets, always_on: int, conditional: int, force: bool) -> int:
     """Record this project's own ceilings in ``af-env.conf``.
 
     Seeded from what the project has today plus stated headroom, so the gate
@@ -535,31 +536,37 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Fail when the always-on instruction payload exceeds its budget.",
         epilog="Framework budgets: AF_CONTEXT_BUDGET_TOKENS, AF_AGENT_CONTEXT_BUDGET_TOKENS, "
-               "AF_CONDITIONAL_BUDGET_TOKENS. Project budgets: "
-               "AF_PROJECT_CONTEXT_BUDGET_TOKENS, AF_PROJECT_CONDITIONAL_BUDGET_TOKENS "
-               "(seed them with --seed-project-budget). All in .github/af-env.conf.",
+        "AF_CONDITIONAL_BUDGET_TOKENS. Project budgets: "
+        "AF_PROJECT_CONTEXT_BUDGET_TOKENS, AF_PROJECT_CONDITIONAL_BUDGET_TOKENS "
+        "(seed them with --seed-project-budget). All in .github/af-env.conf.",
     )
     parser.add_argument(
-        "--github-dir", type=Path, default=None,
+        "--github-dir",
+        type=Path,
+        default=None,
         help="Path to the .github directory (defaults to the one containing this script)",
     )
     parser.add_argument(
-        "--verbose", action="store_true",
+        "--verbose",
+        action="store_true",
         help="Print the per-file breakdown even when the check passes",
     )
     parser.add_argument(
-        "--verify-tokenizer", action="store_true",
+        "--verify-tokenizer",
+        action="store_true",
         help="Re-measure characters-per-token with tiktoken and report the drift "
-             "against the hardcoded divisor, instead of checking budgets "
-             "(development aid; requires tiktoken)",
+        "against the hardcoded divisor, instead of checking budgets "
+        "(development aid; requires tiktoken)",
     )
     parser.add_argument(
-        "--seed-project-budget", action="store_true",
+        "--seed-project-budget",
+        action="store_true",
         help="Record this project's own always-on and conditional ceilings in "
-             "af-env.conf, measured from what it has today plus headroom",
+        "af-env.conf, measured from what it has today plus headroom",
     )
     parser.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="With --seed-project-budget, replace ceilings that are already set",
     )
     args = parser.parse_args(argv)
@@ -585,13 +592,9 @@ def main(argv: list[str] | None = None) -> int:
         conditional_total = af_conditional + project_conditional
 
         if args.seed_project_budget:
-            return _seed_project_budget(
-                conf_path, budgets, project_always_on, project_conditional, args.force
-            )
+            return _seed_project_budget(conf_path, budgets, project_always_on, project_conditional, args.force)
 
-        agent_totals = _agent_totals(
-            github_dir, af_always_on, project_always_on, conditional_total
-        )
+        agent_totals = _agent_totals(github_dir, af_always_on, project_always_on, conditional_total)
     except Blocked as exc:
         print(f"{TAG} BLOCKED -- {exc}", file=sys.stderr)
         print(f"{TAG} Result unknown, not passing. Fix the input and re-run.", file=sys.stderr)
@@ -604,12 +607,9 @@ def main(argv: list[str] | None = None) -> int:
     over_context = af_always_on > budgets.af_context
     over_agent = worst_af_total > budgets.af_agent
     over_conditional = af_conditional > budgets.af_conditional
-    over_project_context = (
-        budgets.project_context is not None and project_always_on > budgets.project_context
-    )
+    over_project_context = budgets.project_context is not None and project_always_on > budgets.project_context
     over_project_conditional = (
-        budgets.project_conditional is not None
-        and project_conditional > budgets.project_conditional
+        budgets.project_conditional is not None and project_conditional > budgets.project_conditional
     )
 
     unbudgeted = budgets.project_context is None or budgets.project_conditional is None
@@ -623,20 +623,18 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"  Record this project's baseline: python {Path(__file__).name} --seed-project-budget")
 
-    failures = (
-        over_context or over_agent or over_conditional
-        or over_project_context or over_project_conditional
-    )
+    failures = over_context or over_agent or over_conditional or over_project_context or over_project_conditional
     if not failures:
         if args.verbose:
-            _print_breakdown(
-                entries, af_always_on, budgets.af_context, project_always_on, budgets.project_context
-            )
+            _print_breakdown(entries, af_always_on, budgets.af_context, project_always_on, budgets.project_context)
             print()
             if conditional_entries:
                 _print_conditional(
-                    conditional_entries, af_conditional, budgets.af_conditional,
-                    project_conditional, budgets.project_conditional,
+                    conditional_entries,
+                    af_conditional,
+                    budgets.af_conditional,
+                    project_conditional,
+                    budgets.project_conditional,
                 )
                 print()
             _print_agents(agent_totals, budgets.af_agent, af_always_on)
@@ -649,9 +647,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if over_context or over_project_context:
-        _print_breakdown(
-            entries, af_always_on, budgets.af_context, project_always_on, budgets.project_context
-        )
+        _print_breakdown(entries, af_always_on, budgets.af_context, project_always_on, budgets.project_context)
         print()
 
     if over_context:
@@ -684,8 +680,11 @@ def main(argv: list[str] | None = None) -> int:
         if over_context or over_project_context:
             print()
         _print_conditional(
-            conditional_entries, af_conditional, budgets.af_conditional,
-            project_conditional, budgets.project_conditional,
+            conditional_entries,
+            af_conditional,
+            budgets.af_conditional,
+            project_conditional,
+            budgets.project_conditional,
         )
         print()
 

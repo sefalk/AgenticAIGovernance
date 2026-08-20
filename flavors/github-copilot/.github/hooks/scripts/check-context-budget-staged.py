@@ -32,6 +32,7 @@ commit in front of the guard, and untracked files are a statement about the
 repository. Charging one to the other makes an unrelated commit pay for a
 configuration defect.
 """
+
 from __future__ import annotations
 
 import os
@@ -48,7 +49,11 @@ BUDGET_FILES = frozenset({"copilot-instructions.md", "af-env.conf", ".af-manifes
 
 def _git_text(args: list[str]) -> str:
     result = subprocess.run(
-        ["git", *args], capture_output=True, check=True, text=True, encoding="utf-8",
+        ["git", *args],
+        capture_output=True,
+        check=True,
+        text=True,
+        encoding="utf-8",
     )
     return result.stdout
 
@@ -60,8 +65,7 @@ def _git_bytes(args: list[str], stdin: bytes | None = None) -> bytes:
 
 def _staged_files() -> list[str]:
     stdout = _git_text(
-        ["-c", "core.quotePath=false", "diff", "--cached", "-z",
-         "--name-only", "--diff-filter=ACMR"],
+        ["-c", "core.quotePath=false", "diff", "--cached", "-z", "--name-only", "--diff-filter=ACMR"],
     )
     return [entry for entry in stdout.split("\0") if entry]
 
@@ -97,7 +101,7 @@ def _payload_root(path: str) -> str | None:
     if ".github" not in parts:
         return None
     index = parts.index(".github")
-    if not _is_budget_input("/".join(parts[index + 1:])):
+    if not _is_budget_input("/".join(parts[index + 1 :])):
         return None
     return "/".join(parts[: index + 1])
 
@@ -124,9 +128,9 @@ def _tracked(root: str) -> set[str]:
     )
     prefix = f"{root}/"
     return {
-        entry[len(prefix):]
+        entry[len(prefix) :]
         for entry in names.decode("utf-8", "replace").split("\0")
-        if entry.startswith(prefix) and _is_budget_input(entry[len(prefix):])
+        if entry.startswith(prefix) and _is_budget_input(entry[len(prefix) :])
     }
 
 
@@ -154,7 +158,9 @@ def _ignored(paths: list[str]) -> set[str]:
     """Which of ``paths`` a gitignore rule matches. Empty on any git failure."""
     result = subprocess.run(
         ["git", "check-ignore", "-z", "--stdin"],
-        input="\0".join(paths).encode("utf-8"), capture_output=True, check=False,
+        input="\0".join(paths).encode("utf-8"),
+        capture_output=True,
+        check=False,
     )
     if result.returncode not in (0, 1):
         return set()
@@ -263,7 +269,10 @@ def _checker() -> Path:
 def _measure(checker: Path, github_dir: Path, indent: str = "  ") -> int:
     result = subprocess.run(
         [sys.executable, str(checker), "--github-dir", str(github_dir)],
-        capture_output=True, text=True, encoding="utf-8", check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
     )
     output = (result.stdout or "") + (result.stderr or "")
     for line in output.splitlines():
