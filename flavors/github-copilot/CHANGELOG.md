@@ -201,6 +201,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The delegation check accused on presence, not on causality (#172).**
+  `coordinator-posttooluse` ran `git status --porcelain` after every terminal
+  call and reported a DELEGATION VIOLATION whenever the working tree was dirty.
+  It never established *who* made the change. In a normal TDD workflow subagents
+  hold uncommitted work in exactly those directories for the whole span between
+  phase commits, so the warning fired on essentially every coordinator terminal
+  call — each time asserting a Cardinal Rule 1 breach that had not happened, and
+  each time advising `git checkout -- <file>`, which would have discarded the
+  subagents' work.
+
+  A guard that fires on the normal case teaches the operator to ignore it, so it
+  is also ignored on the one occasion it is right. The fix supplies the missing
+  evidence instead of tuning a threshold: `coordinator-pretooluse` writes a
+  baseline of the already-dirty entries to `af-delegation.snapshot` inside the
+  git directory before it allows a terminal call, and the PostToolUse hook
+  reports only entries absent from that baseline. Whole porcelain lines are
+  compared rather than paths alone, so a staged/unstaged transition still counts.
+
+  Two properties follow deliberately. Without a baseline the hook stays
+  **silent** — absence of evidence of causality is not evidence of a violation,
+  and accusing anyway is the defect being removed. And the destructive
+  `git checkout --` advice is gone: the remedy is to delegate the change, never
+  to discard uncommitted work.
+
+  The hook had no unit coverage at all. `test-hooks.ps1` never invoked it and the
+  integration suite only checked *that* it fires. Seven assertions now cover the
+  silent-without-baseline case, the false positive from the issue, the true
+  positive, the absence of the destructive advice, tool scoping, and the
+  PreToolUse write. Suite: **279 passed, 0 failed**.
+
+  The bash twin carries the same logic **and one further fix**. It used
+  `[ -z "$X" ] && echo '{}' && exit 0`, which evaluates to 1 whenever `$X` is
+  non-empty and so aborted the hook under `set -euo pipefail` — the exact
+  failure mode its own header comment warns about twenty lines above. Both
+  occurrences are now `if` blocks. **This was not executed:** the authoring host
+  has no bash, so every bash change here is reviewed, not measured (#168).
+
 - **The test guard denied reading, not running (#183).** `coordinator-pretooluse`
   decided "this is a test run" with `$command -match '\bpytest\b'`. A `.` counts
   as a word boundary there, so grepping the configuration header `[tool.pytest`
