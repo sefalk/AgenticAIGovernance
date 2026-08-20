@@ -1166,6 +1166,30 @@ Assert-Silent "coordinator can run non-test scripts via terminal" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"run_in_terminal","tool_input":{"command":".github/scripts/audit-tools.ps1"}}'
 
+# The gate must follow the invocation, not the word. Both directions are held
+# here: naming pytest in read-only text must pass, hiding an invocation after a
+# separator must not. The first case is the command from issue #183 verbatim --
+# it ran no test, and the remedy the denial suggested cannot read files at all.
+Assert-Silent "coordinator can grep a pytest config header" `
+    "coordinator-pretooluse.ps1" `
+    '{"tool_name":"run_in_terminal","tool_input":{"command":"Get-Content \".github/test-log.json\" ;\nGet-Process java ;\nSelect-String -Path \"pyproject.toml\" -Pattern \"^\\[tool\\.pytest\" -Context 0,14 ;\nGet-ChildItem -Recurse -Filter conftest.py"}}'
+
+Assert-Silent "coordinator can read a file whose name starts with pytest" `
+    "coordinator-pretooluse.ps1" `
+    '{"tool_name":"run_in_terminal","tool_input":{"command":"Get-Content pytest.ini"}}'
+
+Assert-Deny "coordinator cannot hide pytest after a statement separator" `
+    "coordinator-pretooluse.ps1" `
+    '{"tool_name":"run_in_terminal","tool_input":{"command":"git status --porcelain ; pytest tests/ -q"}}'
+
+Assert-Deny "coordinator cannot invoke a path-qualified pytest.exe" `
+    "coordinator-pretooluse.ps1" `
+    '{"tool_name":"run_in_terminal","tool_input":{"command":"& \".venv\\Scripts\\pytest.exe\" -q tests/"}}'
+
+Assert-Deny "coordinator cannot run pytest through uv" `
+    "coordinator-pretooluse.ps1" `
+    '{"tool_name":"run_in_terminal","tool_input":{"command":"uv run pytest tests/ -q"}}'
+
 Write-Output ""
 
 # ── 3. test-writer-pretooluse.ps1 ────────────────────────────────────────
