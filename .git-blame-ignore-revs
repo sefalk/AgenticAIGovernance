@@ -1,0 +1,10 @@
+# Commits that only reformat. `git blame` skips them when told to:
+#
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# GitHub's blame view honours this file automatically. Only add commits here
+# that change formatting and nothing else -- a commit listed by mistake makes
+# real authorship invisible.
+
+# style: apply ruff format to the framework's own Python (#167)
+63694aaa294f2b1077e2455bbf4bc36c9fa5d263
