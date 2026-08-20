@@ -14,8 +14,11 @@ set -euo pipefail
 . "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 
 RAW=$(cat)
-# `A && B && exit` returns 1 when A is false, which under `set -e` aborts the
-# hook instead of falling through. Explicit `if` blocks do not.
+# Explicit `if`, not `[ -z "$X" ] && echo '{}' && exit 0`. Measured on bash
+# 5.2.37: that list does NOT abort under `set -e` -- the failing test is not the
+# command after the final `&&`, so the exception applies. What it does do is
+# leave $? = 1 when the guard does not fire, which becomes the hook's exit
+# status if the list is ever the last statement, and it hides the control flow.
 if [ -z "$RAW" ]; then echo '{}'; exit 0; fi
 if [ -z "$AF_PYTHON" ]; then echo '{}'; exit 0; fi
 
@@ -28,7 +31,7 @@ except Exception:
     print('')
 " 2>/dev/null)
 
-[ -z "$TOOL_NAME" ] && echo '{}' && exit 0
+if [ -z "$TOOL_NAME" ]; then echo '{}'; exit 0; fi
 
 # Allow read-only and search tools unconditionally
 case "$TOOL_NAME" in
@@ -146,12 +149,14 @@ PYEOF
         # Baseline for the PostToolUse check: what was already dirty before this
         # command ran. Without it that hook can only see presence, so it fired on
         # every call while subagents legitimately held uncommitted work (#172).
-        SNAP_DIR=$(git rev-parse --absolute-git-dir 2>/dev/null || true)
+        # -C AF_CODE_ROOT, never the cwd: PostToolUse must resolve the same git
+        # directory this wrote to, and a hook runs from wherever the agent sits.
+        SNAP_DIR=$(git -C "$AF_CODE_ROOT" rev-parse --absolute-git-dir 2>/dev/null || true)
         if [ -n "$SNAP_DIR" ] && [ -d "$SNAP_DIR" ]; then
             SNAP_SRC=$(af_conf_get SRC_DIR src)
             # Only on success: a failed status would write an empty baseline, and
             # an empty baseline makes every existing change look new.
-            if BASELINE=$(git status --porcelain -- "${SNAP_SRC}/" tests/ 2>/dev/null); then
+            if BASELINE=$(git -C "$AF_CODE_ROOT" status --porcelain -- "${SNAP_SRC}/" tests/ 2>/dev/null); then
                 printf '%s\n' "$BASELINE" > "${SNAP_DIR}/af-delegation.snapshot"
             fi
         fi
