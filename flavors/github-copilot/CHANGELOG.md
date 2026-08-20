@@ -122,6 +122,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Auto-merge could never be armed for the pull requests that most needed it
+  (#170).** `arm-auto-merge.yml` triggered on `opened`, `reopened` and
+  `ready_for_review` only. Nothing fires again after a pull request exists, so
+  one that was not mergeable at the moment it opened stayed unarmed forever.
+
+  That is not a corner case here. Every payload change touches `CHANGELOG.md`
+  and `VERSION`, and the pre-commit hook's automatic `VERSION` bump *guarantees*
+  a collision between any two concurrent branches. The workflow therefore
+  failed for precisely the pull request that had to queue — the situation #150
+  built it for. Observed on #169: opened two minutes after its base moved, born
+  conflicted, the arm job failed by design, and resolving the conflict raised a
+  `synchronize` event that nothing was listening to. It waited for a human.
+
+  `synchronize` is now a trigger, so the push that resolves a conflict is also
+  the push that arms. A still-conflicted pull request exits with a notice
+  instead of a failure — failing on every push during a rebase would train the
+  author to ignore this job, which is how a guard stops being read.
+  Mergeability is computed asynchronously and reads `UNKNOWN` for a moment
+  after a push, so the state is polled before it is trusted.
+
+  The control is #171: same workflow, same author, same base, opened onto a
+  base that did not move, armed and merged by `github-actions[bot]` six minutes
+  later, unattended. Positive and negative case differ in exactly the variable
+  named above. What that pair does *not* establish is the fix itself — only a
+  pull request that is conflicted at open and then resolved can show that, and
+  until one has merged unattended this entry describes an intent, not a result.
+
 - **The framework's own lint-gate suite was writing mixed-line-ending files.**
   Adding the format check turned six previously-green scenarios red, and the
   cause was the harness, not the gate: `Set-Content` terminates a file with
