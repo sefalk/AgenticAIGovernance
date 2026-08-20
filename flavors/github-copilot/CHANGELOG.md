@@ -122,6 +122,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The hooks README said JSON hooks do not run. They do (#166).** Three
+  places in `.github/hooks/README.md` called the `.json` files "currently
+  orphaned", "legacy fallbacks" and "not currently auto-loaded by VS Code",
+  while a fourth section in the same file called them "Active Hooks (ready to
+  use)". A reader had no way to tell which half to believe, and the wrong half
+  invites the conclusion that the shipped guards are inert.
+
+  Two independent measurements settle it. A workspace folder containing
+  nothing but a `.github/hooks/agent-hooks.json` — no agents, no instructions
+  — ran its `PreToolUse` hook 13 times in one session with the working
+  directory set to that folder; nothing else could have registered it. And in
+  a log of 4,146 hook runs, a single `PreToolUse` event shows
+  `block-dangerous` followed by `test-writer-pretooluse` 167 times, where
+  `test-writer.agent.md` declares only the second — so both sources fire into
+  one event and neither replaces the other.
+
+  The README now says that, and carries the evidence rather than an assurance.
+  What it explicitly does **not** do is act on it: the duplicate declarations
+  stay. The same log shows `scan-secrets` running twice inside one event 476
+  times with no frontmatter hook to account for the repeat, and until that is
+  explained, removing a declaration risks removing the only copy that runs. A
+  hook that fires twice costs a second; a guard that quietly stops firing is a
+  hole nobody sees.
+
 - **Auto-merge could never be armed for the pull requests that most needed it
   (#170).** `arm-auto-merge.yml` triggered on `opened`, `reopened` and
   `ready_for_review` only. Nothing fires again after a pull request exists, so
