@@ -1,11 +1,8 @@
 # Agent Hooks
 
-> **Status:** Transitioning to per-agent frontmatter hooks (v1.18.4+)
->
-> **Global `.json` hooks:** Currently orphaned — VS Code agent hooks are a
-> preview feature and JSON loading is not yet fully implemented. We recommend
-> defining hooks in agent frontmatter instead (per-agent `.agent.md` files).
-> The `.json` files are maintained as legacy fallbacks for future use.
+> **Status:** Both hook sources run — the `.json` files in this folder and the
+> `hooks:` frontmatter of individual agents. Measured, not assumed; the
+> evidence is under [How Hooks Work](#how-hooks-work).
 >
 > Hooks execute deterministic shell commands at lifecycle points during agent
 > sessions. Unlike instructions that _guide_ behaviour, hooks _enforce_ it
@@ -14,8 +11,7 @@
 ## Real Git Hooks vs. Agent Hooks
 
 Everything below this section describes **agent hooks** — they only fire
-during an active VS Code Copilot agent session (preview, JSON loading not
-yet fully implemented; see status note above).
+during an active VS Code Copilot agent session (a preview feature).
 
 For enforcement that must hold regardless of *who* runs `git commit` (agent
 via terminal, or a human), the framework also ships a **real git hook**,
@@ -39,8 +35,28 @@ wired via `core.hooksPath`:
 
 ## How Hooks Work
 
-Hooks are configured in `.json` files in this folder. VS Code loads all
-`*.json` files from `.github/hooks/` automatically.
+Hooks come from two places and **both** are loaded: the `.json` files in this
+folder, which VS Code picks up automatically, and the `hooks:` frontmatter of
+individual `.agent.md` files. They compose — neither replaces the other.
+
+Two measurements, recorded because this folder documented the opposite for
+months:
+
+- A workspace folder containing nothing but a `.github/hooks/agent-hooks.json`
+  — no agents, no instructions — ran its `PreToolUse` hook 13 times in one
+  session, with the working directory set to that folder. Nothing but the
+  JSON could have registered it.
+- Across a session log of 4,146 hook runs, one `PreToolUse` event shows
+  `block-dangerous` followed by `test-writer-pretooluse`, 167 times.
+  `test-writer.agent.md` declares the second and not the first, so the two
+  sources fired into a single event.
+
+**Do not de-duplicate declarations on the strength of that.** The same log
+shows a script running two or three times inside one event — `scan-secrets`
+twice, 476 times over — with no frontmatter hook present to account for the
+repeat. Until that is explained, a script declared in both places stays
+declared in both places: a hook that runs twice costs a second, a guard that
+quietly stops running is a hole nobody sees (#166).
 
 Each hook:
 
@@ -64,8 +80,8 @@ Each hook:
 
 ## Configuration Format
 
-**Recommended:** Define hooks in agent frontmatter (`.agent.md` files) for
-per-agent enforcement. Example:
+**Per-agent:** Define hooks in agent frontmatter (`.agent.md` files) so they
+fire only for that agent. Example:
 
 ```yaml
 hooks:
@@ -75,7 +91,7 @@ hooks:
       windows: 'powershell -ExecutionPolicy Bypass -File .github\hooks\scripts\my-hook.ps1'
 ```
 
-**Legacy:** JSON format (not currently auto-loaded by VS Code):
+**Folder-wide:** JSON format, loaded from this folder automatically:
 
 ```json
 {
