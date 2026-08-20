@@ -153,6 +153,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The test guard denied reading, not running (#183).** `coordinator-pretooluse`
+  decided "this is a test run" with `$command -match '\bpytest\b'`. A `.` counts
+  as a word boundary there, so grepping the configuration header `[tool.pytest`
+  was a hard deny — on a command that read a JSON file, listed processes and
+  searched a TOML file, and ran no test at all. The denial's advice made it
+  worse: `runTests` and the test tasks cannot read a file or list a process, so
+  the only available recourse was to rephrase the command to avoid a word. That
+  is precisely the evasion behaviour the guard exists to prevent.
+
+  The gate now matches an *invocation* rather than the word: `pytest`,
+  `py.test`, `python -m pytest`, or a runner form such as `uv run pytest`,
+  anchored to the start of a statement, allowing a path prefix and quotes so
+  `& ".venv\Scripts\pytest.exe"` still counts.
+
+  Anchoring closes a hole in the other direction as well. `git status ; pytest
+  tests/` was caught before only by accident of the substring, and a narrowing
+  that looked at the first token alone would have turned that accident into a
+  bypass. `test-hooks.ps1` now holds both directions — three denials, two
+  permissions, including the command from the issue verbatim.
+
 - **The hooks README said JSON hooks do not run. They do (#166).** Three
   places in `.github/hooks/README.md` called the `.json` files "currently
   orphaned", "legacy fallbacks" and "not currently auto-loaded by VS Code",
