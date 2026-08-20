@@ -143,6 +143,18 @@ PYEOF
                 fi
             fi
         fi
+        # Baseline for the PostToolUse check: what was already dirty before this
+        # command ran. Without it that hook can only see presence, so it fired on
+        # every call while subagents legitimately held uncommitted work (#172).
+        SNAP_DIR=$(git rev-parse --absolute-git-dir 2>/dev/null || true)
+        if [ -n "$SNAP_DIR" ] && [ -d "$SNAP_DIR" ]; then
+            SNAP_SRC=$(af_conf_get SRC_DIR src)
+            # Only on success: a failed status would write an empty baseline, and
+            # an empty baseline makes every existing change look new.
+            if BASELINE=$(git status --porcelain -- "${SNAP_SRC}/" tests/ 2>/dev/null); then
+                printf '%s\n' "$BASELINE" > "${SNAP_DIR}/af-delegation.snapshot"
+            fi
+        fi
         echo '{}'; exit 0 ;;
 esac
 
