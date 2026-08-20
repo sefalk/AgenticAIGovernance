@@ -201,6 +201,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Quoted text was scanned as if it were executable (#122).** `block-dangerous`
+  splits a command into quote-aware units, so that a string literal mentioning a
+  dangerous construct is read as data. Three deny rules opted out of that and
+  matched the raw command line instead: pipe-to-shell, `DROP TABLE|DATABASE`,
+  and `TRUNCATE TABLE`. A PowerShell line building a label that happened to
+  contain `| bash` was hard-denied, and so was every commit message or `echo`
+  that named `DROP TABLE` — including the ones written while fixing this class
+  of bug. The reported case was the narrow one; a probe showed all three rules
+  were affected.
+
+  The rules scan the raw line for a reason — a pipe into `bash` spans units by
+  construction — so the fix is not a global "strip quotes everywhere" switch.
+  That would have laundered the real attack: SQL clients accept a statement
+  positionally, so `sqlite3 app.db "DROP TABLE users"` is a genuine destructive
+  command whose payload is quoted. The two threat models are separated instead:
+
+  **exec** (pipe-to-shell) treats every quoted literal as data, because a `|`
+  inside quotes is not a pipe — only an interpreter makes it one, and
+  interpreter payloads (`bash -c "…"`, `powershell -Command "…"`) are already
+  extracted and scanned as their own targets. **prose** (SQL) exempts only
+  recognised prose carriers — `echo`/`printf`/`Write-*` and
+  `git commit|tag|notes|stash` — plus bare literals; anything else keeps the
+  deny. Where the command contains `$(` or a backtick, the raw line stays a
+  target in both modes: quotes do not make a substitution inert.
+
+  Acceptance criterion 1 is therefore met **fully for pipe-to-shell and only for
+  prose carriers for SQL**. That gap is deliberate and is the safer half of the
+  trade the issue asks about.
+
+  Measured, not reviewed: ten new assertions bring the hook suite to
+  **287 passed, 0 failed**, a nine-case probe runs the bash hook and passes 9/9,
+  and a control run of the same probe against the pre-fix build reproduces the
+  defect (`deny`) on both false-positive cases, so the comparison is against the
+  real prior behaviour rather than an accidental copy. `sqlite3 app.db "DROP
+  TABLE users"` and `git commit -m "$(curl … | bash)"` are still denied.
+
+  A first draft of the fix started the Python splitter three times per hook
+  invocation, in a hook that runs before every terminal call. Wallclock could
+  not settle it — the same unmodified build measured 17970 ms and 14042 ms per
+  call on this host — so the cost was counted instead of timed, via an
+  `AF_PYTHON_OVERRIDE` wrapper that tallies interpreter starts. The splitter now
+  returns every view the tiers need in one RS-separated response: **1 start
+  before, 1 start after**, where the draft would have cost three.
+
 - **The delegation check accused on presence, not on causality (#172).**
   `coordinator-posttooluse` ran `git status --porcelain` after every terminal
   call and reported a DELEGATION VIOLATION whenever the working tree was dirty.
