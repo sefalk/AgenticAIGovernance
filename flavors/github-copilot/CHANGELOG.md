@@ -146,6 +146,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hook that fires twice costs a second; a guard that quietly stops firing is a
   hole nobody sees.
 
+- **The hook test drew the same false conclusion, and its evidence was
+  contaminated (#166).** `test-hooks-integration.ps1` printed "agent-hooks.json
+  may not be loaded by VS Code" and advised wiring the hooks into agent
+  frontmatter instead — the claim the README just retired, in a script people
+  run to check their setup.
+
+  It reached it by putting `SessionStart` hooks in one list with tool-scoped
+  ones. A tool-scoped hook fires on every matching call, so its absence from a
+  log holding hundreds of invocations means something. `SessionStart` fires
+  once per session, while the log file is created per window: a window reload
+  opens a fresh log mid-session, and that log cannot contain the event that
+  preceded it. Across 8 logs and 7,127 recorded hook events there is exactly
+  one `SessionStart` — and it ran `session-context.ps1` to completion, Success
+  in 3330ms, returning `additionalContext`. The event works; it is rarely
+  captured. The check now separates the two and reports the second as INFO.
+
+  The parser had the opposite fault. Its patterns were unanchored, and the log
+  records every tool's response — so anything printed into a terminal comes
+  back as quoted text inside a later `PostToolUse` line and was counted as hook
+  activity. Printing one raw `Running: ... session-context.ps1` line while
+  investigating made the next run report that hook as firing, with no hook
+  having run in between. The costly case is `Completed (Failure)`, where a
+  phantom match fails the suite and turns the CI gate red. All six patterns are
+  now anchored to the start of the message.
+
+  Orphan detection kept the same shape of error, recommending deletion of
+  scripts "never invoked by VS Code" when all the log shows is that they did
+  not run during the sessions it covers. It now says so, and points at the
+  declarations to check before anything is removed.
+
 - **Auto-merge could never be armed for the pull requests that most needed it
   (#170).** `arm-auto-merge.yml` triggered on `opened`, `reopened` and
   `ready_for_review` only. Nothing fires again after a pull request exists, so
