@@ -13,14 +13,12 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-# Worktree-aware path resolution (see ideas/feature-git-worktrees.md §12).
-$mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
-$codeRoot = $mainRoot
-$sentinel = Join-Path $mainRoot '.github/.active-worktree'
-if (Test-Path $sentinel) {
-    $p = (Get-Content $sentinel -Raw -ErrorAction SilentlyContinue).Trim()
-    if ($p -and (Test-Path $p)) { $codeRoot = $p }
-}
+# Root resolution AND the shared provenance detector both come from here. The
+# hand-rolled worktree block this replaced left Test-AfProvenanceMarker
+# undefined, and PowerShell abandons the enclosing `if` on a command-not-found
+# error, so Gate 2 silently never fired (issue #175).
+. "$PSScriptRoot/_common.ps1"
+$codeRoot = $AfCodeRoot
 
 # Read stdin (hook input JSON -- required by protocol)
 $null = [Console]::In.ReadToEnd()
