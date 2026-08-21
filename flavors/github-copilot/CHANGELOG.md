@@ -201,7 +201,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Quoted text was scanned as if it were executable (#122).** `block-dangerous`
+- **An interrupted test run read as the previous run's result (#179).** The test
+  runner built its `test-log.json` entry only after pytest returned. A run that
+  was interrupted — terminal closed, agent cancelled, machine slept — left the
+  previous entry untouched, still saying `"status": "ok"` with yesterday's
+  counters. Nothing in the file distinguished it from a run that had just
+  finished green. Under the once-per-workflow test budget the next reader skips
+  the suite on exactly that evidence, so an abandoned run was silently promoted
+  to a passing one.
+
+  Both runners now claim their entry *before* pytest starts: `status: running`,
+  a `started` timestamp, and counters `null` — never `0`, for the same reason
+  the runner-failure path uses `null`. When pytest returns, the result replaces
+  the marker. An interrupted run therefore leaves behind a state that says so.
+  The `test-execution` skill gained the matching rule: `running` is not
+  evidence, in either of its two meanings (a live run or an abandoned one).
+
+  The interim write is a merge like the final one, so the marker cannot evict
+  the other scopes' entries — that would have traded #179 for #93. Measured on
+  the shipped scripts through `test-run-tests.ps1`: **28/28 passed**, up from 23,
+  with the four new PowerShell cases and the four bash cases failing first for
+  the right reason (during the run, the log still read `passed=42 total=42` for
+  the scope being re-run).
+
+- **Every completed run of `run-tests.sh` was logged as `0 passed` (#179,
+  found while fixing it).** The summary parser matched with `grep -E '\d+
+  passed'`. `\d` is PCRE; in an ERE `grep` reads it as a literal `d`, so the
+  pattern never matched a pytest summary line. `SUMMARY_LINE` was always empty,
+  which meant a green run was recorded as `0 passed / 0 total` with
+  `status: ok`, and a run with real test failures was recorded as
+  `status: error` — "pytest did not run" — when pytest had run and reported
+  them. The extraction that followed used `grep -P`, which is absent from BSD
+  and macOS grep entirely.
+
+  Both are now POSIX classes (`[0-9]`, `[[:space:]]`) with `grep -Eo`. Verified
+  against the three dialects on Git bash 5.2.37: the old ERE pattern exits 1 on
+  `3 passed in 0.42s`; `-P` and the POSIX form both return `3 passed`. Pinned by
+  a case that asserts the parsed counters *and* the runtime, so a parse that
+  regresses to matching the first number it finds still fails.
+
+
   splits a command into quote-aware units, so that a string literal mentioning a
   dangerous construct is read as data. Three deny rules opted out of that and
   matched the raw command line instead: pipe-to-shell, `DROP TABLE|DATABASE`,
