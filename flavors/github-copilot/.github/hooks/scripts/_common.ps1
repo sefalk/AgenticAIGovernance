@@ -8,7 +8,8 @@
 #   $AfScriptDir   directory this file lives in
 #   $AfMainRoot    checkout where .github/ is deployed
 #   $AfCodeRoot    active worktree if the sentinel points at one, else MAIN
-#   $AfConfPath    absolute path to .github/af-env.conf
+#   $AfConfPath    absolute path to the config: $env:AF_CONF_PATH if set,
+#                  else .github/af-env.conf
 #   $AfConfFound   $true if that file exists
 #   $AfPython      an interpreter that was proven to run, or ''
 #   Get-AfConfig -Key <name> [-Default <value>]
@@ -33,7 +34,27 @@ if (Test-Path $afSentinel) {
     if ($afWt -and (Test-Path $afWt)) { $script:AfCodeRoot = $afWt }
 }
 
-$script:AfConfPath = Join-Path $script:AfMainRoot '.github/af-env.conf'
+# AF_CONF_PATH names the config for this process, overriding the deployed one
+# (issue #108). It exists so a test can state the policy it asserts under: a
+# suite that reads whatever af-env.conf the consumer happens to ship reports
+# that consumer's settings as failures, and teaches people to revert a
+# legitimate policy choice to make a test pass.
+#
+# A path that does not exist counts as NO config, not as a fallback to the
+# deployed one. Falling back would put the consumer's file back in play behind
+# a typo -- the exact confusion this variable removes -- and the caller who set
+# it would never learn that its file was missed.
+#
+# It cannot lift a hard-deny: the deny tier in block-dangerous is hardcoded and
+# runs before any category is consulted. Policy widens or narrows the ask/auto
+# boundary only. Anyone able to set this variable on the hook process already
+# controls that process; the hook is started by the extension host, so a
+# $env: assignment in an agent terminal does not reach it.
+$script:AfConfPath = if ($env:AF_CONF_PATH) {
+    $env:AF_CONF_PATH
+} else {
+    Join-Path $script:AfMainRoot '.github/af-env.conf'
+}
 $script:AfConfFound = Test-Path $script:AfConfPath
 
 function Get-AfConfig {
