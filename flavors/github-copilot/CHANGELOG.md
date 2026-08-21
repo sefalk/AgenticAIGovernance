@@ -9,6 +9,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A measurement an agent cannot show you is not a result (#134).** The
+  framework already required agents to report evidence. It never said where the
+  evidence had to live. That gap is invisible while the deliverable is a file —
+  git holds it, anyone can open it — and opens the moment the deliverable is a
+  *value*: a benchmark, a validation, a profile, a row count. The code that
+  produced it is committed; the number is not. It exists only in the return text
+  of the agent that produced it, which is exactly the artifact a reviewer has no
+  independent way to check.
+
+  Four layers were added, each at the level where it belongs:
+
+  - **MANIFEST § 7 (Traceability)** gains `### Measured Results`: a result only
+    the producing agent can observe is not evidence. Cite a location a third
+    party can open without re-running anything — not the number alone.
+  - **`quality-gates.instructions.md`** gains an *evidence durability* clause in
+    the gate taxonomy. When no durable channel exists the gate is **BLOCKED**,
+    which the existing taxonomy already defines as an escalation trigger. It is
+    not passed with the number in the return.
+  - **`databricks-execution-patterns`** gains a channel-selection matrix. Its
+    run-type framework listed `jobs/runs/submit` and defined jobs but never
+    mentioned the Command Execution API (`/api/1.2/commands/*`) — and a decision
+    framework that omits an available option does not forbid it, it just fails
+    to see it. The ephemeral channel is now named, permitted for probing, and
+    barred from anything that will be quoted. Retention is stated as a **time
+    horizon**, not a yes/no, with a persistence policy by investigation size.
+  - **`copilot-authoring`** gains the convention this generalises to: platform
+    skills carry the runbook, projects carry a configuration overlay, never a
+    forked runbook.
+
+  **The 60-day retention figure is quoted from the issue, not independently
+  measured.** The skill says so and tells the reader to verify the current
+  figure for their own workspace.
+
+  **What this does not do: it is not mechanically enforced, and cannot be.** A
+  Stop hook does not receive the agent's return text, so no hook can check that
+  a cited number has a run id behind it — the same structural limit recorded
+  against #175. The twelve regression cases assert that the *guidance exists and
+  says what it says*; they are documentation invariants, not behavioural ones.
+  Calling them enforcement would repeat the failure this issue is about.
+
+  Paying for the words was part of the change. Adding the durability clause put
+  the always-on budget at 3,522 / 3,500 — 22 tokens over, a hard fail. The
+  budget was not raised. The provider-worker naming examples were duplicated
+  between `quality-gates.instructions.md` (always-on, paid on every request) and
+  MANIFEST § 7 (not counted); the always-on copy now points at the MANIFEST one.
+  Result: **3,476 / 3,500, passing**. Four regression cases assert each example
+  survived the move, so a deduplication that silently became a deletion fails
+  the suite.
+
+  Suite went 312 → **324 passed, 0 failed**. The first run of the new cases
+  reported 323/1, and the failure was mine, not the content's: the assertion
+  matched the literal `BLOCKED, not passed` while the skill writes it with
+  markdown emphasis and a line break between. The assertion was corrected, not
+  the prose.
+
+  A test that passes against the text that was written alongside it proves
+  nothing on its own, so each case was checked against a mutation that deletes
+  the rule it guards. Nine mutations, nine reds, each with exactly one failure
+  and no collateral: the principle sentence, the durability clause, the named
+  ephemeral endpoint, the citation bar, the time-horizon framing, the
+  no-fallback escalation rule, the forked-runbook warning, the
+  enumerate-what-is-disallowed rule, and one provider-worker example removed
+  from the MANIFEST. The three remaining cases are further iterations of that
+  same survival loop and were not mutated separately.
+
 - **Working state now lives on the tracker, not in an agent's context (#186).**
   Every issue in this repository read exactly as it did on the day it was filed.
   What had been delivered, what was blocked, and what had been decided lived in

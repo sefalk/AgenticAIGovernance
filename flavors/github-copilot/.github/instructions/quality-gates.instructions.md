@@ -30,6 +30,10 @@ proofreading your own work.
 the gate as **BLOCKED** — not PASS or FAIL — and include the reason.
 The coordinator treats BLOCKED gates as escalation triggers.
 
+**Evidence durability:** when the deliverable is a value, not a file, the
+artifact is the gate. Return a reference a third party can open — run id, URL,
+table, committed file — not the number. No durable channel → BLOCKED.
+
 ## Complexity Tiers
 
 The complexity tier determines which gates activate and at what strictness.
@@ -55,20 +59,9 @@ to count.
 
 ## Agent Naming Convention (Provider Workers)
 
-Provider-scoped integration workers should use the pattern
-`{provider}-{capability}-{role}` to keep responsibilities explicit and portable.
-
-Examples:
-
-- `ado-work-item-manager`
-- `ado-wiki-manager`
-- `ado-pr-manager`
-- `ado-pipeline-manager`
-- `gh-issue-manager`
-- `gh-pr-manager`
-
-Naming violations are SOFT unless they cause broken orchestration references,
-which is treated as HARD.
+The `{provider}-{capability}-{role}` pattern and its examples live in
+MANIFEST § 7 (Agent Identity). Naming violations are SOFT unless they cause
+broken orchestration references, which is treated as HARD.
 
 ## Per-Agent Exit Gates
 
