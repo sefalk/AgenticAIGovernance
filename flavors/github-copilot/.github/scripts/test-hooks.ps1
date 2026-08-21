@@ -2399,6 +2399,35 @@ Assert-True "post-flight reports the path it probed" `
     ($compliance -match '(?i)MISSING: not found at') `
     "the MISSING line still carries no resolved path"
 
+# ── A quotation is a claim about bytes on disk (issue #174) ─────────────────
+#
+# The watchdog once quoted a sentence from a retro file that did not contain
+# it, and asserted a config value it had not read. Its conclusion was right
+# anyway, which is why neither was caught by reading the conclusion.
+#
+# These cases hold the contract, not the behaviour: an agent file is a prompt,
+# and no test here can prove an LLM will obey it. What they do prove is that
+# the requirement is present and that deleting it turns the suite red -- and
+# the requirement is chosen so that a violation is refutable by opening one
+# path, rather than by re-running the workflow.
+
+Assert-True "compliance-checker requires a citation for anything it quotes" `
+    ($compliance -match '(?i)\{path\}:\{line\}') `
+    "the agent may still quote a file without naming where the line came from"
+
+Assert-True "compliance-checker forbids quoting a file it did not open" `
+    ($compliance -match '(?i)quote only what you read in this pass') `
+    "nothing stops a quotation being composed from memory"
+
+Assert-True "compliance-checker reads the capability mode instead of inferring it" `
+    ($compliance -match '(?i)never inferred from the presence of a PR' -and
+     $compliance -match '(?i)Do NOT infer an `af-env\.conf` value from observed behaviour') `
+    "the mode may still be deduced from the behaviour being audited"
+
+Assert-True "the retro check names the line carrying the lesson" `
+    ($compliance -match '(?i)lesson at line') `
+    "a retro can still be reported substantive by retelling it"
+
 # Point 4: the remediation is what turns the false negative into data loss.
 $tddSkillPath = Join-Path $githubDir 'skills/tdd-orchestration/SKILL.md'
 $tddSkill = Get-Content $tddSkillPath -Raw

@@ -1074,6 +1074,26 @@ case "$compliance_text" in *.gitignore*) assert_true "compliance-checker names t
 case "$compliance_text" in *"MISSING: not found at"*) assert_true "post-flight reports the path it probed" 1 ;;
     *) assert_true "post-flight reports the path it probed" 0 "the MISSING line still carries no resolved path" ;; esac
 
+# --- A quotation is a claim about bytes on disk (issue #174) ---
+#
+# The watchdog once quoted a sentence from a retro that did not contain it, and
+# asserted a config value it had not read; the conclusion was right anyway,
+# so neither was catchable by reading the conclusion. These cases hold the
+# contract, not the behaviour -- what they prove is that the requirement is
+# present and that removing it turns the suite red.
+
+case "$compliance_text" in *'{path}:{line}'*) assert_true "compliance-checker requires a citation for anything it quotes" 1 ;;
+    *) assert_true "compliance-checker requires a citation for anything it quotes" 0 "a quotation need not name where the line came from" ;; esac
+
+case "$compliance_text" in *"Quote only what you read in this pass"*) assert_true "compliance-checker forbids quoting a file it did not open" 1 ;;
+    *) assert_true "compliance-checker forbids quoting a file it did not open" 0 "nothing stops a quotation composed from memory" ;; esac
+
+case "$compliance_text" in *"never inferred from the presence of a PR"*) assert_true "compliance-checker reads the capability mode instead of inferring it" 1 ;;
+    *) assert_true "compliance-checker reads the capability mode instead of inferring it" 0 "the mode may still be deduced from the behaviour being audited" ;; esac
+
+case "$compliance_text" in *"lesson at line"*) assert_true "the retro check names the line carrying the lesson" 1 ;;
+    *) assert_true "the retro check names the line carrying the lesson" 0 "a retro can still be reported substantive by retelling it" ;; esac
+
 tdd_text=$(cat "$GITHUB_DIR/skills/tdd-orchestration/SKILL.md" 2>/dev/null || true)
 # The PowerShell pendant matches with -match, which is case-insensitive. `case`
 # is not, so lowercase the haystack or the two harnesses disagree on casing
