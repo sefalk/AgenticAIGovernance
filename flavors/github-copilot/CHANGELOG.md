@@ -201,6 +201,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The watchdog quoted a file it had not read (#174).** A post-flight
+  compliance report presented a sentence as a direct quotation from the
+  workflow's retro; the retro contained neither that sentence nor the work item
+  it cited. The same report asserted `ADO_CAPABILITY_MODE=off` while the config
+  said `optional` — the mode had been inferred from the absence of a PR, which
+  is the very thing the check exists to assess. The report's conclusion was
+  correct anyway, and that is what makes this the dangerous shape: a fabricated
+  premise reaching a right answer cannot be caught by reading the answer.
+
+  The compliance-checker now carries a content rule beside its existing
+  existence rule: quote only what you read in this pass, cite `{path}:{line}`
+  for every quotation, locate a property by line number instead of retelling
+  it, and read configuration from `af-env.conf` rather than deducing it from
+  observed behaviour. The post-flight return format demands those citations, so
+  a missing one is visible in the artifact rather than buried in a transcript.
+
+  An agent file is a prompt, and no test can prove an LLM will obey one. What
+  the four new suite cases prove is narrower and still worth having: the
+  requirement is present, and removing it turns the suite red. Measured — 298
+  passed / 0 failed with the rule, and 294 passed / **4 failed** against the
+  previous version of the agent file, failing exactly the four new cases and
+  nothing else. The requirement is chosen so that a violation is refutable by
+  opening one path, which is the property the fabricated quotation lacked.
+
 - **The hook suite failed a project for configuring the hooks (#108).** Every
   "asks by default" case in `test-hooks.ps1` was a claim about an autonomy
   policy, and the policy came from whichever `af-env.conf` the running checkout
