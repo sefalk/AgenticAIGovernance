@@ -217,7 +217,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   holding a **declared** policy and point the hooks at it. The verdict is a
   function of the stated policy instead of the consumer's settings: the same
   consumer copy now measures 294 passed / 0 failed, identical to this
-  repository. Seven new cases assert the other half of the matrix — the same
+  repository. Seven new cases in `test-hooks.ps1` and six in `test-hooks.sh`
+  (150 passed / 0 failed) assert the other half of the matrix — the same
   delete `allow`ed under a declared `FS_WRITE=auto`, `ask`ing again once the
   opt-in is withdrawn, and a declared `DATABRICKS=deny` denying what the shipped
   config never denies, which is what proves the declared file is the one in
