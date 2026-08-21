@@ -28,6 +28,65 @@ HOOK_DIR="$GITHUB_DIR/hooks/scripts"
 pass=0
 fail=0
 
+# ── Declared autonomy policy (issue #108) ────────────────────────────────
+#
+# The ask cases below are claims about a policy, and the policy used to be
+# whatever af-env.conf the running checkout shipped. In a consumer that had set
+# AUTONOMY_CAT_FS_WRITE=auto, this suite's PowerShell twin reported nine
+# failures that were that project's configuration, not defects. So the suite
+# states its policy and points the hooks at it through AF_CONF_PATH.
+#
+# Only the AUTONOMY_ keys are declared; the rest of the real config is carried
+# over, because other cases assert against the deployment they run in.
+POLICY_DIR=$(mktemp -d)
+trap 'rm -rf "$POLICY_DIR"' EXIT
+
+if [ -f "$GITHUB_DIR/af-env.conf" ]; then
+    grep -v '^[[:space:]]*AUTONOMY_' "$GITHUB_DIR/af-env.conf" > "$POLICY_DIR/base.conf" 2>/dev/null || :
+else
+    : > "$POLICY_DIR/base.conf"
+fi
+
+# set_policy [KEY=VALUE...] -- declares the policy every hook launched after it
+# reads. Overrides are written first because af_conf_get takes the first match.
+set_policy() {
+    local out="$POLICY_DIR/af-env.conf" kv key
+    : > "$out"
+    for kv in "$@"; do printf '%s\n' "$kv" >> "$out"; done
+    printf 'AUTONOMY_LEVEL=balanced\n' >> "$out"
+    for key in GIT_READ GIT_FEATURE GIT_MERGE TESTS FS_READ PKG_INSTALL \
+               DATABRICKS CLOUD_READ FS_WRITE; do
+        printf 'AUTONOMY_CAT_%s=\n' "$key" >> "$out"
+    done
+    cat "$POLICY_DIR/base.conf" >> "$out"
+    AF_CONF_PATH="$out"
+    export AF_CONF_PATH
+}
+
+set_policy
+
+# Inside a fixture, the fixture's own config is the config -- several cases pass
+# one in to test a key (RETRO_DIR, SRC_DIR) and mean that file, not the
+# process-wide declared policy. Call after cd'ing into the fixture.
+use_fixture_conf() {
+    if [ -f ".github/af-env.conf" ]; then
+        AF_CONF_PATH="$PWD/.github/af-env.conf"
+    else
+        AF_CONF_PATH=""
+    fi
+    export AF_CONF_PATH
+}
+
+# af_policy_conf -- the file to seed a fixture with, so it carries the declared
+# policy rather than the checkout's own settings.
+af_policy_conf() {
+    if [ -n "${AF_CONF_PATH:-}" ] && [ -f "$AF_CONF_PATH" ]; then
+        printf '%s' "$AF_CONF_PATH"
+    else
+        printf '%s' "$GITHUB_DIR/af-env.conf"
+    fi
+}
+
 # The hooks resolve and probe their own interpreter (hooks/scripts/_common.sh),
 # so this harness deliberately does NOT shim a non-functional `python3` away --
 # that shim used to hide the very defect the probe exists for (issue #54).
@@ -81,10 +140,11 @@ run_case() {
     # Hooks source the shared preamble; a deployed .github always ships it,
     # so the fixture has to as well or every hook dies before its first gate.
     cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
-    [ -f "$GITHUB_DIR/af-env.conf" ] && cp "$GITHUB_DIR/af-env.conf" "$fixture/.github/"
+    _conf=$(af_policy_conf); [ -f "$_conf" ] && cp "$_conf" "$fixture/.github/af-env.conf"
 
     (
         cd "$fixture" || exit 1
+        use_fixture_conf
         git init -q .
         if [ "$mode" = "--detach" ]; then
             git -c user.email=fixture@local -c user.name=fixture \
@@ -476,6 +536,7 @@ stop_case() {
 
     (
         cd "$fixture" || exit 1
+        use_fixture_conf
         git init -q .
         git checkout -q -b agent/72-x
         printf '%s' '{"session_id":"s1","transcript_path":"/none"}' \
@@ -602,6 +663,7 @@ stop_output() {
     done
     out=$(
         cd "$fixture" || exit 1
+        use_fixture_conf
         git init -q .
         git checkout -q -b agent/72-x
         printf '%s' '{"session_id":"s1","transcript_path":"/none"}' \
@@ -789,12 +851,13 @@ stamp_log() {
              "$fixture/.github/retros/auto" "$fixture/docs/plans"
     cp "$HOOK_DIR/documenter-stop.sh" "$fixture/.github/hooks/scripts/"
     cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
-    [ -f "$GITHUB_DIR/af-env.conf" ] && cp "$GITHUB_DIR/af-env.conf" "$fixture/.github/"
+    _conf=$(af_policy_conf); [ -f "$_conf" ] && cp "$_conf" "$fixture/.github/af-env.conf"
     printf '%b' "$plan" > "$fixture/docs/plans/fix-2026-08-07-x.md"
     printf '%b' "$log" > "$fixture/.github/logs/72-x.yaml"
     printf '%b' "$RETRO_MD" > "$fixture/.github/retros/auto/72-x.md"
     (
         cd "$fixture" || exit 1
+        use_fixture_conf
         git init -q .
         git checkout -q -b agent/72-x
         printf '%s' '{"session_id":"s1","transcript_path":"/none"}' \
@@ -1029,6 +1092,12 @@ case "$tdd_lower" in *"never overwrite an existing"*) assert_true "Step 7b never
 
 echo "## resolution invariants"
 
+# These cases are about the location-derived path itself, so the declared
+# policy steps aside: with AF_CONF_PATH set they would read the same file from
+# every cwd and pass without proving anything about resolution.
+SAVED_POLICY_PATH="${AF_CONF_PATH:-}"
+unset AF_CONF_PATH
+
 COMMON="$HOOK_DIR/_common.sh"
 if [ -f "$COMMON" ]; then
     assert_true "shared preamble present" 1
@@ -1083,6 +1152,12 @@ PROBE
     fi
 
     rm -rf "$fx" "$elsewhere" "$stub"
+fi
+
+# Resolution invariants are done; restore the declared policy for what follows.
+if [ -n "$SAVED_POLICY_PATH" ]; then
+    AF_CONF_PATH="$SAVED_POLICY_PATH"
+    export AF_CONF_PATH
 fi
 
 # --- Task launch classification (issue #74) --------------------------------
@@ -1322,6 +1397,61 @@ except Exception: print("unparsable")' 2>/dev/null)
 assert_true "a task command with backslashes and quotes still produces parsable JSON" \
     "$([ "$task_dec" = "deny" ] && echo 1 || echo 0)" "got '$task_dec' from: $task_out"
 
+# --- The policy is stated, not inherited (issue #108) ----------------------
+#
+# The cases above mean the declared default policy set at the top of this file.
+# These cover the other side of the matrix: the same commands under a policy
+# that opted in. Both halves have to hold -- opting in is a supported choice,
+# and before this a project that made it read nine failures with no way to tell
+# configuration from defect.
+
+decision_of() {
+    printf '%s' "$1" | bash "$HOOK_DIR/block-dangerous.sh" 2>&1 | "$af_py" -c 'import json,sys
+try: print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecision"])
+except Exception: print("none")' 2>/dev/null
+}
+
+set_policy AUTONOMY_CAT_FS_WRITE=auto
+
+pol_dec=$(decision_of '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}')
+assert_true "a delete is approved under a declared FS_WRITE=auto" \
+    "$([ "$pol_dec" = "allow" ] && echo 1 || echo 0)" "got '$pol_dec'"
+
+# The seam configures the ask/auto boundary and nothing beyond it: the deny
+# tier is hardcoded and resolved before any category is read.
+pol_dec=$(decision_of '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./build -Recurse -Force"}}')
+assert_true "a declared FS_WRITE=auto still cannot lift a hard-deny" \
+    "$([ "$pol_dec" = "deny" ] && echo 1 || echo 0)" "got '$pol_dec'"
+
+set_policy
+
+pol_dec=$(decision_of '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}')
+assert_true "the same delete asks again once the opt-in is withdrawn" \
+    "$([ "$pol_dec" = "ask" ] && echo 1 || echo 0)" "got '$pol_dec'"
+
+# Proof that the declared policy is the one in force: the shipped config denies
+# no Databricks command anywhere, so this verdict can only come from the file
+# this suite wrote.
+set_policy AUTONOMY_CAT_DATABRICKS=deny
+
+pol_dec=$(decision_of '{"tool_name":"runInTerminal","tool_input":{"command":"databricks jobs list"}}')
+assert_true "a declared DATABRICKS=deny denies what the shipped config never denies" \
+    "$([ "$pol_dec" = "deny" ] && echo 1 || echo 0)" "got '$pol_dec'"
+
+set_policy
+
+# A config path that does not exist means NO config, not a silent fallback to
+# the deployed file -- that fallback would put the consumer's settings back in
+# play behind a typo, and the caller would never learn its file was missed.
+pol_probe=$(AF_CONF_PATH="$POLICY_DIR/no-such-file.conf" \
+    bash -c ". '$HOOK_DIR/_common.sh'; echo found=\$AF_CONF_FOUND" 2>&1)
+assert_true "a config path that does not exist is reported as absent" \
+    "$([ "$pol_probe" = "found=0" ] && echo 1 || echo 0)" "got: $pol_probe"
+
+pol_probe=$(bash -c ". '$HOOK_DIR/_common.sh'; echo found=\$AF_CONF_FOUND" 2>&1)
+assert_true "a config path that exists is the config in force" \
+    "$([ "$pol_probe" = "found=1" ] && echo 1 || echo 0)" "got: $pol_probe"
+
 # The reasons live in an array index-aligned with the patterns, which is only
 # safe while the two stay the same length.
 n_pat=$(sed -n '/^ask_patterns=(/,/^)/p' "$HOOK_DIR/block-dangerous.sh" | grep -cE "^    ['\"]")
@@ -1374,6 +1504,10 @@ fi
 
 echo ""
 echo "=== Summary ==="
+# A verdict about autonomy behaviour is only readable next to the policy that
+# produced it (issue #108), so a reader can tell a configuration difference
+# from a defect without re-deriving which config was read.
+echo "  Policy: AUTONOMY_LEVEL=balanced, all AUTONOMY_CAT_* at the level default"
 echo "  Passed: $pass"
 echo "  Failed: $fail"
 if [ $fail -eq 0 ]; then
