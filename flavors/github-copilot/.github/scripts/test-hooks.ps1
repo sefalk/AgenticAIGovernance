@@ -29,6 +29,70 @@ if (-not (Test-Path $scriptDir)) {
     exit 1
 }
 
+# ── Declared autonomy policy (issue #108) ────────────────────────────────
+#
+# Every "asks by default" case below is a claim about a policy, and until now
+# the policy came from whatever af-env.conf the running checkout shipped. In a
+# consumer that had set AUTONOMY_CAT_FS_WRITE=auto the same suite reported nine
+# failures -- not defects, just that project's own configuration read back as
+# broken safety hooks. A suite that fails for a supported setting teaches
+# people to ignore it, or to revert the setting to make it pass.
+#
+# So the suite states its policy and points the hooks at it via AF_CONF_PATH.
+# Only the AUTONOMY_* keys are declared; everything else (SRC_DIR, branch
+# names, allowlists) is carried over from the real config, because those cases
+# assert against the deployment they run in.
+$script:policyDir = Join-Path ([System.IO.Path]::GetTempPath()) "af-hook-policy-$(Get-Random)"
+New-Item -ItemType Directory -Path $script:policyDir -Force | Out-Null
+
+$script:realConf = Join-Path $githubDir 'af-env.conf'
+$script:confBase = if (Test-Path $script:realConf) {
+    # Drop the AUTONOMY_ lines; the declared policy supplies them.
+    (Get-Content $script:realConf) | Where-Object { $_ -notmatch '^\s*AUTONOMY_' }
+} else { @() }
+
+# The policy the unqualified cases speak for: shipped defaults, nothing opted in.
+$script:basePolicy = [ordered]@{
+    AUTONOMY_LEVEL           = 'balanced'
+    AUTONOMY_CAT_GIT_READ    = ''
+    AUTONOMY_CAT_GIT_FEATURE = ''
+    AUTONOMY_CAT_GIT_MERGE   = ''
+    AUTONOMY_CAT_TESTS       = ''
+    AUTONOMY_CAT_FS_READ     = ''
+    AUTONOMY_CAT_PKG_INSTALL = ''
+    AUTONOMY_CAT_DATABRICKS  = ''
+    AUTONOMY_CAT_CLOUD_READ  = ''
+    AUTONOMY_CAT_FS_WRITE    = ''
+}
+$script:activePolicy = $null
+
+# Set-Policy -Overrides @{ AUTONOMY_CAT_FS_WRITE = 'auto' }
+#
+# Writes a config holding the base policy plus the overrides and makes it the
+# config every hook launched afterwards reads. Returns the resolved policy so
+# a case can name the setting it is asserting under.
+function Set-Policy {
+    param([hashtable]$Overrides = @{})
+    $resolved = [ordered]@{}
+    foreach ($k in $script:basePolicy.Keys) { $resolved[$k] = $script:basePolicy[$k] }
+    foreach ($k in $Overrides.Keys) { $resolved[$k] = $Overrides[$k] }
+
+    $lines = @($script:confBase)
+    foreach ($k in $resolved.Keys) { $lines += "$k=$($resolved[$k])" }
+
+    $path = Join-Path $script:policyDir "af-env-$(Get-Random).conf"
+    Set-Content -Path $path -Value $lines -Encoding UTF8
+    $env:AF_CONF_PATH = $path
+    $script:activePolicy = $resolved
+    return $resolved
+}
+
+# Restores the declared default policy. Call after any case that departed from
+# it, so a later case cannot inherit an override it never asked for.
+function Reset-Policy { Set-Policy | Out-Null }
+
+Reset-Policy
+
 # ── Test harness ─────────────────────────────────────────────────────────
 
 $script:passed = 0
@@ -85,9 +149,18 @@ function Invoke-HookInFixture {
     # Hooks dot-source the shared preamble; a deployed .github always ships it.
     $commonSrc = Join-Path (Split-Path $HookPath) '_common.ps1'
     if (Test-Path $commonSrc) { Copy-Item $commonSrc $fixtureHooks }
-    # Same config the hook would read in production, so SRC_DIR is not a guess.
-    $confSrc = Join-Path $githubDir 'af-env.conf'
-    if (Test-Path $confSrc) { Copy-Item $confSrc (Join-Path $fixture '.github') }
+    # The declared policy (AF_CONF_PATH), not the checkout's own af-env.conf:
+    # the fixture must assert under the same stated policy as everything else.
+    # AF_CONF_PATH is inherited by the hook process anyway; this copy keeps the
+    # fixture self-describing and is what the hook falls back to without it.
+    $confSrc = if ($env:AF_CONF_PATH -and (Test-Path $env:AF_CONF_PATH)) {
+        $env:AF_CONF_PATH
+    } else {
+        Join-Path $githubDir 'af-env.conf'
+    }
+    if (Test-Path $confSrc) {
+        Copy-Item $confSrc (Join-Path $fixture '.github/af-env.conf')
+    }
     try {
         Push-Location $fixture
         git init -q 2>&1 | Out-Null
@@ -107,8 +180,19 @@ function Invoke-HookInFixture {
                 Set-Content -Path $dest -Value $Files[$rel] -Encoding UTF8
             }
         }
-        $output = $JsonInput | powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fixtureHooks $Script) 2>&1
-        $exitCode = $LASTEXITCODE
+        # In a fixture, the fixture's config is the config -- several cases pass
+        # one through -Files to test a key (RETRO_DIR, SRC_DIR) and mean that
+        # file, not the process-wide declared policy. Set after -Files, which
+        # may have just replaced the copy made above.
+        $savedConfPath = $env:AF_CONF_PATH
+        $fixtureConf = Join-Path $fixture '.github/af-env.conf'
+        $env:AF_CONF_PATH = if (Test-Path $fixtureConf) { $fixtureConf } else { $null }
+        try {
+            $output = $JsonInput | powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fixtureHooks $Script) 2>&1
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $env:AF_CONF_PATH = $savedConfPath
+        }
         # Not $readBack: PowerShell variable names are case-insensitive, so a
         # local differing only in case silently overwrites the parameter.
         $readContent = $null
@@ -872,6 +956,74 @@ Assert-Ask "a command containing quotes still produces parsable JSON" `
 Assert-Deny "a task command with backslashes and quotes still produces parsable JSON" `
     "block-dangerous.ps1" `
     '{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"x","type":"shell","command":"C:\\evil\\run \"it\".ps1"},"workspaceFolder":"/repo"}}'
+
+# ── The policy is stated, not inherited (issue #108) ─────────────────────
+#
+# The cases above say "by default" and mean the declared default policy set at
+# the top of this file. These cases cover the other side of the matrix: the
+# same commands under a policy that opted in. Both halves have to hold, because
+# opting in is a supported choice -- before this, a project that made it read
+# nine failures and no way to tell configuration from defect.
+
+Set-Policy @{ AUTONOMY_CAT_FS_WRITE = 'auto' } | Out-Null
+
+Assert-Allow "a delete is approved under a declared FS_WRITE=auto" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}'
+
+# The seam configures the ask/auto boundary and nothing beyond it. The deny
+# tier is hardcoded and runs before any category is consulted, so no config --
+# supplied by a consumer or by this suite -- can approve what it covers.
+Assert-Deny "a declared FS_WRITE=auto still cannot lift a hard-deny" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./build -Recurse -Force"}}'
+
+Reset-Policy
+
+Assert-Ask "the same delete asks again once the opt-in is withdrawn" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}'
+
+Set-Policy @{ AUTONOMY_CAT_DATABRICKS = 'auto' } | Out-Null
+
+Assert-Allow "a Databricks job submit is approved under a declared DATABRICKS=auto" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"databricks jobs submit --json @job.json"}}'
+
+# Proof that the declared policy is the one in force: the shipped config denies
+# no Databricks command anywhere, so this verdict can only come from the file
+# this suite wrote.
+Set-Policy @{ AUTONOMY_CAT_DATABRICKS = 'deny' } | Out-Null
+
+Assert-Deny "a declared DATABRICKS=deny denies what the shipped config never denies" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"databricks jobs list"}}'
+
+Reset-Policy
+
+# The seam's contract, asserted on the preamble itself rather than through a
+# hook: a config path that does not exist means NO config. Falling back to the
+# deployed file would put the consumer's settings back in play behind a typo,
+# and the caller would never learn its file was missed.
+$probePath = Join-Path $script:policyDir 'conf-probe.ps1'
+Set-Content -Path $probePath -Encoding UTF8 -Value @(
+    'param([string]$Common)'
+    '. $Common'
+    'Write-Output ("found={0}" -f $AfConfFound)'
+)
+$commonPath = Join-Path $scriptDir '_common.ps1'
+$savedConf = $env:AF_CONF_PATH
+
+$env:AF_CONF_PATH = Join-Path $script:policyDir 'no-such-file.conf'
+$probeMissing = (powershell -NoProfile -ExecutionPolicy Bypass -File $probePath -Common $commonPath 2>&1 | Out-String).Trim()
+$env:AF_CONF_PATH = $savedConf
+$probePresent = (powershell -NoProfile -ExecutionPolicy Bypass -File $probePath -Common $commonPath 2>&1 | Out-String).Trim()
+
+Assert-True "a config path that does not exist is reported as absent" `
+    ($probeMissing -match 'found=False') "got: $probeMissing"
+
+Assert-True "a config path that exists is the config in force" `
+    ($probePresent -match 'found=True') "got: $probePresent"
 
 # ── ALLOW: safe under balanced defaults ──────────────────────────────────
 Assert-Allow "git status is safe" `
@@ -2291,6 +2443,12 @@ Write-Output ""
 
 Write-Output "## Resolution invariants"
 
+# These cases are about the location-derived path itself, so the declared
+# policy has to step aside: with AF_CONF_PATH set they would all read the same
+# file from every cwd and pass without proving anything about resolution.
+$script:savedPolicyPath = $env:AF_CONF_PATH
+$env:AF_CONF_PATH = $null
+
 $commonPs1 = Join-Path $scriptDir '_common.ps1'
 $commonSh = Join-Path $scriptDir '_common.sh'
 Assert-True "shared preamble present (.ps1)" (Test-Path $commonPs1) "expected $commonPs1"
@@ -2401,6 +2559,9 @@ if ((Test-Path $resolveChecker) -and $pyExe) {
 
 Write-Output ""
 
+# Resolution invariants are done; restore the declared policy for anything after.
+$env:AF_CONF_PATH = $script:savedPolicyPath
+
 # ── 9. Parse gate ────────────────────────────────────────────────────────
 #
 # A hook that dies at parse time produces no output, and no output is
@@ -2464,8 +2625,19 @@ Write-Output ""
 # ── Summary ──────────────────────────────────────────────────────────────
 
 Write-Output "=== Summary ==="
+# A verdict about autonomy behaviour is only readable next to the policy that
+# produced it (issue #108). Printing it lets anyone tell a configuration
+# difference from a defect without re-deriving which config was read.
+$catLine = ($script:basePolicy.Keys | Where-Object { $_ -like 'AUTONOMY_CAT_*' } |
+            ForEach-Object { "$($_ -replace '^AUTONOMY_CAT_', '')=$(if ($script:basePolicy[$_]) { $script:basePolicy[$_] } else { '(level default)' })" }) -join ' '
+Write-Output "  Policy: AUTONOMY_LEVEL=$($script:basePolicy['AUTONOMY_LEVEL']) $catLine"
 Write-Output "  Passed: $($script:passed)"
 Write-Output "  Failed: $($script:failed)"
+
+# The declared policy lives in the temp directory; nothing here should outlive
+# the run, and no later process should keep reading a file this suite wrote.
+$env:AF_CONF_PATH = $null
+if (Test-Path $script:policyDir) { Remove-Item $script:policyDir -Recurse -Force -ErrorAction SilentlyContinue }
 
 if ($script:errors.Count -gt 0) {
     Write-Output ""

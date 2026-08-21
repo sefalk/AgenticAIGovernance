@@ -10,7 +10,7 @@
 #   AF_SCRIPT_DIR   directory this file lives in
 #   AF_MAIN_ROOT    checkout where .github/ is deployed
 #   AF_CODE_ROOT    active worktree if the sentinel points at one, else MAIN
-#   AF_CONF         absolute path to .github/af-env.conf
+#   AF_CONF         config path: $AF_CONF_PATH if set, else .github/af-env.conf
 #   AF_CONF_FOUND   1 if that file exists, 0 if it does not
 #   AF_PYTHON       an interpreter that was proven to run, or ""
 #   af_conf_get KEY [DEFAULT]
@@ -36,7 +36,16 @@ if [ -f "$_af_sentinel" ]; then
 fi
 unset _af_sentinel _af_wt
 
-AF_CONF="$AF_MAIN_ROOT/.github/af-env.conf"
+# AF_CONF_PATH overrides the deployed config for this process (issue #108), so
+# a test can state the policy it asserts under instead of inheriting whatever
+# the consumer ships. A path that does not exist counts as NO config rather
+# than falling back to the deployed one -- see _common.ps1 for the reasoning
+# and for why this cannot lift a hard-deny.
+if [ -n "${AF_CONF_PATH:-}" ]; then
+    AF_CONF="$AF_CONF_PATH"
+else
+    AF_CONF="$AF_MAIN_ROOT/.github/af-env.conf"
+fi
 if [ -f "$AF_CONF" ]; then
     AF_CONF_FOUND=1
 else

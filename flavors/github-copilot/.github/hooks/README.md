@@ -199,7 +199,7 @@ What the preamble provides:
 | `AF_SCRIPT_DIR` | `$AfScriptDir` | Directory the hook scripts live in |
 | `AF_MAIN_ROOT` | `$AfMainRoot` | Checkout where `.github/` is deployed |
 | `AF_CODE_ROOT` | `$AfCodeRoot` | Active worktree if `.github/.active-worktree` points at one, else main root |
-| `AF_CONF` / `AF_CONF_FOUND` | `$AfConfPath` / `$AfConfFound` | Path to `af-env.conf` and whether it exists |
+| `AF_CONF` / `AF_CONF_FOUND` | `$AfConfPath` / `$AfConfFound` | Path to the config (`AF_CONF_PATH` if set, else `af-env.conf`) and whether it exists |
 | `AF_PYTHON` | `$AfPython` | An interpreter **proven to run**, or empty |
 | `af_conf_get KEY [DEFAULT]` | `Get-AfConfig -Key <name> [-Default <value>]` | Config lookup that never fails the hook |
 
@@ -208,6 +208,16 @@ and `AF_CODE_ROOT` for the code under review — they differ whenever the work
 runs in a git worktree. Set `AF_PYTHON_OVERRIDE` to force a specific
 interpreter; the preamble probes it like any other candidate, so an override
 pointing at something broken is rejected rather than trusted.
+
+Set `AF_CONF_PATH` to make a different file the config for one process. It
+exists so a test can state the policy it asserts under instead of inheriting
+whatever `af-env.conf` the checkout ships — `test-hooks.ps1` writes a config
+holding a declared autonomy policy and points the hooks at it, which is why its
+verdict no longer changes with a project's `AUTONOMY_CAT_*` settings. A path
+that does not exist counts as **no config**, not as a fallback to the deployed
+file: falling back would put those settings back in play behind a typo. The
+variable configures the ask/auto boundary only — the deny tier is hardcoded and
+resolved before any category is read, so no config can approve what it covers.
 
 **The rule is enforced, not merely documented.**
 `.github/scripts/check-hook-resolution.py` scans `hooks/` for cwd-relative
