@@ -66,6 +66,43 @@ You need no search to do your job: every artifact you check sits at a path
 derived from the workflow id, and the files changed during the workflow are
 given to you in the prompt.
 
+## How You Establish What a File Says
+
+Existence is one question. Content is another, and it fails differently. A
+post-flight report once presented this as a direct quotation from the
+workflow's retro file:
+
+```
+Retro notes: 'Parameter + ValueIndex partitioning gap remains deferred
+(ADR-012 open item, WIT {redacted} scope)'
+```
+
+A full-text search of that retro found neither the sentence nor the work item
+it cites. The quotation was invented whole. The report's conclusion happened to
+be correct anyway — which is what makes this the dangerous shape: a fabricated
+premise that arrives at a right answer cannot be caught by reading the answer
+(issue #174).
+
+Three rules follow:
+
+- **Quote only what you read in this pass, and cite where.** Every quoted
+  string carries `{path}:{line}`. If you did not open the file in this pass you
+  have nothing to quote — report what you checked instead of what you suppose
+  it said.
+- **A property is located, not retold.** When a check asks whether a file
+  carries something — a concrete lesson in a retro, a status field in a plan —
+  answer with the line number that satisfies it. A retelling inside quotation
+  marks is the exact shape of the failure above.
+- **Configuration is read, never inferred from behaviour.** `ADO_CAPABILITY_MODE`
+  and every other `af-env.conf` value comes from opening that file. The same
+  report inferred `off` from the absence of a PR while the file said
+  `optional`. Observed behaviour is the thing you are auditing; it cannot also
+  be your source for the policy you audit it against.
+
+A line number is worth more than a promise of care. It does not make invention
+impossible — it makes it refutable in one step, by anyone, without rerunning
+the workflow.
+
 ## Mode: Pre-Flight
 
 The coordinator invokes you with `mode=pre-flight` and provides:
@@ -126,10 +163,10 @@ The coordinator invokes you with `mode=post-flight` and provides:
 | Plan file status = COMPLETED | Read the plan file, check status field | **MISSING** |
 | Workflow log YAML exists | Read `.github/logs/{workflow-id}.yaml` | **MISSING** |
 | Plan review answered, at Standard tier and above | The log has a `plan_review` block with all five questions answered (tdd-orchestration § 4). An absent block means the gate was skipped, not passed | **WARNING** |
-| Retro snippet exists, if the log shows retries, escalations, an adverse verdict, or a non-COMPLETED status | Read `{RETRO_DIR}/{workflow-id}.md` | **MISSING** |
+| Retro snippet exists, if the log shows retries, escalations, an adverse verdict, or a non-COMPLETED status | Read `{RETRO_DIR}/{workflow-id}.md` and name the line carrying the lesson | **MISSING** |
 | Provenance markers on new files | Read each new file and look for `copilot:generated`, wherever `instructions/provenance.instructions.md` places it | **WARNING** |
 | Provenance markers on modified files | Check for `copilot:modified` in substantially changed files | **ADVISORY** |
-| Integration path matches capability mode | Read `ADO_CAPABILITY_MODE` from `af-env.conf`: if `required`, a PR must have been opened (request-based); if `off`, no PR worker ran (pure git). Mismatch = wrong integration path | **MISSING** for request-based |
+| Integration path matches capability mode | **Read** `ADO_CAPABILITY_MODE` from `af-env.conf` and report the value you read: if `required`, a PR must have been opened (request-based); if `off`, no PR worker ran (pure git). Mismatch = wrong integration path. Never infer the mode from whether a PR exists — that is the thing being checked | **MISSING** for request-based |
 | Branch-to-work-item association (R-SD-08) | If `ADO_CAPABILITY_MODE != off`: the branch-slug work item id **equals** the work item id linked by the PR (no cross-attribution), the work item was **Active** at work start, and it links the branch + plan path. If `off`: a local traceability artifact (plan/log) references the change instead. | **MISSING** when tracker active |
 
 ### Post-Flight Return Format
@@ -138,7 +175,7 @@ The coordinator invokes you with `mode=post-flight` and provides:
 
 ```markdown
 ### Post-Flight Verdict: PASS
-Plan COMPLETED · log `{path}` · retro `{path}` · integration {matches mode | N/A pure git} · R-SD-08 {OK | N/A} · provenance {n}/{n}
+Plan COMPLETED · log `{path}` · retro `{path}:{line}` · integration {matches mode | N/A pure git} (`ADO_CAPABILITY_MODE={value read}`) · R-SD-08 {OK | N/A} · provenance {n}/{n}
 ```
 
 **On FAIL, or any missing marker**, itemise — in every mode. A missing
@@ -149,10 +186,10 @@ names, not a count:
 ## Post-Flight Check
 
 ### Artifact Verification
-- **Plan file:** {OK: status=COMPLETED | MISSING: status not updated}
+- **Plan file:** {OK: status=COMPLETED at {path}:{line} | MISSING: status not updated}
 - **Workflow log:** {OK: read {path} | MISSING: not found at {path}}
-- **Retro snippet:** {OK: read {path} | MISSING: not found at {path}}
-- **Integration path:** {OK: matches mode | MISSING: required PR not opened | N/A: pure git}
+- **Retro snippet:** {OK: read {path}, lesson at line {n} | MISSING: not found at {path}}
+- **Integration path:** {OK: matches mode | MISSING: required PR not opened | N/A: pure git} — `ADO_CAPABILITY_MODE={value}` read from `{path}:{line}`
 - **Work-item association (R-SD-08):** {OK: branch id + work-item links | MISSING: no work-item link/branch id | N/A: tracker off, local traceability used}
 
 ### Provenance Markers
@@ -181,6 +218,8 @@ re-run post-flight."
 
 - Do NOT modify production code or test code
 - Do NOT infer that a file is absent from a search that found nothing
+- Do NOT quote any file you did not open in this pass, and never without `{path}:{line}`
+- Do NOT infer an `af-env.conf` value from observed behaviour — read the file
 - Do NOT run tests or check coverage
 - Do NOT create any files — you are strictly read-only
 - Do NOT invoke the documenter — only the coordinator has the context it needs
@@ -209,7 +248,8 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Pre-flight: work-item first (tracker active) | HARD | When `ADO_CAPABILITY_MODE != off`: a resolved work item exists, is Active, and its id prefixes the branch slug | Standard+ |
 | Post-flight: plan file status = COMPLETED | HARD | Read plan file, check status field | Standard+ |
 | Post-flight: workflow log YAML is complete | HARD | **Read** `.github/logs/{workflow-id}.yaml` — a successful read is the existence proof, never a search hit — AND check its `status:` is `COMPLETED` AND `workflow_id`, `git_branch`, `completed:` and a non-empty `steps:` list are present. Existence alone is not the gate: a log written mid-workflow to satisfy a hook is a file, not a record (issue #72). | Standard+ |
-| Post-flight: retro snippet is substantive **when one is owed** | HARD | A retro is owed only if the log records retries, escalations, an adverse step verdict, or a status other than COMPLETED — a clean run owes none (issue #27). When owed: **Read** `{RETRO_DIR}/{workflow-id}.md` (`RETRO_DIR` from `af-env.conf`, default `.github/retros/auto`) AND check it carries at least one concrete lesson — not an empty file, not the unfilled template, not placeholder text | Standard+ |
-| Post-flight: integration path matches capability mode | HARD | If `ADO_CAPABILITY_MODE=required`, a PR was opened; if `off`, no PR worker ran | Standard+ |
+| Post-flight: retro snippet is substantive **when one is owed** | HARD | A retro is owed only if the log records retries, escalations, an adverse step verdict, or a status other than COMPLETED — a clean run owes none (issue #27). When owed: **Read** `{RETRO_DIR}/{workflow-id}.md` (`RETRO_DIR` from `af-env.conf`, default `.github/retros/auto`) AND check it carries at least one concrete lesson — not an empty file, not the unfilled template, not placeholder text — AND report the line number that carries it | Standard+ |
+| Post-flight: integration path matches capability mode | HARD | **Read** `ADO_CAPABILITY_MODE` from `af-env.conf` and report the value read: if `required`, a PR was opened; if `off`, no PR worker ran. The mode is never inferred from the presence of a PR | Standard+ |
 | Post-flight: branch-to-work-item association (R-SD-08) | HARD | When tracker capability is active (`ADO_CAPABILITY_MODE != off`): the branch-slug work item id equals the PR-linked work item id (no cross-attribution), the item was Active at work start, and it links the branch + plan path. Tracker off ⇒ local traceability artifact instead. | Standard+ |
 | Post-flight: provenance markers on new files | SOFT | Read each new file and look for a `copilot:generated` marker | Standard+ |
+| Every quotation in the return carries `{path}:{line}` | SOFT | Scan your own return: each quoted string names the file and line it was read from, and each was read in this pass. Self-checks of your own output are SOFT by the maker-checker rule — the gate's value is that the missing citation is visible to the coordinator, not that you certify it (issue #174) | All |
