@@ -14,6 +14,11 @@
 
 set -uo pipefail
 
+# Root resolution AND the shared provenance detector both come from here.
+# Without it af_has_provenance_marker exits 127, which `if !` reads as "no
+# marker" -- Gate 2 flagged every new test file, marked or not (issue #175).
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
 # Read stdin (hook input JSON — required by protocol)
 cat > /dev/null
 

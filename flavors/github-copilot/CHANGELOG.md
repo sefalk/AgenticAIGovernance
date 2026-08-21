@@ -201,6 +201,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Two provenance gates were not gates: one never ran, one had no checker
+  (#175).** `test-writer-stop` called `Test-AfProvenanceMarker` /
+  `af_has_provenance_marker` without ever sourcing the file that defines them.
+  It was the only hook script in the payload doing so. The two twins then
+  failed in **opposite directions**, which is why neither was noticed:
+
+  | | marked file | unmarked file |
+  |---|---|---|
+  | PowerShell, helper unsourced | not flagged | **not flagged** |
+  | bash, helper unsourced | **flagged** | flagged |
+  | either twin, after sourcing | not flagged | flagged |
+
+  PowerShell abandons the enclosing `if` on a command-not-found error, and the
+  hook sets `$ErrorActionPreference = 'SilentlyContinue'` — so the gate was a
+  silent fail-open. Bash returns 127, which `if ! …` reads as "no marker" — so
+  it blocked every new test file, marked or not. Both twins now source
+  `_common`; the PowerShell one uses the standard preamble instead of a
+  hand-rolled worktree block.
+
+  The pre-existing suite case asserted only that each hook *mentions* the
+  shared detector. A call site is not a resolved call, so a text match could
+  never have caught this. The replacement enumerates every hook script,
+  detects which of the eight shared helpers it calls, and requires the file to
+  source the one defining them — it is green across all of them, i.e.
+  `test-writer-stop` was the sole offender.
+
+  Separately, `refactorer-stop` had **no provenance gate at all** — not a weak
+  one. The refactorer's reported "marked as `copilot:modified` in both files"
+  was therefore checked by nothing, and the diff carried no marker. It now
+  runs the same gate as `implementer-stop`, filtered through
+  `--list-authored`. That filter matters most here: the refactorer is the
+  agent that runs `ruff format`, and a marker may only be demanded of a file
+  it actually wrote in (#86). `refactorer.agent.md` gains the matching HARD
+  gate row, stating that the Stop hook checks it and the agent does not
+  self-certify.
+
+  A correction to the issue's report: the gate row it quotes
+  ("Scan changed files for markers") is the **documenter's**, not the
+  refactorer's. That one is not a maker-checker violation — the documenter
+  scans files other agents wrote — and is left alone.
+
+  Measured locally: `test-hooks.ps1` 305 → 306 for the sourcing check, →
+  **312** with the refactorer cases; `test-hooks.sh` re-run after the `.sh`
+  edits; `test-hooks-integration.ps1` re-run because the diff touches
+  `.github/hooks/`. Negative control, one mutation at a time, each turning
+  exactly its own case red and nothing else: removing either twin's `_common`
+  sourcing, removing the refactorer's provenance call, and removing its
+  `--list-authored` filter.
+
+  **Not addressed by this change**, and #175 stays open for it: re-verifying
+  advisories an agent claims to have resolved, and treating an empty subagent
+  return as a hard failure. The latter cannot live in a Stop hook at all — a
+  hook does not receive the subagent's return text — so it belongs to the
+  coordinator.
+
 - **A workflow log named a subagent that was never called (#173).** The
   documenter wrote a `steps[]` entry for `arbiter` in a workflow where no
   arbiter ran. Nothing in the artifact contradicted it, so the only way to
