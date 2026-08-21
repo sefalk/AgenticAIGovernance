@@ -201,6 +201,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The hook suite failed a project for configuring the hooks (#108).** Every
+  "asks by default" case in `test-hooks.ps1` was a claim about an autonomy
+  policy, and the policy came from whichever `af-env.conf` the running checkout
+  shipped. Measured here on the same commit: 287 passed / 0 failed in this
+  repository, and 278 passed / **9 failed** from a copy whose config set
+  `AUTONOMY_CAT_FS_WRITE`, `AUTONOMY_CAT_DATABRICKS` and
+  `AUTONOMY_CAT_CLOUD_READ` to `auto` — a supported, documented choice. Those
+  nine failures were that project's configuration read back as broken safety
+  hooks. The suite is what tells a project whether its hooks work, so a false
+  red teaches either to ignore it or to revert a legitimate setting to make it
+  pass; both are worse than not having the test.
+
+  The shared preamble now honours `AF_CONF_PATH`, and both suites write a config
+  holding a **declared** policy and point the hooks at it. The verdict is a
+  function of the stated policy instead of the consumer's settings: the same
+  consumer copy now measures 294 passed / 0 failed, identical to this
+  repository. Seven new cases assert the other half of the matrix — the same
+  delete `allow`ed under a declared `FS_WRITE=auto`, `ask`ing again once the
+  opt-in is withdrawn, and a declared `DATABRICKS=deny` denying what the shipped
+  config never denies, which is what proves the declared file is the one in
+  force. Both summaries now print the policy they judged under.
+
+  Two boundaries are pinned by cases rather than by prose. A config path that
+  does not exist counts as **no config**, not as a fallback to the deployed one:
+  falling back would put the consumer's settings back in play behind a typo. And
+  the seam moves the ask/auto boundary only — the deny tier is hardcoded and
+  resolved before any category is read, so `Remove-Item -Recurse -Force` is
+  still denied under `FS_WRITE=auto`. Anyone able to set the variable on the
+  hook process already controls that process; hooks are launched by the
+  extension host, so an assignment in an agent's terminal does not reach them.
+
 - **An interrupted test run read as the previous run's result (#179).** The test
   runner built its `test-log.json` entry only after pytest returned. A run that
   was interrupted — terminal closed, agent cancelled, machine slept — left the
