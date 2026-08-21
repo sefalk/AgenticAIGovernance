@@ -61,6 +61,38 @@ Reading it:
 
 Regression tests: `scripts/test-session-cost.ps1`.
 
+## The `agent_invocations:` block
+
+Also appended by `documenter-stop`, from the filenames the editor writes for
+each subagent call (`runSubagent-{agent}-{id}.jsonl`):
+
+```yaml
+agent_invocations:
+  observed:
+    implementer: 2
+    test-writer: 1
+  claimed_without_invocation:
+    - arbiter
+```
+
+Reading it:
+
+- **`observed` is a lower bound.** It counts one chat session. A workflow
+  resumed in a later window records only the session that finalised it.
+- **`claimed_without_invocation` lists agents named in `steps[]` with no
+  invocation log.** For a workflow that ran in a single session, that list is
+  the set of steps that did not happen. A log once carried a complete
+  `agent: arbiter` step — action, verdict, review findings — for an arbiter
+  nobody called (issue #173).
+- **Nothing gates on it, deliberately.** A multi-session workflow would fail a
+  block it did not deserve, and a hook that fails honest work gets switched off.
+  The contradiction is written down instead, where a reader meets it without
+  having to reconstruct anything.
+- **The names never pass through a language model.** They come from a
+  directory listing.
+
+Regression tests: `scripts/test-agent-invocations.ps1`.
+
 ## Never committed
 
 The `.gitignore` in this directory keeps every log out of version control. It is

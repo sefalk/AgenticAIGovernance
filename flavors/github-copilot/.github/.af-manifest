@@ -34,6 +34,7 @@ hooks/scripts/check-context-budget-staged.py
 hooks/scripts/check-plan-budget.py
 hooks/scripts/check-plan-structure.py
 hooks/scripts/check-workflow-log.py
+hooks/scripts/collect-agent-invocations.py
 hooks/git/pre-commit
 
 # Scripts (canonical test and lint runners)
@@ -71,6 +72,7 @@ scripts/test-session-cost.ps1
 scripts/analyze-retry-economy.py
 scripts/test-retry-economy.ps1
 scripts/test-workflow-log-schema.ps1
+scripts/test-agent-invocations.ps1
 scripts/test-planner-write-scope.ps1
 scripts/run-all-tests.ps1
 
