@@ -153,6 +153,15 @@ never happened cannot be read as a green one. Its `error_message` field holds
 the interpreter's own words. Fix the runner and re-run the scope; do not report
 the scope as passing and do not skip the run.
 
+**Never accept an entry with `"status": "running"` as evidence either.** The
+runner claims its entry *before* pytest starts and replaces it when pytest
+returns, so `running` means one of exactly two things: a run is in flight right
+now, or a run was interrupted — terminal closed, agent cancelled, machine
+slept — and never reported. Counters and `exit_code` are `null`; `started`
+holds the moment the entry was claimed. Neither case is a result: re-run the
+scope. Before this marker existed, an interrupted run left the *previous*
+entry in place, and a stale green was indistinguishable from a fresh one.
+
 ## Direct Invocation (terminal-capable agents only)
 
 ```bash

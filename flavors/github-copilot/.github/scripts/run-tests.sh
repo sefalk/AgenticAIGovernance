@@ -167,6 +167,90 @@ fi
 FILTER_DISPLAY="${FILTER:-none}"
 echo "=== Test Runner: $TARGET_DISPLAY filter=$FILTER_DISPLAY ==="
 
+# ---------- Test log (.github/test-log.json) ----------
+TEST_LOG_PATH="$WORKSPACE_ROOT/.github/test-log.json"
+
+# Determine scope key
+if [[ -n "$FILE" ]]; then
+    SCOPE_KEY="file"
+    [[ "$FILE" == *"tests/domain"* ]]     && SCOPE_KEY="domain"
+    [[ "$FILE" == *"tests/adapters"* ]]   && SCOPE_KEY="adapters"
+    [[ "$FILE" == *"tests/properties"* ]] && SCOPE_KEY="properties"
+    [[ "$FILE" == *"tests/contracts"* ]]  && SCOPE_KEY="contracts"
+elif [[ "$SCOPE" == "all" ]]; then
+    SCOPE_KEY="all"
+else
+    SCOPE_KEY="$SCOPE"
+fi
+
+# Merge one entry into the existing log (or create it) — pure bash, no python
+# NOTE: The sed extraction below assumes test-log.json has a FLAT structure:
+#   { "scope": { ...flat-key-value-pairs... }, ... }
+# Constraints for correctness:
+#   1. Each scope value must be a single-level object (no nested braces).
+#   2. The greedy .* in sed patterns matches the LAST occurrence of each key.
+#      This is safe because the known scope names (domain, adapters, properties,
+#      contracts, all, file) do not appear as substrings in value fields.
+# If the schema gains nested objects, dynamic keys, or scope names in values,
+# replace this with jq or python.
+write_log_entry() {
+    local _key="$1" _entry="$2"
+    local d_domain="" d_adapters="" d_properties="" d_contracts="" d_all="" d_file=""
+    local _flat _first _scope _val
+    if [[ -f "$TEST_LOG_PATH" ]]; then
+        _flat=$(tr -d '\n\r' < "$TEST_LOG_PATH" | tr -s ' ')
+        d_domain=$(echo "$_flat" | sed -n 's/.*"domain" *: *\({[^}]*}\).*/\1/p')
+        d_adapters=$(echo "$_flat" | sed -n 's/.*"adapters" *: *\({[^}]*}\).*/\1/p')
+        d_properties=$(echo "$_flat" | sed -n 's/.*"properties" *: *\({[^}]*}\).*/\1/p')
+        d_contracts=$(echo "$_flat" | sed -n 's/.*"contracts" *: *\({[^}]*}\).*/\1/p')
+        d_all=$(echo "$_flat" | sed -n 's/.*"all" *: *\({[^}]*}\).*/\1/p')
+        d_file=$(echo "$_flat" | sed -n 's/.*"file" *: *\({[^}]*}\).*/\1/p')
+    fi
+
+    case "$_key" in
+        domain)     d_domain="$_entry" ;;
+        adapters)   d_adapters="$_entry" ;;
+        properties) d_properties="$_entry" ;;
+        contracts)  d_contracts="$_entry" ;;
+        all)        d_all="$_entry" ;;
+        file)       d_file="$_entry" ;;
+    esac
+
+    {
+        printf '{\n'
+        _first=true
+        for _scope in domain adapters properties contracts all file; do
+            case "$_scope" in
+                domain)     _val="$d_domain" ;;
+                adapters)   _val="$d_adapters" ;;
+                properties) _val="$d_properties" ;;
+                contracts)  _val="$d_contracts" ;;
+                all)        _val="$d_all" ;;
+                file)       _val="$d_file" ;;
+            esac
+            if [[ -n "$_val" ]]; then
+                $_first || printf ',\n'
+                printf '  "%s": %s' "$_scope" "$_val"
+                _first=false
+            fi
+        done
+        printf '\n}\n'
+    } > "$TEST_LOG_PATH"
+}
+
+# Claim the entry BEFORE pytest starts.
+#
+# The entry used to be built only after pytest returned. A run that was
+# interrupted -- terminal closed, agent cancelled, machine slept -- left the
+# previous entry untouched, still saying status ok with yesterday's counters.
+# Nothing distinguished it from a fresh green result, and a reader working to a
+# once-per-workflow test budget skips the suite on exactly that evidence.
+#
+# Counters are null, never 0, for the same reason the runner-failure path uses
+# null: "0 failed" is indistinguishable from a clean green run.
+STARTED=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+write_log_entry "$SCOPE_KEY" "{\"last_run\":\"$STARTED\",\"started\":\"$STARTED\",\"passed\":null,\"failed\":null,\"errors\":null,\"total\":null,\"runtime_seconds\":null,\"run_by\":\"run-tests.sh\",\"exit_code\":null,\"coverage_percent\":null,\"status\":\"running\"}"
+
 # Run pytest. stderr is captured to a file rather than discarded: it is noise on
 # a successful run (PySpark), but it is the ONLY diagnosis when the runner itself
 # fails, and discarding it is what made this failure mode silent.
@@ -177,18 +261,24 @@ PYTEST_EXIT=$?
 STDERR_TEXT="$(cat "$STDERR_PATH" 2>/dev/null)"
 rm -f "$STDERR_PATH"
 
-# ---------- Update test log (.github/test-log.json) ----------
-TEST_LOG_PATH="$WORKSPACE_ROOT/.github/test-log.json"
+# ---------- Record the result under the entry claimed before the run ----------
 
 # Parse pytest summary: "619 passed in 5.33s" or "617 passed, 2 failed in 5.33s"
+#
+# POSIX classes, not \d / \s: those are PCRE, and `grep -E` treats \d as a
+# literal 'd'. The summary pattern therefore never matched, SUMMARY_LINE was
+# always empty, and every completed run was recorded as 0 passed / 0 total --
+# or, on a non-zero exit, as "pytest did not run" when pytest had in fact run
+# and reported failures. `grep -P` is avoided as well: it is absent from BSD
+# and macOS grep, where it fails outright rather than silently.
 PASSED=0; FAILED=0; ERRORS=0; RUNTIME=0
 if [[ -n "$STDOUT" ]]; then
-    SUMMARY_LINE=$(echo "$STDOUT" | grep -E '\d+ passed|\d+ failed|\d+ error' | tail -1)
+    SUMMARY_LINE=$(echo "$STDOUT" | grep -E '[0-9]+ (passed|failed|error)' | tail -1)
     if [[ -n "$SUMMARY_LINE" ]]; then
-        p=$(echo "$SUMMARY_LINE" | grep -oP '(\d+) passed' | grep -oP '\d+')
-        f=$(echo "$SUMMARY_LINE" | grep -oP '(\d+) failed' | grep -oP '\d+')
-        e=$(echo "$SUMMARY_LINE" | grep -oP '(\d+) error'  | grep -oP '\d+')
-        r=$(echo "$SUMMARY_LINE" | grep -oP 'in (\d+\.?\d*)s' | grep -oP '[\d.]+')
+        p=$(echo "$SUMMARY_LINE" | grep -Eo '[0-9]+ passed' | grep -Eo '[0-9]+')
+        f=$(echo "$SUMMARY_LINE" | grep -Eo '[0-9]+ failed' | grep -Eo '[0-9]+')
+        e=$(echo "$SUMMARY_LINE" | grep -Eo '[0-9]+ error'  | grep -Eo '[0-9]+')
+        r=$(echo "$SUMMARY_LINE" | grep -Eo 'in [0-9]+\.?[0-9]*s' | grep -Eo '[0-9]+\.?[0-9]*')
         [[ -n "$p" ]] && PASSED=$p
         [[ -n "$f" ]] && FAILED=$f
         [[ -n "$e" ]] && ERRORS=$e
@@ -209,9 +299,9 @@ fi
 # Extract coverage % if requested
 COV_PCT="null"
 if [[ "$COVERAGE" == true ]] && [[ -n "$STDOUT" ]]; then
-    cov_line=$(echo "$STDOUT" | grep -E '^TOTAL\s+' | tail -1)
+    cov_line=$(echo "$STDOUT" | grep -E '^TOTAL[[:space:]]+' | tail -1)
     if [[ -n "$cov_line" ]]; then
-        cov_val=$(echo "$cov_line" | grep -oP '\d+%' | grep -oP '\d+')
+        cov_val=$(echo "$cov_line" | grep -Eo '[0-9]+%' | grep -Eo '[0-9]+')
         [[ -n "$cov_val" ]] && COV_PCT=$cov_val
     fi
 fi
@@ -225,80 +315,17 @@ if [[ "$RUNNER_FAILED" == true ]]; then
     # Escape for JSON embedding (backslash, quote, control chars).
     ERR_MSG="$(printf '%s' "$ERR_MSG" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/ /g')"
     ENTRY=$(cat <<ENTRY_EOF
-{"last_run":"$NOW","passed":null,"failed":null,"errors":null,"total":0,"runtime_seconds":0,"run_by":"run-tests.sh","exit_code":$PYTEST_EXIT,"coverage_percent":null,"status":"error","error_message":"$ERR_MSG"}
+{"last_run":"$NOW","started":"$STARTED","passed":null,"failed":null,"errors":null,"total":0,"runtime_seconds":0,"run_by":"run-tests.sh","exit_code":$PYTEST_EXIT,"coverage_percent":null,"status":"error","error_message":"$ERR_MSG"}
 ENTRY_EOF
 )
 else
     ENTRY=$(cat <<ENTRY_EOF
-{"last_run":"$NOW","passed":$PASSED,"failed":$FAILED,"errors":$ERRORS,"total":$TOTAL,"runtime_seconds":$RUNTIME,"run_by":"run-tests.sh","exit_code":$PYTEST_EXIT,"coverage_percent":$COV_PCT,"status":"ok"}
+{"last_run":"$NOW","started":"$STARTED","passed":$PASSED,"failed":$FAILED,"errors":$ERRORS,"total":$TOTAL,"runtime_seconds":$RUNTIME,"run_by":"run-tests.sh","exit_code":$PYTEST_EXIT,"coverage_percent":$COV_PCT,"status":"ok"}
 ENTRY_EOF
 )
 fi
 
-# Determine scope key
-if [[ -n "$FILE" ]]; then
-    SCOPE_KEY="file"
-    [[ "$FILE" == *"tests/domain"* ]]     && SCOPE_KEY="domain"
-    [[ "$FILE" == *"tests/adapters"* ]]   && SCOPE_KEY="adapters"
-    [[ "$FILE" == *"tests/properties"* ]] && SCOPE_KEY="properties"
-    [[ "$FILE" == *"tests/contracts"* ]]  && SCOPE_KEY="contracts"
-elif [[ "$SCOPE" == "all" ]]; then
-    SCOPE_KEY="all"
-else
-    SCOPE_KEY="$SCOPE"
-fi
-
-# Merge into existing log (or create new) — pure bash, no python
-# NOTE: The sed extraction below assumes test-log.json has a FLAT structure:
-#   { "scope": { ...flat-key-value-pairs... }, ... }
-# Constraints for correctness:
-#   1. Each scope value must be a single-level object (no nested braces).
-#   2. The greedy .* in sed patterns matches the LAST occurrence of each key.
-#      This is safe because the known scope names (domain, adapters, properties,
-#      contracts, all, file) do not appear as substrings in value fields.
-# If the schema gains nested objects, dynamic keys, or scope names in values,
-# replace this with jq or python.
-d_domain="" d_adapters="" d_properties="" d_contracts="" d_all="" d_file=""
-if [[ -f "$TEST_LOG_PATH" ]]; then
-    _flat=$(tr -d '\n\r' < "$TEST_LOG_PATH" | tr -s ' ')
-    d_domain=$(echo "$_flat" | sed -n 's/.*"domain" *: *\({[^}]*}\).*/\1/p')
-    d_adapters=$(echo "$_flat" | sed -n 's/.*"adapters" *: *\({[^}]*}\).*/\1/p')
-    d_properties=$(echo "$_flat" | sed -n 's/.*"properties" *: *\({[^}]*}\).*/\1/p')
-    d_contracts=$(echo "$_flat" | sed -n 's/.*"contracts" *: *\({[^}]*}\).*/\1/p')
-    d_all=$(echo "$_flat" | sed -n 's/.*"all" *: *\({[^}]*}\).*/\1/p')
-    d_file=$(echo "$_flat" | sed -n 's/.*"file" *: *\({[^}]*}\).*/\1/p')
-fi
-
-case "$SCOPE_KEY" in
-    domain)     d_domain="$ENTRY" ;;
-    adapters)   d_adapters="$ENTRY" ;;
-    properties) d_properties="$ENTRY" ;;
-    contracts)  d_contracts="$ENTRY" ;;
-    all)        d_all="$ENTRY" ;;
-    file)       d_file="$ENTRY" ;;
-esac
-
-{
-    printf '{\n'
-    _first=true
-    for _scope in domain adapters properties contracts all file; do
-        case "$_scope" in
-            domain)     _val="$d_domain" ;;
-            adapters)   _val="$d_adapters" ;;
-            properties) _val="$d_properties" ;;
-            contracts)  _val="$d_contracts" ;;
-            all)        _val="$d_all" ;;
-            file)       _val="$d_file" ;;
-        esac
-        if [[ -n "$_val" ]]; then
-            $_first || printf ',\n'
-            printf '  "%s": %s' "$_scope" "$_val"
-            _first=false
-        fi
-    done
-    printf '\n}\n'
-} > "$TEST_LOG_PATH"
-
+write_log_entry "$SCOPE_KEY" "$ENTRY"
 # Write output file if requested
 if [[ "$DO_OUTPUT_FILE" == true ]]; then
     if [[ -n "$STDOUT" ]]; then
