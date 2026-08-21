@@ -6,6 +6,7 @@
 # Gate 2: No new files created -- refactoring modifies existing files only.
 #         Scoped to .py files under SRC_DIR/ and tests/ to avoid false positives
 #         from pre-existing untracked files (notebooks, temp files, etc.).
+# Gate 2b: Provenance markers on files this pass actually authored.
 # Gate 3: Python quality (type hints, docstrings) on changed SRC_DIR/ files.
 # Gate 4: Each new type:ignore / pyright:ignore / noqa is its own commit.
 # Gate 5: ruff linting on changed files under SRC_DIR/ AND tests/.
@@ -167,6 +168,50 @@ if ($mergeBase) { $diffBaseArgs = @('--diff-base', $mergeBase) }
 $pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
 if (-not (Test-Path $pythonExe)) {
     $pythonExe = if ($AfPython) { $AfPython } else { $null }
+}
+
+# ---------- Gate 2b: Provenance markers on authored files ----------
+# refactorer.agent.md carries a HARD provenance gate whose only stated
+# verification was the refactorer's own scan -- so a pass could report
+# "Marked as copilot:modified in both files" with no marker in either
+# (issue #175). A self-scan is the claim restated, not a check.
+# The authorship filter is mirrored from implementer-stop and matters more
+# here: this is the agent that runs `ruff format`, and a marker may only be
+# demanded of files it actually wrote in (issue #86).
+$authoredPy = @($changedLintPy | Where-Object { $_ })
+if ($mergeBase -and $pythonExe -and $authoredPy.Count -gt 0) {
+    $authorshipScript = Join-Path $mainRoot '.github/scripts/check-python-quality.py'
+    if (Test-Path $authorshipScript) {
+        Push-Location $codeRoot
+        $authoredOut = & $pythonExe $authorshipScript @diffBaseArgs --list-authored --files @($authoredPy) 2>$null
+        $authoredExit = $LASTEXITCODE
+        Pop-Location
+        if ($authoredExit -eq 0) {
+            $authoredPy = @($authoredOut | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })
+        }
+    }
+}
+
+$missingMarkers = @()
+foreach ($f in $authoredPy) {
+    if ($f -and (Test-Path (Join-Path $codeRoot $f))) {
+        if (-not (Test-AfProvenanceMarker -Path (Join-Path $codeRoot $f))) {
+            $missingMarkers += $f
+        }
+    }
+}
+
+if ($missingMarkers.Count -gt 0) {
+    $fileList = $missingMarkers -join ', '
+    $output = @{
+        hookSpecificOutput = @{
+            hookEventName = "Stop"
+            decision = "block"
+            reason = "Provenance gate: these refactored .py files carry no copilot:generated or copilot:modified marker anywhere: $fileList. Add a marker in the position instructions/provenance.instructions.md prescribes before completing."
+        }
+    } | ConvertTo-Json -Compress -Depth 3
+    Write-Output $output
+    exit 0
 }
 
 # ---------- Gate 3: Python quality on changed source files ----------

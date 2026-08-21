@@ -6,6 +6,7 @@
 # Gate 1: All tests must still pass after refactoring.
 # Gate 2: No new files created — refactoring modifies existing files only.
 #         Scoped to .py files under SRC_DIR/ and tests/ to avoid false positives.
+# Gate 2b: Provenance markers on files this pass actually authored.
 # Gate 3: Python quality (type hints, docstrings) on changed SRC_DIR/ files.
 # Gate 4: Each new type:ignore / pyright:ignore / noqa is its own commit.
 # Gate 5: ruff linting on changed files under SRC_DIR/ AND tests/.
@@ -149,6 +150,38 @@ fi
 # framework keeps one base-branch resolver.
 diff_base_args=""
 [ -n "$merge_base" ] && diff_base_args="--diff-base $merge_base"
+
+# ---------- Gate 2b: Provenance markers on authored files ----------
+# refactorer.agent.md carries a HARD provenance gate whose only stated
+# verification was the refactorer's own scan -- so a pass could report
+# "Marked as copilot:modified in both files" with no marker in either
+# (issue #175). A self-scan is the claim restated, not a check.
+# The authorship filter is mirrored from implementer-stop and matters more
+# here: this is the agent that runs `ruff format`, and a marker may only be
+# demanded of files it actually wrote in (issue #86).
+authored_py="$changed_lint_py"
+authorship_script=".github/scripts/check-python-quality.py"
+if [ -n "$changed_lint_py" ] && [ -n "$merge_base" ] && [ -n "$python_exe" ] && [ -f "$authorship_script" ]; then
+    if authored_out=$(echo "$changed_lint_py" | xargs "$python_exe" "$authorship_script" $diff_base_args --list-authored --files 2>/dev/null); then
+        authored_py="$authored_out"
+    fi
+fi
+
+missing=""
+if [ -n "$authored_py" ]; then
+    while IFS= read -r f; do
+        if [ -f "$f" ]; then
+            if ! af_has_provenance_marker "$f"; then
+                missing="${missing:+$missing, }$f"
+            fi
+        fi
+    done <<< "$authored_py"
+fi
+
+if [ -n "$missing" ]; then
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Provenance gate: these refactored .py files carry no copilot:generated or copilot:modified marker anywhere: ${missing}. Add a marker in the position instructions/provenance.instructions.md prescribes before completing.\"}}"
+    exit 0
+fi
 
 # ---------- Gate 3: Python quality on changed source files ----------
 
