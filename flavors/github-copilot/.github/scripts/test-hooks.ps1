@@ -149,6 +149,13 @@ function Invoke-HookInFixture {
     # Hooks dot-source the shared preamble; a deployed .github always ships it.
     $commonSrc = Join-Path (Split-Path $HookPath) '_common.ps1'
     if (Test-Path $commonSrc) { Copy-Item $commonSrc $fixtureHooks }
+    # Helper scripts a hook shells out to. Without them the hook takes its
+    # degrade-silently path, and a case asserting what the helper produced
+    # would be asserting on an absent file rather than on the hook.
+    foreach ($helper in @('collect-agent-invocations.py')) {
+        $helperSrc = Join-Path (Split-Path $HookPath) $helper
+        if (Test-Path $helperSrc) { Copy-Item $helperSrc $fixtureHooks }
+    }
     # The declared policy (AF_CONF_PATH), not the checkout's own af-env.conf:
     # the fixture must assert under the same stated policy as everything else.
     # AF_CONF_PATH is inherited by the hook process anyway; this copy keeps the
@@ -2128,6 +2135,83 @@ Assert-Contains "started: is stamped too, so the pair comes from one source" `
 Assert-True "the log carries each timestamp exactly once" `
     (([regex]::Matches($stamped, '(?m)^completed:')).Count -eq 1 -and ([regex]::Matches($stamped, '(?m)^started:')).Count -eq 1) `
     "got: $stamped" -Subject $stamped
+
+# ── documenter-stop.ps1 — which agents actually ran (issue #173) ─────────
+#
+# A workflow log carried a complete `agent: arbiter` step -- action, verdict,
+# review findings -- for an arbiter that was never invoked. The editor names
+# one debug log per subagent call, so which agents ran is a directory listing
+# and not a claim. These cases drive the hook end to end: the fixture holds a
+# session directory shaped the way the hook derives it, so what is asserted is
+# the hook's wiring, not the recorder in isolation.
+
+Write-Output "## documenter-stop.ps1 agent invocations"
+
+# <chat>/transcripts/<sid>.jsonl  ->  <chat>/debug-logs/<sid>/
+$invChat = Join-Path ([IO.Path]::GetTempPath()) "af-inv-$(Get-Random)"
+$invSid  = 's2'
+$invDir  = Join-Path (Join-Path $invChat 'debug-logs') $invSid
+New-Item -ItemType Directory -Path $invDir -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $invChat 'transcripts') -Force | Out-Null
+foreach ($n in @('runSubagent-implementer-toolu_a.jsonl', 'runSubagent-code-critic-toolu_b.jsonl')) {
+    Set-Content -Path (Join-Path $invDir $n) -Value '{}' -Encoding UTF8
+}
+$INV_JSON = @{
+    session_id      = $invSid
+    transcript_path = (Join-Path (Join-Path $invChat 'transcripts') "$invSid.jsonl")
+} | ConvertTo-Json -Compress
+
+# Schema-valid on purpose: the schema gate runs first and would block, and a
+# case that never reaches the code it names proves nothing.
+$LOG_ARBITER = @(
+    'workflow_id: "72-x"'
+    'status: "COMPLETED"'
+    'steps:'
+    '  - step: 1'
+    '    agent: implementer'
+    '    verdict: "APPROVED"'
+    '  - step: 2'
+    '    agent: code-critic'
+    '    verdict: "APPROVED"'
+    '  - step: 3'
+    '    agent: arbiter'
+    '    verdict: "RESOLVED"'
+) -join "`n"
+
+$invLog = (Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $INV_JSON -Branch 'agent/72-x' -ReadBack '.github/logs/72-x.yaml' -Files @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+    '.github/logs/72-x.yaml'         = $LOG_ARBITER
+    '.github/retros/auto/72-x.md'    = $RETRO_MD
+}).ReadBack
+
+Assert-Contains "the log comes back before the invocation block is judged" `
+    $invLog 'workflow_id:' "the read-back returned nothing"
+
+Assert-Contains "the hook records which subagents actually ran" `
+    $invLog '(?m)^agent_invocations:'
+
+Assert-Contains "an agent invoked once is counted once" `
+    $invLog '(?m)^\s*implementer:\s*1\s*$'
+
+Assert-Contains "a step naming an agent that never ran is called out" `
+    $invLog '(?m)^\s*-\s*arbiter\s*$'
+
+# Listing an agent that did run would make the section noise, and a section
+# that cries wolf is a section nobody reads.
+Assert-NotContains "an agent that did run is not accused" `
+    $invLog '(?m)^\s*-\s*implementer\s*$'
+
+Assert-True "the block appears exactly once" `
+    (([regex]::Matches($invLog, '(?m)^agent_invocations:')).Count -eq 1) `
+    "got: $invLog" -Subject $invLog
+
+# Debug logging is a vendor setting that can be off. Absent evidence must not
+# become an assertion of zero invocations -- the earlier timestamp cases run
+# with a transcript path that resolves nowhere.
+Assert-NotContains "no session directory means no block, not an empty one" `
+    $stamped 'agent_invocations:'
+
+Remove-Item $invChat -Recurse -Force -ErrorAction SilentlyContinue
 
 $bare = Get-StampedLog $LOG_YAML
 Assert-True "a log without timestamps gets both from the hook" `

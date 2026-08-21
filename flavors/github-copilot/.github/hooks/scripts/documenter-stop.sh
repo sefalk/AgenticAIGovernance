@@ -236,6 +236,55 @@ if ! grep -q '^cost:' "$log_path" 2>/dev/null; then
     fi
 fi
 
+# ---------- Agent invocations (ADVISORY — never blocks) ----------
+#
+# Which subagents actually ran, read from the editor's own subagent log
+# filenames so the record never passes through a language model. Measured: a
+# Deep-tier workflow log carried a complete `agent: arbiter` step — action,
+# verdict, review findings — for an arbiter that was never invoked, and only
+# the coordinator's cross-check caught it (issue #173).
+#
+# Advisory rather than blocking, on purpose. The count covers one chat session,
+# so a workflow resumed in a later window would fail a gate it did not deserve,
+# and a hook that fails honest work is a hook that gets switched off (#108).
+# The contradiction is written into the log instead, where any reader meets it.
+
+invocation_note=""
+log_path=".github/logs/${workflow_id}.yaml"
+[ -f "$log_path" ] || log_path=".github/logs/${workflow_id}.yml"
+
+# Appending twice would produce a duplicate YAML key; first write wins.
+if ! grep -q '^agent_invocations:' "$log_path" 2>/dev/null; then
+    sid=$(printf '%s' "$stdin_raw" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    transcript=$(printf '%s' "$stdin_raw" | grep -o '"transcript_path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+
+    if [ -n "$sid" ] && [ -n "$transcript" ]; then
+        chat_dir=$(dirname "$(dirname "$transcript")")
+        session_dir="${chat_dir}/debug-logs/${sid}"
+
+        recorder=".github/hooks/scripts/collect-agent-invocations.py"
+        inv_python=""
+        for c in .venv/bin/python .venv/Scripts/python.exe; do
+            [ -x "$c" ] && inv_python="$c" && break
+        done
+        if [ -z "$inv_python" ]; then
+            inv_python="$AF_PYTHON"
+        fi
+
+        if [ -n "$inv_python" ] && [ -f "$recorder" ]; then
+            if block=$("$inv_python" "$recorder" --session-dir "$session_dir" --log "$log_path" 2>/dev/null) && [ -n "$block" ]; then
+                printf '\n%s\n' "$block" >> "$log_path"
+                invocation_note=" + agent invocations measured"
+                case "$block" in
+                    *claimed_without_invocation*)
+                        invocation_note="${invocation_note} (steps name agents with no invocation log — check them)"
+                        ;;
+                esac
+            fi
+        fi
+    fi
+fi
+
 # ---------- Scratch task audit (ADVISORY — never blocks) ----------
 #
 # createAndRunTask writes its payload into .vscode/tasks.json, so every one-off
@@ -262,5 +311,5 @@ if [ -f "$checker" ] && [ -f ".vscode/tasks.json" ]; then
     fi
 fi
 
-echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS for '${workflow_id}'${retro_note}${schema_note}${stamp_note}${cost_note}${scratch_note}\"}"
+echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS for '${workflow_id}'${retro_note}${schema_note}${stamp_note}${cost_note}${invocation_note}${scratch_note}\"}"
 exit 0

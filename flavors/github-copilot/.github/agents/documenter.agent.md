@@ -134,7 +134,20 @@ escalation:
   trigger: "<why escalated>"
   resolution: "<human decision or arbiter verdict>"
   step_at_escalation: <step number>
+
+# Appended by your Stop hook from the editor's own subagent logs. Do not write
+# it, and do not anticipate what it will say.
+agent_invocations: <appended by your Stop hook>
 ```
+
+**A step is a record of a call that happened.** Your Stop hook reads which
+subagents the editor actually invoked and appends the counts, then lists any
+agent your `steps` name that has no invocation behind it. A workflow log once
+carried a complete `agent: arbiter` step — action, verdict, review findings —
+for an arbiter nobody had called, and the conclusion drawn from it was plausible
+enough that only a cross-check caught it (issue #173). If you cannot say which
+call a step describes, leave the step out; a gap is recoverable, an invented
+step is not.
 
 For the `verdict` field in step entries, use the parseable format from
 MANIFEST § 13 (Inter-Agent Contracts → Verdict Format): APPROVED,

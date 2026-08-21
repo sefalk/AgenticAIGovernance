@@ -201,6 +201,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A workflow log named a subagent that was never called (#173).** The
+  documenter wrote a `steps[]` entry for `arbiter` in a workflow where no
+  arbiter ran. Nothing in the artifact contradicted it, so the only way to
+  catch it was to remember the workflow — which is exactly what the log exists
+  to replace.
+
+  The editor already keeps a machine-written record of which subagents ran: the
+  session's debug-log directory contains one `runSubagent-{agent}-{callid}.jsonl`
+  per invocation. Those filenames never pass through a language model. Measured
+  here by listing `%APPDATA%\Code\User\workspaceStorage\**\debug-logs\**` —
+  `runSubagent-implementer-…`, `runSubagent-test-writer-…`,
+  `runSubagent-ado-pr-manager-…`. `documenter-stop` already resolved that
+  directory for the cost block, so the input was in reach.
+
+  The new `collect-agent-invocations.py` (stdlib only) counts those files per
+  agent and appends an `agent_invocations:` block to the log: `observed:` with
+  the counts, and `claimed_without_invocation:` listing any agent named in
+  `steps[]` with no invocation log. The fabricated `arbiter` step is now
+  refutable by reading the same file it appears in.
+
+  **Nothing gates on it, deliberately.** The count covers one chat session, so
+  a workflow resumed in a later window would fail a check it did not deserve —
+  and a hook that fails honest work gets switched off, which is the #108 lesson.
+  `observed:` is therefore documented as a lower bound, and the block carries
+  that caveat inline. When no subagent logs exist at all the recorder exits 1
+  and writes nothing, rather than stamping an empty block that would read as
+  "no agents ran" (#59: an unrun check is not a pass).
+
+  Measured: the recorder's own suite `test-agent-invocations.ps1` 22 passed /
+  0 failed; `test-hooks.ps1` 298 / 0 before the seven new end-to-end cases and
+  **305 / 0** after; `test-hooks.sh` 154 / 0 (measured before those PowerShell-
+  only cases were added — `documenter-stop.sh` itself is unchanged since, and
+  its wiring is covered by `bash -n` plus the existing twin cross-checks, not by
+  an end-to-end case); `test-hooks-integration.ps1` 8 / 0.
+
+  A mutation control decided which of those cases are evidence. Breaking the
+  agent-name split turned the hyphenated-name case red; removing the block-scalar
+  skip turned the block-scalar case red; removing the `steps:` boundary turned
+  the other-section case red. A fourth mutation — removing the top-level-key
+  guard — left its case **green**, because a top-level `agent:` clears the
+  `steps` flag by itself before that guard is reached. That case was measuring
+  nothing, so it was deleted rather than shipped, taking the suite from 23 back
+  to 22.
+
+  **What this does not fix.** `summary.tests_added`, `summary.provenance.*` and
+  `escalation.step_at_escalation` are still written by hand and still fabricable;
+  the same reported workflow claimed `tests_added: 122` for 11 tests and "6 files
+  checked, 6 markers present" having read no file. No mechanical source exists
+  for `tests_added` (`test-log.json` records passed/total, not added), and a
+  naive provenance derivation would produce a new wrong number, since AF
+  framework files and `docs/**` are deliberately unmarked. #173 stays open.
+
 - **The watchdog quoted a file it had not read (#174).** A post-flight
   compliance report presented a sentence as a direct quotation from the
   workflow's retro; the retro contained neither that sentence nor the work item
