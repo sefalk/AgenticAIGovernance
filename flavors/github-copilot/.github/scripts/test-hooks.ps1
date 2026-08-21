@@ -2403,6 +2403,36 @@ foreach ($site in $provenanceCallSites) {
         "fixed 5-line window still present in $site"
 }
 
+# Naming the helper is not the same as being able to call it. test-writer-stop
+# called the detector without sourcing the file that defines it, and the two
+# twins failed in opposite directions: PowerShell abandons the enclosing `if`
+# on command-not-found, so the gate never fired; bash reads the 127 as "no
+# marker", so it flagged every new test file (issue #175). Neither is visible
+# to a test that only greps for the call.
+$psHelpers = @(
+    'Get-AfConfig', 'Get-AfRetroDir', 'Find-AfPython', 'Get-AfPlanLifecycle',
+    'Get-AfRetroRequirement', 'Test-AfWriteTool', 'Get-AfWritePaths', 'Test-AfProvenanceMarker'
+)
+$shHelpers = @(
+    'af_conf_get', 'af_retro_dir', 'af_find_python', 'af_plan_lifecycle',
+    'af_retro_required', 'af_is_write_tool', 'af_write_paths', 'af_has_provenance_marker'
+)
+$unsourced = @()
+foreach ($hookFile in Get-ChildItem $scriptDir -File | Where-Object {
+        $_.Name -match '\.(ps1|sh)$' -and $_.Name -notmatch '^_common\.'
+    }) {
+    $text = Get-Content $hookFile.FullName -Raw
+    $isPs = $hookFile.Name.EndsWith('.ps1')
+    $helpers = if ($isPs) { $psHelpers } else { $shHelpers }
+    $commonFile = if ($isPs) { '_common.ps1' } else { '_common.sh' }
+    $used = @($helpers | Where-Object { $text -match "(^|[^\w-])$([regex]::Escape($_))(\s|\()" })
+    if ($used.Count -gt 0 -and $text -notmatch [regex]::Escape($commonFile)) {
+        $unsourced += "$($hookFile.Name) calls $($used -join '/')"
+    }
+}
+Assert-True "a hook that calls a shared helper also sources the file defining it" `
+    ($unsourced.Count -eq 0) "unsourced call sites: $($unsourced -join '; ')"
+
 $compliancePath = Join-Path $githubDir 'agents/compliance-checker.agent.md'
 Assert-True "compliance-checker states the same detection rule as the hooks" `
     (((Get-Content $compliancePath -Raw) -notmatch 'first 5 lines')) `
@@ -2421,6 +2451,8 @@ Write-Output "## Provenance gate scope (issue #86)"
 # authorship query, not from `git diff`.
 $implPs1 = Get-Content (Join-Path $scriptDir 'implementer-stop.ps1') -Raw
 $implSh  = Get-Content (Join-Path $scriptDir 'implementer-stop.sh') -Raw
+$refacPs1 = Get-Content (Join-Path $scriptDir 'refactorer-stop.ps1') -Raw
+$refacSh  = Get-Content (Join-Path $scriptDir 'refactorer-stop.sh') -Raw
 
 Assert-True "implementer-stop.ps1 scopes the provenance gate to authored files" `
     ($implPs1 -match '--list-authored') `
@@ -2430,10 +2462,26 @@ Assert-True "implementer-stop.sh scopes the provenance gate to authored files" `
     ($implSh -match '--list-authored') `
     "provenance gate still takes the raw diff"
 
+# The refactorer's gate table calls provenance HARD, but its stated
+# verification was the refactorer's own scan -- so a pass reported markers in
+# both files it had touched and the diff had none (issue #175). A gate that
+# only the maker checks is the claim restated as its own proof.
+foreach ($pair in @(@{ n = 'refactorer-stop.ps1'; t = $refacPs1 }, @{ n = 'refactorer-stop.sh'; t = $refacSh })) {
+    Assert-True "$($pair.n) checks provenance itself instead of trusting the agent" `
+        ($pair.t -match 'Test-AfProvenanceMarker|af_has_provenance_marker') `
+        "no provenance gate in the refactorer's Stop hook"
+
+    Assert-True "$($pair.n) scopes its provenance gate to authored files" `
+        ($pair.t -match '--list-authored') `
+        "provenance gate would fire on files the refactorer only reformatted"
+}
+
 # The filter belongs to authorship gates only. A lint violation is real whoever
 # produced it, so scoping the lint gate this way would be a genuine bypass --
 # the one thing this change must not become.
-foreach ($pair in @(@{ n = 'implementer-stop.ps1'; t = $implPs1 }, @{ n = 'implementer-stop.sh'; t = $implSh })) {
+foreach ($pair in @(
+        @{ n = 'implementer-stop.ps1'; t = $implPs1 }, @{ n = 'implementer-stop.sh'; t = $implSh },
+        @{ n = 'refactorer-stop.ps1'; t = $refacPs1 }, @{ n = 'refactorer-stop.sh'; t = $refacSh })) {
     $lintLines = ($pair.t -split "`r?`n") | Where-Object { $_ -match 'check-python-linting\.py' }
     Assert-True "$($pair.n) does not scope the lint gate to authored files" `
         (-not ($lintLines -match 'authored')) `
