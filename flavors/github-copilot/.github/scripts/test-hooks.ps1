@@ -2574,6 +2574,67 @@ Assert-True "Step 7b never overwrites an existing artifact" `
 
 Write-Output ""
 
+# ── 6e. A measurement must leave an inspectable artifact (issue #134) ─────
+
+Write-Output "## Measurement evidence (issue #134)"
+
+# A ~59M-row measurement was taken over an ephemeral REPL channel that leaves
+# no job, no run record and no output. The numbers were about to be cited as
+# established findings. Nothing failed -- which is the whole problem.
+$dbxSkill = Get-Content (Join-Path $githubDir 'skills/databricks-execution-patterns/SKILL.md') -Raw
+$manifest = Get-Content (Join-Path $githubDir 'MANIFEST.md') -Raw
+$gatesInstr = Get-Content (Join-Path $githubDir 'instructions/quality-gates.instructions.md') -Raw
+
+Assert-True "the principle names the failure: unobservable is not evidence" `
+    ($manifest -match '(?i)only the producing agent can observe is not evidence') `
+    "MANIFEST states no rule about results a third party cannot inspect"
+
+Assert-True "the gate taxonomy covers a deliverable that is a value, not a file" `
+    ($gatesInstr -match '(?i)Evidence durability') `
+    "quality gates still assume the artifact is the code"
+
+# The decision framework listed only sanctioned channels, so the fastest one
+# was never ruled out -- it was simply never mentioned. Enumerating it is the
+# fix; listing the good options again is not.
+Assert-True "the disallowed execution channel is named, not merely omitted" `
+    ($dbxSkill -match [regex]::Escape('/api/1.2/commands')) `
+    "the ephemeral channel is still absent from the decision tree"
+
+Assert-True "the ephemeral channel is allowed for probing and barred from citation" `
+    ($dbxSkill -match '(?i)disallowed for any result that will be quoted') `
+    "no rule separates probing from citable measurement"
+
+# A run record expires. Guidance that stops at "it appears under Runs" leaves
+# the number uncheckable exactly when someone finally challenges it.
+Assert-True "durability is stated as a time horizon, not a binary" `
+    ($dbxSkill -match '(?i)time horizon' -and $dbxSkill -match '(?i)retention') `
+    "retention is still treated as guaranteed"
+
+Assert-True "an absent durable channel is BLOCKED rather than reported anyway" `
+    ($dbxSkill -match '(?i)do not fall back to the ephemeral channel and report the number') `
+    "a tooling gap can still be downgraded to an unverifiable claim"
+
+# The drift generator behind all of it: two runbooks for one agent.
+$authoringSkill = Get-Content (Join-Path $githubDir 'skills/copilot-authoring/SKILL.md') -Raw
+
+Assert-True "projects are told to overlay configuration, not fork the runbook" `
+    ($authoringSkill -match '(?i)never a forked runbook') `
+    "nothing warns against a project-local copy of framework guidance"
+
+Assert-True "selection matrices must enumerate what is disallowed" `
+    ($authoringSkill -match '(?i)enumerate the disallowed options') `
+    "listing only sanctioned paths is still presented as sufficient"
+
+# The naming examples moved to the MANIFEST to pay for the above in budget.
+# If they did not survive the move, the dedup silently deleted content.
+foreach ($worker in @('ado-work-item-manager', 'ado-pipeline-manager', 'gh-issue-manager', 'gh-pr-manager')) {
+    Assert-True "provider worker example '$worker' survived the move to MANIFEST" `
+        ($manifest -match [regex]::Escape($worker)) `
+        "example lost when quality-gates stopped restating it"
+}
+
+Write-Output ""
+
 # ── 7. Edge cases ────────────────────────────────────────────────────────
 
 Write-Output "## Edge cases"
