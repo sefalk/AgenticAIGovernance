@@ -113,7 +113,9 @@ function Invoke-Hook {
         [string]$Branch,
         [switch]$Detached,
         [hashtable]$Files,
-        [string]$ReadBack
+        [string]$ReadBack,
+        [string]$StubBin,
+        [hashtable]$StubFiles
     )
     $hookPath = Join-Path $scriptDir $Script
     if (-not (Test-Path $hookPath)) {
@@ -122,7 +124,7 @@ function Invoke-Hook {
     if (-not $Branch -and -not $Detached -and -not $Files) {
         return (Invoke-HookScript -HookPath $hookPath -JsonInput $JsonInput)
     }
-    return (Invoke-HookInFixture -HookPath $hookPath -Script $Script -JsonInput $JsonInput -Branch $Branch -Detached:$Detached -Files $Files -ReadBack $ReadBack)
+    return (Invoke-HookInFixture -HookPath $hookPath -Script $Script -JsonInput $JsonInput -Branch $Branch -Detached:$Detached -Files $Files -ReadBack $ReadBack -StubBin $StubBin -StubFiles $StubFiles)
 }
 
 # Branch-context gates read the branch of the repo the hook sits in, resolved
@@ -140,7 +142,19 @@ function Invoke-HookInFixture {
         # A hook that writes into the repository cannot be judged by its
         # verdict alone -- the fixture is deleted on the way out, so the file
         # has to be read back before then. $null means the path was absent.
-        [string]$ReadBack
+        [string]$ReadBack,
+        # A fixture-relative directory to put in front of PATH. A gate that
+        # shells out to a test runner cannot be judged against the developer's
+        # own suite: the exit code and summary line are the input under test,
+        # so the runner has to be a stub the case controls (issue #123).
+        [string]$StubBin,
+        # Executables, not documents. `Set-Content -Encoding UTF8` on PowerShell
+        # 5.1 writes a BOM, and `EF BB BF @echo off` is not a command -- cmd
+        # reports it, leaves echo on, and every later line of the stub is echoed
+        # back beside its output. A gate that reads the last line of the runner's
+        # output then reads `exit /b 1` instead of the summary, and the case fails
+        # for a reason that has nothing to do with the hook. Measured 2026-08-24.
+        [hashtable]$StubFiles
     )
     $fixture = Join-Path ([System.IO.Path]::GetTempPath()) "af-hook-branch-$(Get-Random)"
     $fixtureHooks = Join-Path $fixture '.github/hooks/scripts'
@@ -187,6 +201,14 @@ function Invoke-HookInFixture {
                 Set-Content -Path $dest -Value $Files[$rel] -Encoding UTF8
             }
         }
+        if ($StubFiles) {
+            $noBom = New-Object System.Text.UTF8Encoding($false)
+            foreach ($rel in $StubFiles.Keys) {
+                $dest = Join-Path $fixture $rel
+                New-Item -ItemType Directory -Path (Split-Path $dest) -Force | Out-Null
+                [System.IO.File]::WriteAllText($dest, $StubFiles[$rel], $noBom)
+            }
+        }
         # In a fixture, the fixture's config is the config -- several cases pass
         # one through -Files to test a key (RETRO_DIR, SRC_DIR) and mean that
         # file, not the process-wide declared policy. Set after -Files, which
@@ -194,11 +216,14 @@ function Invoke-HookInFixture {
         $savedConfPath = $env:AF_CONF_PATH
         $fixtureConf = Join-Path $fixture '.github/af-env.conf'
         $env:AF_CONF_PATH = if (Test-Path $fixtureConf) { $fixtureConf } else { $null }
+        $savedPath = $env:PATH
+        if ($StubBin) { $env:PATH = "$(Join-Path $fixture $StubBin);$savedPath" }
         try {
             $output = $JsonInput | powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fixtureHooks $Script) 2>&1
             $exitCode = $LASTEXITCODE
         } finally {
             $env:AF_CONF_PATH = $savedConfPath
+            $env:PATH = $savedPath
         }
         # Not $readBack: PowerShell variable names are case-insensitive, so a
         # local differing only in case silently overwrites the parameter.
@@ -2841,6 +2866,59 @@ foreach ($f in $shellSources) {
     if ([System.IO.File]::ReadAllBytes($f.FullName) -contains 13) { $crFiles += $f.Name }
 }
 Assert-True "no shipped shell script carries a CR" ($crFiles.Count -eq 0) "CRLF in: $($crFiles -join ', ')"
+
+# --- Red phase validity (issue #123) ---------------------------------------
+#
+# The Red gate ran the suite and then read only two exit codes: 0 meant "all
+# tests pass" and 5 meant "nothing collected". Everything else fell through to
+# "Red phase satisfied", so a test file that could not be imported, or a test
+# that died in setup, counted as a genuine red. That test never reaches the
+# behaviour it claims to guard and stays red after a correct implementation --
+# the Green phase is then sent hunting for a defect that does not exist.
+#
+# The runner is stubbed because its exit code and summary line ARE the input
+# under test; run against a real suite these cases would assert on whatever the
+# developer's checkout happens to contain.
+
+Write-Output "## test-writer-stop.ps1 red phase validity"
+
+$PYTEST_STUB_DIR = 'bin'
+
+function Get-RedPhaseDecision {
+    param([int]$StubExit, [string]$StubSummary)
+    # A .cmd, not a shell script: on Windows executability comes from the
+    # extension, which is what `Get-Command pytest` resolves through PATHEXT.
+    # It goes through -StubFiles, which writes without a BOM -- see the note
+    # on that parameter for what a BOM does to a batch file.
+    $stub = "@echo off`r`necho $StubSummary`r`nexit /b $StubExit`r`n"
+    $r = Invoke-Hook -Script 'test-writer-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/123-x' `
+        -StubBin $PYTEST_STUB_DIR `
+        -StubFiles @{ "$PYTEST_STUB_DIR/pytest.cmd" = $stub } `
+        -Files @{ 'tests/test_seeded.py' = "def test_seeded():`n    assert True`n" }
+    return (Resolve-StopDecision $r.Output $r.ExitCode)
+}
+
+Assert-True "red phase: a failing assertion is a satisfied red" `
+    ((Get-RedPhaseDecision -StubExit 1 -StubSummary '1 failed in 0.5s') -eq 'pass') `
+    "exit 1 with a failure summary is the one shape a Red phase is allowed to have"
+
+Assert-True "red phase: a green suite is not a red phase" `
+    ((Get-RedPhaseDecision -StubExit 0 -StubSummary '3 passed in 0.5s') -eq 'block') `
+    "tests that already pass express no requirement gap"
+
+Assert-True "red phase: a collection error is not a satisfied red" `
+    ((Get-RedPhaseDecision -StubExit 2 -StubSummary '1 error in 0.9s') -eq 'block') `
+    "a file that cannot be imported never reaches the behaviour it claims to guard"
+
+# Measured 2026-08-24: a missing fixture reports `1 error` and still exits 1,
+# so the exit code alone cannot separate it from a genuine failure.
+Assert-True "red phase: a setup error exiting 1 is not a satisfied red" `
+    ((Get-RedPhaseDecision -StubExit 1 -StubSummary '1 error in 0.5s') -eq 'block') `
+    "exit 1 is shared by a real failure and a fixture that never ran; the summary line is not"
+
+Assert-True "red phase: no tests collected is not a verdict" `
+    ((Get-RedPhaseDecision -StubExit 5 -StubSummary 'no tests ran in 0.1s') -eq 'pass') `
+    "an empty run is a skip, not a satisfied red and not a violation"
 
 Write-Output ""
 
