@@ -189,7 +189,13 @@ function Invoke-HookInFixture {
             git -c user.email=fixture@local -c user.name=fixture commit -q --allow-empty -m 'fixture' 2>&1 | Out-Null
             git checkout -q --detach 2>&1 | Out-Null
         } else {
-            git checkout -q -b $Branch 2>&1 | Out-Null
+            # A case may seed files without caring about branch context. Every
+            # -Files case so far happened to pass a branch too, so the empty
+            # value was never reached: `git checkout -b ""` fails, the fixture
+            # dies before the hook runs, and the case reports a git error in
+            # place of a verdict. Measured on the #200 worktree cases.
+            $branchName = if ($Branch) { $Branch } else { 'agent/fixture' }
+            git checkout -q -b $branchName 2>&1 | Out-Null
         }
         # Lifecycle gates read the repository, not the prompt. Seeding the plan
         # file, log and retro is the only way to make the lifecycle an input of
@@ -325,10 +331,11 @@ function Assert-Decision {
         [string]$Script,
         [string]$Json,
         [string]$Branch,
-        [switch]$Detached
+        [switch]$Detached,
+        [hashtable]$Files
     )
     try {
-        $result = Invoke-Hook -Script $Script -JsonInput $Json -Branch $Branch -Detached:$Detached
+        $result = Invoke-Hook -Script $Script -JsonInput $Json -Branch $Branch -Detached:$Detached -Files $Files
         $decision = Resolve-Decision $result.Output $result.ExitCode
         if ($decision -eq $Expected) {
             $script:passed++
@@ -344,8 +351,8 @@ function Assert-Decision {
 }
 
 function Assert-Deny {
-    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch, [switch]$Detached)
-    Assert-Decision -TestName $TestName -Expected 'deny' -Script $Script -Json $Json -Branch $Branch -Detached:$Detached
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch, [switch]$Detached, [hashtable]$Files)
+    Assert-Decision -TestName $TestName -Expected 'deny' -Script $Script -Json $Json -Branch $Branch -Detached:$Detached -Files $Files
 }
 
 function Assert-Ask {
@@ -362,8 +369,8 @@ function Assert-Allow {
 # The hook had no opinion and said so. Distinct from Assert-Allow: it does not
 # claim the request was approved, only that this gate was not the one to judge.
 function Assert-Silent {
-    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch, [switch]$Detached)
-    Assert-Decision -TestName $TestName -Expected 'silent' -Script $Script -Json $Json -Branch $Branch -Detached:$Detached
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Branch, [switch]$Detached, [hashtable]$Files)
+    Assert-Decision -TestName $TestName -Expected 'silent' -Script $Script -Json $Json -Branch $Branch -Detached:$Detached -Files $Files
 }
 
 # The verdict is only half of what a gate owes the human: an 'ask' whose reason
@@ -1414,6 +1421,41 @@ Assert-Deny "coordinator cannot invoke a path-qualified pytest.exe" `
 Assert-Deny "coordinator cannot run pytest through uv" `
     "coordinator-pretooluse.ps1" `
     '{"tool_name":"run_in_terminal","tool_input":{"command":"uv run pytest tests/ -q"}}'
+
+# The worktree gate shipped with no cases at all, which is how a path with a
+# space in it got past review: `\S+` split the quoted path into arguments, so
+# the branch check read the `-` out of `OneDrive - Siemens` and denied a valid
+# name, while the collision guard tested a prefix that does not exist (#200).
+Assert-Silent "worktree: a quoted path with spaces does not fake a bad branch" `
+    "coordinator-pretooluse.ps1" `
+    '{"tool_name":"run_in_terminal","tool_input":{"command":"git worktree add \"c:\\Users\\me\\OneDrive - Siemens Healthineers\\MP Usage XP.worktrees\\3097\" agent/3097-micro-movements"}}'
+
+Assert-Silent "worktree: a valid -b branch is not obstructed" `
+    "coordinator-pretooluse.ps1" `
+    '{"tool_name":"run_in_terminal","tool_input":{"command":"git worktree add ../wt/feat-x -b agent/feat-auth"}}'
+
+Assert-Deny "worktree: an invalid -b branch is refused" `
+    "coordinator-pretooluse.ps1" `
+    '{"tool_name":"run_in_terminal","tool_input":{"command":"git worktree add ../wt/bad -b main"}}'
+
+# `git worktree add <path> <commit-ish>` names the branch positionally. The
+# bash twin never parsed this form, so the same command was denied here and
+# allowed there -- the cases are duplicated across harnesses to hold both.
+Assert-Deny "worktree: an invalid positional branch is refused" `
+    "coordinator-pretooluse.ps1" `
+    '{"tool_name":"run_in_terminal","tool_input":{"command":"git worktree add ../wt/bad main"}}'
+
+# A file seeds the directory, so the collision the guard is meant to catch is
+# real rather than asserted.
+Assert-Deny "worktree: a collision is caught when the path contains spaces" `
+    "coordinator-pretooluse.ps1" `
+    '{"tool_name":"run_in_terminal","tool_input":{"command":"git worktree add \"existing wt\" agent/collide-x"}}' `
+    -Files @{ 'existing wt/keep.txt' = 'x' }
+
+Assert-Deny "worktree: a collision is caught when the path has no spaces" `
+    "coordinator-pretooluse.ps1" `
+    '{"tool_name":"run_in_terminal","tool_input":{"command":"git worktree add existingwt agent/collide-y"}}' `
+    -Files @{ 'existingwt/keep.txt' = 'x' }
 
 Write-Output ""
 
