@@ -114,10 +114,31 @@ if ($toolName -match 'terminal') {
     # Validate git worktree add preconditions
     if ($command -match 'git\s+worktree\s+add') {
         $WT_DIR = Get-AfConfig -Key 'WORKTREE_DIR' -Default '../wt'
-        # Extract branch name: git worktree add <path> -b <branch> ...
+        # `\S+` stops at the first blank, so a quoted path containing spaces was
+        # read as several arguments: `...\OneDrive - Siemens...` handed the branch
+        # check the token `-` and denied a perfectly valid branch name, while the
+        # collision guard tested a prefix that does not exist (issue #200).
+        # Tokenise the command instead, honouring quotes.
+        $wtTokens = [regex]::Matches($command, '"[^"]*"|''[^'']*''|\S+') |
+            ForEach-Object { $_.Value.Trim('"', "'") }
         $branchMatch = $null
-        if ($command -match '-b\s+(\S+)') { $branchMatch = $Matches[1] }
-        elseif ($command -match 'worktree\s+add\s+\S+\s+(\S+)') { $branchMatch = $Matches[1] }
+        $pathMatch = $null
+        $seenAdd = $false
+        $takeBranch = $false
+        $positional = 0
+        for ($i = 0; $i -lt $wtTokens.Count; $i++) {
+            $tok = $wtTokens[$i]
+            if (-not $seenAdd) {
+                if ($tok -eq 'add' -and $i -gt 0 -and $wtTokens[$i - 1] -eq 'worktree') { $seenAdd = $true }
+                continue
+            }
+            if ($takeBranch) { $branchMatch = $tok; $takeBranch = $false; continue }
+            if ($tok -eq '-b' -or $tok -eq '-B') { $takeBranch = $true; continue }
+            if ($tok.StartsWith('-')) { continue }
+            $positional++
+            if ($positional -eq 1) { $pathMatch = $tok }
+            elseif ($positional -eq 2 -and -not $branchMatch) { $branchMatch = $tok }
+        }
         if ($branchMatch -and $branchMatch -notmatch '^agent/[a-z0-9][a-z0-9-]*$') {
             @{
                 hookSpecificOutput = @{
@@ -128,9 +149,7 @@ if ($toolName -match 'terminal') {
             } | ConvertTo-Json -Depth 3 -Compress
             exit 0
         }
-        # Extract worktree path and check for collision
-        $pathMatch = $null
-        if ($command -match 'worktree\s+add\s+(\S+)') { $pathMatch = $Matches[1] }
+        # Check for a collision at the resolved worktree path
         if ($pathMatch) {
             try {
                 $resolvedWt = [System.IO.Path]::GetFullPath($pathMatch)
