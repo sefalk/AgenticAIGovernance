@@ -129,11 +129,15 @@ print(n)
 # and whose allow/ask outcome is decided by tiers this test has no opinion on.
 run_case() {
     local name="$1" hook="$2" mode="$3" json="$4" expect="$5"
+    # Optional 6th arg: a directory to create inside the fixture, so a case
+    # about a path collision can collide with something that exists.
+    local seed="${6:-}"
     local fixture out err rc=0 ok=0 stmts
     local fixture out err rc=0 ok=0
     fixture=$(mktemp -d)
 
     mkdir -p "$fixture/.github/hooks/scripts"
+    if [ -n "$seed" ]; then mkdir -p "$fixture/$seed"; fi
     # HOOK_SRC lets the harness self-check point run_case at a stub emitter
     # without writing into the payload directory.
     cp "${HOOK_SRC:-$HOOK_DIR}/$hook" "$fixture/.github/hooks/scripts/"
@@ -412,6 +416,19 @@ FETCH_URLS_SPOOF='{"tool_name":"fetch_webpage","tool_input":{"urls":["https://do
 CO_PYTEST='{"tool_name":"runInTerminal","tool_input":{"command":"pytest tests/ -q"}}'
 CO_MSG_BAD='{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"[agent:implementer] make tests pass\""}}'
 CO_MSG_OK='{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"[agent:implementer] make tests pass: extract the pure alignment step\""}}'
+# The worktree gate shipped with no cases in either harness, which is how a
+# path with a space in it got past review (issue #200). `\S+` split the quoted
+# path into arguments, so the branch check read the `-` out of `OneDrive -
+# Siemens` and the collision guard tested a prefix that does not exist.
+WT_SPACED='{"tool_name":"runInTerminal","tool_input":{"command":"git worktree add \"c:\\\\Users\\\\me\\\\OneDrive - Siemens Healthineers\\\\MP Usage XP.worktrees\\\\3097\" agent/3097-micro-movements"}}'
+WT_B_OK='{"tool_name":"runInTerminal","tool_input":{"command":"git worktree add ../wt/feat-x -b agent/feat-auth"}}'
+WT_B_BAD='{"tool_name":"runInTerminal","tool_input":{"command":"git worktree add ../wt/bad -b main"}}'
+# `git worktree add <path> <commit-ish>` names the branch positionally. This
+# twin never parsed that form, so the command below was denied by the
+# PowerShell hook and allowed here.
+WT_POS_BAD='{"tool_name":"runInTerminal","tool_input":{"command":"git worktree add ../wt/bad main"}}'
+WT_COLLIDE_SPACED='{"tool_name":"runInTerminal","tool_input":{"command":"git worktree add \"existing wt\" agent/collide-x"}}'
+WT_COLLIDE_PLAIN='{"tool_name":"runInTerminal","tool_input":{"command":"git worktree add existingwt agent/collide-y"}}'
 
 # The coordinator hook's whole purpose is delegation enforcement, and nothing
 # here exercised it -- which is how it stayed unparsable, and therefore silent,
@@ -423,6 +440,18 @@ run_case "reading a file is not the gate's business"  coordinator-pretooluse.sh 
 run_case "pytest via terminal is denied"              coordinator-pretooluse.sh agent/fixture "$CO_PYTEST"  deny
 run_case "phase-only commit message is denied"        coordinator-pretooluse.sh agent/fixture "$CO_MSG_BAD" deny
 run_case "described commit message passes"            coordinator-pretooluse.sh agent/fixture "$CO_MSG_OK"  silent
+run_case "worktree: a quoted path with spaces does not fake a bad branch" \
+    coordinator-pretooluse.sh agent/fixture "$WT_SPACED" silent
+run_case "worktree: a valid -b branch is not obstructed" \
+    coordinator-pretooluse.sh agent/fixture "$WT_B_OK" silent
+run_case "worktree: an invalid -b branch is refused" \
+    coordinator-pretooluse.sh agent/fixture "$WT_B_BAD" deny
+run_case "worktree: an invalid positional branch is refused" \
+    coordinator-pretooluse.sh agent/fixture "$WT_POS_BAD" deny
+run_case "worktree: a collision is caught when the path contains spaces" \
+    coordinator-pretooluse.sh agent/fixture "$WT_COLLIDE_SPACED" deny "existing wt"
+run_case "worktree: a collision is caught when the path has no spaces" \
+    coordinator-pretooluse.sh agent/fixture "$WT_COLLIDE_PLAIN" deny "existingwt"
 
 echo "## test-writer-pretooluse.sh"
 run_case "branch gate denies on dev"            test-writer-pretooluse.sh dev           "$TEST_EDIT" deny

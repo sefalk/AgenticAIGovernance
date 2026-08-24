@@ -99,16 +99,80 @@ except Exception:
         # Validate git worktree add preconditions
         if echo "$COMMAND" | grep -qE 'git[[:space:]]+worktree[[:space:]]+add'; then
             WT_DIR=$(af_conf_get WORKTREE_DIR '../wt')
-            # Extract branch name after -b flag
-            BRANCH=$(echo "$COMMAND" | grep -oP '(?<=-b )\S+' || true)
+            # `\S+` stops at the first blank, so a quoted path containing spaces
+            # was read as several arguments: the collision guard tested a prefix
+            # that does not exist and passed everything (issue #200). Split the
+            # command into shell-like tokens instead, honouring quotes. This also
+            # drops `grep -oP`, which is GNU-only and absent on macOS.
+            af_wt_tokens() {
+                _s="${1:-}"
+                while [ -n "$_s" ]; do
+                    case "$_s" in
+                        [[:space:]]*) _s="${_s#?}"; continue ;;
+                    esac
+                    case "$_s" in
+                        \"*) _rest="${_s#\"}"
+                             case "$_rest" in
+                                 *\"*) _tok="${_rest%%\"*}"; _s="${_rest#*\"}" ;;
+                                 *)    _tok="$_rest"; _s="" ;;
+                             esac ;;
+                        \'*) _rest="${_s#\'}"
+                             case "$_rest" in
+                                 *\'*) _tok="${_rest%%\'*}"; _s="${_rest#*\'}" ;;
+                                 *)    _tok="$_rest"; _s="" ;;
+                             esac ;;
+                        *)   _tok="${_s%%[[:space:]]*}"; _s="${_s#"$_tok"}" ;;
+                    esac
+                    printf '%s\n' "$_tok"
+                done
+            }
+
+            BRANCH=""
+            WT_PATH=""
+            _seen_worktree=0
+            _seen_add=0
+            _take_branch=0
+            _positional=0
+            while IFS= read -r _tok; do
+                if [ "$_seen_add" -eq 0 ]; then
+                    if [ "$_seen_worktree" -eq 1 ] && [ "$_tok" = "add" ]; then
+                        _seen_add=1
+                    elif [ "$_tok" = "worktree" ]; then
+                        _seen_worktree=1
+                    else
+                        _seen_worktree=0
+                    fi
+                    continue
+                fi
+                if [ "$_take_branch" -eq 1 ]; then
+                    BRANCH="$_tok"; _take_branch=0; continue
+                fi
+                case "$_tok" in
+                    -b|-B) _take_branch=1 ;;
+                    -*)    : ;;
+                    *)     _positional=$((_positional + 1))
+                           if [ "$_positional" -eq 1 ]; then
+                               WT_PATH="$_tok"
+                           elif [ "$_positional" -eq 2 ] && [ -z "$BRANCH" ]; then
+                               # `git worktree add <path> <commit-ish>` names the
+                               # branch positionally. The PowerShell twin has
+                               # always checked this form; bash never did, so the
+                               # same command was denied on one platform and
+                               # allowed on the other (issue #200).
+                               BRANCH="$_tok"
+                           fi ;;
+                esac
+            done <<EOF
+$(af_wt_tokens "$COMMAND")
+EOF
             if [ -n "$BRANCH" ] && ! echo "$BRANCH" | grep -qE '^agent/[a-z0-9][a-z0-9-]*$'; then
-                printf '%s\n' "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Worktree branch name '${BRANCH}' is invalid. Must match '^agent/[a-z0-9-]+' (e.g. agent/feat-auth, agent/fix-db-pool). See skills/git-worktrees/SKILL.md.\"}}"
+                _b=$(af_json_escape "$BRANCH")
+                printf '%s\n' "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Worktree branch name '${_b}' is invalid. Must match '^agent/[a-z0-9-]+' (e.g. agent/feat-auth, agent/fix-db-pool). See skills/git-worktrees/SKILL.md.\"}}"
                 exit 0
             fi
-            # Extract worktree path (first arg after 'add')
-            WT_PATH=$(echo "$COMMAND" | grep -oP '(?<=worktree add )\S+' || true)
             if [ -n "$WT_PATH" ] && [ -e "$WT_PATH" ]; then
-                printf '%s\n' "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Worktree path '${WT_PATH}' already exists. An existing task may still be running. Run 'git worktree list' to check before creating a new worktree here.\"}}"
+                _p=$(af_json_escape "$WT_PATH")
+                printf '%s\n' "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Worktree path '${_p}' already exists. An existing task may still be running. Run 'git worktree list' to check before creating a new worktree here.\"}}"
                 exit 0
             fi
             # Check repo health

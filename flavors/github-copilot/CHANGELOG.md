@@ -269,6 +269,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The worktree gate mis-read any path containing a space, and shipped with no
+  test cases at all (#200).** Both twins extracted the path and branch with
+  `\S+`, which stops at the first blank. For
+
+  ```
+  git worktree add "c:\...\OneDrive - Siemens Healthineers\MP Usage XP.worktrees\3097" agent/3097-micro-movements
+  ```
+
+  the PowerShell twin read the `-` out of `OneDrive - Siemens` as an argument
+  and denied a perfectly valid branch name, while the collision guard tested
+  `"c:\...\OneDrive` — a path that does not exist — and waved everything
+  through. The reporter's summary was blunt and correct: this made worktrees
+  unusable in any repository whose path contains a space.
+
+  Measured against both twins with byte-identical payloads, before and after:
+
+  | case | `ps1` before | `sh` before | both after |
+  |---|---|---|---|
+  | quoted path with spaces, valid branch | **deny `'-'`** | silent | silent |
+  | unquoted path, valid `-b` branch | silent | silent | silent |
+  | unquoted path, **invalid positional** branch | deny | **silent** | deny |
+  | unquoted path, invalid `-b` branch | deny | deny | deny |
+  | collision, existing path **with** spaces | **silent** | **silent**, invalid JSON | deny |
+  | collision, existing path without spaces | deny | deny | deny |
+
+  Two of those columns are defects the issue did not report, and both were
+  found only because the twins were measured side by side rather than one
+  after the other:
+
+  - **The bash twin never parsed a positional branch.** It handled `-b` only,
+    so `git worktree add ../wt/bad main` was denied on Windows and allowed on
+    macOS and Linux. The issue states bash "has the identical issue"; it does
+    not. It could not mis-read the branch because it never read it. Same
+    symptom class as #123: one gate, two platforms, opposite verdicts.
+  - **The bash twin emitted unparsable JSON for Windows paths.** It
+    interpolated values straight into a hand-built string, so `\U` in
+    `c:\Users\...` is not a JSON escape and the client discarded the object.
+    The gate reached the *correct* deny and the deny reached nobody — a
+    silent fail-open. A new `af_json_escape` helper in `_common.sh` covers the
+    two call sites here; the remaining 42 interpolation sites across 12 files
+    are filed as #202 rather than folded into this change.
+
+  **Deviation from the fix the issue proposed.** It suggested keeping
+  `grep -oP` with a longer regex. `-oP` is a GNU extension, absent on macOS
+  and BSD, so a hook depending on it is broken on the platforms this gate is
+  meant to protect. Both twins now use a quote-aware tokeniser instead — a
+  POSIX `case` loop in bash, `[regex]::Matches` in PowerShell.
+
+  **The gate had zero test cases in either harness before this change.** A
+  grep for `worktree` across both suites returned two prose comments and
+  nothing executable. That is how a defect of this size reached users. Six
+  cases were added per harness: `test-hooks.sh` **163 → 169 passed, 0 failed**;
+  `test-hooks.ps1` **329 → 335 passed, 0 failed**.
+
+  Each new case was then falsified by mutation. The mapping is one-to-one
+  except where noted:
+
+  | mutation | case that goes red |
+  |---|---|
+  | `ps1` tokeniser reverted to `\S+` | quoted path fakes a bad branch |
+  | `ps1` path extraction reverted to the truncating regex | collision, path with spaces |
+  | `sh` tokeniser replaced by word splitting | quoted path fakes a bad branch |
+  | `sh` positional branch assignment deleted | invalid positional branch |
+  | `af_json_escape` stops escaping | **both** collision cases, as `UNPARSEABLE` |
+
+  Three things about that table are worth stating rather than leaving to be
+  inferred. The negative control drives the hooks directly with the six
+  payloads the harness cases assert on, instead of re-running both suites five
+  times; it therefore proves the *hook behaviour* changes under mutation, while
+  the harness reporting that change is what the 169/0 and 335/0 runs show. The
+  two `-b` branch cases are not falsified by any mutation here — they guard
+  behaviour this change did not touch and are regression anchors, not evidence
+  for the fix. And `UNPARSEABLE` is scored as its own outcome, never folded
+  into `silent`: a hook that decides correctly and emits broken JSON has been
+  discarded by the client, and calling that "silent" would conceal precisely
+  the defect above.
+
+  A first attempt at the PowerShell mutation was **discarded as invalid**: it
+  rewrote every line ending and wrote `'\\S+'` instead of `'\S+'`, so the hook
+  matched nothing and fell silent on all six cases. Four reds that looked like
+  a result were a dead hook. The changed-line counter is what caught it — 484
+  lines where 2 were expected.
+
+  One harness defect surfaced on the way and is fixed here too:
+  `Invoke-HookInFixture` built its fixture with `git checkout -q -b $Branch`,
+  which fails with ``switch `b' requires a value`` when a case seeds files but
+  declares no branch. Every prior `-Files` case happened to pass a branch, so
+  the empty value was never reached. The fixture died before the hook ran and
+  the case reported a git error where a verdict belonged.
+
 - **Three producer gates ran the suite and then threw the result away (#123).**
   The issue reported an implementer that "echoed its verification commands back
   and declared broken code complete", and a test-writer whose measured red was
