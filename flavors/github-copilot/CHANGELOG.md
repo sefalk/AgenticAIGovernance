@@ -45,7 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **What this does not do: it is not mechanically enforced, and cannot be.** A
   Stop hook does not receive the agent's return text, so no hook can check that
   a cited number has a run id behind it — the same structural limit recorded
-  against #175. The twelve regression cases assert that the *guidance exists and
+  against #175. *(Corrected under #123: the conclusion holds, but "structural
+  limit" is the wrong label. The tool-call record **is** reachable from a Stop
+  hook; what no hook can do is bind a number in prose to a run id.)* The twelve
+  regression cases assert that the *guidance exists and
   says what it says*; they are documentation invariants, not behavioural ones.
   Calling them enforcement would repeat the failure this issue is about.
 
@@ -266,6 +269,120 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Three producer gates ran the suite and then threw the result away (#123).**
+  The issue reported an implementer that "echoed its verification commands back
+  and declared broken code complete", and a test-writer whose measured red was
+  wrong on two tests. Both turned out to have a mechanical cause underneath the
+  behavioural one, and it is the same line in three hooks:
+
+  ```bash
+  output=$(pytest ...) || true
+  exit_code=$?          # the status of `true`, which is 0 on every path
+  ```
+
+  Measured, by running the idiom against a command with a chosen exit code:
+
+  | intended exit | 0 | 1 | 2 | 5 |
+  |---|---|---|---|---|
+  | captured with the `\|\| true` | 0 | 0 | 0 | 0 |
+  | captured without it | 0 | 1 | 2 | 5 |
+
+  The gate therefore could not see a failing suite at all. The three hooks fail
+  in **opposite directions**, which is why neither direction was reported as the
+  same bug:
+
+  | hook | gate | pre-fix behaviour |
+  |---|---|---|
+  | `implementer-stop.sh` | Green | fails **open** -- a failing suite never blocks |
+  | `refactorer-stop.sh` | Refactor | fails **open** -- a refactor may break the suite unchallenged |
+  | `test-writer-stop.sh` | Red | fails **closed** -- every legitimate Red phase is blocked as "all tests PASS" |
+
+  Verified by executing each hook against a stubbed runner whose exit code is
+  the input under test: before the fix, `implementer-stop.sh` and
+  `refactorer-stop.sh` answered *pass* to a suite exiting 1, and
+  `test-writer-stop.sh` answered *block* to all three of exit 0, 1 and 2.
+
+  `scan-secrets.sh` had already been fixed for this exact bug, with a comment
+  naming it -- *"a detection was reported as a pass every single time"*. It was
+  never swept across its siblings. Knowing a bug once is not the same as
+  removing it.
+
+- **Not every red is a red (#123).** The Red gate read two exit codes -- 0 meant
+  "all tests pass", 5 meant "nothing collected" -- and let everything else fall
+  through to *Red phase satisfied*. A test file that cannot be imported, or a
+  test that dies in setup, was therefore counted as a genuine red. It never
+  reaches the behaviour it claims to guard and it stays red after a correct
+  implementation, so the Green phase is sent hunting for a defect that does not
+  exist. That is the mechanism behind the issue's second finding.
+
+  Reading the exit code alone is not enough. Measured against pytest, 2026-08-24:
+
+  | case | exit | summary line |
+  |---|---|---|
+  | failing assertion | 1 | `1 failed` |
+  | collection `ImportError` | 2 | `1 error` |
+  | syntax error | 2 | `1 error` |
+  | missing fixture | **1** | `1 error` |
+  | `ValueError` raised in the test body | 1 | `1 failed` |
+
+  A missing fixture exits 1, exactly like a genuine failure, so both twins now
+  read the summary line as well: exit 2 **or** a summary matching `N error`
+  blocks, with an explanation of what to fix.
+
+  **Deliberately not done: blocking on non-`AssertionError` failures.** A
+  genuine red against production code that does not exist yet legitimately
+  raises `AttributeError` or `ImportError` from inside the test body, and the
+  last row of that table shows such a case is indistinguishable from an
+  assertion failure by the summary line. A gate that fails honest work gets
+  switched off (#108), so this stays guidance rather than a HARD gate.
+
+  Also **not** addressed from the issue: the scope-breach diff (direction 3 --
+  the Stop hook has no declared in-scope file list to diff against) and treating
+  an empty producer return as a failed handoff (direction 5 -- coordinator-side,
+  not a hook's job). **#123 stays open.**
+
+  A correction to the framing used on #175 and #134: a Stop hook's payload
+  carries no return text and no agent identity -- measured, it is
+  `hook_event_name`, `session_id`, `transcript_path`, `stop_hook_active`, `cwd`.
+  But `transcript_path` resolves to a debug-log directory holding one
+  `runSubagent-{agent}-{id}.jsonl` per invocation, and those files contain
+  machine-written `tool_call` records naming every tool the subagent ran --
+  `documenter-stop.ps1` already navigates exactly that path. "Did the agent
+  actually run the tests" is therefore *reachable*, from a better source than
+  the agent's own prose. It is not built here, but it is not impossible, and the
+  earlier wording implied that it was.
+
+  **Regression coverage, and what it is worth.** Fourteen cases were added that
+  execute the hooks against a stubbed runner whose exit code and summary line
+  are the input under test -- nine in `test-hooks.sh` (163 passed / 0 failed,
+  from a baseline of 154) and five in `test-hooks.ps1` (329 / 0, from 324).
+  Text-only coverage would have proved nothing here: every one of these gates
+  read the right variable and then acted on a value that was already wrong.
+
+  Each case was then checked against a mutation of the hook it guards, because
+  a case no mutation can turn red is not a test (#173). Every case fell to
+  exactly one mutation, and to a different one:
+
+  | mutation | case turned red |
+  |---|---|
+  | `\|\| true` restored in `test-writer-stop.sh` | a failing assertion is a satisfied red; no tests collected is not a verdict |
+  | red-validity branch deleted (both twins) | a collection error is not a satisfied red; a setup error exiting 1 is not a satisfied red |
+  | exit-0 violation branch deleted (both twins) | a green suite is not a red phase |
+  | exit-5 skip turned into a violation (PowerShell) | no tests collected is not a verdict |
+  | error regex widened from `\d+ error` to `\d+ ` | a failing assertion is a satisfied red |
+  | `\|\| true` restored in `implementer-stop.sh` / `refactorer-stop.sh` | a failing suite blocks the implementer / the refactorer |
+  | green suite no longer accepted (both) | a passing suite does not block the implementer / the refactorer |
+
+  The last row matters as much as the first: without it, half the suite would
+  only prove the gates can block, not that they can still let honest work
+  through. The widened-regex row is the one that shows the error check is
+  guarded for its *precision* and not merely for its existence.
+
+  `test-hooks-integration.ps1` was run as required for a hooks change (8 checks
+  passed / 0 failed) and says nothing about this fix: all three modified hooks
+  appear in its own orphan-candidate list, never having fired in the logs it
+  reads.
+
 - **Two provenance gates were not gates: one never ran, one had no checker
   (#175).** `test-writer-stop` called `Test-AfProvenanceMarker` /
   `af_has_provenance_marker` without ever sourcing the file that defines them.
@@ -319,7 +436,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   advisories an agent claims to have resolved, and treating an empty subagent
   return as a hard failure. The latter cannot live in a Stop hook at all — a
   hook does not receive the subagent's return text — so it belongs to the
-  coordinator.
+  coordinator. *(Corrected under #123: the payload carries no return text, but
+  the debug-log tool-call records are reachable from it, so this is unbuilt
+  rather than impossible.)*
 
 - **A workflow log named a subagent that was never called (#173).** The
   documenter wrote a `steps[]` entry for `arbiter` in a workflow where no
