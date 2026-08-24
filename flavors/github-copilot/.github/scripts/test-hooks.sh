@@ -1480,6 +1480,132 @@ assert_true "every ask pattern has a reason" \
     "$([ "$n_pat" -eq "$n_rea" ] && [ "$n_pat" -gt 0 ] && echo 1 || echo 0)" \
     "$n_pat patterns vs $n_rea reasons"
 
+# --- Producer Stop gates: the suite verdict must reach the decision --------
+#
+# The three producer Stop hooks run the suite themselves, so asserting on their
+# text proves nothing about what they do with the result. `out=$(pytest ...) ||
+# true` followed by `exit_code=$?` still mentions pytest, still looks like a
+# gate, and reads exit 0 on every path -- the green and refactor gates could not
+# block a failing suite at all, and the red gate blocked every legitimate Red
+# phase. Both directions shipped for months under text-only coverage.
+#
+# These cases execute the hook against a stub whose exit code and summary line
+# are the input under test, so the assertion is on the verdict (issue #123).
+
+echo "## producer stop gates (executed against a stubbed suite)"
+
+# gate_case NAME HOOK EXPECT STUB STUB_EXIT STUB_STDOUT
+#   EXPECT = block | pass
+#   STUB   = pytest | run-tests   -- the command the hook shells out to
+gate_case() {
+    local name="$1" hook="$2" expect="$3" stub="$4" stub_exit="$5" stub_out="$6"
+    local fixture rc=0 out ok=0 stmts stub_path
+
+    fixture=$(mktemp -d)
+    mkdir -p "$fixture/.github/hooks/scripts" "$fixture/tests" "$fixture/bin"
+    cp "${HOOK_SRC:-$HOOK_DIR}/$hook" "$fixture/.github/hooks/scripts/"
+    cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
+
+    case "$stub" in
+        pytest)
+            stub_path="$fixture/bin/pytest" ;;
+        run-tests)
+            mkdir -p "$fixture/.github/scripts"
+            stub_path="$fixture/.github/scripts/run-tests.sh"
+            # The green and refactor gates skip themselves when no runner is
+            # installed, so a real-looking pytest has to be on PATH before the
+            # exit code of the suite is reachable at all.
+            printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/bin/pytest"
+            chmod +x "$fixture/bin/pytest" ;;
+    esac
+
+    # A quoted heredoc, not printf: a summary line is arbitrary text and may
+    # carry a percent sign.
+    {
+        echo '#!/usr/bin/env bash'
+        echo "cat <<'AF_STUB_EOF'"
+        printf '%s\n' "$stub_out"
+        echo 'AF_STUB_EOF'
+        echo "exit $stub_exit"
+    } > "$stub_path"
+    chmod +x "$stub_path"
+
+    printf 'def test_seeded():\n    assert True\n' > "$fixture/tests/test_seeded.py"
+
+    (
+        cd "$fixture" || exit 1
+        use_fixture_conf
+        PATH="$fixture/bin:$PATH"; export PATH
+        git init -q .
+        git checkout -q -b agent/123-x
+        printf '%s' '{"session_id":"s1","transcript_path":"/none"}' \
+            | bash ".github/hooks/scripts/$hook"
+    ) > "$fixture/out.txt" 2> "$fixture/err.txt" || rc=$?
+
+    out=$(cat "$fixture/out.txt")
+
+    stmts=$(af_json_statements "$out")
+    if [ "$rc" -ne 0 ]; then
+        ok=0
+    elif [ "$stmts" -gt 1 ]; then
+        echo "FAIL  $name -- the hook made $stmts statements; the protocol is one: $out"
+        fail=$((fail + 1))
+        rm -rf "$fixture"
+        return
+    else
+        case "$expect" in
+            block) [[ "$out" == *'"block"'* ]] && ok=1 ;;
+            pass)  [[ "$out" != *'"block"'* ]] && ok=1 ;;
+        esac
+    fi
+
+    if [ $ok -eq 1 ]; then
+        echo "PASS  $name"
+        pass=$((pass + 1))
+    else
+        echo "FAIL  $name -- expected $expect, got: ${out:-<no output>} (exit $rc)"
+        fail=$((fail + 1))
+    fi
+
+    rm -rf "$fixture"
+}
+
+# Red phase. The exit code has to come from pytest, not from the `|| true` that
+# follows it, or every one of these collapses onto the same branch.
+gate_case "red phase: a failing assertion is a satisfied red" \
+    test-writer-stop.sh pass pytest 1 "1 failed in 0.5s"
+
+gate_case "red phase: a green suite is not a red phase" \
+    test-writer-stop.sh block pytest 0 "3 passed in 0.5s"
+
+# Not every red is a red. A test that cannot be imported or set up never reaches
+# the behaviour it claims to guard and stays red after a correct implementation,
+# which sends the green phase hunting for a defect that does not exist.
+gate_case "red phase: a collection error is not a satisfied red" \
+    test-writer-stop.sh block pytest 2 "1 error in 0.9s"
+
+# A missing fixture reports `1 error` and still exits 1, so the exit code alone
+# cannot tell it from a genuine failure -- the summary line has to be read.
+gate_case "red phase: a setup error exiting 1 is not a satisfied red" \
+    test-writer-stop.sh block pytest 1 "1 error in 0.5s"
+
+gate_case "red phase: no tests collected is not a verdict" \
+    test-writer-stop.sh pass pytest 5 "no tests ran in 0.1s"
+
+# Green and refactor phase. Both hooks already ran the suite; the defect was
+# that the result never reached the decision.
+gate_case "green phase: a failing suite blocks the implementer" \
+    implementer-stop.sh block run-tests 1 "2 failed, 8 passed in 1.0s"
+
+gate_case "green phase: a passing suite does not block the implementer" \
+    implementer-stop.sh pass run-tests 0 "10 passed in 1.0s"
+
+gate_case "refactor phase: a failing suite blocks the refactorer" \
+    refactorer-stop.sh block run-tests 1 "2 failed, 8 passed in 1.0s"
+
+gate_case "refactor phase: a passing suite does not block the refactorer" \
+    refactorer-stop.sh pass run-tests 0 "10 passed in 1.0s"
+
 # --- Parse gate ------------------------------------------------------------
 #
 # A hook that dies at parse time produces no output, and no output is
