@@ -69,7 +69,11 @@ elif [[ "$from_log" == true ]]; then
     exit_code=0
     output="Tests: accepted from test log (${log_info} passed, no code changes since)"
 else
-    output=$(.github/scripts/run-tests.sh --scope all 2>&1) || true
+    # `output=$(...) || true` followed by `exit_code=$?` reads the status of
+    # `true`, which is 0 on every path -- so the Green gate treated every run as
+    # passing and could not block a failing suite at all (issue #123, finding 1).
+    # Same bug, same fix as scan-secrets.sh.
+    output=$(.github/scripts/run-tests.sh --scope all 2>&1)
     exit_code=$?
 fi
 

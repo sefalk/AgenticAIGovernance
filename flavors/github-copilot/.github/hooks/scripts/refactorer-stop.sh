@@ -69,7 +69,11 @@ elif [[ "$from_log" == true ]]; then
     exit_code=0
     output="Tests: accepted from test log (${log_info} passed, no code changes since)"
 else
-    output=$(.github/scripts/run-tests.sh --scope all 2>&1) || true
+    # `output=$(...) || true` followed by `exit_code=$?` reads the status of
+    # `true`, which is 0 on every path -- so the Refactor gate never fired and a
+    # refactor could break the suite unchallenged (issue #123). Same bug, same
+    # fix as scan-secrets.sh.
+    output=$(.github/scripts/run-tests.sh --scope all 2>&1)
     exit_code=$?
 fi
 
