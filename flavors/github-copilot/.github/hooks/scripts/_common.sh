@@ -330,3 +330,20 @@ af_has_provenance_marker() {
 
     grep -qE "$_prov_pattern" "$_prov_file" 2>/dev/null
 }
+
+# af_json_escape VALUE
+#
+# Prints VALUE safe to paste between the quotes of a JSON string.
+#
+# The bash hooks build their JSON with printf and interpolate values straight
+# in. A Windows path then emits `C:\Users\...`, whose `\U` is not a JSON escape
+# -- the client cannot parse the object and the decision is discarded, so a
+# correct deny reaches nobody (measured on the worktree gate, issue #200).
+# Escaping quotes alone, as several call sites do, does not cover this.
+#
+# Backslash must be replaced first, or it would double the backslashes this
+# function itself introduces. Control characters are dropped rather than
+# encoded: these values are single-line human-readable reasons.
+af_json_escape() {
+    printf '%s' "${1:-}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\000-\037'
+}
