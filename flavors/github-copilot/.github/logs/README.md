@@ -27,8 +27,8 @@ the chat debug log of the current session:
 
 ```yaml
 cost:
-  schema_version: 3
-  collector: "collect-session-cost.py@3"
+  schema_version: 4
+  collector: "collect-session-cost.py@4"
   available: true
   coverage: full            # full | partial | truncated
   sessions: ["<session-id>"]
@@ -40,15 +40,25 @@ cost:
   credits_by_kind: { input_uncached: 852.1, cache_read: 602.7, output: 480.2, unexplained: 450.082 }
   by_model:
     claude-opus-5: { requests: 188, credits: 2363.735 }
+  by_purpose:              # what the request was for, not who made it
+    agent_work: { requests: 199, unbilled: 0, credits: 2290.082 }
+    compaction: { requests: 6, unbilled: 0, credits: 95.0 }
+    background: { requests: 0, unbilled: 9, credits: 0.0 }
   by_agent:                 # most expensive first; null when truncated
     main:
       totals: { invocations: 1, requests: 150, unbilled_requests: 9, input_uncached: 900000, cached: 18000000, output: 190000, credits: 2100.0 }
       by_model:
         claude-opus-5: { requests: 150, credits: 2100.0 }
+      by_purpose:
+        agent_work: { requests: 144, unbilled: 0, credits: 2005.0 }
+        compaction: { requests: 6, unbilled: 0, credits: 95.0 }
+        background: { requests: 0, unbilled: 9, credits: 0.0 }
     implementer:
       totals: { invocations: 3, requests: 55, unbilled_requests: 0, input_uncached: 359777, cached: 3963581, output: 44002, credits: 285.082 }
       by_model:
         claude-sonnet-5: { requests: 55, credits: 285.082 }
+      by_purpose:
+        agent_work: { requests: 55, unbilled: 0, credits: 285.082 }
   facts: "<path>"           # null unless --facts-out was passed
   environment: { vscode: "1.131.0", copilot_chat: "0.59.0" }
 ```
@@ -85,6 +95,19 @@ Reading it:
   is a routing decision, an agent that is costly on a cheap model is a prompt
   problem. Tokens and credits carry independent signals here too: a bucket can
   read far more tokens than another and still cost a fraction of it.
+- **`by_purpose` says what a request was *for*, which is not the same question
+  as who made it.** Compaction (`summarizeConversationHistory`) is the price of
+  the session having grown too long, not of the agent whose turn happened to
+  trigger it — measured at 292 of 6764 credits, 4.3%, on one real session, all
+  of it inside the `main` bucket where it read as coordinator spend. The lever
+  that reduces it is splitting the session or trimming context, not rewriting
+  that agent's prompt. The split is rendered inside every agent bucket as well,
+  including the buckets where it is uniform: an absent split must not mean both
+  "uniform" and "not computed". `background` is always unbilled and is listed
+  anyway, with its request count under `unbilled` — "it happened and cost
+  nothing" is a different statement from "it did not happen". An unrecognised
+  `debugName` lands in `other` and is never sorted into a known bucket; the
+  name itself is not emitted, since it is vendor-supplied text.
 - **`credits_by_kind` splits the bill the way it is charged.** A cached token
   costs a tenth of an uncached one and an output token ten times it, so the
   three token counts and the single credit scalar cannot be crossed after the

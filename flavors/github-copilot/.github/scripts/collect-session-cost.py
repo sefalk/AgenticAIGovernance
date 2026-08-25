@@ -41,8 +41,8 @@ import re
 import sys
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 3
-COLLECTOR_VERSION = 3
+SCHEMA_VERSION = 4
+COLLECTOR_VERSION = 4
 FACTS_SCHEMA_VERSION = 1
 
 NANO_AIU_PER_CREDIT = 1_000_000_000
@@ -54,6 +54,9 @@ RATE_CARD_FILE = "models.json"
 # log it happened in, but it is a cost of the session having grown too long.
 COMPACTION = "summarizeConversationHistory"
 BACKGROUND = frozenset({"backgroundTodoAgent"})
+# `other` last, and always rendered when present: an unrecognised debugName is
+# a question, and sorting it into a known bucket would answer it by guessing.
+PURPOSE_ORDER = ("agent_work", "compaction", "background", "other")
 
 # Name of the bucket holding the parent session. Deliberately not `coordinator`:
 # the file records which log a request came from, not which agent authored it,
@@ -284,6 +287,7 @@ class Totals:
         self.nano_aiu = 0
         self.invocations = 0
         self.by_model: dict[str, dict[str, int]] = {}
+        self.by_purpose: dict[str, dict[str, int]] = {}
         self.by_kind: dict[str, float] = {
             "input_uncached": 0.0,
             "cache_read": 0.0,
@@ -292,8 +296,13 @@ class Totals:
         }
 
     def add(self, fact: dict[str, Any]) -> None:
+        # Counted before the billed check: an unbilled purpose is still a
+        # purpose, and `background` is exactly the one that would vanish.
+        purpose = self.by_purpose.setdefault(fact["purpose"], {"requests": 0, "unbilled": 0, "nano_aiu": 0})
+
         if not fact["billed"]:
             self.unbilled += 1
+            purpose["unbilled"] += 1
             return
 
         nano = int(fact["nano_aiu"])
@@ -306,6 +315,9 @@ class Totals:
         bucket = self.by_model.setdefault(fact["model"], {"requests": 0, "nano_aiu": 0})
         bucket["requests"] += 1
         bucket["nano_aiu"] += nano
+
+        purpose["requests"] += 1
+        purpose["nano_aiu"] += nano
 
         for kind, key in (
             ("input_uncached", "nano_input_uncached"),
@@ -477,6 +489,7 @@ def render(result: dict[str, Any], facts_path: str | None = None) -> str:
         lines.append(f"    {model}: {{ requests: {bucket['requests']}, credits: {credits} }}")
     if not (totals and totals.by_model):
         lines[-1] = "  by_model: {}"
+    lines.extend(_by_purpose(totals.by_purpose if totals else {}, "  "))
     lines.extend(_by_agent(result.get("by_agent")))
     # Names the artifact a third party can re-aggregate, not just this summary.
     lines.append(f"  facts: {_scalar(facts_path)}")
@@ -508,13 +521,38 @@ def _by_agent(per_agent: dict[str, Totals] | None) -> list[str]:
             f"unbilled_requests: {bucket.unbilled}, input_uncached: {bucket.input_uncached}, "
             f"cached: {bucket.cached}, output: {bucket.output}, credits: {bucket.credits} }}"
         )
-        if not bucket.by_model:
+        if bucket.by_model:
+            lines.append("      by_model:")
+            for model, sub in sorted(bucket.by_model.items()):
+                credits = round(sub["nano_aiu"] / NANO_AIU_PER_CREDIT, 3)
+                lines.append(f"        {model}: {{ requests: {sub['requests']}, credits: {credits} }}")
+        else:
             lines.append("      by_model: {}")
-            continue
-        lines.append("      by_model:")
-        for model, sub in sorted(bucket.by_model.items()):
-            credits = round(sub["nano_aiu"] / NANO_AIU_PER_CREDIT, 3)
-            lines.append(f"        {model}: {{ requests: {sub['requests']}, credits: {credits} }}")
+        # Rendered for every bucket, including the uniform ones: a reader must
+        # not have to decide whether an absent split means uniform or unknown.
+        lines.extend(_by_purpose(bucket.by_purpose, "      "))
+    return lines
+
+
+def _by_purpose(by_purpose: dict[str, dict[str, int]], indent: str) -> list[str]:
+    """What each request was *for* (issue #215).
+
+    Compaction is the price of the session having grown too long, not of the
+    agent whose turn happened to trigger it, and the lever that reduces it is a
+    different one. Unbilled purposes are listed too, or `background` -- which is
+    always unbilled -- would be the one category that silently disappears.
+    """
+    if not by_purpose:
+        return [f"{indent}by_purpose: {{}}"]
+    lines = [f"{indent}by_purpose:"]
+    known = [p for p in PURPOSE_ORDER if p in by_purpose]
+    rest = sorted(p for p in by_purpose if p not in PURPOSE_ORDER)
+    for purpose in known + rest:
+        sub = by_purpose[purpose]
+        credits = round(sub["nano_aiu"] / NANO_AIU_PER_CREDIT, 3)
+        lines.append(
+            f"{indent}  {purpose}: {{ requests: {sub['requests']}, unbilled: {sub['unbilled']}, credits: {credits} }}"
+        )
     return lines
 
 

@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Compaction is no longer billed to the agent that did not cause it (#215).**
+  The block split by model and by agent. Both answer *who spent*; neither
+  answered *what the request was for*, and one category of request is not the
+  agent's work at all. `by_purpose:` now distinguishes `agent_work`,
+  `compaction` (`summarizeConversationHistory`), `background` and `other`,
+  derived from `llm_request.debugName`, at session level and inside every agent
+  bucket.
+
+  Measured on session `1d4b973a`: 292.1 of 6764.4 credits — 4.3% — was context
+  compaction, and all of it sat in the `main` bucket reading as coordinator
+  spend. It is not. It is the price of the session having grown too long, and
+  the lever that reduces it (split the session, trim context) has nothing to do
+  with the lever that reduces an agent's prompt cost. Six compaction rounds at
+  roughly 49 credits each is a retrospective finding, not a rounding error.
+
+  The split is rendered in every bucket, including the uniform ones, so an
+  absent split cannot mean both "uniform" and "not computed". `background` is
+  always unbilled and is listed anyway with its count under `unbilled`: "it
+  happened and cost nothing" is a different statement from "it did not happen",
+  and a credit-weighted view is exactly where the difference disappears. An
+  unrecognised `debugName` lands in `other` rather than being guessed into a
+  known bucket, and the name itself is not emitted — it is vendor text.
+  `schema_version` moves to 4.
+
 - **The collector no longer aggregates against an expiring source (#217).** The
   debug log is capped at 100 MB and the cap drops the *oldest* entries; it also
   contains every prompt verbatim, so it can never be committed. Everything not
