@@ -30,8 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   happened and cost nothing" is a different statement from "it did not happen",
   and a credit-weighted view is exactly where the difference disappears. An
   unrecognised `debugName` lands in `other` rather than being guessed into a
-  known bucket, and the name itself is not emitted — it is vendor text.
-  `schema_version` moves to 4.
+  known bucket; the block names only the bucket, while the raw `debugName` stays
+  in the facts rows, so a new vendor string is visible without the block growing
+  a category per release. `schema_version` moves to 4.
 
 - **The collector no longer aggregates against an expiring source (#217).** The
   debug log is capped at 100 MB and the cap drops the *oldest* entries; it also

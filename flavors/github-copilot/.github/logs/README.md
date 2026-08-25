@@ -107,7 +107,8 @@ Reading it:
   anyway, with its request count under `unbilled` — "it happened and cost
   nothing" is a different statement from "it did not happen". An unrecognised
   `debugName` lands in `other` and is never sorted into a known bucket; the
-  name itself is not emitted, since it is vendor-supplied text.
+  block names only the bucket, and the raw `debugName` stays in the facts rows
+  where it can be looked at without widening the block for every vendor string.
 - **`credits_by_kind` splits the bill the way it is charged.** A cached token
   costs a tenth of an uncached one and an output token ten times it, so the
   three token counts and the single credit scalar cannot be crossed after the
