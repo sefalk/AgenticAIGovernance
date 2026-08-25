@@ -27,8 +27,8 @@ the chat debug log of the current session:
 
 ```yaml
 cost:
-  schema_version: 2
-  collector: "collect-session-cost.py@2"
+  schema_version: 3
+  collector: "collect-session-cost.py@3"
   available: true
   coverage: full            # full | partial | truncated
   sessions: ["<session-id>"]
@@ -36,6 +36,8 @@ cost:
   unbilled_requests: 9
   tokens: { input_uncached: 1259777, cached: 21963581, output: 234002 }
   credits: 2385.082
+  rate_card: "models.json"  # null when the dump is absent or unusable
+  credits_by_kind: { input_uncached: 852.1, cache_read: 602.7, output: 480.2, unexplained: 450.082 }
   by_model:
     claude-opus-5: { requests: 188, credits: 2363.735 }
   by_agent:                 # most expensive first; null when truncated
@@ -47,6 +49,7 @@ cost:
       totals: { invocations: 3, requests: 55, unbilled_requests: 0, input_uncached: 359777, cached: 3963581, output: 44002, credits: 285.082 }
       by_model:
         claude-sonnet-5: { requests: 55, credits: 285.082 }
+  facts: "<path>"           # null unless --facts-out was passed
   environment: { vscode: "1.131.0", copilot_chat: "0.59.0" }
 ```
 
@@ -82,6 +85,29 @@ Reading it:
   is a routing decision, an agent that is costly on a cheap model is a prompt
   problem. Tokens and credits carry independent signals here too: a bucket can
   read far more tokens than another and still cost a fraction of it.
+- **`credits_by_kind` splits the bill the way it is charged.** A cached token
+  costs a tenth of an uncached one and an output token ten times it, so the
+  three token counts and the single credit scalar cannot be crossed after the
+  fact. The split is computed from the `models.json` price dump the editor
+  writes next to the log, named in `rate_card`; without it the kinds are not
+  guessed — everything lands in `unexplained` and `rate_card` is `null`.
+- **`unexplained` is a named field, never a rounding.** Cache-*write* tokens are
+  billed and never reported, so on models that charge for them the known kinds
+  do not reach the invoice — measured at roughly 19% of a real session. That
+  gap is stated rather than distributed across the kinds that *are* known,
+  because a plausible total is worse than an honest one. The four kinds always
+  sum to `credits`.
+- **`facts` names the per-request artifact** (`--facts-out`, NDJSON, one row per
+  request). The debug log is capped and expires; a row that was never extracted
+  while it existed answers no question ever again. The aggregates above are
+  computed *from* those rows, so the block cannot disagree with them. The rows
+  carry dimensions the block does not render — request purpose (agent work,
+  compaction, background), the parent span, the prompt and tool payload files,
+  reasoning effort — and contain numbers and identifiers only: no prompt text
+  is ever extracted, which is what makes the file keepable at all. The rows are
+  still written under `coverage: truncated`, where the aggregates are withheld:
+  each row is individually accurate, only the *set* is incomplete, and the
+  header row records the coverage so nobody re-aggregates them as a total.
 - **The numbers never pass through a language model.** The hook appends the
   script's output verbatim; no agent reads the debug log (a session log reaches
   tens of megabytes and contains every prompt verbatim).

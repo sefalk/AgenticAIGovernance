@@ -2,9 +2,18 @@
 """Collect the billed cost of one chat session from the agent debug log.
 
 Emits a YAML `cost:` block on stdout for the documenter to append to
-`.github/logs/{workflow-id}.yaml`. It writes no file itself, so the documenter
-stays the only writer of the workflow log and this script stays testable
-without a workflow.
+`.github/logs/{workflow-id}.yaml`. It never writes the workflow log, so the
+documenter stays the only writer of it and this script stays testable without a
+workflow. With ``--facts-out`` it also writes a per-request facts file, the one
+artifact it does write.
+
+The facts file exists because the debug log does not survive. It is capped at
+100 MB, truncation drops the *oldest* entries, and it contains every prompt
+verbatim, so it can never be committed or shared. Any dimension not extracted
+while the log still exists is lost for that run permanently. The aggregates
+below are therefore derived from the facts rows rather than from a second pass
+over the log: a question nobody asked yet stays answerable, and the block can
+never disagree with the rows it came from.
 
 Exit codes:
     0  a block was emitted -- including ``available: false``
@@ -32,10 +41,19 @@ import re
 import sys
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 2
-COLLECTOR_VERSION = 2
+SCHEMA_VERSION = 3
+COLLECTOR_VERSION = 3
+FACTS_SCHEMA_VERSION = 1
 
 NANO_AIU_PER_CREDIT = 1_000_000_000
+
+# Dumped into the session directory by VS Code; carries the billing rate card.
+RATE_CARD_FILE = "models.json"
+
+# `debugName` values that are not agent work. Compaction is charged to whichever
+# log it happened in, but it is a cost of the session having grown too long.
+COMPACTION = "summarizeConversationHistory"
+BACKGROUND = frozenset({"backgroundTodoAgent"})
 
 # Name of the bucket holding the parent session. Deliberately not `coordinator`:
 # the file records which log a request came from, not which agent authored it,
@@ -57,6 +75,163 @@ BILLING_ATTR = "copilotUsageNanoAiu"
 
 class Drift(Exception):
     """The log no longer carries the fields this collector depends on."""
+
+
+def purpose_of(debug_name: str) -> str:
+    """Why the request was made, not who made it."""
+    if debug_name == COMPACTION:
+        return "compaction"
+    if debug_name in BACKGROUND:
+        return "background"
+    if debug_name.startswith("tool/runSubagent-") or debug_name.startswith("panel/"):
+        return "agent_work"
+    return "other"
+
+
+def rate_card(session_dir: str) -> dict[str, dict[str, float]] | None:
+    """Per-model token prices, or None when the dump is absent or unusable.
+
+    `cache_write_price` is read but unusable: cache-write tokens are billed and
+    never reported, which is what leaves a residual on every model that charges
+    for them. Inferring the count would mean inventing a rounding rule.
+    """
+    try:
+        with open(os.path.join(session_dir, RATE_CARD_FILE), encoding="utf-8", errors="replace") as handle:
+            models = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(models, list):
+        return None
+
+    cards: dict[str, dict[str, float]] = {}
+    for entry in models:
+        if not isinstance(entry, dict) or not entry.get("id"):
+            continue
+        billing = entry.get("billing") or {}
+        prices = billing.get("token_prices") or {}
+        default = prices.get("default")
+        if not isinstance(default, dict):
+            continue
+        try:
+            cards[str(entry["id"])] = {
+                "input": float(default["input_price"]),
+                "cache_read": float(default["cache_read_price"]),
+                "output": float(default["output_price"]),
+                "batch": float(prices.get("batch_size") or 1_000_000) or 1_000_000.0,
+                "discount": float(billing.get("auto_discount") or 0.0),
+            }
+        except (KeyError, TypeError, ValueError):
+            continue
+    return cards or None
+
+
+def _shape_message_count(shape: Any) -> int | None:
+    """Prompt length in messages -- the distance to the next compaction."""
+    if not isinstance(shape, str):
+        return None
+    try:
+        parsed = json.loads(shape)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    for key in ("messageCount", "inputItemCount"):
+        value = parsed.get(key)
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def _reasoning_effort(options: Any) -> str | None:
+    if not isinstance(options, str):
+        return None
+    try:
+        parsed = json.loads(options)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    effort = (parsed.get("reasoning") or {}).get("effort")
+    return str(effort) if isinstance(effort, str) else None
+
+
+def build_fact(event: dict[str, Any], session: str, log: str, agent: str) -> dict[str, Any]:
+    """One row per request: every dimension the log carries, no prompt text.
+
+    `inputMessages` and `userRequest` are verbatim prompts. They are the reason
+    the debug log cannot be shared, and they are never read here -- a facts file
+    that leaked them would inherit exactly that restriction.
+    """
+    attrs = event.get("attrs") or {}
+    for field in REQUIRED_REQUEST_ATTRS:
+        if attrs.get(field) is None:
+            raise Drift(field)
+
+    nano = attrs.get(BILLING_ATTR)
+    input_tokens = int(attrs["inputTokens"])
+    cached = int(attrs["cachedTokens"])
+    debug_name = str(attrs.get("debugName") or "")
+
+    return {
+        "session": session,
+        "log": log,
+        "agent": agent,
+        "ts": event.get("ts"),
+        "dur": event.get("dur"),
+        "status": event.get("status"),
+        "span": event.get("spanId"),
+        "parent_span": event.get("parentSpanId"),
+        "parent_kind": None,  # resolved once every span in the session is known
+        "model": str(attrs["model"]),
+        "debug_name": debug_name,
+        "purpose": purpose_of(debug_name),
+        "reasoning_effort": _reasoning_effort(attrs.get("requestOptions")),
+        "system_prompt_file": attrs.get("systemPromptFile"),
+        "tools_file": attrs.get("toolsFile"),
+        "message_count": _shape_message_count(attrs.get("requestShape")),
+        "response_id": attrs.get("responseId"),
+        "ttft": attrs.get("ttft"),
+        "max_tokens": attrs.get("maxTokens"),
+        # inputTokens already includes cachedTokens -- adding both double-counts.
+        "input_uncached": input_tokens - cached,
+        "cached": cached,
+        "output": int(attrs["outputTokens"]),
+        # Absent means *not billed* (measured: only `backgroundTodoAgent`
+        # infrastructure calls), not lost. Never default it to zero.
+        "billed": nano is not None,
+        "nano_aiu": None if nano is None else int(nano),
+    }
+
+
+def price(fact: dict[str, Any], cards: dict[str, dict[str, float]] | None) -> None:
+    """Split a request's charge across token kinds, in place.
+
+    Verified as an exact identity against `copilotUsageNanoAiu` on every
+    request of a model whose `cache_write_price` is 0. Where it is not 0 the
+    remainder lands in `nano_unexplained` rather than being spread across the
+    kinds that *are* known -- the parts must not appear to sum to the whole.
+    """
+    for key in ("nano_input_uncached", "nano_cache_read", "nano_output", "nano_unexplained"):
+        fact[key] = None
+    nano = fact["nano_aiu"]
+    if nano is None:
+        return
+
+    card = (cards or {}).get(fact["model"])
+    if card is None:
+        # An unpriced model is fully unexplained, never silently zero.
+        fact["nano_unexplained"] = nano
+        return
+
+    scale = NANO_AIU_PER_CREDIT * (1.0 - card["discount"]) / card["batch"]
+    fact["nano_input_uncached"] = fact["input_uncached"] * card["input"] * scale
+    fact["nano_cache_read"] = fact["cached"] * card["cache_read"] * scale
+    fact["nano_output"] = fact["output"] * card["output"] * scale
+    # Derived by subtraction so the four parts close on the billed total by
+    # construction; a computed residual could not drift from the invoice.
+    fact["nano_unexplained"] = nano - (
+        fact["nano_input_uncached"] + fact["nano_cache_read"] + fact["nano_output"]
+    )
 
 
 def iter_events(path: str) -> Iterator[dict[str, Any]]:
@@ -100,7 +275,7 @@ def agent_from(path: str) -> str:
 
 
 class Totals:
-    """Billed aggregate. Unbilled requests are counted, never summed."""
+    """Billed aggregate over fact rows. Unbilled requests are counted, never summed."""
 
     def __init__(self) -> None:
         self.requests = 0
@@ -111,37 +286,43 @@ class Totals:
         self.nano_aiu = 0
         self.invocations = 0
         self.by_model: dict[str, dict[str, int]] = {}
+        self.by_kind: dict[str, float] = {
+            "input_uncached": 0.0,
+            "cache_read": 0.0,
+            "output": 0.0,
+            "unexplained": 0.0,
+        }
 
-    def add(self, attrs: dict[str, Any]) -> None:
-        for field in REQUIRED_REQUEST_ATTRS:
-            if attrs.get(field) is None:
-                raise Drift(field)
-
-        nano = attrs.get(BILLING_ATTR)
-        if nano is None:
-            # Absent means *not billed* (measured: only `backgroundTodoAgent`
-            # infrastructure calls), not lost. Never default it to zero.
+    def add(self, fact: dict[str, Any]) -> None:
+        if not fact["billed"]:
             self.unbilled += 1
             return
 
-        model = str(attrs["model"])
-        input_tokens = int(attrs["inputTokens"])
-        cached = int(attrs["cachedTokens"])
-
+        nano = int(fact["nano_aiu"])
         self.requests += 1
-        # inputTokens already includes cachedTokens -- adding both double-counts.
-        self.input_uncached += input_tokens - cached
-        self.cached += cached
-        self.output += int(attrs["outputTokens"])
-        self.nano_aiu += int(nano)
+        self.input_uncached += fact["input_uncached"]
+        self.cached += fact["cached"]
+        self.output += fact["output"]
+        self.nano_aiu += nano
 
-        bucket = self.by_model.setdefault(model, {"requests": 0, "nano_aiu": 0})
+        bucket = self.by_model.setdefault(fact["model"], {"requests": 0, "nano_aiu": 0})
         bucket["requests"] += 1
-        bucket["nano_aiu"] += int(nano)
+        bucket["nano_aiu"] += nano
+
+        for kind, key in (
+            ("input_uncached", "nano_input_uncached"),
+            ("cache_read", "nano_cache_read"),
+            ("output", "nano_output"),
+            ("unexplained", "nano_unexplained"),
+        ):
+            self.by_kind[kind] += fact.get(key) or 0.0
 
     @property
     def credits(self) -> float:
         return round(self.nano_aiu / NANO_AIU_PER_CREDIT, 3)
+
+    def credits_by_kind(self) -> dict[str, float]:
+        return {k: round(v / NANO_AIU_PER_CREDIT, 3) for k, v in self.by_kind.items()}
 
 
 def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
@@ -153,38 +334,62 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
     if not os.path.isfile(main):
         return {"available": False, "reason": "main_log_missing"}
 
+    session = os.path.basename(os.path.normpath(session_dir))
+    cards = rate_card(session_dir)
     session_start: dict[str, Any] | None = None
-    totals = Totals()
-    per_agent: dict[str, Totals] = {}
+    facts: list[dict[str, Any]] = []
+    span_kind: dict[str, str] = {}
+    agent_files: list[str] = []
     parsed = 0
 
     for path in log_files(session_dir):
         if not os.path.isfile(path):
             continue
+        agent = agent_from(path)
         # Counted from the filename, so an invocation that produced no billed
         # request still shows up as one -- it happened either way.
-        agent = per_agent.setdefault(agent_from(path), Totals())
-        agent.invocations += 1
+        agent_files.append(agent)
+        log = os.path.basename(path)
         for event in iter_events(path):
             parsed += 1
+            span = event.get("spanId")
+            if isinstance(span, str):
+                span_kind[span] = str(event.get("type"))
             kind = event.get("type")
             if kind == "session_start" and session_start is None:
                 session_start = event
             elif kind == "llm_request":
-                attrs = event.get("attrs") or {}
                 try:
-                    totals.add(attrs)
-                    agent.add(attrs)
+                    fact = build_fact(event, session, log, agent)
                 except Drift:
                     return {"available": False, "reason": "schema_drift"}
+                price(fact, cards)
+                facts.append(fact)
 
     if parsed == 0:
         return {"available": False, "reason": "log_unparseable"}
 
+    # The trace states what the filename only implies: every request has a
+    # parent span, resolving to the subagent, user message or hook that caused it.
+    for fact in facts:
+        parent = fact["parent_span"]
+        if isinstance(parent, str):
+            fact["parent_kind"] = span_kind.get(parent)
+
+    totals = Totals()
+    per_agent: dict[str, Totals] = {name: Totals() for name in agent_files}
+    for name in agent_files:
+        per_agent[name].invocations += 1
+    for fact in facts:
+        totals.add(fact)
+        per_agent[fact["agent"]].add(fact)
+
     result: dict[str, Any] = {
         "available": True,
-        "sessions": [os.path.basename(os.path.normpath(session_dir))],
+        "sessions": [session],
         "environment": _environment(session_start),
+        "facts": facts,
+        "rate_card": RATE_CARD_FILE if cards else None,
     }
 
     if session_start is None:
@@ -221,10 +426,12 @@ def _scalar(value: Any) -> str:
         return "true" if value else "false"
     if isinstance(value, (int, float)):
         return str(value)
-    return f'"{value}"'
+    # YAML double-quoting is JSON escaping, so a Windows path stays a path
+    # instead of becoming an invalid `\U` escape that breaks the whole log.
+    return json.dumps(str(value))
 
 
-def render(result: dict[str, Any]) -> str:
+def render(result: dict[str, Any], facts_path: str | None = None) -> str:
     """Render the block. Only numbers and short identifiers are ever emitted.
 
     No field is copied from the log unless it is constructed here: request
@@ -256,6 +463,16 @@ def render(result: dict[str, Any]) -> str:
         )
     )
     lines.append(f"  credits: {_scalar(totals.credits if totals else None)}")
+    lines.append(f"  rate_card: {_scalar(result.get('rate_card'))}")
+    if totals is None:
+        lines.append("  credits_by_kind: null")
+    else:
+        kinds = totals.credits_by_kind()
+        lines.append(
+            f"  credits_by_kind: {{ input_uncached: {kinds['input_uncached']},"
+            f" cache_read: {kinds['cache_read']}, output: {kinds['output']},"
+            f" unexplained: {kinds['unexplained']} }}"
+        )
     lines.append("  by_model:")
     for model, bucket in sorted((totals.by_model if totals else {}).items()):
         credits = round(bucket["nano_aiu"] / NANO_AIU_PER_CREDIT, 3)
@@ -263,6 +480,8 @@ def render(result: dict[str, Any]) -> str:
     if not (totals and totals.by_model):
         lines[-1] = "  by_model: {}"
     lines.extend(_by_agent(result.get("by_agent")))
+    # Names the artifact a third party can re-aggregate, not just this summary.
+    lines.append(f"  facts: {_scalar(facts_path)}")
     lines.append(f"  environment: {{ vscode: {_scalar(env['vscode'])}, copilot_chat: {_scalar(env['copilot_chat'])} }}")
     return "\n".join(lines) + "\n"
 
@@ -301,6 +520,38 @@ def _by_agent(per_agent: dict[str, Totals] | None) -> list[str]:
     return lines
 
 
+def write_facts(path: str, result: dict[str, Any]) -> str | None:
+    """Write the per-request rows as NDJSON. Returns the path, or None.
+
+    One header row carries the schema version and the rate card the prices came
+    from, so a row can be re-priced later without guessing which card was in
+    force. Failure to write is reported, never raised: the block is advisory and
+    must still be emitted.
+    """
+    facts = result.get("facts")
+    if not facts:
+        return None
+    header = {
+        "record": "header",
+        "facts_schema_version": FACTS_SCHEMA_VERSION,
+        "collector": f"collect-session-cost.py@{COLLECTOR_VERSION}",
+        "session": result["sessions"][0],
+        "coverage": result.get("coverage"),
+        "rate_card": result.get("rate_card"),
+    }
+    try:
+        directory = os.path.dirname(os.path.abspath(path))
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(header, sort_keys=True) + "\n")
+            for fact in facts:
+                handle.write(json.dumps(fact, sort_keys=True) + "\n")
+    except OSError:
+        return None
+    return path
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Collect billed session cost from the agent debug log.",
@@ -316,9 +567,16 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Workflow start as epoch milliseconds; enables partial-coverage detection.",
     )
+    parser.add_argument(
+        "--facts-out",
+        default=None,
+        help="Write the per-request facts as NDJSON here. The debug log expires; these rows do not.",
+    )
     args = parser.parse_args(argv)
 
-    sys.stdout.write(render(collect(args.session_dir, args.workflow_start)))
+    result = collect(args.session_dir, args.workflow_start)
+    written = write_facts(args.facts_out, result) if args.facts_out else None
+    sys.stdout.write(render(result, written))
     return 0
 
 

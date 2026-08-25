@@ -90,11 +90,46 @@ function New-SessionFixture {
         [string]$ChildName = 'runSubagent-implementer-toolu_test.jsonl',
         [string[]]$Child2 = @(),
         [string]$ChildName2 = 'runSubagent-implementer-toolu_second.jsonl',
-        [switch]$NoMainFile
+        [switch]$NoMainFile,
+        [switch]$RateCard
     )
     $base = Join-Path ([IO.Path]::GetTempPath()) ("sesscost-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
     $dir  = Join-Path $base $SID
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    if ($RateCard) {
+        # Shape mirrors the real models.json dump: prices per `batch_size`
+        # tokens. Two entries, because ConvertTo-Json in PS 5.1 unwraps a
+        # one-element array into a bare object and the real dump is a list.
+        $card = @(
+            [ordered]@{
+                id = 'claude-opus-5'
+                billing = [ordered]@{
+                    auto_discount = 0
+                    token_prices = [ordered]@{
+                        batch_size = 1000000
+                        default = [ordered]@{
+                            input_price = 500; cache_read_price = 50
+                            cache_write_price = 0; output_price = 2500
+                        }
+                    }
+                }
+            },
+            [ordered]@{
+                id = 'claude-haiku-4.5'
+                billing = [ordered]@{
+                    auto_discount = 0
+                    token_prices = [ordered]@{
+                        batch_size = 1000000
+                        default = [ordered]@{
+                            input_price = 100; cache_read_price = 10
+                            cache_write_price = 125; output_price = 500
+                        }
+                    }
+                }
+            }
+        )
+        [IO.File]::WriteAllText((Join-Path $dir 'models.json'), ($card | ConvertTo-Json -Depth 8))
+    }
     if (-not $NoMainFile) {
         [IO.File]::WriteAllText((Join-Path $dir 'main.jsonl'), (($Main -join "`n") + "`n"))
     }
@@ -137,7 +172,7 @@ try {
     $results['A_session_reported'] = ($r.Output -match [regex]::Escape($SID))
     $results['A_environment']      = ($r.Output -match 'vscode:\s*"?1\.131\.0' -and
                                       $r.Output -match 'copilot_chat:\s*"?0\.59\.0')
-    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*2\s*$')
+    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*3\s*$')
     $results['A_collector_named']  = ($r.Output -match 'collector:\s*"?collect-session-cost\.py@')
 
     # --- B: subagent child file is summed, per model ------------------------
@@ -203,6 +238,98 @@ try {
     $r = Invoke-Collector @('--session-dir', $dir)
     $results['N_unparsed_name_visible'] = ($r.Output -match 'runSubagent-unparseable:\s+totals:\s*\{[^}]*credits:\s*1(\.0+)?')
 
+    # --- P: credits split by token kind (issue #217) ------------------------
+    # A cached token costs a tenth of an uncached one and an output token ten
+    # times it, so three token counts and one credit scalar cannot be crossed
+    # after the fact. 600 uncached * 500 + 400 cached * 50 + 50 out * 2500,
+    # per 1e6 tokens = 0.3 + 0.02 + 0.125 = 0.445, and the identity closes.
+    $dir = New-SessionFixture -RateCard -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 445000000)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['P_rate_card_named'] = ($r.Output -match '(?m)^\s*rate_card:\s*"models\.json"\s*$')
+    $results['P_kind_split_exact'] = ($r.Output -match
+        'credits_by_kind:\s*\{\s*input_uncached:\s*0\.3,\s*cache_read:\s*0\.02,\s*output:\s*0\.125,\s*unexplained:\s*0(\.0+)?\s*\}')
+
+    # Cache-write tokens are billed and never logged. The remainder must be
+    # named, not spread across the kinds that are known.
+    $dir = New-SessionFixture -RateCard -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1500000000)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['P_residual_named'] = ($r.Output -match 'unexplained:\s*1\.055\s*\}')
+    # The parts must never appear to sum to more or less than the invoice.
+    $m = [regex]::Match($r.Output, 'credits_by_kind:\s*\{\s*input_uncached:\s*([\d.]+),\s*cache_read:\s*([\d.]+),\s*output:\s*([\d.]+),\s*unexplained:\s*([\d.]+)')
+    $sum = 0.0
+    if ($m.Success) { 1..4 | ForEach-Object { $sum += [double]$m.Groups[$_].Value } }
+    $results['P_kinds_close_on_total'] = ($m.Success -and [math]::Abs($sum - 1.5) -lt 0.0005)
+
+    # No rate card is not zero cost: everything becomes unexplained.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1500000000)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['P_no_rate_card_null'] = ($r.Output -match '(?m)^\s*rate_card:\s*null\s*$')
+    $results['P_no_rate_card_unexplained'] = ($r.Output -match
+        'credits_by_kind:\s*\{\s*input_uncached:\s*0(\.0+)?,\s*cache_read:\s*0(\.0+)?,\s*output:\s*0(\.0+)?,\s*unexplained:\s*1\.5\s*\}')
+
+    # --- Q: the facts artifact outlives the log (issue #217) ----------------
+    $secret = 'SUPERSECRET-FACTS-ghp_zzz999'
+    $dir = New-SessionFixture -RateCard -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1500000000 -SecretText $secret),
+        (New-LlmRequest -NanoAiu 500000000 -DebugName 'summarizeConversationHistory')
+    )
+    $fixtures += $dir
+    $factsPath = Join-Path $dir 'facts.ndjson'
+    $r = Invoke-Collector @('--session-dir', $dir, '--facts-out', $factsPath)
+    $results['Q_facts_written'] = (Test-Path $factsPath)
+    $results['Q_facts_path_in_block'] = ($r.Output -match '(?m)^\s*facts:\s*".*facts\.ndjson"\s*$')
+    # A Windows path in a double-quoted YAML scalar must be escaped: raw
+    # `C:\Users` is an invalid `\U` escape that would break the whole log.
+    $pm = [regex]::Match($r.Output, '(?m)^\s*facts:\s*("[^\r\n]*facts\.ndjson")\s*$')
+    # An unescaped path throws here rather than mismatching, so catch it: a
+    # check that aborts the run reports nothing, which is worse than a FAIL.
+    $decoded = $null
+    if ($pm.Success) {
+        try { $decoded = ('{"p":' + $pm.Groups[1].Value + '}' | ConvertFrom-Json).p } catch { $decoded = $null }
+    }
+    $results['Q_facts_path_escaped'] = ($decoded -eq $factsPath)
+    if (Test-Path $factsPath) {
+        $factLines = @([IO.File]::ReadAllLines($factsPath) | Where-Object { $_.Trim() })
+        $raw = [IO.File]::ReadAllText($factsPath)
+        # One header plus one row per request. An aggregate cannot be
+        # un-aggregated, so a missing row is a question never askable again.
+        $results['Q_facts_row_per_request'] = ($factLines.Count -eq 3)
+        $results['Q_facts_header_versioned'] = ($factLines[0] -match '"facts_schema_version":\s*1' -and
+                                                $factLines[0] -match '"record":\s*"header"')
+        # The facts file is meant to be keepable; a prompt in it would make it
+        # exactly as unshareable as the debug log it replaces.
+        $results['Q_facts_no_prompt_leak'] = ($raw -notmatch 'SUPERSECRET')
+        # Dimensions the block does not render today must still be captured.
+        $results['Q_facts_carry_purpose'] = ($raw -match '"purpose":\s*"compaction"' -and
+                                             $raw -match '"purpose":\s*"agent_work"')
+        $results['Q_facts_carry_trace'] = ($raw -match '"parent_kind":\s*"session_start"')
+        # The block must be an aggregation of these rows, not a second opinion.
+        $nano = 0
+        foreach ($l in ($factLines | Select-Object -Skip 1)) {
+            $mm = [regex]::Match($l, '"nano_aiu":\s*(\d+)')
+            if ($mm.Success) { $nano += [long]$mm.Groups[1].Value }
+        }
+        $results['Q_facts_reconcile_block'] = (($nano / 1e9) -eq 2.0 -and
+                                               $r.Output -match '(?m)^\s*credits:\s*2(\.0+)?\s*$')
+    }
+
+    # Writing the artifact is opt-in: the collector is not the log's writer.
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['Q_facts_opt_in'] = ($r.Output -match '(?m)^\s*facts:\s*null\s*$')
+
     # --- C/D/E: the log is a pointer, not evidence --------------------------
     $missing = Join-Path ([IO.Path]::GetTempPath()) ("sesscost-absent-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
     $r = Invoke-Collector @('--session-dir', $missing)
@@ -236,6 +363,17 @@ try {
     # `{}` would read as "no agent consumed anything"; the split is withheld,
     # biased downward by the same size cap that dropped the oldest entries.
     $results['F_by_agent_withheld']   = ($r.Output -match '(?m)^\s*by_agent:\s*null\s*$')
+    $results['F_kinds_withheld']      = ($r.Output -match '(?m)^\s*credits_by_kind:\s*null\s*$')
+    # The rows survive the withholding: each is individually accurate, only the
+    # set is incomplete, and the header says so.
+    $tf = Join-Path $dir 'trunc.ndjson'
+    $r = Invoke-Collector @('--session-dir', $dir, '--facts-out', $tf)
+    $results['F_facts_still_written'] = (Test-Path $tf)
+    if (Test-Path $tf) {
+        $tl = @([IO.File]::ReadAllLines($tf) | Where-Object { $_.Trim() })
+        $results['F_facts_rows_kept']     = ($tl.Count -eq 3)
+        $results['F_facts_header_coverage'] = ($tl[0] -match '"coverage":\s*"truncated"')
+    }
 
     # --- G: workflow started before this session ----------------------------
     $dir = New-SessionFixture -Main @(
@@ -275,7 +413,8 @@ try {
         'sessions', 'requests', 'unbilled_requests', 'tokens', 'input_uncached',
         'cached', 'output', 'credits', 'by_model', 'by_agent', 'invocations', 'totals',
         'main', 'environment', 'vscode', 'copilot_chat', 'claude-opus-5',
-        'claude-haiku-4.5'
+        'claude-haiku-4.5', 'rate_card', 'credits_by_kind', 'cache_read',
+        'unexplained', 'facts'
     )
     $keys = [regex]::Matches($r.Output, '(?m)(?:^\s*|[{,]\s*)([A-Za-z][\w.\-]*)\s*:') |
             ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique

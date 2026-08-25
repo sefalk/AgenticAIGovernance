@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The collector no longer aggregates against an expiring source (#217).** The
+  debug log is capped at 100 MB and the cap drops the *oldest* entries; it also
+  contains every prompt verbatim, so it can never be committed. Everything not
+  extracted while it exists is unanswerable afterwards, and the block extracted
+  four numbers. `--facts-out` now writes one NDJSON row per request — numbers
+  and identifiers only, never `inputMessages` or `userRequest`, which is what
+  makes the file keepable at all. The aggregates are computed *from* those rows,
+  so the block cannot disagree with the artifact it summarises, and the rows
+  already carry dimensions the block does not render: request purpose (agent
+  work, compaction, background), the parent span, prompt and tool payload files,
+  reasoning effort, latency. `schema_version` moves to 3.
+
+  `credits_by_kind` splits the bill the way it is charged. A cached token costs
+  a tenth of an uncached one and an output token ten times it, so three token
+  counts and one credit scalar could not be crossed. The prices come from the
+  `models.json` dump the editor writes beside the log, named in `rate_card`;
+  the identity `nano_aiu = 1e9 * (1 - auto_discount) / batch_size * (uncached *
+  input + cached * cache_read + output * output)` was verified to hold exactly
+  on every request of the one model whose `cache_write_price` is zero.
+
+  On every other model it does not close, and the gap is stated rather than
+  smoothed away: cache-*write* tokens are billed and never reported, leaving
+  `unexplained` at 1274.9 of 6764.4 credits — 18.8% — on a real session. The
+  residual is not divided among the kinds that are known, and it is not
+  dropped; the four kinds always sum to `credits`. Dividing it by the published
+  cache-write price yields fractional token counts spread evenly across every
+  bucket, so the count is not recoverable and pretending otherwise would be
+  invention. Without a usable rate card nothing is guessed: `rate_card` is
+  `null` and the whole amount lands in `unexplained`, never a silent zero.
+
 - **Cost is now attributed per subagent, not only per model (#212).** The
   `cost:` block answered what a workflow cost but not what in it was expensive,
   and a workflow is split into subagents precisely so work can be moved between
