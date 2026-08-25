@@ -230,11 +230,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        names = [
-            n
-            for n in os.listdir(args.session_dir)
-            if n.startswith("runSubagent-") and n.endswith(".jsonl")
-        ]
+        names = [n for n in os.listdir(args.session_dir) if n.startswith("runSubagent-") and n.endswith(".jsonl")]
     except OSError:
         return 1
 
@@ -272,8 +268,7 @@ def main() -> int:
     exclusive = {
         p
         for p in peer_edits
-        if os.path.normcase(os.path.abspath(p))
-        not in {os.path.normcase(os.path.abspath(m)) for m in my_edits}
+        if os.path.normcase(os.path.abspath(p)) not in {os.path.normcase(os.path.abspath(m)) for m in my_edits}
     }
 
     for path in relativise(exclusive, args.repo_root):
