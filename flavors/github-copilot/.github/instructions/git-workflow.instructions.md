@@ -6,14 +6,12 @@ applyTo: '**'
 
 # Git Workflow
 
-These rules define how agents interact with git. They consolidate and extend
-the git conventions from the [Agent Team Manifest](../MANIFEST.md).
-
-This file holds only what **every** agent needs. The operational depth —
-autonomy boundary table, integration paths, work-item association, planning
-document lifecycle, pre-commit guards, LFS — lives in the **git-workflow**
-skill. Worktree lifecycle and troubleshooting live in the **git-worktrees**
-skill. The coordinator reads both.
+How agents interact with git, consolidating and extending the conventions in
+the [Agent Team Manifest](../MANIFEST.md). Only what **every** agent needs
+lives here. The operational depth — autonomy boundary table, integration paths,
+work-item association, planning document lifecycle, pre-commit guards, LFS — is
+in the **git-workflow** skill; worktree lifecycle and troubleshooting are in
+**git-worktrees**. The coordinator reads both.
 
 ## Cardinal Rule
 
@@ -35,8 +33,7 @@ independently of these instructions: `git push --force`, any push naming a
 protected branch (`dev`/`main`/`master`), `git reset --hard`, `git rebase`,
 `git branch -D`, and `git add .` / `-A`.
 
-See the **git-workflow** skill § 1–2 for the full autonomy boundary and the
-integration paths.
+Full autonomy boundary and integration paths: **git-workflow** skill § 1–2.
 
 ## Branch Lifecycle
 
@@ -85,20 +82,19 @@ Per-phase commit messages: **git-workflow** skill § 5.
    with message: `[agent:coordinator] WIP checkpoint -- {phase}`.
    WIP.md lives in the plan directory (e.g., `docs/plans/WIP.md`).
 6. **Ignore statements are standalone commits** — each new `# type: ignore`,
-   `# pyright: ignore`, or `# noqa` added to production code must be its own
-   isolated atomic commit. It must not be bundled with code changes or with
-   other ignore additions. Commit message format:
-   `[agent:{agent-name}] justify ignore: {file}:{line} {rule} -- {reason}`.
-   The reason must explain *why* the suppression is warranted and why it cannot
-   be avoided. The implementer/refactorer stop-hook enforces this mechanically.
+   `# pyright: ignore`, or `# noqa` added to production code is its own
+   isolated atomic commit, never bundled with code changes or with another
+   ignore. Message format:
+   `[agent:{agent-name}] justify ignore: {file}:{line} {rule} -- {reason}`,
+   where the reason explains *why* the suppression is warranted and why it
+   cannot be avoided. The implementer/refactorer stop-hook enforces this
+   mechanically.
 
 ## Planning Document
 
-Every mid-to-high complexity task produces a **persisted planning document**
-in the project's plans directory (default `docs/plans/`), named
+Every mid-to-high complexity task produces a **persisted planning document** in
+the project's plans directory (default `docs/plans/`), named
 `{type}-{YYYY-MM-DD}-{slug}.md`. The planner creates it, the implementer
 updates it, the documenter finalises it. Skip it for trivial fixes,
-review-only, and plan-only workflows.
-
-Full naming, location discovery, lifecycle, and WIP checkpoint rules:
-**git-workflow** skill § 6.
+review-only, and plan-only workflows. Full naming, location discovery,
+lifecycle, and WIP checkpoint rules: **git-workflow** skill § 6.
