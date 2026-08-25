@@ -227,14 +227,19 @@ work-item-first contract, and post-merge reconciliation live there, not here:
 ### Review Only (user asks to review existing code)
 
 ```
-code-critic
+code-critic [→ documenter]
 ```
 
 ### Plan Only (user asks to analyse or plan)
 
 ```
-planner
+planner [→ documenter]
 ```
+
+The bracketed step runs when `AF_WORKFLOW_LOG_COVERAGE=all` (the default) and
+is **log-only**: the YAML log, nothing else. These two workflows are otherwise
+the only ones that leave no per-run record, so without it the cost and usage
+series has holes that read as cheap runs.
 
 ### Research Pre-Flight (conditional)
 

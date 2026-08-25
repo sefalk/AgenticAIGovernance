@@ -12,6 +12,11 @@ See the [documenter agent](../agents/documenter.agent.md) for the full YAML sche
 - **Format:** YAML with 2-space indentation
 - **Timestamps:** ISO 8601 with timezone (e.g., `2025-01-15T14:30:00Z`)
 - **Retention:** 30 days locally, archive if long-term audit needed
+- **Coverage:** `AF_WORKFLOW_LOG_COVERAGE` (`af-env.conf`) decides which
+  workflows write one. At the default `all`, every workflow does — Review Only
+  and Plan Only get a log-only documenter pass — so the cost series below has
+  no holes. A missing log then means a workflow that was never recorded, which
+  is a defect, not a cheap run.
 
 ## The `cost:` block (ADVISORY)
 

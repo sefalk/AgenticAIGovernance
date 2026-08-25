@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A workflow that leaves no log reads as a cheap workflow (#206).** The YAML
+  log in `.github/logs/` is the only per-run record of what a workflow cost and
+  which definitions it loaded. It was never written for every run: Review Only
+  and Plan Only invoke no documenter at all, and in the Trivial tier the log
+  gate was `Standard+`, so nothing enforced it. That is tolerable for audit —
+  those runs change little — and corrosive for measurement, because the gaps
+  are not random. They fall exactly on the cheapest and the most-repeated
+  workflows, so every average computed over the series is biased downward by an
+  unknown amount, and a skill used only in unlogged runs looks unused.
+
+  `AF_WORKFLOW_LOG_COVERAGE` (`af-env.conf`) now decides, defaulting to `all`:
+
+  - Review Only and Plan Only get a **log-only** documenter pass — the YAML log
+    and nothing else. No plan status, no provenance scan, no retro.
+  - The log becomes a HARD gate at **every** tier, not from Standard upward.
+  - `standard+` restores the previous behaviour byte for byte.
+
+  The documenter is told what a log-only run must *not* contain: it has no
+  phases, no verdicts and no changed files, so those keys are omitted rather
+  than filled with an empty list or a `SKIPPED` verdict. A reader cannot tell an
+  invented zero from a measured one, and the series exists to be read later.
+
+  Costs 76 tokens of coordinator budget (9,128 → 9,204 of 9,450). Refs #206.
+
 - **A measurement an agent cannot show you is not a result (#134).** The
   framework already required agents to report evidence. It never said where the
   evidence had to live. That gap is invisible while the deliverable is a file —
