@@ -88,6 +88,8 @@ function New-SessionFixture {
         [string[]]$Main = @(),
         [string[]]$Child = @(),
         [string]$ChildName = 'runSubagent-implementer-toolu_test.jsonl',
+        [string[]]$Child2 = @(),
+        [string]$ChildName2 = 'runSubagent-implementer-toolu_second.jsonl',
         [switch]$NoMainFile
     )
     $base = Join-Path ([IO.Path]::GetTempPath()) ("sesscost-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -98,6 +100,9 @@ function New-SessionFixture {
     }
     if ($Child.Count -gt 0) {
         [IO.File]::WriteAllText((Join-Path $dir $ChildName), (($Child -join "`n") + "`n"))
+    }
+    if ($Child2.Count -gt 0) {
+        [IO.File]::WriteAllText((Join-Path $dir $ChildName2), (($Child2 -join "`n") + "`n"))
     }
     return $dir
 }
@@ -132,7 +137,7 @@ try {
     $results['A_session_reported'] = ($r.Output -match [regex]::Escape($SID))
     $results['A_environment']      = ($r.Output -match 'vscode:\s*"?1\.131\.0' -and
                                       $r.Output -match 'copilot_chat:\s*"?0\.59\.0')
-    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*1\s*$')
+    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*2\s*$')
     $results['A_collector_named']  = ($r.Output -match 'collector:\s*"?collect-session-cost\.py@')
 
     # --- B: subagent child file is summed, per model ------------------------
@@ -148,6 +153,42 @@ try {
     $results['B_child_requests']     = ($r.Output -match '(?m)^\s*requests:\s*2\s*$')
     $results['B_by_model_parent']    = ($r.Output -match 'claude-opus-5:\s*\{[^}]*credits:\s*3(\.0+)?')
     $results['B_by_model_child']     = ($r.Output -match 'claude-haiku-4\.5:\s*\{[^}]*credits:\s*1(\.0+)?')
+
+    # --- N: cost is attributed to the log it came from (issue #212) ---------
+    # Same fixture as B: the total is identical, the split is what is new.
+    $results['N_parent_bucket']   = ($r.Output -match 'main:\s*\{[^}]*credits:\s*3(\.0+)?[^}]*\}')
+    $results['N_child_bucket']    = ($r.Output -match 'implementer:\s*\{[^}]*credits:\s*1(\.0+)?[^}]*\}')
+    # A split that does not add up lets a reader pick the number that suits them
+    $perAgent = [regex]::Matches($r.Output, '(?m)^\s{4}\S+:\s*\{[^}]*requests:\s*(\d+)')
+    $sumReq   = ($perAgent | ForEach-Object { [int]$_.Groups[1].Value } | Measure-Object -Sum).Sum
+    $results['N_reconciles_total'] = ($sumReq -eq 2 -and $r.Output -match '(?m)^\s*requests:\s*2\s*$')
+
+    # Eleven implementer calls in one session is the case that motivated this:
+    # repeated invocations must collapse into one bucket, counted.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart)
+    ) -Child @(
+        (New-LlmRequest -NanoAiu 1000000000)
+    ) -Child2 @(
+        (New-LlmRequest -NanoAiu 2000000000)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['N_invocations_counted'] = ($r.Output -match 'implementer:\s*\{\s*invocations:\s*2\b')
+    $results['N_invocations_summed']  = ($r.Output -match 'implementer:\s*\{[^}]*credits:\s*3(\.0+)?[^}]*\}')
+    # The parent ran but billed nothing; dropping it would hide that it ran.
+    $results['N_idle_parent_kept']    = ($r.Output -match 'main:\s*\{[^}]*requests:\s*0\b')
+
+    # An id format without a trailing hyphen must become an odd bucket, never
+    # a silent zero -- the filename is the only record that the agent ran.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart)
+    ) -Child @(
+        (New-LlmRequest -NanoAiu 1000000000)
+    ) -ChildName 'runSubagent-unparseable.jsonl'
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['N_unparsed_name_visible'] = ($r.Output -match 'runSubagent-unparseable:\s*\{[^}]*credits:\s*1(\.0+)?')
 
     # --- C/D/E: the log is a pointer, not evidence --------------------------
     $missing = Join-Path ([IO.Path]::GetTempPath()) ("sesscost-absent-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -179,6 +220,9 @@ try {
     # paired with a positive assertion so it cannot pass on empty output
     $results['F_no_numeric_credits']  = ($r.Output -match '(?m)^cost:' -and
                                          $r.Output -notmatch '(?m)^\s*credits:\s*[0-9]')
+    # `{}` would read as "no agent consumed anything"; the split is withheld,
+    # biased downward by the same size cap that dropped the oldest entries.
+    $results['F_by_agent_withheld']   = ($r.Output -match '(?m)^\s*by_agent:\s*null\s*$')
 
     # --- G: workflow started before this session ----------------------------
     $dir = New-SessionFixture -Main @(
@@ -216,8 +260,9 @@ try {
     $allowed = @(
         'cost', 'schema_version', 'collector', 'available', 'reason', 'coverage',
         'sessions', 'requests', 'unbilled_requests', 'tokens', 'input_uncached',
-        'cached', 'output', 'credits', 'by_model', 'environment', 'vscode',
-        'copilot_chat', 'claude-opus-5', 'claude-haiku-4.5'
+        'cached', 'output', 'credits', 'by_model', 'by_agent', 'invocations',
+        'main', 'environment', 'vscode', 'copilot_chat', 'claude-opus-5',
+        'claude-haiku-4.5'
     )
     $keys = [regex]::Matches($r.Output, '(?m)(?:^\s*|[{,]\s*)([A-Za-z][\w.\-]*)\s*:') |
             ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
