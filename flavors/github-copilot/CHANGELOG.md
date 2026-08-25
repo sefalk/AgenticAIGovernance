@@ -269,6 +269,115 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Producer stop-hook gates scoped themselves from shared git state, so
+  parallel subagents on one branch authored — and falsely claimed provenance
+  for — each other's files (#101).** `git diff` is global to the checkout.
+  When the coordinator ran two producers at once on the same branch, each
+  one's Stop hook read the other's in-flight edits as its own: the quality
+  gate demanded docstrings and type hints for a file the agent had been told
+  not to touch, and the provenance gate then required it to stamp a
+  `copilot:modified` marker naming itself as the author of work it had never
+  done. The gate did not merely misfire; it manufactured a false attribution
+  and blocked until the agent produced one.
+
+  Who edited which file is not something an agent has to be asked. The editor
+  writes one debug log per subagent call, named
+  `runSubagent-{agent}-{toolcallid}.jsonl`, and each write tool leaves a
+  `tool_call` span carrying its own arguments. A new reader,
+  `hooks/scripts/concurrent-agent-edits.py`, walks that directory, takes the
+  spans of every *other* subagent whose run overlapped this one in time, and
+  reports the files it edited. The four producer Stop hooks subtract that list
+  before judging. This is the channel #173 already used to measure which
+  agents ran at all — the same principle: a value a model can get wrong should
+  be measured, not requested.
+
+  Three design decisions are worth stating, because two of them depart from
+  the issue:
+
+  - **The issue's own option 2 — snapshot the diff at agent start and judge
+    only what changed after — does not work, and the issue's claim that it
+    fixes the concurrent case is wrong.** A baseline taken at start excludes
+    only what a peer changed *before* that moment. Under genuine concurrency
+    both agents start together and do their editing afterwards, so every peer
+    edit lands *after* the snapshot and stays in scope. The option repairs the
+    sequential-within-branch case only.
+  - **Option B — an interlock that refuses to launch a second producer — was
+    rejected on the framework's own recorded grounds, not out of caution.**
+    `collect-agent-invocations.py` states the doctrine directly: *"nothing
+    here blocks: a watchdog that fails a legitimate multi-session workflow
+    gets switched off, and a hook nobody runs protects nothing (issue #108)."*
+  - **Subtraction, not intersection.** Scoping each agent to "the files my own
+    log says I edited" would be tighter, and fails dangerously: one unrecognised
+    edit-tool name would collapse the scope to empty and every gate would pass
+    in silence. Subtracting only what a peer *positively claims* means every
+    failure mode subtracts less and lands back on today's behaviour. The gate
+    can lose the fix; it cannot lose its teeth. Every error path in the reader
+    and in both `_common` helpers returns an empty list for the same reason.
+
+  **The filter is confined to the authorship and quality scopes. The lint
+  scope is deliberately left whole.** This was a correction made during
+  implementation: the first version subtracted peer files from the lint scope
+  too, which contradicts the boundary #86 drew and the existing suite already
+  asserts — *a ruff violation is real whoever produced it*. The peer's own
+  Stop hook lints the peer's files, so nothing goes unlinted; scoping there
+  would have converted a correction into a bypass. Both harnesses now assert
+  that the lint scope stays unfiltered, so the mistake cannot be made twice.
+
+  `coordinator.agent.md` still forbids running producers in parallel, and the
+  wording was tightened rather than relaxed: subtask independence is not
+  sufficient grounds, `WORKTREE_ENABLED=true` does not help (one worktree per
+  workflow, not per subagent), and the hook change repairs the misattribution
+  without licensing the practice. Read-only agents — the critics, `researcher`,
+  `compliance-checker`, `Explore` — may still be parallelised.
+
+  Two defects in this change were found and fixed by its own controls, and are
+  recorded here because both produced confident, plausible, wrong output:
+
+  - The timestamp regex required no whitespace after the colon
+    (`"ts":(\d+)`). Any log written by `json.dumps` — which emits `"ts": 1000`
+    — yielded *zero* timestamps, and the reader then fell through to its
+    unknown-bounds branch and subtracted a peer that had never overlapped.
+  - That fallback was itself wrong. It treated unknown bounds as overlapping,
+    which subtracts *more* — in direct contradiction of the safety property
+    stated three paragraphs above it in the same file. Unknown bounds now mean
+    no overlap. The stated invariant had to be checked against every branch,
+    not just the ones the author had in mind.
+
+  **Measured.** `test-hooks.ps1` 335 → **349 passed, 0 failed** (14 new cases);
+  `test-hooks.sh` 169 → **178 passed, 0 failed** (9 new cases);
+  `test-hooks-integration.ps1` 8 passed, 0 failed. The reader's own control
+  suite covers 12 cases including shared authorship, a read-only peer, a
+  non-overlapping peer, a path outside the repository, an unrecognised write
+  tool, and both "nothing measurable" exits.
+
+  The new cases were then checked for teeth by mutation, with the expected
+  failures declared before each run:
+
+  | mutation | cases that must go red | result |
+  |---|---|---|
+  | timestamp regex loses `\s*` | overlapping peer subtracted; nested replacements harvested; unknown write tool caught | exactly those, and only those |
+  | unknown time bounds treated as overlapping | non-overlapping peer is ignored | exactly that |
+  | every tool counts as an edit | `read_file` is not an edit; `create_and_run_task` is not a write | exactly those |
+
+  The first run of that control was itself wrong twice, and both corrections
+  are the useful part: the predicted red set for the regex mutation was
+  mis-specified (the *compact* fixture, `"ts":1000`, is the one format the
+  brittle pattern still parses — which is exactly why the defect stayed hidden),
+  and the changed-line counter reported 158 changes for a one-line insertion
+  because it compared line by line instead of diffing. The tests had teeth; the
+  predictions did not. Mutation coverage is confined to the reader's logic —
+  the harness assertions about hook wiring and the lint-scope boundary are
+  static checks and were not mutation-tested.
+
+  **Honest limits.** This reads one editor session: producers launched from
+  two separate chat sessions against one branch are not covered. Peers are
+  matched by time overlap, so a peer that finished before this agent started
+  is correctly ignored but a long-idle overlapping peer is still counted. The
+  caller's own log is identified by most-recent modification time, which is a
+  heuristic. The bash twin extracts `transcript_path` with the same
+  `grep`/`sed` idiom the documenter hook already uses and inherits its existing
+  limitation with escaped Windows paths.
+
 - **The worktree gate mis-read any path containing a space, and shipped with no
   test cases at all (#200).** Both twins extracted the path and branch with
   `\S+`, which stops at the first blank. For
