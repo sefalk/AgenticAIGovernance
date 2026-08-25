@@ -39,8 +39,14 @@ cost:
   by_model:
     claude-opus-5: { requests: 188, credits: 2363.735 }
   by_agent:                 # most expensive first; null when truncated
-    main: { invocations: 1, requests: 150, unbilled_requests: 9, input_uncached: 900000, cached: 18000000, output: 190000, credits: 2100.0 }
-    implementer: { invocations: 3, requests: 55, unbilled_requests: 0, input_uncached: 359777, cached: 3963581, output: 44002, credits: 285.082 }
+    main:
+      totals: { invocations: 1, requests: 150, unbilled_requests: 9, input_uncached: 900000, cached: 18000000, output: 190000, credits: 2100.0 }
+      by_model:
+        claude-opus-5: { requests: 150, credits: 2100.0 }
+    implementer:
+      totals: { invocations: 3, requests: 55, unbilled_requests: 0, input_uncached: 359777, cached: 3963581, output: 44002, credits: 285.082 }
+      by_model:
+        claude-sonnet-5: { requests: 55, credits: 285.082 }
   environment: { vscode: "1.131.0", copilot_chat: "0.59.0" }
 ```
 
@@ -70,6 +76,12 @@ Reading it:
   log files, so an agent that ran and billed nothing still appears. It is
   `null`, not `{}`, when coverage is `truncated`: the split inherits the same
   downward bias as the totals.
+- **The nested `by_model` resolves both axes on a joint key.** "The coordinator
+  is expensive" and "opus is expensive" are different findings, and only the
+  crossing distinguishes them — an agent that is costly *because of its model*
+  is a routing decision, an agent that is costly on a cheap model is a prompt
+  problem. Tokens and credits carry independent signals here too: a bucket can
+  read far more tokens than another and still cost a fraction of it.
 - **The numbers never pass through a language model.** The hook appends the
   script's output verbatim; no agent reads the debug log (a session log reaches
   tens of megabytes and contains every prompt verbatim).
