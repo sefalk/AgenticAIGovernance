@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **A workflow that leaves no log reads as a cheap workflow (#206).** The YAML
+- **A workflow that leaves no log reads as a cheap workflow (#210).** The YAML
   log in `.github/logs/` is the only per-run record of what a workflow cost and
   which definitions it loaded. It was never written for every run: Review Only
   and Plan Only invoke no documenter at all, and in the Trivial tier the log
@@ -31,7 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than filled with an empty list or a `SKIPPED` verdict. A reader cannot tell an
   invented zero from a measured one, and the series exists to be read later.
 
-  Costs 76 tokens of coordinator budget (9,128 → 9,204 of 9,450). Refs #206.
+  The two workflows this covers write no plan file, so `documenter-stop` used
+  to classify their call as unclassifiable and say nothing further. It now
+  names the missing log in that branch — advisory, never blocking, because the
+  same branch carries legitimate mid-workflow documenter calls that have no log
+  yet.
+
+  Costs 76 tokens of coordinator budget (9,128 → 9,204 of 9,450). Refs #210.
 
 - **A measurement an agent cannot show you is not a result (#134).** The
   framework already required agents to report evidence. It never said where the

@@ -62,8 +62,20 @@ if (-not $plan.Found) {
     # Unclassifiable is not the same as fine, and saying nothing would repeat
     # the defect this gate is meant to prevent. Completeness is still enforced
     # once, by the compliance-checker post-flight gate.
+    #
+    # Review Only and Plan Only never write a plan file, so this branch is the
+    # only place their log-only documenter call is observable at all. The
+    # notice below is advisory on purpose: a mid-workflow documenter call has
+    # no log yet and must not be blocked for it (issue #210).
+    $coverage = Get-AfConfig -Key 'AF_WORKFLOW_LOG_COVERAGE' -Default 'all'
+    $coverageNote = ''
+    if ($coverage -eq 'all' -and
+        -not (Test-Path ".github/logs/$workflowId.yaml") -and
+        -not (Test-Path ".github/logs/$workflowId.yml")) {
+        $coverageNote = " NOTE: AF_WORKFLOW_LOG_COVERAGE=all and .github/logs/$workflowId.yaml does not exist -- if this call is finalising the workflow, write the log now; a run without one is indistinguishable from a cheap run."
+    }
     $output = @{
-        systemMessage = "documenter:Stop -- no plan file names 'agent/$workflowId', so a mid-workflow call cannot be told from finalisation; artifact gate not applied. Completeness is enforced by the compliance-checker post-flight gate."
+        systemMessage = "documenter:Stop -- no plan file names 'agent/$workflowId', so a mid-workflow call cannot be told from finalisation; artifact gate not applied. Completeness is enforced by the compliance-checker post-flight gate.$coverageNote"
     } | ConvertTo-Json -Compress
     Write-Output $output
     exit 0

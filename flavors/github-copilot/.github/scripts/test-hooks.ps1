@@ -1842,6 +1842,38 @@ Assert-True "with no plan file the gate says it could not classify the call" `
     ($noPlan.Output -match 'no plan file' -and $noPlan.Output -notmatch '"block"') `
     "got: $($noPlan.Output)" -Subject $noPlan.Output
 
+# Review Only and Plan Only write no plan file, so the branch above is the only
+# place their log-only documenter call can be seen -- which is why the coverage
+# rule has to speak here or nowhere (issue #210). It stays advisory: the same
+# branch carries legitimate mid-workflow calls that have no log yet.
+$COVER_ALL  = "AF_WORKFLOW_LOG_COVERAGE=all`n"
+$COVER_STD  = "AF_WORKFLOW_LOG_COVERAGE=standard+`n"
+
+$noLog = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'README.md'               = 'x'
+    '.github/af-env.conf'     = $COVER_ALL
+}
+Assert-True "under coverage=all an unclassifiable call with no log is told to write one" `
+    ($noLog.Output -match 'AF_WORKFLOW_LOG_COVERAGE=all' -and $noLog.Output -notmatch '"block"') `
+    "got: $($noLog.Output)" -Subject $noLog.Output
+
+$withLog = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'README.md'               = 'x'
+    '.github/af-env.conf'     = $COVER_ALL
+    '.github/logs/72-x.yaml'  = $LOG_YAML
+}
+Assert-True "the notice is about the missing log, not about every unclassifiable call" `
+    ($withLog.Output -notmatch 'AF_WORKFLOW_LOG_COVERAGE') `
+    "got: $($withLog.Output)" -Subject $withLog.Output
+
+$optedOut = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'README.md'               = 'x'
+    '.github/af-env.conf'     = $COVER_STD
+}
+Assert-True "coverage=standard+ opts out of the notice as documented" `
+    ($optedOut.Output -notmatch 'AF_WORKFLOW_LOG_COVERAGE') `
+    "got: $($optedOut.Output)" -Subject $optedOut.Output
+
 # stop-tests judges the same condition with less force (AC4). It used to warn
 # about missing closing artifacts for a workflow that had not claimed to be
 # finished -- pressure to write them early, from the other direction.
