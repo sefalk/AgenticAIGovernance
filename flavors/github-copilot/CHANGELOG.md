@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Cost is now attributed per subagent, not only per model (#212).** The
+  `cost:` block answered what a workflow cost but not what in it was expensive,
+  and a workflow is split into subagents precisely so work can be moved between
+  them. The data was already being read and discarded: `collect-session-cost.py`
+  has always summed `main.jsonl` together with every `runSubagent-*.jsonl`, and
+  the filename carries the agent name. The new `by_agent:` block keeps that
+  bucket key instead of throwing it away.
+
+  Measured on one real session, the split says something the total cannot: the
+  implementer read more input tokens than the entire parent session (34.5M vs
+  22.6M) while costing under a third as many credits, because it runs on a
+  cheaper model. Token pressure and credit cost point at different agents, and
+  a `by_model` split attributes neither to anyone who could act on it.
+
+  The buckets reconcile against the totals — no field is dropped in the split —
+  and `invocations` counts log files, so an agent that ran and billed nothing
+  still appears. Under `coverage: truncated` the block is `null` rather than
+  `{}`: the split inherits the downward bias of the size cap, and an empty map
+  would read as "no agent consumed anything". `main` is deliberately not named
+  `coordinator`; the file records where a request was made, not who wrote it.
+  `schema_version` moves to 2.
+
 - **A workflow that leaves no log reads as a cheap workflow (#210).** The YAML
   log in `.github/logs/` is the only per-run record of what a workflow cost and
   which definitions it loaded. It was never written for every run: Review Only

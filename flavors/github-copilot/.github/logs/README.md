@@ -27,8 +27,8 @@ the chat debug log of the current session:
 
 ```yaml
 cost:
-  schema_version: 1
-  collector: "collect-session-cost.py@1"
+  schema_version: 2
+  collector: "collect-session-cost.py@2"
   available: true
   coverage: full            # full | partial | truncated
   sessions: ["<session-id>"]
@@ -38,6 +38,9 @@ cost:
   credits: 2385.082
   by_model:
     claude-opus-5: { requests: 188, credits: 2363.735 }
+  by_agent:                 # most expensive first; null when truncated
+    main: { invocations: 1, requests: 150, unbilled_requests: 9, input_uncached: 900000, cached: 18000000, output: 190000, credits: 2100.0 }
+    implementer: { invocations: 3, requests: 55, unbilled_requests: 0, input_uncached: 359777, cached: 3963581, output: 44002, credits: 285.082 }
   environment: { vscode: "1.131.0", copilot_chat: "0.59.0" }
 ```
 
@@ -60,6 +63,13 @@ Reading it:
   attribute are counted separately as `unbilled_requests`, never as zero.
 - **`input_uncached` excludes cached tokens** — the raw `inputTokens` field
   already includes them, so the two must never be added.
+- **`by_agent` says which log each request came from**, keyed by the agent name
+  in the filename; `main` is the parent session, deliberately not called
+  `coordinator` — the file records where a request was made, not who authored
+  it. The buckets reconcile against the totals, and `invocations` counts the
+  log files, so an agent that ran and billed nothing still appears. It is
+  `null`, not `{}`, when coverage is `truncated`: the split inherits the same
+  downward bias as the totals.
 - **The numbers never pass through a language model.** The hook appends the
   script's output verbatim; no agent reads the debug log (a session log reaches
   tens of megabytes and contains every prompt verbatim).

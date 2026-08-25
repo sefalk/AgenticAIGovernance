@@ -28,13 +28,25 @@ import argparse
 import glob
 import json
 import os
+import re
 import sys
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 1
-COLLECTOR_VERSION = 1
+SCHEMA_VERSION = 2
+COLLECTOR_VERSION = 2
 
 NANO_AIU_PER_CREDIT = 1_000_000_000
+
+# Name of the bucket holding the parent session. Deliberately not `coordinator`:
+# the file records which log a request came from, not which agent authored it,
+# and a session that never delegated has no coordinator in it at all.
+PARENT = "main"
+
+# `runSubagent-ado-pr-manager-toolu_011DEuS1yqmhJkPQa1qmtY3U.jsonl`. Split on
+# the LAST hyphen -- agent names contain hyphens, the tool-call id does not.
+# Same parse as collect-agent-invocations.py; an unmatched name keeps its whole
+# stem so a future id format shows up as an odd bucket instead of a lost one.
+SUBAGENT = re.compile(r"^runSubagent-(?P<agent>.+)-(?P<call>[^-]+)\.jsonl$")
 
 # Fields a billed request must carry. Missing any of them means the log schema
 # moved; these are preview fields under no compatibility promise.
@@ -76,6 +88,17 @@ def log_files(session_dir: str) -> list[str]:
     return files
 
 
+def agent_from(path: str) -> str:
+    """Bucket name for a log file: the parent, or the subagent that wrote it."""
+    name = os.path.basename(path)
+    if name == "main.jsonl":
+        return PARENT
+    match = SUBAGENT.match(name)
+    if match:
+        return match.group("agent")
+    return name[: -len(".jsonl")] if name.endswith(".jsonl") else name
+
+
 class Totals:
     """Billed aggregate. Unbilled requests are counted, never summed."""
 
@@ -86,6 +109,7 @@ class Totals:
         self.cached = 0
         self.output = 0
         self.nano_aiu = 0
+        self.invocations = 0
         self.by_model: dict[str, dict[str, int]] = {}
 
     def add(self, attrs: dict[str, Any]) -> None:
@@ -131,19 +155,26 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
 
     session_start: dict[str, Any] | None = None
     totals = Totals()
+    per_agent: dict[str, Totals] = {}
     parsed = 0
 
     for path in log_files(session_dir):
         if not os.path.isfile(path):
             continue
+        # Counted from the filename, so an invocation that produced no billed
+        # request still shows up as one -- it happened either way.
+        agent = per_agent.setdefault(agent_from(path), Totals())
+        agent.invocations += 1
         for event in iter_events(path):
             parsed += 1
             kind = event.get("type")
             if kind == "session_start" and session_start is None:
                 session_start = event
             elif kind == "llm_request":
+                attrs = event.get("attrs") or {}
                 try:
-                    totals.add(event.get("attrs") or {})
+                    totals.add(attrs)
+                    agent.add(attrs)
                 except Drift:
                     return {"available": False, "reason": "schema_drift"}
 
@@ -159,8 +190,10 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
     if session_start is None:
         # The size cap drops the OLDEST entries, i.e. the plan and Red phases.
         # A total would look complete while being biased downward, so emit none.
+        # The per-agent split inherits that bias and is withheld with it.
         result["coverage"] = "truncated"
         result["totals"] = None
+        result["by_agent"] = None
         return result
 
     started = session_start.get("ts")
@@ -169,6 +202,7 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
     else:
         result["coverage"] = "full"
     result["totals"] = totals
+    result["by_agent"] = per_agent
     return result
 
 
@@ -228,8 +262,34 @@ def render(result: dict[str, Any]) -> str:
         lines.append(f"    {model}: {{ requests: {bucket['requests']}, credits: {credits} }}")
     if not (totals and totals.by_model):
         lines[-1] = "  by_model: {}"
+    lines.extend(_by_agent(result.get("by_agent")))
     lines.append(f"  environment: {{ vscode: {_scalar(env['vscode'])}, copilot_chat: {_scalar(env['copilot_chat'])} }}")
     return "\n".join(lines) + "\n"
+
+
+def _by_agent(per_agent: dict[str, Totals] | None) -> list[str]:
+    """Which log each request came from, keyed by agent (issue #212).
+
+    The fields are the totals' fields so the split reconciles against them:
+    a breakdown that does not add up invites the reader to pick whichever
+    number suits the argument.
+    """
+    if per_agent is None:
+        # Withheld, not empty: `{}` would read as "no agent consumed anything".
+        return ["  by_agent: null"]
+    if not per_agent:
+        return ["  by_agent: {}"]
+    lines = ["  by_agent:"]
+    # Most expensive first: the block exists to be acted on, and the reader
+    # who stops after two lines should have read the two that matter.
+    order = sorted(per_agent.items(), key=lambda kv: (-kv[1].nano_aiu, kv[0]))
+    for agent, bucket in order:
+        lines.append(
+            f"    {agent}: {{ invocations: {bucket.invocations}, requests: {bucket.requests}, "
+            f"unbilled_requests: {bucket.unbilled}, input_uncached: {bucket.input_uncached}, "
+            f"cached: {bucket.cached}, output: {bucket.output}, credits: {bucket.credits} }}"
+        )
+    return lines
 
 
 def main(argv: list[str] | None = None) -> int:
