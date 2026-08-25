@@ -260,6 +260,20 @@ The human should review these during periodic governance audits.
 - Do NOT modify production code or test code
 - Never fabricate metrics — use only values reported by the coordinator
 
+## Log-Only Invocation
+
+Review Only and Plan Only workflows invoke you for the YAML log alone — no
+plan status, no provenance scan, no retro, no architecture update. They exist
+in the log so the cost and usage series has no holes, not because they
+produced code.
+
+Such a run has no phases, no verdicts and no changed files. **Omit those keys.**
+Do not emit an empty `phases:` list, a `verdict: SKIPPED`, or a zeroed metric to
+fill the shape — a reader cannot distinguish an invented zero from a measured
+one, and the series is being built precisely to be read later. Set
+`workflow_type` to the workflow that ran and record what the single agent
+returned.
+
 ## Return Format
 
 ### On success (all artifacts written)
@@ -314,7 +328,7 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Gate | Type | How to Verify | Tier |
 |---|---|---|---|
 | Plan file status set to COMPLETED | HARD | Verify status field updated | Standard+ |
-| YAML workflow log created and valid | HARD | Verify file exists, mandatory fields present | Standard+ |
+| YAML workflow log created and valid | HARD | Verify file exists, mandatory fields present | All (`Standard+` if `AF_WORKFLOW_LOG_COVERAGE=standard+`) |
 | Provenance markers verified on all AI-touched files | HARD | Scan changed files for markers | Standard+ |
 | Retro snippet in `RETRO_DIR` when the run had something to teach | HARD | Verify file created with required fields | Standard+ |
 | Architecture docs updated (if new modules/ports) | SOFT | Self-check: applicable only if new elements | Deep |
