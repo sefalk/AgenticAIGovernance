@@ -23,8 +23,10 @@ set -uo pipefail
 SRC_DIR=$(af_conf_get SRC_DIR src)
 BASE_BRANCH=$(af_conf_get BASE_BRANCH '')
 
-# Read stdin (hook input JSON — required by protocol)
-cat > /dev/null
+# Read stdin (hook input JSON — required by protocol). Kept rather than
+# discarded: `session_id` and `transcript_path` locate this session's subagent
+# logs, which is how the gates below tell their own edits from a peer's (#101).
+stdin_raw=$(cat)
 
 # ---------- Gate 1: All tests must pass ----------
 # A missing test runner disables THIS gate only. Gates 2-5 need neither pytest
@@ -115,6 +117,18 @@ changed_lint_py=$(git diff --name-only --cached --diff-filter=AM -- "${SRC_DIR}/
 if [ -z "$changed_lint_py" ]; then
     changed_lint_py=$(git diff --name-only HEAD --diff-filter=AM -- "${SRC_DIR}/" 'tests/' 2>/dev/null | grep -E '\.py$' || true)
 fi
+
+# `git diff` is global to the checkout, so a producer running alongside this one
+# puts its in-flight edits in these scopes. The gate then demands work on a file
+# this agent was told not to touch, and the provenance gate stamps a marker
+# naming the wrong author (issue #101).
+#
+# Applied to the authorship and quality scopes ONLY. A lint violation is real
+# whoever produced it, so subtracting from the lint scope would be a genuine
+# bypass rather than a correction -- the same boundary #86 drew for
+# `--list-authored`. The peer's own Stop hook lints the peer's files.
+peer_edits=$(af_peer_edits "$stdin_raw" refactorer)
+changed_src_py=$(af_strip_lines "$changed_src_py" "$peer_edits")
 
 # Files committed in an EARLIER phase of this workflow appear in neither diff
 # above -- the coordinator commits the test files at the end of the Red phase,

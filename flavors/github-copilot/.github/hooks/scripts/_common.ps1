@@ -349,3 +349,53 @@ function Test-AfProvenanceMarker {
     $pattern = if ($Kind -eq 'generated') { 'copilot:generated' } else { 'copilot:(generated|modified)' }
     return [bool]($text -match $pattern)
 }
+
+# ── Files a concurrent peer agent edited (issue #101) ──────────────────
+#
+# Producer stop-hook gates scope themselves from `git diff`, which is global to
+# the checkout. Two producers on one branch therefore see each other's in-flight
+# edits, and the gate demands work on a file the agent was told not to touch --
+# then the provenance gate makes it stamp an authorship marker recording the
+# wrong agent.
+#
+# Returns the files a DIFFERENT subagent edited while this one was running, so
+# the caller can drop them from its own scope. Every failure path returns an
+# empty array: no stdin, no session id, no session directory, no interpreter,
+# a non-zero exit. Subtracting nothing is exactly today's behaviour, which is
+# the only direction this may fail in -- a watchdog that fails a legitimate
+# workflow gets switched off (issue #108).
+function Get-AfPeerEdits {
+    param(
+        [string]$StdinRaw,
+        [string]$Agent,
+        [string]$CodeRoot,
+        [string]$MainRoot
+    )
+
+    if (-not $StdinRaw -or -not $Agent) { return @() }
+
+    try { $payload = $StdinRaw | ConvertFrom-Json } catch { return @() }
+    $sid = $payload.session_id
+    $transcript = $payload.transcript_path
+    if (-not $sid -or -not $transcript) { return @() }
+
+    # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
+    $chatDir = Split-Path -Parent (Split-Path -Parent $transcript)
+    if (-not $chatDir) { return @() }
+    $sessionDir = Join-Path (Join-Path $chatDir 'debug-logs') $sid
+    if (-not (Test-Path $sessionDir)) { return @() }
+
+    $reader = Join-Path $MainRoot '.github/hooks/scripts/concurrent-agent-edits.py'
+    if (-not (Test-Path $reader)) { return @() }
+
+    $python = Join-Path $CodeRoot '.venv/Scripts/python.exe'
+    if (-not (Test-Path $python)) {
+        $python = if ($AfPython) { $AfPython } else { $null }
+    }
+    if (-not $python) { return @() }
+
+    $out = & $python $reader '--session-dir' $sessionDir '--agent' $Agent '--repo-root' $CodeRoot 2>$null
+    if ($LASTEXITCODE -ne 0) { return @() }
+
+    return @($out | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })
+}

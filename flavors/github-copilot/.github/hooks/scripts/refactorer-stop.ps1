@@ -28,7 +28,7 @@ $SRC_DIR = Get-AfConfig -Key 'SRC_DIR' -Default 'src'
 $BASE_BRANCH = Get-AfConfig -Key 'BASE_BRANCH' -Default ''
 
 # Read stdin (hook input JSON -- required by protocol)
-$null = [Console]::In.ReadToEnd()
+$stdinRaw = [Console]::In.ReadToEnd()
 
 # ---------- Gate 1: All tests must pass ----------
 # A missing test runner disables THIS gate only. Gates 2-5 need neither pytest
@@ -137,6 +137,20 @@ try {
             Where-Object { $_ -match '\.py$' })
     }
 } catch {}
+
+# `git diff` is global to the checkout, so a producer running alongside this one
+# puts its in-flight edits in these scopes. The gate then demands work on a file
+# this agent was told not to touch, and the provenance gate stamps a marker
+# naming the wrong author (issue #101).
+#
+# Applied to the authorship and quality scopes ONLY. A lint violation is real
+# whoever produced it, so subtracting from the lint scope would be a genuine
+# bypass rather than a correction -- the same boundary #86 drew for
+# `--list-authored`. The peer's own Stop hook lints the peer's files.
+$peerEdits = @(Get-AfPeerEdits -StdinRaw $stdinRaw -Agent 'refactorer' -CodeRoot $codeRoot -MainRoot $mainRoot)
+if ($peerEdits.Count -gt 0) {
+    $changedSrcPy = @($changedSrcPy | Where-Object { $peerEdits -notcontains $_ })
+}
 
 # Files committed in an EARLIER phase of this workflow appear in neither diff
 # above -- the coordinator commits the test files at the end of the Red phase,
