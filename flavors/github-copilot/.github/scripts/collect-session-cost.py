@@ -229,9 +229,7 @@ def price(fact: dict[str, Any], cards: dict[str, dict[str, float]] | None) -> No
     fact["nano_output"] = fact["output"] * card["output"] * scale
     # Derived by subtraction so the four parts close on the billed total by
     # construction; a computed residual could not drift from the invoice.
-    fact["nano_unexplained"] = nano - (
-        fact["nano_input_uncached"] + fact["nano_cache_read"] + fact["nano_output"]
-    )
+    fact["nano_unexplained"] = nano - (fact["nano_input_uncached"] + fact["nano_cache_read"] + fact["nano_output"])
 
 
 def iter_events(path: str) -> Iterator[dict[str, Any]]:
