@@ -166,7 +166,7 @@ function Invoke-HookInFixture {
     # Helper scripts a hook shells out to. Without them the hook takes its
     # degrade-silently path, and a case asserting what the helper produced
     # would be asserting on an absent file rather than on the hook.
-    foreach ($helper in @('collect-agent-invocations.py')) {
+    foreach ($helper in @('collect-agent-invocations.py', 'concurrent-agent-edits.py')) {
         $helperSrc = Join-Path (Split-Path $HookPath) $helper
         if (Test-Path $helperSrc) { Copy-Item $helperSrc $fixtureHooks }
     }
@@ -2553,6 +2553,140 @@ foreach ($pair in @(
     Assert-True "$($pair.n) does not scope the lint gate to authored files" `
         (-not ($lintLines -match 'authored')) `
         "lint invocation references the authorship filter: $lintLines"
+}
+
+Write-Output ""
+
+# ── 6c-2. Concurrent producer scope (issue #101) ─────────────────────────
+
+Write-Output "## Concurrent producer scope (issue #101)"
+
+# `git diff` is global to the checkout. Two producers on one branch therefore
+# read each other's in-flight edits as their own: measured, an implementer was
+# told to add docstrings to a file a parallel documenter was writing, and the
+# provenance gate would have had it stamp its own name on that file. The editor
+# names one debug log per subagent call, so who edited what is a measurement
+# and not a claim -- the same channel #173 used for who ran at all.
+$peerScript = Join-Path $scriptDir 'concurrent-agent-edits.py'
+
+Assert-True "the peer-edit reader ships with the hooks" `
+    (Test-Path $peerScript) "no concurrent-agent-edits.py in hooks/scripts"
+
+# Resolve Python the way the hooks do. Without it the cases below would assert
+# on an absent interpreter rather than on the reader.
+$peerPy = @(
+    (Join-Path $githubDir '../.venv/Scripts/python.exe')
+    (Join-Path $githubDir '../.venv/bin/python')
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $peerPy) { $peerPy = 'python' }
+
+function New-PeerLog {
+    # $Mtime is explicit: the reader identifies the caller's own log as the most
+    # recently written one, and sleeping to separate two writes makes the case
+    # depend on filesystem timestamp resolution.
+    param([string]$Dir, [string]$Name, [int]$Start, [int]$End, [string[]]$Files,
+          [string]$Tool = 'replace_string_in_file', [datetime]$Mtime)
+    $lines = @()
+    $lines += (@{ ts = $Start; type = 'llm_request'; name = 'x' } | ConvertTo-Json -Compress)
+    foreach ($f in $Files) {
+        # `attrs.args` is a JSON string inside the JSON, as the editor writes it.
+        $argJson = @{ filePath = $f } | ConvertTo-Json -Compress
+        $lines += (@{ ts = $Start; type = 'tool_call'; name = $Tool; attrs = @{ args = $argJson } } | ConvertTo-Json -Compress -Depth 6)
+    }
+    $lines += (@{ ts = $End; type = 'agent_response'; name = 'x' } | ConvertTo-Json -Compress)
+    $path = Join-Path $Dir $Name
+    Set-Content -Path $path -Value ($lines -join "`n") -Encoding UTF8
+    (Get-Item $path).LastWriteTime = $Mtime
+}
+
+function Invoke-PeerReader {
+    param([string]$Dir, [string]$Agent, [string]$Root)
+    $out = & $peerPy $peerScript --session-dir $Dir --agent $Agent --repo-root $Root 2>$null
+    @{ Out = (@($out) -join "`n"); Code = $LASTEXITCODE }
+}
+
+$peerRoot = Join-Path ([IO.Path]::GetTempPath()) "af-101-$(Get-Random)"
+New-Item -ItemType Directory -Path $peerRoot -Force | Out-Null
+$peerDir = Join-Path $peerRoot 'debug-logs'
+New-Item -ItemType Directory -Path $peerDir -Force | Out-Null
+
+$mine = Join-Path $peerRoot 'src/mine.py'
+$peer = Join-Path $peerRoot 'src/peer.py'
+
+$peerOld = (Get-Date).AddMinutes(-10)
+$peerNew = (Get-Date)
+
+# The caller's own log is the most recently written one.
+New-PeerLog -Dir $peerDir -Name 'runSubagent-documenter-toolu_peer.jsonl' -Start 1000 -End 3000 -Files @($peer, $mine) -Mtime $peerOld
+New-PeerLog -Dir $peerDir -Name 'runSubagent-implementer-toolu_mine.jsonl' -Start 2000 -End 4000 -Files @($mine) -Mtime $peerNew
+
+$r = Invoke-PeerReader -Dir $peerDir -Agent 'implementer' -Root $peerRoot
+
+Assert-True "a file only the concurrent peer edited leaves this agent's scope" `
+    ($r.Out -match '(?m)^src/peer\.py$') "got: $($r.Out)"
+
+# Subtracting a file both agents touched would hand the implementer a way to
+# duck its own gate by having any peer open the same file.
+Assert-True "a file this agent also edited stays in scope" `
+    ($r.Out -notmatch '(?m)^src/mine\.py$') "shared authorship was subtracted: $($r.Out)"
+
+# Sequential-within-branch is the normal case. Treating a peer that had already
+# finished as concurrent would shrink every scope on every branch.
+$seqDir = Join-Path $peerRoot 'debug-logs-seq'
+New-Item -ItemType Directory -Path $seqDir -Force | Out-Null
+New-PeerLog -Dir $seqDir -Name 'runSubagent-documenter-toolu_old.jsonl' -Start 1000 -End 1500 -Files @($peer) -Mtime $peerOld
+New-PeerLog -Dir $seqDir -Name 'runSubagent-implementer-toolu_new.jsonl' -Start 9000 -End 9500 -Files @($mine) -Mtime $peerNew
+
+$rSeq = Invoke-PeerReader -Dir $seqDir -Agent 'implementer' -Root $peerRoot
+Assert-True "a peer that finished before this agent started is not concurrent" `
+    ([string]::IsNullOrWhiteSpace($rSeq.Out)) "got: $($rSeq.Out)"
+
+# Reading a file is not authoring it. Harvesting every tool that carries a
+# filePath would subtract most of the branch.
+$roDir = Join-Path $peerRoot 'debug-logs-ro'
+New-Item -ItemType Directory -Path $roDir -Force | Out-Null
+New-PeerLog -Dir $roDir -Name 'runSubagent-code-critic-toolu_ro.jsonl' -Start 1000 -End 3000 -Files @($peer) -Tool 'read_file' -Mtime $peerOld
+New-PeerLog -Dir $roDir -Name 'runSubagent-implementer-toolu_x.jsonl' -Start 1000 -End 3000 -Files @($mine) -Mtime $peerNew
+
+$rRo = Invoke-PeerReader -Dir $roDir -Agent 'implementer' -Root $peerRoot
+Assert-True "a peer that only read a file did not author it" `
+    ([string]::IsNullOrWhiteSpace($rRo.Out)) "a read_file call was treated as an edit: $($rRo.Out)"
+
+# Debug logging is a vendor setting that can be off, and the reader runs on a
+# branch where nothing ran in parallel far more often than not. Absent evidence
+# must subtract nothing rather than everything.
+$emptyDir = Join-Path $peerRoot 'debug-logs-empty'
+New-Item -ItemType Directory -Path $emptyDir -Force | Out-Null
+$rEmpty = Invoke-PeerReader -Dir $emptyDir -Agent 'implementer' -Root $peerRoot
+Assert-True "no log of this agent's own call means nothing measurable" `
+    ($rEmpty.Code -ne 0 -and [string]::IsNullOrWhiteSpace($rEmpty.Out)) `
+    "exit $($rEmpty.Code), out: $($rEmpty.Out)"
+
+Remove-Item $peerRoot -Recurse -Force -ErrorAction SilentlyContinue
+
+# The wiring. A reader nothing calls protects nothing.
+foreach ($pair in @(
+        @{ n = 'implementer-stop.ps1'; t = $implPs1; c = 'Get-AfPeerEdits' },
+        @{ n = 'refactorer-stop.ps1';  t = $refacPs1; c = 'Get-AfPeerEdits' },
+        @{ n = 'implementer-stop.sh';  t = $implSh;  c = 'af_peer_edits' },
+        @{ n = 'refactorer-stop.sh';   t = $refacSh; c = 'af_peer_edits' })) {
+    Assert-True "$($pair.n) subtracts what a concurrent peer edited" `
+        ($pair.t -match [regex]::Escape($pair.c)) `
+        "the hook still scopes its gates from shared git state alone"
+}
+
+# The boundary #86 drew, restated. Lint is not an authorship question: a ruff
+# violation is real whoever produced it, and the peer's own Stop hook lints the
+# peer's files. Subtracting here would turn a correction into a bypass.
+foreach ($pair in @(
+        @{ n = 'implementer-stop.ps1'; t = $implPs1 }, @{ n = 'implementer-stop.sh'; t = $implSh },
+        @{ n = 'refactorer-stop.ps1'; t = $refacPs1 }, @{ n = 'refactorer-stop.sh'; t = $refacSh })) {
+    $lintScope = ($pair.t -split "`r?`n") | Where-Object {
+        $_ -match 'changed_lint_py=|changedLintPy =|inherited_lint_py=|inheritedLintPy ='
+    }
+    Assert-True "$($pair.n) does not subtract peer edits from the lint scope" `
+        (-not ($lintScope -match 'peer_edits|peerEdits')) `
+        "lint scope is filtered by peer authorship: $lintScope"
 }
 
 Write-Output ""

@@ -458,9 +458,18 @@ as its step completes — e.g. `1. [x] Plan — 3 subtasks identified`,
 
 ## Parallel Execution
 
-When the plan has **independent** subtasks, run subagents in parallel — e.g.
-multiple test-writers for unrelated modules, or implementer and documenter
-together. Only parallelise when the subtasks have no dependencies on each other.
+Parallelise **read-only** agents freely — critics, `researcher`,
+`compliance-checker`, `Explore` — they author nothing.
+
+Run **producers sequentially** in a shared checkout: `test-writer`,
+`implementer`, `refactorer`, `documenter`. Independent subtasks are not enough:
+producer stop-hook gates scope themselves from `git diff`, which is global to
+the working tree, so a peer's in-flight edits land in this agent's scope —
+measured, one agent was made to stamp an authorship marker on another's file
+(#101). The hooks now subtract a concurrent peer's files, but that repairs the
+misattribution rather than licensing the practice, and cannot help when the
+editor's session logs are missing. `WORKTREE_ENABLED=true` gives one worktree
+per workflow, not per subagent.
 
 ## Mandatory Escalation Triggers
 
