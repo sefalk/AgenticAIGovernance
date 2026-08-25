@@ -983,6 +983,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The coordinator had two tokens of headroom left (#205).** All three context
+  ceilings were measured within 0.7 % of their limits at once — AF always-on
+  3,476/3,500, AF conditional 3,824/3,850, and the coordinator at 9,448/9,450.
+  A gate that passes by two tokens is not a gate that passed; it is a gate
+  about to fail on the next sentence anybody adds, and the agent it would block
+  is the one every workflow starts with.
+
+  Fixed by **compression alone** — no rule was removed, nothing was extracted
+  into a skill, and no ceiling was raised:
+
+  | budget | before | after | headroom |
+  |---|---|---|---|
+  | coordinator | 9,448 | **9,128** | 322 / 9,450 |
+  | AF always-on | 3,476 | **3,414** | 86 / 3,500 |
+  | AF conditional | 3,824 | **3,811** | 39 / 3,850 |
+
+  `coordinator.agent.md`, `quality-gates.instructions.md`,
+  `git-workflow.instructions.md` and `tooling.instructions.md` were rewritten
+  denser: bullet lists that carried no branching collapsed to prose, split
+  paragraphs stating one thing were merged, and pointers to skills were reduced
+  to the pointer. Exactly one thing was deleted, and it was not a rule — the
+  standalone line restating that Steps 0b and 7b are mandatory bookends, which
+  the Steps 1–7b preamble and the Full TDD note both already say. Stating a
+  rule three times does not make it three rules.
+
+  Two limits are recorded rather than papered over. The conditional budget
+  gained only 13 tokens and still sits 39 from its ceiling — the compressible
+  slack in those files is spent, and the next request there will need
+  extraction. And the gate counts less than it appears to: `check-context-budget.py`
+  measures `copilot-instructions.md` plus the always-matching `instructions/*.md`,
+  so the skill catalogue (29 active skills ≈ 1,949 tok), the agent catalogue
+  (17 agents ≈ 918 tok) and every MCP tool description are always-on payload
+  that no ceiling sees. That is roughly the size of the entire measured
+  always-on budget, sitting outside it — which also means extraction into a
+  skill relocates tokens out of the measurement rather than out of the request.
+  Filed as #206; it is why nothing was extracted here. Refs #205.
+
 - The header comments of `run-lint.ps1` / `run-lint.sh`, `tooling.instructions.md`
   and the `test-execution` skill now state *why* a direct `ruff` call does not
   reproduce the gate: `check-python-linting.py` applies the project's own ruff
