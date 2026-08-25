@@ -270,9 +270,10 @@ def render(result: dict[str, Any]) -> str:
 def _by_agent(per_agent: dict[str, Totals] | None) -> list[str]:
     """Which log each request came from, keyed by agent (issue #212).
 
-    The fields are the totals' fields so the split reconciles against them:
-    a breakdown that does not add up invites the reader to pick whichever
-    number suits the argument.
+    `totals` carries the same fields as the session totals so the split
+    reconciles against them, and `by_model` resolves the two axes jointly:
+    "the implementer is expensive" and "opus is expensive" are different
+    findings, and only the crossing says which agent to move off which model.
     """
     if per_agent is None:
         # Withheld, not empty: `{}` would read as "no agent consumed anything".
@@ -284,11 +285,19 @@ def _by_agent(per_agent: dict[str, Totals] | None) -> list[str]:
     # who stops after two lines should have read the two that matter.
     order = sorted(per_agent.items(), key=lambda kv: (-kv[1].nano_aiu, kv[0]))
     for agent, bucket in order:
+        lines.append(f"    {agent}:")
         lines.append(
-            f"    {agent}: {{ invocations: {bucket.invocations}, requests: {bucket.requests}, "
+            f"      totals: {{ invocations: {bucket.invocations}, requests: {bucket.requests}, "
             f"unbilled_requests: {bucket.unbilled}, input_uncached: {bucket.input_uncached}, "
             f"cached: {bucket.cached}, output: {bucket.output}, credits: {bucket.credits} }}"
         )
+        if not bucket.by_model:
+            lines.append("      by_model: {}")
+            continue
+        lines.append("      by_model:")
+        for model, sub in sorted(bucket.by_model.items()):
+            credits = round(sub["nano_aiu"] / NANO_AIU_PER_CREDIT, 3)
+            lines.append(f"        {model}: {{ requests: {sub['requests']}, credits: {credits} }}")
     return lines
 
 

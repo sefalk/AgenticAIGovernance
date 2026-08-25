@@ -156,12 +156,22 @@ try {
 
     # --- N: cost is attributed to the log it came from (issue #212) ---------
     # Same fixture as B: the total is identical, the split is what is new.
-    $results['N_parent_bucket']   = ($r.Output -match 'main:\s*\{[^}]*credits:\s*3(\.0+)?[^}]*\}')
-    $results['N_child_bucket']    = ($r.Output -match 'implementer:\s*\{[^}]*credits:\s*1(\.0+)?[^}]*\}')
-    # A split that does not add up lets a reader pick the number that suits them
-    $perAgent = [regex]::Matches($r.Output, '(?m)^\s{4}\S+:\s*\{[^}]*requests:\s*(\d+)')
+    $results['N_parent_bucket']   = ($r.Output -match 'main:\s+totals:\s*\{[^}]*credits:\s*3(\.0+)?[^}]*\}')
+    $results['N_child_bucket']    = ($r.Output -match 'implementer:\s+totals:\s*\{[^}]*credits:\s*1(\.0+)?[^}]*\}')
+    # A split that does not add up lets a reader pick the number that suits them.
+    # Anchored on `invocations`: a greedy `[^}]*` lands on `unbilled_requests`
+    # and silently sums the wrong column.
+    $perAgent = [regex]::Matches($r.Output, 'totals:\s*\{\s*invocations:\s*\d+,\s*requests:\s*(\d+)')
     $sumReq   = ($perAgent | ForEach-Object { [int]$_.Groups[1].Value } | Measure-Object -Sum).Sum
-    $results['N_reconciles_total'] = ($sumReq -eq 2 -and $r.Output -match '(?m)^\s*requests:\s*2\s*$')
+    $results['N_reconciles_total'] = ($perAgent.Count -eq 2 -and $sumReq -eq 2 -and
+                                      $r.Output -match '(?m)^\s*requests:\s*2\s*$')
+
+    # Agent and model must resolve on a joint key: "the implementer is
+    # expensive" and "opus is expensive" are different findings, and only the
+    # crossing says which agent to move off which model.
+    $results['N_agent_model_crossed'] = (
+        $r.Output -match 'main:\s+totals:\s*\{[^}]*\}\s+by_model:\s+claude-opus-5:\s*\{[^}]*credits:\s*3(\.0+)?' -and
+        $r.Output -match 'implementer:\s+totals:\s*\{[^}]*\}\s+by_model:\s+claude-haiku-4\.5:\s*\{[^}]*credits:\s*1(\.0+)?')
 
     # Eleven implementer calls in one session is the case that motivated this:
     # repeated invocations must collapse into one bucket, counted.
@@ -174,10 +184,13 @@ try {
     )
     $fixtures += $dir
     $r = Invoke-Collector @('--session-dir', $dir)
-    $results['N_invocations_counted'] = ($r.Output -match 'implementer:\s*\{\s*invocations:\s*2\b')
-    $results['N_invocations_summed']  = ($r.Output -match 'implementer:\s*\{[^}]*credits:\s*3(\.0+)?[^}]*\}')
+    $results['N_invocations_counted'] = ($r.Output -match 'implementer:\s+totals:\s*\{\s*invocations:\s*2\b')
+    $results['N_invocations_summed']  = ($r.Output -match 'implementer:\s+totals:\s*\{[^}]*credits:\s*3(\.0+)?[^}]*\}')
     # The parent ran but billed nothing; dropping it would hide that it ran.
-    $results['N_idle_parent_kept']    = ($r.Output -match 'main:\s*\{[^}]*requests:\s*0\b')
+    $results['N_idle_parent_kept']    = ($r.Output -match 'main:\s+totals:\s*\{[^}]*requests:\s*0\b')
+    # An agent that billed nothing has no model rows -- it must still say so
+    # rather than inherit the session's models and imply spend it never had.
+    $results['N_idle_parent_no_models'] = ($r.Output -match 'main:\s+totals:\s*\{[^}]*\}\s+by_model:\s*\{\}')
 
     # An id format without a trailing hyphen must become an odd bucket, never
     # a silent zero -- the filename is the only record that the agent ran.
@@ -188,7 +201,7 @@ try {
     ) -ChildName 'runSubagent-unparseable.jsonl'
     $fixtures += $dir
     $r = Invoke-Collector @('--session-dir', $dir)
-    $results['N_unparsed_name_visible'] = ($r.Output -match 'runSubagent-unparseable:\s*\{[^}]*credits:\s*1(\.0+)?')
+    $results['N_unparsed_name_visible'] = ($r.Output -match 'runSubagent-unparseable:\s+totals:\s*\{[^}]*credits:\s*1(\.0+)?')
 
     # --- C/D/E: the log is a pointer, not evidence --------------------------
     $missing = Join-Path ([IO.Path]::GetTempPath()) ("sesscost-absent-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -260,7 +273,7 @@ try {
     $allowed = @(
         'cost', 'schema_version', 'collector', 'available', 'reason', 'coverage',
         'sessions', 'requests', 'unbilled_requests', 'tokens', 'input_uncached',
-        'cached', 'output', 'credits', 'by_model', 'by_agent', 'invocations',
+        'cached', 'output', 'credits', 'by_model', 'by_agent', 'invocations', 'totals',
         'main', 'environment', 'vscode', 'copilot_chat', 'claude-opus-5',
         'claude-haiku-4.5'
     )

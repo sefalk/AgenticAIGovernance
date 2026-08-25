@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `coordinator`; the file records where a request was made, not who wrote it.
   `schema_version` moves to 2.
 
+  Each bucket also carries its own `by_model:`, so agent and model resolve on a
+  joint key rather than as two separate lists that cannot be crossed. The
+  crossing is what makes the number actionable: on the same session `main`
+  accounts for 33% of requests and 75% of credits purely because it is the only
+  bucket running on opus — a routing decision. An agent that were expensive on
+  a *cheap* model would be a prompt problem instead, and the two look identical
+  until the axes are joined.
+
 - **A workflow that leaves no log reads as a cheap workflow (#210).** The YAML
   log in `.github/logs/` is the only per-run record of what a workflow cost and
   which definitions it loaded. It was never written for every run: Review Only
