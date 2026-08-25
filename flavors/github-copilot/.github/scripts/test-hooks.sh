@@ -1073,6 +1073,72 @@ else
     assert_true "implementer-stop.sh does not scope the lint gate to authored files" 1
 fi
 
+# --- Concurrent producer scope (issue #101) --------------------------------
+#
+# `git diff` is global to the checkout, so two producers on one branch read
+# each other's in-flight edits as their own: measured, an implementer was told
+# to document a file a parallel documenter was writing, and the provenance gate
+# would have had it stamp its own name on it. The editor names one debug log
+# per subagent call, so who edited what is a measurement and not a claim.
+
+echo "## concurrent producer scope (issue #101)"
+
+if [ -f "$HOOK_DIR/concurrent-agent-edits.py" ]; then
+    assert_true "the peer-edit reader ships with the hooks" 1
+else
+    assert_true "the peer-edit reader ships with the hooks" 0 "no concurrent-agent-edits.py in hooks/scripts"
+fi
+
+# A reader nothing calls protects nothing.
+for f in implementer refactorer; do
+    if grep -q 'af_peer_edits' "$HOOK_DIR/${f}-stop.sh" 2>/dev/null; then
+        assert_true "${f}-stop.sh subtracts what a concurrent peer edited" 1
+    else
+        assert_true "${f}-stop.sh subtracts what a concurrent peer edited" 0 \
+            "the hook still scopes its gates from shared git state alone"
+    fi
+done
+
+# The #86 boundary restated. The peer's own Stop hook lints the peer's files;
+# subtracting here would turn a correction into a bypass.
+for f in implementer refactorer; do
+    if grep -E 'changed_lint_py=|inherited_lint_py=' "$HOOK_DIR/${f}-stop.sh" 2>/dev/null | grep -q 'peer_edits'; then
+        assert_true "${f}-stop.sh does not subtract peer edits from the lint scope" 0 \
+            "lint scope is filtered by peer authorship"
+    else
+        assert_true "${f}-stop.sh does not subtract peer edits from the lint scope" 1
+    fi
+done
+
+# `grep -vxF` reads its pattern argument as one pattern per line, so a single
+# blank line is an empty pattern that -x matches against every line -- which
+# would filter the entire scope away rather than nothing. The strip helper
+# drops blank lines first, and that is load-bearing, not tidiness.
+# shellcheck source=/dev/null
+if [ -f "$HOOK_DIR/_common.sh" ]; then
+    strip_out=$(
+        AF_CODE_ROOT="." bash -c '
+            . "$1" >/dev/null 2>&1 || true
+            af_strip_lines "src/a.py
+src/b.py" ""
+        ' _ "$HOOK_DIR/_common.sh" 2>/dev/null || true
+    )
+    assert_contains "an empty peer list leaves the scope intact" "$strip_out" "src/a.py"
+    assert_contains "an empty peer list drops nothing at all" "$strip_out" "src/b.py"
+
+    strip_out2=$(
+        AF_CODE_ROOT="." bash -c '
+            . "$1" >/dev/null 2>&1 || true
+            af_strip_lines "src/a.py
+src/b.py" "
+src/b.py
+"
+        ' _ "$HOOK_DIR/_common.sh" 2>/dev/null || true
+    )
+    assert_contains "a peer list padded with blank lines still keeps this agent's file" "$strip_out2" "src/a.py"
+    assert_not_contains "a peer list padded with blank lines still drops the peer's file" "$strip_out2" "src/b.py"
+fi
+
 # --- Artifact existence is a filesystem question (issue #87) ---------------
 #
 # The post-flight checked for the workflow log and retro with git-aware search,
