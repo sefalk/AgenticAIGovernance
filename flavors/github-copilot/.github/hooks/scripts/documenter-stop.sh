@@ -61,7 +61,19 @@ if [ "$plan_found" != "1" ]; then
     # Unclassifiable is not the same as fine, and saying nothing would repeat
     # the defect this gate is meant to prevent. Completeness is still enforced
     # once, by the compliance-checker post-flight gate.
-    echo "{\"systemMessage\": \"documenter:Stop — no plan file names 'agent/${workflow_id}', so a mid-workflow call cannot be told from finalisation; artifact gate not applied. Completeness is enforced by the compliance-checker post-flight gate.\"}"
+    #
+    # Review Only and Plan Only never write a plan file, so this branch is the
+    # only place their log-only documenter call is observable at all. The
+    # notice below is advisory on purpose: a mid-workflow documenter call has
+    # no log yet and must not be blocked for it (issue #210).
+    coverage=$(af_conf_get AF_WORKFLOW_LOG_COVERAGE all)
+    coverage_note=""
+    if [ "$coverage" = "all" ] &&
+       [ ! -f ".github/logs/${workflow_id}.yaml" ] &&
+       [ ! -f ".github/logs/${workflow_id}.yml" ]; then
+        coverage_note=" NOTE: AF_WORKFLOW_LOG_COVERAGE=all and .github/logs/${workflow_id}.yaml does not exist — if this call is finalising the workflow, write the log now; a run without one is indistinguishable from a cheap run."
+    fi
+    echo "{\"systemMessage\": \"documenter:Stop — no plan file names 'agent/${workflow_id}', so a mid-workflow call cannot be told from finalisation; artifact gate not applied. Completeness is enforced by the compliance-checker post-flight gate.${coverage_note}\"}"
     exit 0
 fi
 

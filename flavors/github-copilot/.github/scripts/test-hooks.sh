@@ -588,6 +588,10 @@ stop_case() {
             pass)  [[ "$out" != *'"block"'* && -n "$out" ]] && ok=1 ;;
             unclassified)
                 [[ "$out" != *'"block"'* && "$out" == *'no plan file'* ]] && ok=1 ;;
+            coverage)
+                [[ "$out" != *'"block"'* && "$out" == *'AF_WORKFLOW_LOG_COVERAGE=all'* ]] && ok=1 ;;
+            no-coverage)
+                [[ "$out" != *'"block"'* && "$out" != *'AF_WORKFLOW_LOG_COVERAGE'* ]] && ok=1 ;;
             pending) [[ "$out" == *'PENDING'* && "$out" != *'WARNING'* ]] && ok=1 ;;
             warning) [[ "$out" == *'WARNING'* ]] && ok=1 ;;
         esac
@@ -638,6 +642,20 @@ doc_stop_case "another workflow's COMPLETED plan does not finalise this one" \
 # than passing in silence -- the failure mode this whole issue family is about.
 doc_stop_case "with no plan file the gate says it could not classify the call" \
     unclassified 'README.md=x\n'
+
+# Review Only and Plan Only write no plan file, so the branch above is the only
+# place their log-only documenter call can be seen -- which is why the coverage
+# rule has to speak here or nowhere (issue #210). It stays advisory: the same
+# branch carries legitimate mid-workflow calls that have no log yet.
+doc_stop_case "under coverage=all an unclassifiable call with no log is told to write one" \
+    coverage 'README.md=x\n' '.github/af-env.conf=AF_WORKFLOW_LOG_COVERAGE=all\n'
+
+doc_stop_case "the notice is about the missing log, not about every unclassifiable call" \
+    no-coverage 'README.md=x\n' '.github/af-env.conf=AF_WORKFLOW_LOG_COVERAGE=all\n' \
+    '.github/logs/72-x.yaml=workflow_id: "72-x"\nstatus: "COMPLETED"\n'
+
+doc_stop_case "coverage=standard+ opts out of the notice as documented" \
+    no-coverage 'README.md=x\n' '.github/af-env.conf=AF_WORKFLOW_LOG_COVERAGE=standard+\n'
 
 # stop-tests judges the same condition with less force (AC4). It used to warn
 # about missing closing artifacts for a workflow that had not claimed to be
