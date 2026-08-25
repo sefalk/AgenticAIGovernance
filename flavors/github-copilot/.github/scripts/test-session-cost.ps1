@@ -172,7 +172,7 @@ try {
     $results['A_session_reported'] = ($r.Output -match [regex]::Escape($SID))
     $results['A_environment']      = ($r.Output -match 'vscode:\s*"?1\.131\.0' -and
                                       $r.Output -match 'copilot_chat:\s*"?0\.59\.0')
-    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*3\s*$')
+    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*4\s*$')
     $results['A_collector_named']  = ($r.Output -match 'collector:\s*"?collect-session-cost\.py@')
 
     # --- B: subagent child file is summed, per model ------------------------
@@ -330,6 +330,63 @@ try {
     $r = Invoke-Collector @('--session-dir', $dir)
     $results['Q_facts_opt_in'] = ($r.Output -match '(?m)^\s*facts:\s*null\s*$')
 
+    # --- R: the purpose axis (issue #215) -----------------------------------
+    # Compaction is the price of the session having grown too long. Folded into
+    # the bucket of whichever agent's turn triggered it, it reads as that
+    # agent's spend and points at the wrong lever.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1000000000),
+        (New-LlmRequest -NanoAiu 4000000000 -DebugName 'summarizeConversationHistory'),
+        (New-LlmRequest -NanoAiu $null -DebugName 'backgroundTodoAgent'),
+        (New-LlmRequest -NanoAiu 500000000 -DebugName 'somethingNewFromTheVendor')
+    ) -Child @(
+        (New-LlmRequest -NanoAiu 2000000000 -DebugName 'tool/runSubagent-implementer')
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['R_compaction_split']  = ($r.Output -match
+        '(?m)^  by_purpose:\s*$[\s\S]*?^\s*compaction:\s*\{\s*requests:\s*1,\s*unbilled:\s*0,\s*credits:\s*4(\.0+)?\s*\}')
+    # Unbilled and therefore invisible to every credit-weighted view; listed
+    # anyway, because "it happened and cost nothing" is a different statement
+    # from "it did not happen".
+    $results['R_background_listed'] = ($r.Output -match
+        'background:\s*\{\s*requests:\s*0,\s*unbilled:\s*1,\s*credits:\s*0(\.0+)?\s*\}')
+    # An unrecognised debugName must not be sorted into a known bucket.
+    $results['R_other_not_guessed'] = ($r.Output -match
+        'other:\s*\{\s*requests:\s*1,\s*unbilled:\s*0,\s*credits:\s*0\.5\s*\}' -and
+        $r.Output -notmatch 'somethingNewFromTheVendor')
+    $results['R_agent_work_summed'] = ($r.Output -match
+        'agent_work:\s*\{\s*requests:\s*2,\s*unbilled:\s*0,\s*credits:\s*3(\.0+)?\s*\}')
+
+    # The axis must reconcile like the others, or it is a fifth opinion.
+    $pm = [regex]::Matches($r.Output, '(?m)^    (agent_work|compaction|background|other):\s*\{\s*requests:\s*(\d+),\s*unbilled:\s*(\d+),\s*credits:\s*([\d.]+)')
+    $pReq = 0; $pUnb = 0; $pCr = 0.0
+    foreach ($x in $pm) { $pReq += [int]$x.Groups[2].Value; $pUnb += [int]$x.Groups[3].Value; $pCr += [double]$x.Groups[4].Value }
+    $results['R_purpose_reconciles'] = ($pm.Count -eq 4 -and $pReq -eq 4 -and $pUnb -eq 1 -and
+                                        [math]::Abs($pCr - 7.5) -lt 0.0005 -and
+                                        $r.Output -match '(?m)^\s*credits:\s*7\.5\s*$')
+
+    # Inside the bucket too: `main` must not read as 5 credits of coordinator work.
+    # Sliced per bucket rather than matched across the whole block, so a lazy
+    # `[\s\S]*?` cannot borrow a line from the next agent and pass.
+    function Get-Bucket([string]$text, [string]$name) {
+        # Single-quoted and concatenated: in a double-quoted string `$(` opens a
+        # PowerShell subexpression and the pattern never reaches the regex engine.
+        $pattern = '(?m)^    ' + [regex]::Escape($name) + ':\s*$([\s\S]*?)(?=^    \S|^  \S|\z)'
+        $m = [regex]::Match($text, $pattern)
+        if ($m.Success) { return $m.Groups[1].Value } else { return '' }
+    }
+    $mainB  = Get-Bucket $r.Output 'main'
+    $implB  = Get-Bucket $r.Output 'implementer'
+    $results['R_bucket_labelled'] = ($mainB -match 'compaction:\s*\{\s*requests:\s*1,\s*unbilled:\s*0,\s*credits:\s*4(\.0+)?\s*\}' -and
+                                     $mainB -match 'agent_work:\s*\{\s*requests:\s*1,')
+    # Rendered even where it is uniform, so absence never has two meanings --
+    # and the implementer must carry no compaction it did not cause.
+    $results['R_uniform_bucket_rendered'] = ($implB -match '(?m)^\s*by_purpose:\s*$' -and
+                                             $implB -match 'agent_work:\s*\{\s*requests:\s*1,\s*unbilled:\s*0,\s*credits:\s*2(\.0+)?\s*\}' -and
+                                             $implB -notmatch 'compaction')
+
     # --- C/D/E: the log is a pointer, not evidence --------------------------
     $missing = Join-Path ([IO.Path]::GetTempPath()) ("sesscost-absent-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
     $r = Invoke-Collector @('--session-dir', $missing)
@@ -414,7 +471,8 @@ try {
         'cached', 'output', 'credits', 'by_model', 'by_agent', 'invocations', 'totals',
         'main', 'environment', 'vscode', 'copilot_chat', 'claude-opus-5',
         'claude-haiku-4.5', 'rate_card', 'credits_by_kind', 'cache_read',
-        'unexplained', 'facts'
+        'unexplained', 'facts', 'by_purpose', 'agent_work', 'compaction',
+        'background', 'other', 'unbilled'
     )
     $keys = [regex]::Matches($r.Output, '(?m)(?:^\s*|[{,]\s*)([A-Za-z][\w.\-]*)\s*:') |
             ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
