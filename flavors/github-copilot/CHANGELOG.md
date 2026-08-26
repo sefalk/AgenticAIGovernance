@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Cost can now be traced to the definitions that cause it, not only to the
+  agents that spend it (#214).** Every block so far answered *who spent*. None
+  could answer *why a prompt is that large*, because none of them knew what was
+  in it. `by_entity:` names the tools, skills, agents and instruction files
+  actually delivered in each request, measured from the payload dumps the editor
+  writes next to the log — not from the source files on disk, which is the
+  difference between what shipped and what exists.
+
+  The first measurement of one real session says the budget discussion has been
+  aimed at the wrong target. The tool catalogue is 197 definitions and roughly
+  61651 estimated tokens on *every request that carried it*; the entire skill
+  catalogue is 3631, agents 1129, instruction entries 651. Two MCP servers —
+  pylance at 9926 and playwright at 3823 — shipped on all 633 requests that
+  named a tools payload and were called zero times. Disabling one unused server
+  is worth several times what trimming every skill description in the
+  repository would save.
+
+  The second finding is cheaper still to act on. Four of the seven instruction
+  files were skipped on all 61 customization resolutions, every one for an
+  `applyTo` pattern that matched no attached file — while four *attached*
+  instruction files were pasted in full on each of the 589 requests that named
+  a system prompt, at 5062 estimated tokens, nearly eight times what their
+  catalogue entries cost.
+
+  What the block deliberately does not do is put a price on any of it.
+  `credits_attributable: false` is rendered in the block itself, not only in
+  the docs: an entity's tokens live inside a request's `inputTokens`, and a
+  request-level billing record cannot be split by which span of the prompt
+  produced it. A per-entity credit figure could only be invented by dividing.
+  `invoked` follows the same rule and appears only for tool groups, where calls
+  are logged — a zero next to a skill's token count would read as "never used"
+  when it means "not measurable".
+
+  `--entities-out` writes the rows as NDJSON at grain **payload × entity**, its
+  own schema version and its own header, deliberately not the facts file's
+  grain. `requests` on a row is a multiplier, not something the row did:
+  summing it counts each request once per definition it carried — 158300
+  against 808 requests actually made. The fan trap is left visible as a
+  column instead of being materialised as duplicate rows, and a regression check
+  asserts the file is not summable to a credit total rather than only saying so
+  in prose. `schema_version` 5; 97 regression checks, each new one shown able to
+  fail under a targeted mutation of the collector.
+
 - **Compaction is no longer billed to the agent that did not cause it (#215).**
   The block split by model and by agent. Both answer *who spent*; neither
   answered *what the request was for*, and one category of request is not the
