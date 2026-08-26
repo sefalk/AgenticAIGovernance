@@ -41,6 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the intended behaviour and also the defect #222 tracks: invisible is cheap,
   and indistinguishable from absent.
 
+  The pre-commit guard needed a fix to make any of this bind at commit time. It
+  exported `copilot-instructions.md`, `instructions/` and `agents/` and never
+  `skills/`, so the first commit carrying the new ceiling reported 1416 tokens
+  where the checker reported 3322 — agents plus instruction entries, with the
+  largest kind missing entirely. It now exports `skills/*/SKILL.md`, and only
+  that: the reference material beside a skill loads on demand and costs the
+  budget nothing.
+
 - **Cost can now be traced to the definitions that cause it, not only to the
   agents that spend it (#214).** Every block so far answered *who spent*. None
   could answer *why a prompt is that large*, because none of them knew what was
