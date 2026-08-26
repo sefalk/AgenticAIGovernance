@@ -13,14 +13,12 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-# Worktree-aware path resolution (see ideas/feature-git-worktrees.md §12).
-$mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
-$codeRoot = $mainRoot
-$sentinel = Join-Path $mainRoot '.github/.active-worktree'
-if (Test-Path $sentinel) {
-    $p = (Get-Content $sentinel -Raw -ErrorAction SilentlyContinue).Trim()
-    if ($p -and (Test-Path $p)) { $codeRoot = $p }
-}
+# Root resolution AND the shared provenance detector both come from here. The
+# hand-rolled worktree block this replaced left Test-AfProvenanceMarker
+# undefined, and PowerShell abandons the enclosing `if` on a command-not-found
+# error, so Gate 2 silently never fired (issue #175).
+. "$PSScriptRoot/_common.ps1"
+$codeRoot = $AfCodeRoot
 
 # Read stdin (hook input JSON -- required by protocol)
 $null = [Console]::In.ReadToEnd()
@@ -68,6 +66,28 @@ if ($exitCode -eq 5) {
     $output = @{
         systemMessage = "test-writer:Stop -- no tests collected, Red gate skipped"
     } | ConvertTo-Json -Compress
+    Write-Output $output
+    exit 0
+}
+
+# Not every red is a red. A file that cannot be imported (exit 2) or a test that
+# errors before it runs -- missing fixture, fixture raising -- never reaches the
+# behaviour it claims to guard, and it stays red after a perfect implementation.
+# Everything but 0 and 5 used to fall through to "Red phase satisfied", which
+# sent the Green phase hunting for a defect that does not exist (issue #123).
+#
+# Read off the summary line as well as the exit code: a missing fixture reports
+# `1 error` and still exits 1, indistinguishable from a genuine failure by exit
+# code alone. Measured 2026-08-24.
+$summaryLine = ($result | Where-Object { "$_".Trim() } | Select-Object -Last 1 | Out-String).Trim()
+if ($exitCode -eq 2 -or $summaryLine -match '\d+ error') {
+    $output = @{
+        hookSpecificOutput = @{
+            hookEventName = "Stop"
+            decision      = "block"
+            reason        = "Red phase invalid: the suite reported collection or setup ERRORS, not test failures. A test that cannot be collected or set up never reaches the behaviour it claims to guard, and it stays red after a correct implementation. Fix the test construction -- imports, syntax, fixtures, schema-less DataFrames -- so the red comes from an assertion. Summary: $summaryLine"
+        }
+    } | ConvertTo-Json -Compress -Depth 3
     Write-Output $output
     exit 0
 }

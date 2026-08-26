@@ -147,9 +147,7 @@ def scan_file(path: Path) -> list[tuple[int, str, str]]:
 
 def main(argv: list[str] | None = None) -> int:
     """Scan markdown for legacy azure-devops-mcp tool identifiers."""
-    parser = argparse.ArgumentParser(
-        description="Detect legacy Azure DevOps MCP tool identifiers."
-    )
+    parser = argparse.ArgumentParser(description="Detect legacy Azure DevOps MCP tool identifiers.")
     parser.add_argument("--root", default=".github", help="Directory to scan (default: .github)")
     parser.add_argument("--quiet", action="store_true", help="Only print the summary line")
     args = parser.parse_args(argv)

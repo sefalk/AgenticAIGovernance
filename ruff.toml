@@ -1,0 +1,23 @@
+# The framework makes `ruff format` blocking for its consumers (#124), so it is
+# subject to the same rule (#167). Without this file everything outside
+# mcp-deploy was measured against ruff's defaults, i.e. against a width nobody
+# chose.
+#
+# 120 is not a preference: it is the only ruff decision already made in this
+# repository (flavors/github-copilot/mcp-deploy/pyproject.toml), and it is what
+# the payload's consumers use. Measured against the repository's own 36 tracked
+# Python files, it also reformats the fewest of them -- 19, against 30 at 88.
+line-length = 120
+
+# Explicit, because "auto" writes CRLF on Windows into files git stores as LF.
+# Git normalises that away on commit, so the damage is invisible here and
+# surfaces in a consumer's working tree instead. This repository has already
+# been bitten once by mixed line endings in its own test fixtures.
+[format]
+line-ending = "lf"
+
+[lint]
+# Mirrors mcp-deploy's selection. `ruff check` currently reports 28 findings
+# under it; they are tracked separately and are deliberately not gated here,
+# because this file's job is to state the target, not to hide the distance.
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]

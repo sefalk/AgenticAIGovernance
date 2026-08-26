@@ -21,7 +21,12 @@ on:
   pull_request:
     # Not pull_request_target. That variant runs with the base branch's token
     # and would hand write permissions to code from a fork.
-    types: [opened, reopened, ready_for_review]
+    #
+    # synchronize is here because a pull request that is not mergeable when it
+    # opens can never be armed by the other three events, and nothing else
+    # fires again. #169 was opened two minutes after its base moved, was born
+    # conflicted, and sat green and unmerged until a human clicked (#170).
+    types: [opened, reopened, ready_for_review, synchronize]
     branches: [dev]
 
 permissions:
@@ -66,4 +71,22 @@ jobs:
         # Branch cleanup is not done here. --delete-branch is inert with
         # --auto: gh returns once auto-merge is armed and never sees the merge.
         # prune-merged-branches.yml handles it on a schedule instead (#153).
-        run: gh pr merge "$PR_URL" --auto --merge || gh pr merge "$PR_URL" --merge
+        run: |
+          # Mergeability is computed asynchronously, so a run triggered by a
+          # push regularly arrives before the answer exists.
+          state=UNKNOWN
+          for _ in 1 2 3 4 5 6; do
+            state=$(gh pr view "$PR_URL" --json mergeable --jq .mergeable)
+            if [ "$state" != "UNKNOWN" ]; then break; fi
+            sleep 5
+          done
+
+          # A conflicted pull request cannot be armed at all. Failing on every
+          # push while the author is still resolving would train them to ignore
+          # this job; the push that resolves the conflict is the one that arms.
+          if [ "$state" = "CONFLICTING" ]; then
+            echo "::notice::Conflicts unresolved -- auto-merge will be armed by the push that resolves them."
+            exit 0
+          fi
+
+          gh pr merge "$PR_URL" --auto --merge || gh pr merge "$PR_URL" --merge

@@ -10,7 +10,7 @@
 #   AF_SCRIPT_DIR   directory this file lives in
 #   AF_MAIN_ROOT    checkout where .github/ is deployed
 #   AF_CODE_ROOT    active worktree if the sentinel points at one, else MAIN
-#   AF_CONF         absolute path to .github/af-env.conf
+#   AF_CONF         config path: $AF_CONF_PATH if set, else .github/af-env.conf
 #   AF_CONF_FOUND   1 if that file exists, 0 if it does not
 #   AF_PYTHON       an interpreter that was proven to run, or ""
 #   af_conf_get KEY [DEFAULT]
@@ -36,7 +36,16 @@ if [ -f "$_af_sentinel" ]; then
 fi
 unset _af_sentinel _af_wt
 
-AF_CONF="$AF_MAIN_ROOT/.github/af-env.conf"
+# AF_CONF_PATH overrides the deployed config for this process (issue #108), so
+# a test can state the policy it asserts under instead of inheriting whatever
+# the consumer ships. A path that does not exist counts as NO config rather
+# than falling back to the deployed one -- see _common.ps1 for the reasoning
+# and for why this cannot lift a hard-deny.
+if [ -n "${AF_CONF_PATH:-}" ]; then
+    AF_CONF="$AF_CONF_PATH"
+else
+    AF_CONF="$AF_MAIN_ROOT/.github/af-env.conf"
+fi
 if [ -f "$AF_CONF" ]; then
     AF_CONF_FOUND=1
 else
@@ -320,4 +329,82 @@ af_has_provenance_marker() {
     fi
 
     grep -qE "$_prov_pattern" "$_prov_file" 2>/dev/null
+}
+
+# af_json_escape VALUE
+#
+# Prints VALUE safe to paste between the quotes of a JSON string.
+#
+# The bash hooks build their JSON with printf and interpolate values straight
+# in. A Windows path then emits `C:\Users\...`, whose `\U` is not a JSON escape
+# -- the client cannot parse the object and the decision is discarded, so a
+# correct deny reaches nobody (measured on the worktree gate, issue #200).
+# Escaping quotes alone, as several call sites do, does not cover this.
+#
+# Backslash must be replaced first, or it would double the backslashes this
+# function itself introduces. Control characters are dropped rather than
+# encoded: these values are single-line human-readable reasons.
+af_json_escape() {
+    printf '%s' "${1:-}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\000-\037'
+}
+
+# ── Files a concurrent peer agent edited (issue #101) ──────────────────
+#
+# Producer stop-hook gates scope themselves from `git diff`, which is global to
+# the checkout. Two producers on one branch therefore see each other's in-flight
+# edits, and the gate demands work on a file the agent was told not to touch --
+# then the provenance gate makes it stamp an authorship marker recording the
+# wrong agent.
+#
+# Echoes the files a DIFFERENT subagent edited while this one was running, one
+# per line, so the caller can drop them from its own scope. Every failure path
+# echoes nothing: no stdin, no session id, no session directory, no
+# interpreter, a non-zero exit. Subtracting nothing is exactly today's
+# behaviour, which is the only direction this may fail in -- a watchdog that
+# fails a legitimate workflow gets switched off (issue #108).
+#
+# Usage: af_peer_edits "$stdin_raw" implementer
+af_peer_edits() {
+    _pe_stdin="${1:-}"
+    _pe_agent="${2:-}"
+    [ -n "$_pe_stdin" ] && [ -n "$_pe_agent" ] || return 0
+
+    _pe_sid=$(printf '%s' "$_pe_stdin" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    _pe_transcript=$(printf '%s' "$_pe_stdin" | grep -o '"transcript_path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    [ -n "$_pe_sid" ] && [ -n "$_pe_transcript" ] || return 0
+
+    # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
+    _pe_chat_dir=$(dirname "$(dirname "$_pe_transcript")")
+    _pe_session_dir="${_pe_chat_dir}/debug-logs/${_pe_sid}"
+    [ -d "$_pe_session_dir" ] || return 0
+
+    _pe_reader="${AF_MAIN_ROOT:-.}/.github/hooks/scripts/concurrent-agent-edits.py"
+    [ -f "$_pe_reader" ] || return 0
+
+    _pe_python=""
+    for _pe_c in .venv/bin/python .venv/Scripts/python.exe; do
+        [ -x "$_pe_c" ] && _pe_python="$_pe_c" && break
+    done
+    [ -n "$_pe_python" ] || _pe_python="${AF_PYTHON:-}"
+    [ -n "$_pe_python" ] || return 0
+
+    "$_pe_python" "$_pe_reader" --session-dir "$_pe_session_dir" \
+        --agent "$_pe_agent" --repo-root "${AF_CODE_ROOT:-.}" 2>/dev/null || return 0
+}
+
+# Remove from a newline-separated list ($1) every line present in a second
+# list ($2). Used to drop a concurrent peer's files from a gate scope (#101).
+#
+# The blank-line guard is not cosmetic: `grep -vxF` reads its pattern argument
+# as one pattern PER LINE, so a single empty line in the drop list is an empty
+# pattern, `-x` makes it match every line, and the entire scope would be
+# filtered away -- a gate that silently checks nothing.
+af_strip_lines() {
+    _sl_list="${1:-}"
+    _sl_drop=$(printf '%s\n' "${2:-}" | sed '/^[[:space:]]*$/d')
+    if [ -z "$_sl_list" ] || [ -z "$_sl_drop" ]; then
+        printf '%s' "$_sl_list"
+        return 0
+    fi
+    printf '%s\n' "$_sl_list" | grep -vxF "$_sl_drop" || true
 }

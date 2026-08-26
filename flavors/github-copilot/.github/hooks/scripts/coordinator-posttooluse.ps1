@@ -48,6 +48,26 @@ if ($toolName -notmatch 'terminal|Terminal|runInTerminal') {
     exit 0
 }
 
+# Attribution, not presence. PreToolUse leaves a baseline of what was already
+# dirty, so only what appeared since is attributable to this call (#172).
+# No baseline means no evidence -- and a guard that accuses without evidence is
+# the defect this replaced, so it stays silent instead.
+$gitDir = git -C $codeRoot rev-parse --absolute-git-dir 2>$null | Select-Object -First 1
+if (-not $gitDir -or -not (Test-Path -LiteralPath $gitDir)) {
+    Write-Output '{}'
+    exit 0
+}
+$snapshot = Join-Path $gitDir 'af-delegation.snapshot'
+if (-not (Test-Path -LiteralPath $snapshot)) {
+    Write-Output '{}'
+    exit 0
+}
+$baseline = @{}
+foreach ($line in (Get-Content -LiteralPath $snapshot)) {
+    if ($line -match '\S') { $baseline[$line.TrimEnd()] = $true }
+}
+Remove-Item -LiteralPath $snapshot -Force
+
 # Check for modified/new files in source directories (fast -- scoped to two dirs)
 $status = git -C $codeRoot status --porcelain -- "$SRC_DIR/" tests/ 2>&1
 if (-not $status -or $status.Length -eq 0) {
@@ -55,9 +75,12 @@ if (-not $status -or $status.Length -eq 0) {
     exit 0
 }
 
-# Parse changed files
-$changedFiles = ($status -split "`n" |
+# Keep only entries the baseline did not already contain. Comparing the whole
+# porcelain line, not just the path, so a staged/unstaged transition still counts.
+$changedFiles = @($status -split "`n" |
     Where-Object { $_ -match '\S' } |
+    ForEach-Object { $_.TrimEnd() } |
+    Where-Object { -not $baseline.ContainsKey($_) } |
     ForEach-Object { ($_ -replace '^\s*\S+\s+', '').Trim() } |
     Select-Object -First 10)
 
@@ -67,11 +90,11 @@ if ($changedFiles.Count -eq 0) {
 }
 
 $fileList = $changedFiles -join ', '
-$warning = "DELEGATION VIOLATION DETECTED: $($changedFiles.Count) source file(s) have " +
-    "uncommitted changes: $fileList. " +
-    "If you modified these via terminal, this violates Cardinal Rule 1. " +
-    "The coordinator must delegate all file modifications to subagents. " +
-    "Consider reverting (git checkout -- <file>) and delegating to the proper workflow."
+$warning = "DELEGATION VIOLATION DETECTED: $($changedFiles.Count) source file(s) changed while " +
+    "this terminal call ran: $fileList. " +
+    "Cardinal Rule 1 requires the coordinator to delegate file modifications to subagents. " +
+    "Delegate the change and let the subagent redo it. " +
+    "Do not discard uncommitted work to clear this warning."
 
 @{
     hookSpecificOutput = @{

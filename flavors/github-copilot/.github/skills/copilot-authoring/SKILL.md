@@ -200,6 +200,29 @@ Skills support the same visibility fields as agents:
 | `disable-model-invocation: true` | Yes | No | On-demand only |
 | Both set | No | No | Disabled |
 
+## Framework Skill vs Project Skill
+
+**Platform skills carry the runbook; projects carry a configuration overlay,
+never a forked runbook.**
+
+A project-local skill that restates framework guidance is a drift generator,
+and the cost is correctness, not context. Two overlapping runbooks activated
+for the same agent means the agent follows whichever it happened to consult,
+and the two diverge silently — the framework copy keeps the stale rule while
+the local copy gets the fix, or the reverse.
+
+A project overlay legitimately holds: profile and cluster ids, catalog/schema
+conventions, table-family naming, job-registry entries, local precedents. That
+is a handful of lines.
+
+If a project needs to **change** the runbook rather than parameterise it, that
+is a signal the framework skill is wrong. Fix it upstream instead of forking.
+
+Applies to any skill presenting a run-type or tool-selection matrix:
+**enumerate the disallowed options explicitly, with the reason.** Listing only
+the sanctioned paths does not forbid the others — it just fails to mention
+them, and an agent optimising for speed finds them anyway.
+
 ## Custom Tool Sets
 
 Tool sets group related tools under a name, referenced by agents in `tools:`.

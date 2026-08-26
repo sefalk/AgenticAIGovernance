@@ -34,8 +34,10 @@ function Test-LintPath {
     return ($Path -like "$SRC_DIR/*") -or ($Path -like 'tests/*')
 }
 
-# Read stdin (hook input JSON -- required by protocol)
-$null = [Console]::In.ReadToEnd()
+# Read stdin (hook input JSON -- required by protocol). Kept rather than
+# discarded: `session_id` and `transcript_path` locate this session's subagent
+# logs, which is how the gate below tells its own edits from a peer's (#101).
+$stdinRaw = [Console]::In.ReadToEnd()
 
 # Check if stop hook is already active (prevent infinite loop)
 # The input JSON contains stop_hook_active but we read it as raw;
@@ -95,6 +97,17 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
         }
     } catch {}
 
+    # `git diff` is global to the checkout, so a producer running alongside this
+    # one puts its in-flight edits in this scope. The gate then demands work on
+    # a file this agent was told not to touch, and the provenance gate stamps a
+    # marker naming the wrong author (issue #101).
+    #
+    # Applied to the authorship and quality scopes ONLY. A lint violation is
+    # real whoever produced it, so subtracting from the lint scope would be a
+    # genuine bypass rather than a correction -- the same boundary #86 drew for
+    # `--list-authored`. The peer's own Stop hook lints the peer's files.
+    $peerEdits = @(Get-AfPeerEdits -StdinRaw $stdinRaw -Agent 'implementer' -CodeRoot $codeRoot -MainRoot $mainRoot)
+
     # The unit of accountability is the branch delta: what the merge will add.
     # Resolved here rather than at each gate so provenance, quality and hygiene
     # all speak about the same base.
@@ -119,7 +132,7 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
     # without writing a word of it, and a diff cannot tell the two apart
     # (issue #86). If the query cannot run, keep the whole diff: an
     # unanswerable question must not silence the gate.
-    $authoredPy = @($changedPy | Where-Object { $_ })
+    $authoredPy = @($changedPy | Where-Object { $_ -and ($peerEdits -notcontains $_) })
     if ($mergeBase -and $pythonExe -and (Test-Path $qualityScript) -and $authoredPy.Count -gt 0) {
         Push-Location $codeRoot
         $authoredOut = & $pythonExe $qualityScript @diffBaseArgs --list-authored --files @($authoredPy) 2>$null
@@ -154,7 +167,8 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
 
     # Python quality hard gate (only when changed files are under SRC_DIR)
     $changedSrcPy = @($changedPy | Where-Object {
-        $_ -and ($_ -match '\.py$') -and (($_ -like "$SRC_DIR/*") -or ($_ -like "$SRC_DIR\\*"))
+        $_ -and ($_ -match '\.py$') -and ($peerEdits -notcontains $_) -and
+        (($_ -like "$SRC_DIR/*") -or ($_ -like "$SRC_DIR\\*"))
     })
 
     # Linting scope is wider than the quality scope: type hints and NumPy

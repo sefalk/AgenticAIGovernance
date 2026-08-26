@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: regression-${{ github.ref }}
@@ -38,6 +39,155 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      # test-hooks-integration.ps1 is excluded from the sweep below because a
+      # hosted runner cannot run it. That left the hooks -- the most
+      # safety-critical part of the payload -- covered by nothing once the
+      # hand-run sweep was replaced by CI. This step does not close that hole;
+      # it makes the hole visible at the moment it matters.
+      #
+      # It is attestation, not verification. It records that someone states
+      # they ran the suite. It cannot prove they did, and nothing built on it
+      # may be described as evidence that the hooks were tested. It is worth
+      # having because the failure it prevents is forgetting, not lying.
+      - name: Require local-check attestation for hook changes
+        if: github.event_name == 'pull_request'
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          $marker = 'local-check: test-hooks-integration.ps1'
+
+          $files = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER/files" --paginate --jq '.[].filename'
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Could not list the changed files. Failing rather than passing on an unanswered question."
+            exit 1
+          }
+
+          $hookFiles = @($files | Where-Object { $_ -like 'flavors/github-copilot/.github/hooks/*' })
+          if ($hookFiles.Count -eq 0) {
+            Write-Host "No files under flavors/github-copilot/.github/hooks/ -- attestation not required."
+            exit 0
+          }
+
+          # Read the body from the API rather than the event payload, so that
+          # adding the marker and re-running this job is enough to clear the
+          # check. A re-run replays the original payload, which would still
+          # carry the body as it was when the run was triggered.
+          $body = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER" --jq '.body'
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Could not read the pull request body. Failing rather than passing on an unanswered question."
+            exit 1
+          }
+
+          # HTML comments are stripped first. The pull request template carries
+          # the marker line commented out, and a template nobody edited must
+          # not satisfy a check about work somebody did.
+          $body = [regex]::Replace([string]$body, '(?s)<!--.*?-->', '')
+
+          if ($body -like "*$marker*") {
+            Write-Host "Attestation present. Recorded, not verified."
+            exit 0
+          }
+
+          Write-Host "Changed under the hooks directory:"
+          $hookFiles | ForEach-Object { Write-Host "  $_" }
+          Write-Host "::error::This pull request changes files under flavors/github-copilot/.github/hooks/. test-hooks-integration.ps1 covers them and CI cannot run it. Run it locally, then add this line to the pull request body and re-run this job: $marker"
+          exit 1
+
+      # The files that govern this repository's own development -- editor
+      # settings, the installed pre-commit hook, and CI itself -- are where an
+      # unintended change is least likely to be read, because reviewers read
+      # the payload diff. #123 records a subagent that returned nothing and had
+      # modified .vscode/settings.json anyway. It was caught by a hand-run
+      # `git status`, and nothing required that to happen.
+      #
+      # Payload hooks under flavors/ are deliberately not covered: they have
+      # their own gate above. The prefixes are exact for that reason --
+      # `flavors/github-copilot/.github/...` does not start with `.github/`.
+      #
+      # Like the attestation, this is a declaration gate. It proves somebody
+      # wrote down why the environment changed. It does not review the change,
+      # and it must not be cited as though it had.
+      #
+      # It runs even when the step above failed, so that an author learns about
+      # both problems in one run rather than in two round trips.
+      - name: Require declaration for environment changes
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          $prefixes = @('.vscode/', '.githooks/', '.github/')
+
+          $files = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER/files" --paginate --jq '.[].filename'
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Could not list the changed files. Failing rather than passing on an unanswered question."
+            exit 1
+          }
+
+          $envFiles = @($files | Where-Object {
+            $path = $_
+            @($prefixes | Where-Object { $path.StartsWith($_) }).Count -gt 0
+          })
+          if ($envFiles.Count -eq 0) {
+            Write-Host "No files under .vscode/, .githooks/ or root .github/ -- declaration not required."
+            exit 0
+          }
+
+          # Read the body from the API rather than the event payload, so that
+          # adding the line and re-running this job is enough to clear the
+          # check. A re-run replays the payload as it was when triggered.
+          $bodyLines = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER" --jq '.body'
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Could not read the pull request body. Failing rather than passing on an unanswered question."
+            exit 1
+          }
+
+          # PowerShell hands back a native command's multi-line output as an
+          # array of lines, and casting that array to a string joins it with
+          # spaces -- which collapses the body to one line and defeats every
+          # line anchor below. Measured on #165: the gate did not see its own
+          # declaration. Out-String restores the newlines.
+          $body = $bodyLines | Out-String
+
+          # The template carries the marker commented out, and a template
+          # nobody edited must not satisfy a check about work somebody did.
+          $body = [regex]::Replace([string]$body, '(?s)<!--.*?-->', '')
+
+          # A bare marker would be a checkbox, and a checkbox gets ticked. The
+          # reason is the part a reviewer actually needs, so it is required.
+          #
+          # The horizontal-whitespace class is deliberate: `\s*` would swallow
+          # the newline after an empty `env-change:` and the marker would read
+          # as absent, which costs the author the specific error message.
+          # Every match is considered, so a template line left empty above a
+          # filled-in one does not mask the real declaration.
+          $markerMatches = [regex]::Matches($body, '(?m)^[ \t]*env-change:[ \t]*(.*)$')
+          $reason = ''
+          foreach ($m in $markerMatches) {
+            $candidate = $m.Groups[1].Value.Trim()
+            if ($candidate.Length -ge 10) { $reason = $candidate; break }
+          }
+
+          if ($reason) {
+            Write-Host "Environment change declared: $reason"
+            Write-Host "Declared, not reviewed."
+            exit 0
+          }
+
+          Write-Host "Changed under the environment paths:"
+          $envFiles | ForEach-Object { Write-Host "  $_" }
+          if ($markerMatches.Count -gt 0) {
+            Write-Host "::error::The env-change: line states no reason. Say why this pull request changes the environment, in at least 10 characters, then re-run this job."
+            exit 1
+          }
+          Write-Host "::error::This pull request changes files that govern this repository's own development environment. Add a line to the pull request body saying why, then re-run this job: env-change: <reason>"
+          exit 1
+
       - name: Check out
         uses: actions/checkout@v4
         with:
@@ -52,11 +202,15 @@ jobs:
       # those suites print "SKIP: ..." and exit 0 -- green while asserting
       # nothing. -FailOnSkip below turns that into a hard failure, so these
       # installs are load-bearing, not convenience.
+      #
+      # ruff is pinned because the formatting gate below compares against its
+      # output: an unpinned formatter turns a routine ruff release into a red
+      # build on a pull request that changed no Python at all.
       - name: Install suite prerequisites
         shell: powershell
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ruff pyyaml
+          python -m pip install ruff==0.16.2 pyyaml
 
       # Several suites build throwaway git repositories and commit inside them.
       # A fresh runner has no global git identity, so those commits would fail
@@ -67,6 +221,31 @@ jobs:
           git config --global user.email "ci@example.invalid"
           git config --global user.name "Regression CI"
           git config --global init.defaultBranch main
+
+      # The declaration gate above is a PowerShell block inside this file, so
+      # run-all-tests.ps1 does not cover it -- that sweep is for the payload
+      # under flavors/. This runs the gate's decision table, extracting the
+      # step's own script and driving it against a stubbed `gh`, so that CI's
+      # own machinery is not a shipped script nobody ever executed.
+      - name: Test the env-change declaration gate
+        shell: powershell
+        run: python .github\scripts\test-env-change-gate.py
+
+      # #124 made `ruff format` blocking for consumers while the framework's
+      # own Python went unformatted (#167). The file list comes from git rather
+      # than a hardcoded glob, so a new file is covered the moment it is
+      # tracked -- and an empty list fails loudly instead of passing silently,
+      # which is the failure shape this repository keeps rediscovering.
+      - name: Check formatting of the framework's own Python
+        shell: powershell
+        run: |
+          $files = git ls-files '*.py'
+          if (-not $files) {
+            Write-Error 'No tracked Python found -- the glob is wrong, not the repository.'
+            exit 1
+          }
+          Write-Host "Checking $($files.Count) tracked Python files."
+          ruff format --check --no-respect-gitignore @files
 
       # test-hooks-integration.ps1 is excluded on purpose. It does not test the
       # payload: it reads VS Code's own hook log under %APPDATA%\Code\logs to

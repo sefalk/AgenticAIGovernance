@@ -28,6 +28,69 @@ HOOK_DIR="$GITHUB_DIR/hooks/scripts"
 pass=0
 fail=0
 
+# ── Declared autonomy policy (issue #108) ────────────────────────────────
+#
+# The ask cases below are claims about a policy, and the policy used to be
+# whatever af-env.conf the running checkout shipped. In a consumer that had set
+# AUTONOMY_CAT_FS_WRITE=auto, this suite's PowerShell twin reported nine
+# failures that were that project's configuration, not defects. So the suite
+# states its policy and points the hooks at it through AF_CONF_PATH.
+#
+# Only the AUTONOMY_ keys and the customisable destinations are declared; the
+# rest of the real config is carried over, because other cases assert against
+# the deployment they run in. RETRO_DIR joined the declared set after the same
+# failure recurred under it: 14 red cases in the first consumer to use it, none
+# of them a defect (issue #209).
+POLICY_DIR=$(mktemp -d)
+trap 'rm -rf "$POLICY_DIR"' EXIT
+
+if [ -f "$GITHUB_DIR/af-env.conf" ]; then
+    grep -vE '^[[:space:]]*(AUTONOMY_|RETRO_DIR=)' "$GITHUB_DIR/af-env.conf" > "$POLICY_DIR/base.conf" 2>/dev/null || :
+else
+    : > "$POLICY_DIR/base.conf"
+fi
+
+# set_policy [KEY=VALUE...] -- declares the policy every hook launched after it
+# reads. Overrides are written first because af_conf_get takes the first match.
+set_policy() {
+    local out="$POLICY_DIR/af-env.conf" kv key
+    : > "$out"
+    for kv in "$@"; do printf '%s\n' "$kv" >> "$out"; done
+    printf 'AUTONOMY_LEVEL=balanced\n' >> "$out"
+    printf 'RETRO_DIR=.github/retros/auto\n' >> "$out"
+    for key in GIT_READ GIT_FEATURE GIT_MERGE TESTS FS_READ PKG_INSTALL \
+               DATABRICKS CLOUD_READ FS_WRITE; do
+        printf 'AUTONOMY_CAT_%s=\n' "$key" >> "$out"
+    done
+    cat "$POLICY_DIR/base.conf" >> "$out"
+    AF_CONF_PATH="$out"
+    export AF_CONF_PATH
+}
+
+set_policy
+
+# Inside a fixture, the fixture's own config is the config -- several cases pass
+# one in to test a key (RETRO_DIR, SRC_DIR) and mean that file, not the
+# process-wide declared policy. Call after cd'ing into the fixture.
+use_fixture_conf() {
+    if [ -f ".github/af-env.conf" ]; then
+        AF_CONF_PATH="$PWD/.github/af-env.conf"
+    else
+        AF_CONF_PATH=""
+    fi
+    export AF_CONF_PATH
+}
+
+# af_policy_conf -- the file to seed a fixture with, so it carries the declared
+# policy rather than the checkout's own settings.
+af_policy_conf() {
+    if [ -n "${AF_CONF_PATH:-}" ] && [ -f "$AF_CONF_PATH" ]; then
+        printf '%s' "$AF_CONF_PATH"
+    else
+        printf '%s' "$GITHUB_DIR/af-env.conf"
+    fi
+}
+
 # The hooks resolve and probe their own interpreter (hooks/scripts/_common.sh),
 # so this harness deliberately does NOT shim a non-functional `python3` away --
 # that shim used to hide the very defect the probe exists for (issue #54).
@@ -70,21 +133,26 @@ print(n)
 # and whose allow/ask outcome is decided by tiers this test has no opinion on.
 run_case() {
     local name="$1" hook="$2" mode="$3" json="$4" expect="$5"
+    # Optional 6th arg: a directory to create inside the fixture, so a case
+    # about a path collision can collide with something that exists.
+    local seed="${6:-}"
     local fixture out err rc=0 ok=0 stmts
     local fixture out err rc=0 ok=0
     fixture=$(mktemp -d)
 
     mkdir -p "$fixture/.github/hooks/scripts"
+    if [ -n "$seed" ]; then mkdir -p "$fixture/$seed"; fi
     # HOOK_SRC lets the harness self-check point run_case at a stub emitter
     # without writing into the payload directory.
     cp "${HOOK_SRC:-$HOOK_DIR}/$hook" "$fixture/.github/hooks/scripts/"
     # Hooks source the shared preamble; a deployed .github always ships it,
     # so the fixture has to as well or every hook dies before its first gate.
     cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
-    [ -f "$GITHUB_DIR/af-env.conf" ] && cp "$GITHUB_DIR/af-env.conf" "$fixture/.github/"
+    _conf=$(af_policy_conf); [ -f "$_conf" ] && cp "$_conf" "$fixture/.github/af-env.conf"
 
     (
         cd "$fixture" || exit 1
+        use_fixture_conf
         git init -q .
         if [ "$mode" = "--detach" ]; then
             git -c user.email=fixture@local -c user.name=fixture \
@@ -352,6 +420,19 @@ FETCH_URLS_SPOOF='{"tool_name":"fetch_webpage","tool_input":{"urls":["https://do
 CO_PYTEST='{"tool_name":"runInTerminal","tool_input":{"command":"pytest tests/ -q"}}'
 CO_MSG_BAD='{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"[agent:implementer] make tests pass\""}}'
 CO_MSG_OK='{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"[agent:implementer] make tests pass: extract the pure alignment step\""}}'
+# The worktree gate shipped with no cases in either harness, which is how a
+# path with a space in it got past review (issue #200). `\S+` split the quoted
+# path into arguments, so the branch check read the `-` out of `OneDrive -
+# Siemens` and the collision guard tested a prefix that does not exist.
+WT_SPACED='{"tool_name":"runInTerminal","tool_input":{"command":"git worktree add \"c:\\\\Users\\\\me\\\\OneDrive - Siemens Healthineers\\\\MP Usage XP.worktrees\\\\3097\" agent/3097-micro-movements"}}'
+WT_B_OK='{"tool_name":"runInTerminal","tool_input":{"command":"git worktree add ../wt/feat-x -b agent/feat-auth"}}'
+WT_B_BAD='{"tool_name":"runInTerminal","tool_input":{"command":"git worktree add ../wt/bad -b main"}}'
+# `git worktree add <path> <commit-ish>` names the branch positionally. This
+# twin never parsed that form, so the command below was denied by the
+# PowerShell hook and allowed here.
+WT_POS_BAD='{"tool_name":"runInTerminal","tool_input":{"command":"git worktree add ../wt/bad main"}}'
+WT_COLLIDE_SPACED='{"tool_name":"runInTerminal","tool_input":{"command":"git worktree add \"existing wt\" agent/collide-x"}}'
+WT_COLLIDE_PLAIN='{"tool_name":"runInTerminal","tool_input":{"command":"git worktree add existingwt agent/collide-y"}}'
 
 # The coordinator hook's whole purpose is delegation enforcement, and nothing
 # here exercised it -- which is how it stayed unparsable, and therefore silent,
@@ -363,6 +444,18 @@ run_case "reading a file is not the gate's business"  coordinator-pretooluse.sh 
 run_case "pytest via terminal is denied"              coordinator-pretooluse.sh agent/fixture "$CO_PYTEST"  deny
 run_case "phase-only commit message is denied"        coordinator-pretooluse.sh agent/fixture "$CO_MSG_BAD" deny
 run_case "described commit message passes"            coordinator-pretooluse.sh agent/fixture "$CO_MSG_OK"  silent
+run_case "worktree: a quoted path with spaces does not fake a bad branch" \
+    coordinator-pretooluse.sh agent/fixture "$WT_SPACED" silent
+run_case "worktree: a valid -b branch is not obstructed" \
+    coordinator-pretooluse.sh agent/fixture "$WT_B_OK" silent
+run_case "worktree: an invalid -b branch is refused" \
+    coordinator-pretooluse.sh agent/fixture "$WT_B_BAD" deny
+run_case "worktree: an invalid positional branch is refused" \
+    coordinator-pretooluse.sh agent/fixture "$WT_POS_BAD" deny
+run_case "worktree: a collision is caught when the path contains spaces" \
+    coordinator-pretooluse.sh agent/fixture "$WT_COLLIDE_SPACED" deny "existing wt"
+run_case "worktree: a collision is caught when the path has no spaces" \
+    coordinator-pretooluse.sh agent/fixture "$WT_COLLIDE_PLAIN" deny "existingwt"
 
 echo "## test-writer-pretooluse.sh"
 run_case "branch gate denies on dev"            test-writer-pretooluse.sh dev           "$TEST_EDIT" deny
@@ -476,6 +569,7 @@ stop_case() {
 
     (
         cd "$fixture" || exit 1
+        use_fixture_conf
         git init -q .
         git checkout -q -b agent/72-x
         printf '%s' '{"session_id":"s1","transcript_path":"/none"}' \
@@ -498,6 +592,10 @@ stop_case() {
             pass)  [[ "$out" != *'"block"'* && -n "$out" ]] && ok=1 ;;
             unclassified)
                 [[ "$out" != *'"block"'* && "$out" == *'no plan file'* ]] && ok=1 ;;
+            coverage)
+                [[ "$out" != *'"block"'* && "$out" == *'AF_WORKFLOW_LOG_COVERAGE=all'* ]] && ok=1 ;;
+            no-coverage)
+                [[ "$out" != *'"block"'* && "$out" != *'AF_WORKFLOW_LOG_COVERAGE'* ]] && ok=1 ;;
             pending) [[ "$out" == *'PENDING'* && "$out" != *'WARNING'* ]] && ok=1 ;;
             warning) [[ "$out" == *'WARNING'* ]] && ok=1 ;;
         esac
@@ -548,6 +646,20 @@ doc_stop_case "another workflow's COMPLETED plan does not finalise this one" \
 # than passing in silence -- the failure mode this whole issue family is about.
 doc_stop_case "with no plan file the gate says it could not classify the call" \
     unclassified 'README.md=x\n'
+
+# Review Only and Plan Only write no plan file, so the branch above is the only
+# place their log-only documenter call can be seen -- which is why the coverage
+# rule has to speak here or nowhere (issue #210). It stays advisory: the same
+# branch carries legitimate mid-workflow calls that have no log yet.
+doc_stop_case "under coverage=all an unclassifiable call with no log is told to write one" \
+    coverage 'README.md=x\n' '.github/af-env.conf=AF_WORKFLOW_LOG_COVERAGE=all\n'
+
+doc_stop_case "the notice is about the missing log, not about every unclassifiable call" \
+    no-coverage 'README.md=x\n' '.github/af-env.conf=AF_WORKFLOW_LOG_COVERAGE=all\n' \
+    '.github/logs/72-x.yaml=workflow_id: "72-x"\nstatus: "COMPLETED"\n'
+
+doc_stop_case "coverage=standard+ opts out of the notice as documented" \
+    no-coverage 'README.md=x\n' '.github/af-env.conf=AF_WORKFLOW_LOG_COVERAGE=standard+\n'
 
 # stop-tests judges the same condition with less force (AC4). It used to warn
 # about missing closing artifacts for a workflow that had not claimed to be
@@ -602,6 +714,7 @@ stop_output() {
     done
     out=$(
         cd "$fixture" || exit 1
+        use_fixture_conf
         git init -q .
         git checkout -q -b agent/72-x
         printf '%s' '{"session_id":"s1","transcript_path":"/none"}' \
@@ -691,14 +804,32 @@ echo "## retro destination is configurable (RETRO_DIR)"
 CONF_DOCS_B='RETRO_DIR=docs/retros\n'
 
 # If the shipped config lost the key, every override case below would still
-# pass -- against the default, proving nothing.
-if grep -qE '^RETRO_DIR=\.github/retros/auto[[:space:]]*$' "$GITHUB_DIR/af-env.conf" 2>/dev/null; then
-    conf_default_ok=1
+# pass -- against the default, proving nothing. It is a claim about the file
+# this framework ships, so it can only be made where that file lives: a
+# consumer's copy is [customizable] and is meant to differ (issue #209).
+if [ -f "$GITHUB_DIR/../../../.githooks/pre-commit" ]; then
+    if grep -qE '^RETRO_DIR=\.github/retros/auto[[:space:]]*$' "$GITHUB_DIR/af-env.conf" 2>/dev/null; then
+        conf_default_ok=1
+    else
+        conf_default_ok=0
+    fi
+    assert_true "the shipped af-env.conf carries RETRO_DIR at the unchanged default" \
+        "$conf_default_ok" "an upgrading consumer must not have its retro destination move under it"
 else
-    conf_default_ok=0
+    echo "SKIP: shipped-default RETRO_DIR -- a consumer's af-env.conf is meant to differ"
 fi
-assert_true "the shipped af-env.conf carries RETRO_DIR at the unchanged default" \
-    "$conf_default_ok" "an upgrading consumer must not have its retro destination move under it"
+
+# The portability property, asserted rather than trusted. Without the pin, the
+# cases below seed their retro at the default while the fixture carries the
+# host's setting -- green here, red in every consumer that uses the key as
+# intended, which is how #209 reached one.
+if grep -qE '^RETRO_DIR=\.github/retros/auto[[:space:]]*$' "$(af_policy_conf)" 2>/dev/null; then
+    policy_pin_ok=1
+else
+    policy_pin_ok=0
+fi
+assert_true "the declared policy pins RETRO_DIR to the shipped default" \
+    "$policy_pin_ok" "fixtures would inherit the host's retro destination and judge it as the hook's"
 
 doc_stop_case "with no RETRO_DIR configured the default destination still satisfies the gate" \
     pass "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
@@ -789,12 +920,13 @@ stamp_log() {
              "$fixture/.github/retros/auto" "$fixture/docs/plans"
     cp "$HOOK_DIR/documenter-stop.sh" "$fixture/.github/hooks/scripts/"
     cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
-    [ -f "$GITHUB_DIR/af-env.conf" ] && cp "$GITHUB_DIR/af-env.conf" "$fixture/.github/"
+    _conf=$(af_policy_conf); [ -f "$_conf" ] && cp "$_conf" "$fixture/.github/af-env.conf"
     printf '%b' "$plan" > "$fixture/docs/plans/fix-2026-08-07-x.md"
     printf '%b' "$log" > "$fixture/.github/logs/72-x.yaml"
     printf '%b' "$RETRO_MD" > "$fixture/.github/retros/auto/72-x.md"
     (
         cd "$fixture" || exit 1
+        use_fixture_conf
         git init -q .
         git checkout -q -b agent/72-x
         printf '%s' '{"session_id":"s1","transcript_path":"/none"}' \
@@ -981,6 +1113,72 @@ else
     assert_true "implementer-stop.sh does not scope the lint gate to authored files" 1
 fi
 
+# --- Concurrent producer scope (issue #101) --------------------------------
+#
+# `git diff` is global to the checkout, so two producers on one branch read
+# each other's in-flight edits as their own: measured, an implementer was told
+# to document a file a parallel documenter was writing, and the provenance gate
+# would have had it stamp its own name on it. The editor names one debug log
+# per subagent call, so who edited what is a measurement and not a claim.
+
+echo "## concurrent producer scope (issue #101)"
+
+if [ -f "$HOOK_DIR/concurrent-agent-edits.py" ]; then
+    assert_true "the peer-edit reader ships with the hooks" 1
+else
+    assert_true "the peer-edit reader ships with the hooks" 0 "no concurrent-agent-edits.py in hooks/scripts"
+fi
+
+# A reader nothing calls protects nothing.
+for f in implementer refactorer; do
+    if grep -q 'af_peer_edits' "$HOOK_DIR/${f}-stop.sh" 2>/dev/null; then
+        assert_true "${f}-stop.sh subtracts what a concurrent peer edited" 1
+    else
+        assert_true "${f}-stop.sh subtracts what a concurrent peer edited" 0 \
+            "the hook still scopes its gates from shared git state alone"
+    fi
+done
+
+# The #86 boundary restated. The peer's own Stop hook lints the peer's files;
+# subtracting here would turn a correction into a bypass.
+for f in implementer refactorer; do
+    if grep -E 'changed_lint_py=|inherited_lint_py=' "$HOOK_DIR/${f}-stop.sh" 2>/dev/null | grep -q 'peer_edits'; then
+        assert_true "${f}-stop.sh does not subtract peer edits from the lint scope" 0 \
+            "lint scope is filtered by peer authorship"
+    else
+        assert_true "${f}-stop.sh does not subtract peer edits from the lint scope" 1
+    fi
+done
+
+# `grep -vxF` reads its pattern argument as one pattern per line, so a single
+# blank line is an empty pattern that -x matches against every line -- which
+# would filter the entire scope away rather than nothing. The strip helper
+# drops blank lines first, and that is load-bearing, not tidiness.
+# shellcheck source=/dev/null
+if [ -f "$HOOK_DIR/_common.sh" ]; then
+    strip_out=$(
+        AF_CODE_ROOT="." bash -c '
+            . "$1" >/dev/null 2>&1 || true
+            af_strip_lines "src/a.py
+src/b.py" ""
+        ' _ "$HOOK_DIR/_common.sh" 2>/dev/null || true
+    )
+    assert_contains "an empty peer list leaves the scope intact" "$strip_out" "src/a.py"
+    assert_contains "an empty peer list drops nothing at all" "$strip_out" "src/b.py"
+
+    strip_out2=$(
+        AF_CODE_ROOT="." bash -c '
+            . "$1" >/dev/null 2>&1 || true
+            af_strip_lines "src/a.py
+src/b.py" "
+src/b.py
+"
+        ' _ "$HOOK_DIR/_common.sh" 2>/dev/null || true
+    )
+    assert_contains "a peer list padded with blank lines still keeps this agent's file" "$strip_out2" "src/a.py"
+    assert_not_contains "a peer list padded with blank lines still drops the peer's file" "$strip_out2" "src/b.py"
+fi
+
 # --- Artifact existence is a filesystem question (issue #87) ---------------
 #
 # The post-flight checked for the workflow log and retro with git-aware search,
@@ -1011,6 +1209,26 @@ case "$compliance_text" in *.gitignore*) assert_true "compliance-checker names t
 case "$compliance_text" in *"MISSING: not found at"*) assert_true "post-flight reports the path it probed" 1 ;;
     *) assert_true "post-flight reports the path it probed" 0 "the MISSING line still carries no resolved path" ;; esac
 
+# --- A quotation is a claim about bytes on disk (issue #174) ---
+#
+# The watchdog once quoted a sentence from a retro that did not contain it, and
+# asserted a config value it had not read; the conclusion was right anyway,
+# so neither was catchable by reading the conclusion. These cases hold the
+# contract, not the behaviour -- what they prove is that the requirement is
+# present and that removing it turns the suite red.
+
+case "$compliance_text" in *'{path}:{line}'*) assert_true "compliance-checker requires a citation for anything it quotes" 1 ;;
+    *) assert_true "compliance-checker requires a citation for anything it quotes" 0 "a quotation need not name where the line came from" ;; esac
+
+case "$compliance_text" in *"Quote only what you read in this pass"*) assert_true "compliance-checker forbids quoting a file it did not open" 1 ;;
+    *) assert_true "compliance-checker forbids quoting a file it did not open" 0 "nothing stops a quotation composed from memory" ;; esac
+
+case "$compliance_text" in *"never inferred from the presence of a PR"*) assert_true "compliance-checker reads the capability mode instead of inferring it" 1 ;;
+    *) assert_true "compliance-checker reads the capability mode instead of inferring it" 0 "the mode may still be deduced from the behaviour being audited" ;; esac
+
+case "$compliance_text" in *"lesson at line"*) assert_true "the retro check names the line carrying the lesson" 1 ;;
+    *) assert_true "the retro check names the line carrying the lesson" 0 "a retro can still be reported substantive by retelling it" ;; esac
+
 tdd_text=$(cat "$GITHUB_DIR/skills/tdd-orchestration/SKILL.md" 2>/dev/null || true)
 # The PowerShell pendant matches with -match, which is case-insensitive. `case`
 # is not, so lowercase the haystack or the two harnesses disagree on casing
@@ -1028,6 +1246,12 @@ case "$tdd_lower" in *"never overwrite an existing"*) assert_true "Step 7b never
 # elsewhere, which is the shape production actually has.
 
 echo "## resolution invariants"
+
+# These cases are about the location-derived path itself, so the declared
+# policy steps aside: with AF_CONF_PATH set they would read the same file from
+# every cwd and pass without proving anything about resolution.
+SAVED_POLICY_PATH="${AF_CONF_PATH:-}"
+unset AF_CONF_PATH
 
 COMMON="$HOOK_DIR/_common.sh"
 if [ -f "$COMMON" ]; then
@@ -1083,6 +1307,12 @@ PROBE
     fi
 
     rm -rf "$fx" "$elsewhere" "$stub"
+fi
+
+# Resolution invariants are done; restore the declared policy for what follows.
+if [ -n "$SAVED_POLICY_PATH" ]; then
+    AF_CONF_PATH="$SAVED_POLICY_PATH"
+    export AF_CONF_PATH
 fi
 
 # --- Task launch classification (issue #74) --------------------------------
@@ -1322,6 +1552,61 @@ except Exception: print("unparsable")' 2>/dev/null)
 assert_true "a task command with backslashes and quotes still produces parsable JSON" \
     "$([ "$task_dec" = "deny" ] && echo 1 || echo 0)" "got '$task_dec' from: $task_out"
 
+# --- The policy is stated, not inherited (issue #108) ----------------------
+#
+# The cases above mean the declared default policy set at the top of this file.
+# These cover the other side of the matrix: the same commands under a policy
+# that opted in. Both halves have to hold -- opting in is a supported choice,
+# and before this a project that made it read nine failures with no way to tell
+# configuration from defect.
+
+decision_of() {
+    printf '%s' "$1" | bash "$HOOK_DIR/block-dangerous.sh" 2>&1 | "$af_py" -c 'import json,sys
+try: print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecision"])
+except Exception: print("none")' 2>/dev/null
+}
+
+set_policy AUTONOMY_CAT_FS_WRITE=auto
+
+pol_dec=$(decision_of '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}')
+assert_true "a delete is approved under a declared FS_WRITE=auto" \
+    "$([ "$pol_dec" = "allow" ] && echo 1 || echo 0)" "got '$pol_dec'"
+
+# The seam configures the ask/auto boundary and nothing beyond it: the deny
+# tier is hardcoded and resolved before any category is read.
+pol_dec=$(decision_of '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./build -Recurse -Force"}}')
+assert_true "a declared FS_WRITE=auto still cannot lift a hard-deny" \
+    "$([ "$pol_dec" = "deny" ] && echo 1 || echo 0)" "got '$pol_dec'"
+
+set_policy
+
+pol_dec=$(decision_of '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}')
+assert_true "the same delete asks again once the opt-in is withdrawn" \
+    "$([ "$pol_dec" = "ask" ] && echo 1 || echo 0)" "got '$pol_dec'"
+
+# Proof that the declared policy is the one in force: the shipped config denies
+# no Databricks command anywhere, so this verdict can only come from the file
+# this suite wrote.
+set_policy AUTONOMY_CAT_DATABRICKS=deny
+
+pol_dec=$(decision_of '{"tool_name":"runInTerminal","tool_input":{"command":"databricks jobs list"}}')
+assert_true "a declared DATABRICKS=deny denies what the shipped config never denies" \
+    "$([ "$pol_dec" = "deny" ] && echo 1 || echo 0)" "got '$pol_dec'"
+
+set_policy
+
+# A config path that does not exist means NO config, not a silent fallback to
+# the deployed file -- that fallback would put the consumer's settings back in
+# play behind a typo, and the caller would never learn its file was missed.
+pol_probe=$(AF_CONF_PATH="$POLICY_DIR/no-such-file.conf" \
+    bash -c ". '$HOOK_DIR/_common.sh'; echo found=\$AF_CONF_FOUND" 2>&1)
+assert_true "a config path that does not exist is reported as absent" \
+    "$([ "$pol_probe" = "found=0" ] && echo 1 || echo 0)" "got: $pol_probe"
+
+pol_probe=$(bash -c ". '$HOOK_DIR/_common.sh'; echo found=\$AF_CONF_FOUND" 2>&1)
+assert_true "a config path that exists is the config in force" \
+    "$([ "$pol_probe" = "found=1" ] && echo 1 || echo 0)" "got: $pol_probe"
+
 # The reasons live in an array index-aligned with the patterns, which is only
 # safe while the two stay the same length.
 n_pat=$(sed -n '/^ask_patterns=(/,/^)/p' "$HOOK_DIR/block-dangerous.sh" | grep -cE "^    ['\"]")
@@ -1329,6 +1614,132 @@ n_rea=$(sed -n '/^ask_reasons=(/,/^)/p' "$HOOK_DIR/block-dangerous.sh" | grep -c
 assert_true "every ask pattern has a reason" \
     "$([ "$n_pat" -eq "$n_rea" ] && [ "$n_pat" -gt 0 ] && echo 1 || echo 0)" \
     "$n_pat patterns vs $n_rea reasons"
+
+# --- Producer Stop gates: the suite verdict must reach the decision --------
+#
+# The three producer Stop hooks run the suite themselves, so asserting on their
+# text proves nothing about what they do with the result. `out=$(pytest ...) ||
+# true` followed by `exit_code=$?` still mentions pytest, still looks like a
+# gate, and reads exit 0 on every path -- the green and refactor gates could not
+# block a failing suite at all, and the red gate blocked every legitimate Red
+# phase. Both directions shipped for months under text-only coverage.
+#
+# These cases execute the hook against a stub whose exit code and summary line
+# are the input under test, so the assertion is on the verdict (issue #123).
+
+echo "## producer stop gates (executed against a stubbed suite)"
+
+# gate_case NAME HOOK EXPECT STUB STUB_EXIT STUB_STDOUT
+#   EXPECT = block | pass
+#   STUB   = pytest | run-tests   -- the command the hook shells out to
+gate_case() {
+    local name="$1" hook="$2" expect="$3" stub="$4" stub_exit="$5" stub_out="$6"
+    local fixture rc=0 out ok=0 stmts stub_path
+
+    fixture=$(mktemp -d)
+    mkdir -p "$fixture/.github/hooks/scripts" "$fixture/tests" "$fixture/bin"
+    cp "${HOOK_SRC:-$HOOK_DIR}/$hook" "$fixture/.github/hooks/scripts/"
+    cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
+
+    case "$stub" in
+        pytest)
+            stub_path="$fixture/bin/pytest" ;;
+        run-tests)
+            mkdir -p "$fixture/.github/scripts"
+            stub_path="$fixture/.github/scripts/run-tests.sh"
+            # The green and refactor gates skip themselves when no runner is
+            # installed, so a real-looking pytest has to be on PATH before the
+            # exit code of the suite is reachable at all.
+            printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/bin/pytest"
+            chmod +x "$fixture/bin/pytest" ;;
+    esac
+
+    # A quoted heredoc, not printf: a summary line is arbitrary text and may
+    # carry a percent sign.
+    {
+        echo '#!/usr/bin/env bash'
+        echo "cat <<'AF_STUB_EOF'"
+        printf '%s\n' "$stub_out"
+        echo 'AF_STUB_EOF'
+        echo "exit $stub_exit"
+    } > "$stub_path"
+    chmod +x "$stub_path"
+
+    printf 'def test_seeded():\n    assert True\n' > "$fixture/tests/test_seeded.py"
+
+    (
+        cd "$fixture" || exit 1
+        use_fixture_conf
+        PATH="$fixture/bin:$PATH"; export PATH
+        git init -q .
+        git checkout -q -b agent/123-x
+        printf '%s' '{"session_id":"s1","transcript_path":"/none"}' \
+            | bash ".github/hooks/scripts/$hook"
+    ) > "$fixture/out.txt" 2> "$fixture/err.txt" || rc=$?
+
+    out=$(cat "$fixture/out.txt")
+
+    stmts=$(af_json_statements "$out")
+    if [ "$rc" -ne 0 ]; then
+        ok=0
+    elif [ "$stmts" -gt 1 ]; then
+        echo "FAIL  $name -- the hook made $stmts statements; the protocol is one: $out"
+        fail=$((fail + 1))
+        rm -rf "$fixture"
+        return
+    else
+        case "$expect" in
+            block) [[ "$out" == *'"block"'* ]] && ok=1 ;;
+            pass)  [[ "$out" != *'"block"'* ]] && ok=1 ;;
+        esac
+    fi
+
+    if [ $ok -eq 1 ]; then
+        echo "PASS  $name"
+        pass=$((pass + 1))
+    else
+        echo "FAIL  $name -- expected $expect, got: ${out:-<no output>} (exit $rc)"
+        fail=$((fail + 1))
+    fi
+
+    rm -rf "$fixture"
+}
+
+# Red phase. The exit code has to come from pytest, not from the `|| true` that
+# follows it, or every one of these collapses onto the same branch.
+gate_case "red phase: a failing assertion is a satisfied red" \
+    test-writer-stop.sh pass pytest 1 "1 failed in 0.5s"
+
+gate_case "red phase: a green suite is not a red phase" \
+    test-writer-stop.sh block pytest 0 "3 passed in 0.5s"
+
+# Not every red is a red. A test that cannot be imported or set up never reaches
+# the behaviour it claims to guard and stays red after a correct implementation,
+# which sends the green phase hunting for a defect that does not exist.
+gate_case "red phase: a collection error is not a satisfied red" \
+    test-writer-stop.sh block pytest 2 "1 error in 0.9s"
+
+# A missing fixture reports `1 error` and still exits 1, so the exit code alone
+# cannot tell it from a genuine failure -- the summary line has to be read.
+gate_case "red phase: a setup error exiting 1 is not a satisfied red" \
+    test-writer-stop.sh block pytest 1 "1 error in 0.5s"
+
+gate_case "red phase: no tests collected is not a verdict" \
+    test-writer-stop.sh pass pytest 5 "no tests ran in 0.1s"
+
+# Green and refactor phase. Both hooks already ran the suite; the defect was
+# that the result never reached the decision.
+gate_case "green phase: a failing suite blocks the implementer" \
+    implementer-stop.sh block run-tests 1 "2 failed, 8 passed in 1.0s"
+
+gate_case "green phase: a passing suite does not block the implementer" \
+    implementer-stop.sh pass run-tests 0 "10 passed in 1.0s"
+
+gate_case "refactor phase: a failing suite blocks the refactorer" \
+    refactorer-stop.sh block run-tests 1 "2 failed, 8 passed in 1.0s"
+
+gate_case "refactor phase: a passing suite does not block the refactorer" \
+    refactorer-stop.sh pass run-tests 0 "10 passed in 1.0s"
 
 # --- Parse gate ------------------------------------------------------------
 #
@@ -1374,6 +1785,10 @@ fi
 
 echo ""
 echo "=== Summary ==="
+# A verdict about autonomy behaviour is only readable next to the policy that
+# produced it (issue #108), so a reader can tell a configuration difference
+# from a defect without re-deriving which config was read.
+echo "  Policy: AUTONOMY_LEVEL=balanced, all AUTONOMY_CAT_* at the level default"
 echo "  Passed: $pass"
 echo "  Failed: $fail"
 if [ $fail -eq 0 ]; then

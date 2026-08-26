@@ -14,8 +14,9 @@ checker, so globs, budgets and ``applyTo`` semantics keep exactly one
 definition.
 
 The check runs only when the commit stages something the budget depends on
-(``copilot-instructions.md``, ``instructions/*.md``, ``agents/*.agent.md``, or
-the ``af-env.conf`` that sets the ceiling), so every other commit pays nothing.
+(``copilot-instructions.md``, ``instructions/*.md``, ``agents/*.agent.md``,
+``skills/*/SKILL.md``, or the ``af-env.conf`` that sets the ceiling), so every
+other commit pays nothing.
 
 That scoping has a failure mode of its own: a guard with nothing to measure
 emits nothing, and nothing is exactly what a passing guard emits. A project
@@ -32,6 +33,7 @@ commit in front of the guard, and untracked files are a statement about the
 repository. Charging one to the other makes an unrelated commit pay for a
 configuration defect.
 """
+
 from __future__ import annotations
 
 import os
@@ -48,7 +50,11 @@ BUDGET_FILES = frozenset({"copilot-instructions.md", "af-env.conf", ".af-manifes
 
 def _git_text(args: list[str]) -> str:
     result = subprocess.run(
-        ["git", *args], capture_output=True, check=True, text=True, encoding="utf-8",
+        ["git", *args],
+        capture_output=True,
+        check=True,
+        text=True,
+        encoding="utf-8",
     )
     return result.stdout
 
@@ -60,8 +66,7 @@ def _git_bytes(args: list[str], stdin: bytes | None = None) -> bytes:
 
 def _staged_files() -> list[str]:
     stdout = _git_text(
-        ["-c", "core.quotePath=false", "diff", "--cached", "-z",
-         "--name-only", "--diff-filter=ACMR"],
+        ["-c", "core.quotePath=false", "diff", "--cached", "-z", "--name-only", "--diff-filter=ACMR"],
     )
     return [entry for entry in stdout.split("\0") if entry]
 
@@ -78,6 +83,11 @@ def _is_budget_input(relative: str) -> bool:
     parts = relative.split("/")
     if len(parts) == 1:
         return parts[0] in BUDGET_FILES
+    # A skill body is loaded on demand and costs the budget nothing. Its
+    # frontmatter description is announced on every request, so SKILL.md is a
+    # budget input and the reference files beside it are not.
+    if len(parts) == 3:
+        return parts[0] == "skills" and parts[2] == "SKILL.md"
     if len(parts) != 2:
         return False
     if parts[0] == "instructions":
@@ -97,7 +107,7 @@ def _payload_root(path: str) -> str | None:
     if ".github" not in parts:
         return None
     index = parts.index(".github")
-    if not _is_budget_input("/".join(parts[index + 1:])):
+    if not _is_budget_input("/".join(parts[index + 1 :])):
         return None
     return "/".join(parts[: index + 1])
 
@@ -114,6 +124,11 @@ def _on_disk(root: str) -> set[str]:
             relative = f"{sub}/{entry.name}"
             if entry.is_file() and _is_budget_input(relative):
                 found.add(relative)
+    skills = base / "skills"
+    if skills.is_dir():
+        for entry in skills.iterdir():
+            if entry.is_dir() and (entry / "SKILL.md").is_file():
+                found.add(f"skills/{entry.name}/SKILL.md")
     return found
 
 
@@ -124,9 +139,9 @@ def _tracked(root: str) -> set[str]:
     )
     prefix = f"{root}/"
     return {
-        entry[len(prefix):]
+        entry[len(prefix) :]
         for entry in names.decode("utf-8", "replace").split("\0")
-        if entry.startswith(prefix) and _is_budget_input(entry[len(prefix):])
+        if entry.startswith(prefix) and _is_budget_input(entry[len(prefix) :])
     }
 
 
@@ -154,7 +169,9 @@ def _ignored(paths: list[str]) -> set[str]:
     """Which of ``paths`` a gitignore rule matches. Empty on any git failure."""
     result = subprocess.run(
         ["git", "check-ignore", "-z", "--stdin"],
-        input="\0".join(paths).encode("utf-8"), capture_output=True, check=False,
+        input="\0".join(paths).encode("utf-8"),
+        capture_output=True,
+        check=False,
     )
     if result.returncode not in (0, 1):
         return set()
@@ -235,6 +252,11 @@ def _export_index(root: str, dest: Path) -> bool:
         f":(literal){root}/.af-manifest",
         f":(literal){root}/instructions",
         f":(literal){root}/agents",
+        # Only the SKILL.md files, never the reference material beside them.
+        # Exporting whole skill directories would copy megabytes on every
+        # commit that touches one, to measure a few hundred characters of
+        # frontmatter.
+        f":(glob){root}/skills/*/SKILL.md",
     ]
     names = _git_bytes(["-c", "core.quotePath=false", "ls-files", "-z", "--", *pathspecs])
     if not names.strip(b"\0"):
@@ -263,7 +285,10 @@ def _checker() -> Path:
 def _measure(checker: Path, github_dir: Path, indent: str = "  ") -> int:
     result = subprocess.run(
         [sys.executable, str(checker), "--github-dir", str(github_dir)],
-        capture_output=True, text=True, encoding="utf-8", check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
     )
     output = (result.stdout or "") + (result.stderr or "")
     for line in output.splitlines():

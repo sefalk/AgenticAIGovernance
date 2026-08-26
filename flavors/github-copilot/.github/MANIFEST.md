@@ -233,8 +233,22 @@ Every agent operates under a distinct, verifiable identity:
 - All commits, logs, and provenance markers attribute actions to the agent name
 - No "shadow agents" — every autonomous action is traceable to a named agent
 - Agents must not impersonate other agents or the human user
-- Provider-scoped workers should use `{provider}-{capability}-{role}` naming
-  (for example `ado-work-item-manager`, `ado-wiki-manager`, `ado-pr-manager`)
+- Provider-scoped workers should use `{provider}-{capability}-{role}` naming:
+  `ado-work-item-manager`, `ado-wiki-manager`, `ado-pr-manager`,
+  `ado-pipeline-manager`, `gh-issue-manager`, `gh-pr-manager`
+
+### Measured Results
+
+A result only the producing agent can observe is not evidence. Where the
+deliverable is a **value** rather than a file — a measurement, benchmark,
+validation, profile — the code is not the artifact and git does not catch it.
+Record the result where a third party can open it without re-running anything,
+and cite that location, not the number alone.
+
+Durability is a time horizon, not a yes/no. Run histories expire; for a number
+that must stay checkable past that window, write it to a table or a committed
+artifact. When no durable channel exists, the gate is BLOCKED — not passed
+with the number in the return.
 
 ### Least Privilege — R-SD-21, R-SD-22
 

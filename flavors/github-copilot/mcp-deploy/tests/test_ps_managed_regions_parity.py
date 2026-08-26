@@ -89,9 +89,20 @@ def _run_ps_region(tmp_path: Path, mode: str, base: str, overlay: str | None = N
     base_file.write_bytes(base.encode("utf-8"))
     out_file = tmp_path / "out.bin"
     args = [
-        exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness),
-        "-Mode", mode, "-DeployPs1", str(DEPLOY_PS1), "-BaseFile", str(base_file),
-        "-OutFile", str(out_file),
+        exe,
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(harness),
+        "-Mode",
+        mode,
+        "-DeployPs1",
+        str(DEPLOY_PS1),
+        "-BaseFile",
+        str(base_file),
+        "-OutFile",
+        str(out_file),
     ]
     if overlay is not None:
         overlay_file = tmp_path / "overlay.txt"

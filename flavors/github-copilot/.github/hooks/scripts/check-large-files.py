@@ -7,6 +7,7 @@ in ``.github/af-env.conf`` or a one-off ``ALLOW_LARGE_FILES=1`` override.
 
 Exit codes: 0 pass, 1 blocked, 2 internal error.
 """
+
 from __future__ import annotations
 
 import fnmatch
@@ -22,7 +23,10 @@ DEFAULT_MAX_BYTES = 1_048_576  # 1 MB
 def _repo_root() -> Path:
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True, text=True, encoding="utf-8", check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     return Path(result.stdout.strip())
 
@@ -48,9 +52,11 @@ def _read_conf(conf_path: Path) -> tuple[int, list[str]]:
 
 def _staged_files() -> list[str]:
     result = subprocess.run(
-        ["git", "-c", "core.quotePath=false", "diff", "--cached", "-z",
-         "--name-only", "--diff-filter=ACMR"],
-        capture_output=True, text=True, encoding="utf-8", check=True,
+        ["git", "-c", "core.quotePath=false", "diff", "--cached", "-z", "--name-only", "--diff-filter=ACMR"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     return [entry for entry in result.stdout.split("\0") if entry]
 
@@ -58,7 +64,10 @@ def _staged_files() -> list[str]:
 def _staged_blob_size(path: str) -> int | None:
     ls_result = subprocess.run(
         ["git", "ls-files", "-s", "--", f":(literal){path}"],
-        capture_output=True, text=True, encoding="utf-8", check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     line = ls_result.stdout.strip()
     if not line:
@@ -69,7 +78,10 @@ def _staged_blob_size(path: str) -> int | None:
     blob_sha = parts[1]
     cat_result = subprocess.run(
         ["git", "cat-file", "-s", blob_sha],
-        capture_output=True, text=True, encoding="utf-8", check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     size_text = cat_result.stdout.strip()
     return int(size_text) if size_text.isdigit() else None

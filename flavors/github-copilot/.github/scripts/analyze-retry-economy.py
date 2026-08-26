@@ -75,8 +75,7 @@ def _load(path: Path, drift: list[str]) -> dict[str, Any] | None:
     try:
         doc = yaml.safe_load(path.read_text(encoding="utf-8", errors="replace"))
     except yaml.YAMLError as exc:
-        drift.append(f"{path.name}: not parsable as YAML ({type(exc).__name__}) -- "
-                     "excluded from every number below")
+        drift.append(f"{path.name}: not parsable as YAML ({type(exc).__name__}) -- excluded from every number below")
         return None
     if not isinstance(doc, dict):
         drift.append(f"{path.name}: top level is not a mapping -- excluded")
@@ -139,15 +138,24 @@ class Economy:
         if doc.get("escalation"):
             escalations = max(escalations, 1)
         self.per_workflow[workflow] = retries
-        if isinstance(claimed_r, int) and claimed_r != retries or \
-           isinstance(claimed_e, int) and claimed_e != escalations:
-            self.mismatch.append((workflow, claimed_r if isinstance(claimed_r, int) else -1,
-                                  retries, claimed_e if isinstance(claimed_e, int) else -1,
-                                  escalations))
+        if (
+            isinstance(claimed_r, int)
+            and claimed_r != retries
+            or isinstance(claimed_e, int)
+            and claimed_e != escalations
+        ):
+            self.mismatch.append(
+                (
+                    workflow,
+                    claimed_r if isinstance(claimed_r, int) else -1,
+                    retries,
+                    claimed_e if isinstance(claimed_e, int) else -1,
+                    escalations,
+                )
+            )
 
     @staticmethod
-    def _cause(steps: list[dict[str, Any]], verdicts: list[str],
-               previous: int, current: int) -> tuple[str, bool]:
+    def _cause(steps: list[dict[str, Any]], verdicts: list[str], previous: int, current: int) -> tuple[str, bool]:
         """Why the agent ran again. Stated as a heuristic, not as a fact."""
         between = list(range(previous + 1, current))
         for i in between:
@@ -246,8 +254,7 @@ def report(economy: Economy, logs: int, drift: list[str], as_json: bool) -> int:
         print()
     if economy.unknown_verdicts:
         exit_code = 1
-        print("Drift -- verdicts outside the MANIFEST closed set "
-              f"({'/'.join(sorted(CANONICAL))})")
+        print(f"Drift -- verdicts outside the MANIFEST closed set ({'/'.join(sorted(CANONICAL))})")
         for value, count in economy.unknown_verdicts.most_common():
             print(f"  {value!r:<44} x{count}")
         print()
@@ -264,8 +271,7 @@ def report(economy: Economy, logs: int, drift: list[str], as_json: bool) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--logs-dir", default=".github/logs",
-                        help="directory of workflow log YAML files")
+    parser.add_argument("--logs-dir", default=".github/logs", help="directory of workflow log YAML files")
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = parser.parse_args(argv)
 
@@ -275,9 +281,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     files = sorted(directory.rglob("*.yaml")) + sorted(directory.rglob("*.yml"))
     if not files:
-        print(f"ERROR: no workflow logs under {directory} -- nothing to measure. "
-              "Reporting zero here would be a lie about the framework, not a fact "
-              "about it.", file=sys.stderr)
+        print(
+            f"ERROR: no workflow logs under {directory} -- nothing to measure. "
+            "Reporting zero here would be a lie about the framework, not a fact "
+            "about it.",
+            file=sys.stderr,
+        )
         return 2
 
     drift: list[str] = []

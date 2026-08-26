@@ -44,7 +44,13 @@ All `lint:` tasks call `.github/scripts/run-lint.ps1`, which resolves the venv
 interpreter itself and derives the rule set from `LINTING_STRICTNESS` in
 `af-env.conf`. **Never invoke `ruff` directly** — task shells do not activate
 the venv, so a bare `ruff` command fails with `CommandNotFoundException`, and a
-direct call would bypass the configured strictness.
+direct call would bypass the configured strictness. It also would not
+reproduce the gate's verdict even with the right `--select`:
+`check-python-linting.py` applies the project's own ruff `ignore` /
+`per-file-ignores` on top of the selected rules (visible as `project_ignore=`
+in its output), so a direct `ruff check --select=...` call can show violations
+the gate does not have — a wasted edit, and pressure to add a `# noqa` the
+project never asked for (issue #124).
 
 ### Checking the gate's own file set
 
@@ -146,6 +152,15 @@ error, nothing collected — and no test was executed. Such an entry carries
 never happened cannot be read as a green one. Its `error_message` field holds
 the interpreter's own words. Fix the runner and re-run the scope; do not report
 the scope as passing and do not skip the run.
+
+**Never accept an entry with `"status": "running"` as evidence either.** The
+runner claims its entry *before* pytest starts and replaces it when pytest
+returns, so `running` means one of exactly two things: a run is in flight right
+now, or a run was interrupted — terminal closed, agent cancelled, machine
+slept — and never reported. Counters and `exit_code` are `null`; `started`
+holds the moment the entry was claimed. Neither case is a result: re-run the
+scope. Before this marker existed, an interrupted run left the *previous*
+entry in place, and a stale green was indistinguishable from a fresh one.
 
 ## Direct Invocation (terminal-capable agents only)
 

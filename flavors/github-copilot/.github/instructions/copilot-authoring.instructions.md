@@ -114,4 +114,6 @@ removing something else, not raising the budget.
 
 The same reasoning applies one level down: a narrow `applyTo` makes a file load
 *less often*, not *cheaply*. The conditional set has its own ceiling
-(`AF_CONDITIONAL_BUDGET_TOKENS`), so depth still belongs in a skill.
+(`AF_CONDITIONAL_BUDGET_TOKENS`), so depth still belongs in a skill. And a skill
+is cheaper, not free: its description ships on every request, under
+`AF_CATALOGUE_BUDGET_TOKENS`.

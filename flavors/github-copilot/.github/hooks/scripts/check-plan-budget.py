@@ -16,6 +16,7 @@ a fact rather than an intention.
 
 Exit codes: 0 pass, 1 blocked, 2 internal error.
 """
+
 from __future__ import annotations
 
 import os
@@ -48,7 +49,10 @@ COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 def _repo_root() -> Path:
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True, text=True, encoding="utf-8", check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     return Path(result.stdout.strip())
 
@@ -69,9 +73,11 @@ def _read_budgets(conf_path: Path) -> dict[str, int]:
 
 def _staged_files() -> list[str]:
     result = subprocess.run(
-        ["git", "-c", "core.quotePath=false", "diff", "--cached", "-z",
-         "--name-only", "--diff-filter=ACMR"],
-        capture_output=True, text=True, encoding="utf-8", check=True,
+        ["git", "-c", "core.quotePath=false", "diff", "--cached", "-z", "--name-only", "--diff-filter=ACMR"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     return [entry for entry in result.stdout.split("\0") if entry]
 
@@ -86,7 +92,10 @@ def _is_plan(path: str) -> bool:
 def _staged_text(path: str) -> str | None:
     listed = subprocess.run(
         ["git", "ls-files", "-s", "--", f":(literal){path}"],
-        capture_output=True, text=True, encoding="utf-8", check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     line = listed.stdout.strip()
     if not line:
@@ -96,7 +105,8 @@ def _staged_text(path: str) -> str | None:
         return None
     blob = subprocess.run(
         ["git", "cat-file", "blob", fields[1]],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     return blob.stdout.decode("utf-8", errors="replace")
 

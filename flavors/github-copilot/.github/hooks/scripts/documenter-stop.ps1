@@ -62,8 +62,20 @@ if (-not $plan.Found) {
     # Unclassifiable is not the same as fine, and saying nothing would repeat
     # the defect this gate is meant to prevent. Completeness is still enforced
     # once, by the compliance-checker post-flight gate.
+    #
+    # Review Only and Plan Only never write a plan file, so this branch is the
+    # only place their log-only documenter call is observable at all. The
+    # notice below is advisory on purpose: a mid-workflow documenter call has
+    # no log yet and must not be blocked for it (issue #210).
+    $coverage = Get-AfConfig -Key 'AF_WORKFLOW_LOG_COVERAGE' -Default 'all'
+    $coverageNote = ''
+    if ($coverage -eq 'all' -and
+        -not (Test-Path ".github/logs/$workflowId.yaml") -and
+        -not (Test-Path ".github/logs/$workflowId.yml")) {
+        $coverageNote = " NOTE: AF_WORKFLOW_LOG_COVERAGE=all and .github/logs/$workflowId.yaml does not exist -- if this call is finalising the workflow, write the log now; a run without one is indistinguishable from a cheap run."
+    }
     $output = @{
-        systemMessage = "documenter:Stop -- no plan file names 'agent/$workflowId', so a mid-workflow call cannot be told from finalisation; artifact gate not applied. Completeness is enforced by the compliance-checker post-flight gate."
+        systemMessage = "documenter:Stop -- no plan file names 'agent/$workflowId', so a mid-workflow call cannot be told from finalisation; artifact gate not applied. Completeness is enforced by the compliance-checker post-flight gate.$coverageNote"
     } | ConvertTo-Json -Compress
     Write-Output $output
     exit 0
@@ -290,6 +302,59 @@ catch {
     $costNote = ''
 }
 
+# ---------- Agent invocations (ADVISORY -- never blocks) ----------
+#
+# Which subagents actually ran, read from the editor's own subagent log
+# filenames so the record never passes through a language model. Measured: a
+# Deep-tier workflow log carried a complete `agent: arbiter` step -- action,
+# verdict, review findings -- for an arbiter that was never invoked, and only
+# the coordinator's cross-check caught it (issue #173).
+#
+# Advisory rather than blocking, on purpose. The count covers one chat session,
+# so a workflow resumed in a later window would fail a gate it did not deserve,
+# and a hook that fails honest work is a hook that gets switched off (#108).
+# The contradiction is written into the log instead, where any reader meets it.
+
+$invocationNote = ''
+try {
+    $logPath = if (Test-Path $logPath1) { $logPath1 } else { $logPath2 }
+
+    # Appending twice would produce a duplicate YAML key; first write wins.
+    if ((Select-String -Path $logPath -Pattern '^agent_invocations:' -Quiet) -ne $true) {
+        $hookInput = $null
+        if ($stdinRaw) { $hookInput = $stdinRaw | ConvertFrom-Json }
+        $sid = $hookInput.session_id
+        $transcript = $hookInput.transcript_path
+
+        if ($sid -and $transcript) {
+            $chatDir = Split-Path -Parent (Split-Path -Parent $transcript)
+            $sessionDir = Join-Path (Join-Path $chatDir 'debug-logs') $sid
+
+            $recorder = '.github/hooks/scripts/collect-agent-invocations.py'
+            $invPython = $null
+            foreach ($c in @('.venv/Scripts/python.exe', '.venv/bin/python')) {
+                if (Test-Path $c) { $invPython = $c; break }
+            }
+            if (-not $invPython) { $invPython = $AfPython }
+
+            if ($invPython -and (Test-Path $recorder)) {
+                $block = & $invPython $recorder '--session-dir' $sessionDir '--log' $logPath 2>$null
+                if ($LASTEXITCODE -eq 0 -and $block) {
+                    Add-Content -Path $logPath -Value ''
+                    Add-Content -Path $logPath -Value $block
+                    $invocationNote = ' + agent invocations measured'
+                    if (@($block | Where-Object { $_ -match 'claimed_without_invocation' }).Count -gt 0) {
+                        $invocationNote += ' (steps name agents with no invocation log -- check them)'
+                    }
+                }
+            }
+        }
+    }
+}
+catch {
+    $invocationNote = ''
+}
+
 # ---------- Scratch task audit (ADVISORY -- never blocks) ----------
 #
 # createAndRunTask writes its payload into .vscode/tasks.json, so every one-off
@@ -322,7 +387,7 @@ catch {
 }
 
 $output = @{
-    systemMessage = "documenter:Stop -- artifact gate PASS for '$workflowId'$retroNote$schemaNote$stampNote$costNote$scratchNote"
+    systemMessage = "documenter:Stop -- artifact gate PASS for '$workflowId'$retroNote$schemaNote$stampNote$costNote$invocationNote$scratchNote"
 } | ConvertTo-Json -Compress
 Write-Output $output
 exit 0

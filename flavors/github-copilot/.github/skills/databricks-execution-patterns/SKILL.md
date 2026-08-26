@@ -92,6 +92,79 @@ and fails in hive_metastore workspaces with "Catalogs not supported", not "No me
 
 Record the detected mode in run notes and evidence comments.
 
+## Execution Channel Selection (Auditability Gate)
+
+Answer this **before** the Run-Type Decision Framework. That framework starts
+from "does a defined job exist" and so only ever enumerates sanctioned
+channels — but a decision framework that omits an available option does not
+forbid it, it just fails to see it. The fastest channel on this platform is
+outside that tree, and an agent looking for the fastest path will find it.
+
+| Channel | Job definition | Run record | Code identity |
+|---|---|---|---|
+| Command Execution API (`/api/1.2/commands/*`), REPL-style attach to a running cluster | no | **no** | none |
+| `jobs/runs/submit` (one-time run) | no | yes | via `git_source` pinned to commit/tag |
+| Defined job (`jobs/create` + `run-now`, or Asset Bundle) | yes | yes | via bundle `git_tag` / `git_hash` |
+
+**The ephemeral channel produces no inspectable artifact.** The numbers exist
+only as text in the agent's terminal. It is legitimate for *probing* — checking
+a column signature, sizing a workload, discarding a hypothesis — and
+**disallowed for any result that will be quoted** in a plan, ADR, work item,
+handoff or commit message. Asking "where can I look at this myself?" must have
+an answer that is not "nowhere".
+
+If a probe unexpectedly produces a number worth citing, do not cite it. Re-run
+it through a channel that leaves a record. The re-run is cheap; the number
+is not defensible without it.
+
+### Retention Is Part of Durability
+
+A run record is not permanent. Databricks retains job-run history for a limited
+window (order of 60 days) — verify the current figure for the workspace rather
+than trusting this line. Guidance that stops at "make it appear under Runs" is
+incomplete: for a number that must stay checkable beyond that window, write it
+to a table or a committed artifact.
+
+State durability as a **time horizon**, not a binary. "Inspectable for 60 days"
+and "inspectable indefinitely" are different guarantees, and a release decision
+usually needs the second.
+
+### Investigation Persistence Policy
+
+Scale the artifact to how long the finding must survive, not to how long the
+query took.
+
+| Investigation | Persist as | Rationale |
+|---|---|---|
+| **S** — single probe, answer discarded within the session | nothing | Probing is not a deliverable |
+| **M** — findings feed a plan, work item or review | run record + the query text in the workflow log | Re-derivable within retention |
+| **L** — findings justify a release, architecture or risk decision | committed notebook/script **and** results written to a table, with run id, commit and scope columns | Must outlive run history |
+
+Choose the tier when the investigation starts, not when someone asks for the
+evidence. The compute context is gone by then.
+
+### Escalation Rule For Artifact Creation
+
+If the tier requires a durable artifact and no durable channel is available —
+no job-creation rights, no writable schema, bundle deploy blocked — the gate is
+**BLOCKED**, not passed. Report it as BLOCKED with the reason, and escalate.
+Do not fall back to the ephemeral channel and report the number: that converts
+a tooling gap into an unverifiable claim, which is the more expensive failure.
+
+### Artifact Inventory
+
+For tier **L**, record what was produced so a third party can find it without
+asking the agent:
+
+- run id and workspace URL
+- commit or tag the executed code came from
+- output location (table name, or repo path of the committed result file)
+- scope of the measurement (row count, date range, filters applied)
+
+Projects supply their own table-family naming and catalog/schema conventions
+for this list — those are configuration, and belong in the project's overlay,
+not here.
+
 ## Run-Type Decision Framework
 
 Before submitting any workload, answer these deterministically:

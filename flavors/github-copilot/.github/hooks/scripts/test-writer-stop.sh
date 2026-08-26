@@ -14,6 +14,11 @@
 
 set -uo pipefail
 
+# Root resolution AND the shared provenance detector both come from here.
+# Without it af_has_provenance_marker exits 127, which `if !` reads as "no
+# marker" -- Gate 2 flagged every new test file, marked or not (issue #175).
+. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
 # Read stdin (hook input JSON — required by protocol)
 cat > /dev/null
 
@@ -29,7 +34,11 @@ fi
 
 # ---------- Gate 1: Red phase — new tests must FAIL ----------
 
-output=$(pytest tests/ -q --tb=line --no-header 2>&1) || true
+# The exit code has to be read from pytest itself. `output=$(pytest ...) || true`
+# followed by `exit_code=$?` reads the status of `true`, which is 0 on every
+# path — so this gate always took the "all tests PASS" branch and blocked every
+# legitimate Red phase. Same bug, same fix as scan-secrets.sh (issue #123).
+output=$(pytest tests/ -q --tb=line --no-header 2>&1)
 exit_code=$?
 
 # Exit code 0 = all tests pass → Red phase violation
@@ -41,6 +50,22 @@ fi
 # Exit code 5 = no tests collected → skip
 if [ "$exit_code" -eq 5 ]; then
     echo '{"systemMessage": "test-writer:Stop — no tests collected, Red gate skipped"}'
+    exit 0
+fi
+
+# Not every red is a red. A file that cannot be imported (exit 2) or a test that
+# errors before it runs — missing fixture, fixture raising — never reaches the
+# behaviour it claims to guard, and it stays red after a perfect implementation.
+# Counting it as a satisfied Red phase sends the Green phase hunting for a defect
+# that does not exist (issue #123, finding 2).
+#
+# Read off the summary line rather than the exit code: a missing fixture reports
+# `1 error` and still exits 1, which is indistinguishable from a genuine failure
+# by exit code alone. Measured 2026-08-24.
+summary_line=$(printf '%s' "$output" | grep -v '^[[:space:]]*$' | tail -1)
+if [ "$exit_code" -eq 2 ] || printf '%s' "$summary_line" | grep -qE '[0-9]+ error'; then
+    detail=$(printf '%s' "$summary_line" | sed 's/"/\\"/g')
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Red phase invalid: the suite reported collection or setup ERRORS, not test failures. A test that cannot be collected or set up never reaches the behaviour it claims to guard, and it stays red after a correct implementation. Fix the test construction — imports, syntax, fixtures, schema-less DataFrames — so the red comes from an assertion. Summary: ${detail}\"}}"
     exit 0
 fi
 

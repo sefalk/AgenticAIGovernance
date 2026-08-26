@@ -49,7 +49,19 @@ if ($toolName -match 'terminal') {
     $bootstrapMode = (Get-AfConfig -Key 'PY_ENV_BOOTSTRAP' -Default 'ask').ToLower()
 
     $isPyTerminalCommand = $command -match '(\.github/scripts/(run-tests|run-deps|run-metrics)\.ps1)|(\.venv/Scripts/python\.exe)|(^|\s)(python|pip|ruff|mypy)(\s|$)'
-    $isPytestViaTerminal = $command -match '\bpytest\b|\bpy\.test\b'
+
+    # Match a pytest *invocation*, not the word. The gate used to test the bare
+    # substring '\bpytest\b', which denied read-only commands that merely name
+    # it -- grepping the config header '[tool.pytest' was a hard deny (#183).
+    # Anchoring to a statement start also closes the reverse hole: a pytest run
+    # hidden after a separator in an otherwise innocent command.
+    $stmtStart  = '(?:^|[;&|`(){}]|\r?\n)\s*(?:&\s*)?'
+    $pathPrefix = '(?:[''"])?(?:[^\s;&|''"]*[\\/])?'
+    $isPytestViaTerminal =
+        ($command -match ($stmtStart + $pathPrefix + '(?:pytest|py\.test)(?:\.exe)?(?:[''"])?(?:\s|;|$)')) -or
+        ($command -match ($stmtStart + $pathPrefix + '(?:python3?|py)(?:\.exe)?(?:[''"])?\s(?:[^;&|\r\n]*\s)?-m\s+pytest(?:\s|;|$)')) -or
+        ($command -match ('(?:^|[;&|`(){}]|\r?\n)\s*(?:uv|uvx|poetry|pdm|hatch|pipenv|nox|tox|conda)\s[^;&|\r\n]*\spytest(?:\s|;|$)'))
+
     $venvPython = Join-Path $AfCodeRoot '.venv/Scripts/python.exe'
 
     # Bootstrap only for non-pytest Python commands; pytest via terminal is denied below anyway.
@@ -102,10 +114,31 @@ if ($toolName -match 'terminal') {
     # Validate git worktree add preconditions
     if ($command -match 'git\s+worktree\s+add') {
         $WT_DIR = Get-AfConfig -Key 'WORKTREE_DIR' -Default '../wt'
-        # Extract branch name: git worktree add <path> -b <branch> ...
+        # `\S+` stops at the first blank, so a quoted path containing spaces was
+        # read as several arguments: `...\OneDrive - Siemens...` handed the branch
+        # check the token `-` and denied a perfectly valid branch name, while the
+        # collision guard tested a prefix that does not exist (issue #200).
+        # Tokenise the command instead, honouring quotes.
+        $wtTokens = [regex]::Matches($command, '"[^"]*"|''[^'']*''|\S+') |
+            ForEach-Object { $_.Value.Trim('"', "'") }
         $branchMatch = $null
-        if ($command -match '-b\s+(\S+)') { $branchMatch = $Matches[1] }
-        elseif ($command -match 'worktree\s+add\s+\S+\s+(\S+)') { $branchMatch = $Matches[1] }
+        $pathMatch = $null
+        $seenAdd = $false
+        $takeBranch = $false
+        $positional = 0
+        for ($i = 0; $i -lt $wtTokens.Count; $i++) {
+            $tok = $wtTokens[$i]
+            if (-not $seenAdd) {
+                if ($tok -eq 'add' -and $i -gt 0 -and $wtTokens[$i - 1] -eq 'worktree') { $seenAdd = $true }
+                continue
+            }
+            if ($takeBranch) { $branchMatch = $tok; $takeBranch = $false; continue }
+            if ($tok -eq '-b' -or $tok -eq '-B') { $takeBranch = $true; continue }
+            if ($tok.StartsWith('-')) { continue }
+            $positional++
+            if ($positional -eq 1) { $pathMatch = $tok }
+            elseif ($positional -eq 2 -and -not $branchMatch) { $branchMatch = $tok }
+        }
         if ($branchMatch -and $branchMatch -notmatch '^agent/[a-z0-9][a-z0-9-]*$') {
             @{
                 hookSpecificOutput = @{
@@ -116,9 +149,7 @@ if ($toolName -match 'terminal') {
             } | ConvertTo-Json -Depth 3 -Compress
             exit 0
         }
-        # Extract worktree path and check for collision
-        $pathMatch = $null
-        if ($command -match 'worktree\s+add\s+(\S+)') { $pathMatch = $Matches[1] }
+        # Check for a collision at the resolved worktree path
         if ($pathMatch) {
             try {
                 $resolvedWt = [System.IO.Path]::GetFullPath($pathMatch)
@@ -169,6 +200,20 @@ if ($toolName -match 'terminal') {
             }
         }
     }
+    # Baseline for the PostToolUse check: what was already dirty before this
+    # command ran. Without it that hook can only see presence, so it fired on
+    # every call while subagents legitimately held uncommitted work (#172).
+    $snapDir = git -C $AfCodeRoot rev-parse --absolute-git-dir 2>$null | Select-Object -First 1
+    if ($snapDir -and (Test-Path -LiteralPath $snapDir)) {
+        $srcDir = Get-AfConfig -Key 'SRC_DIR' -Default 'src'
+        $baseline = git -C $AfCodeRoot status --porcelain -- "$srcDir/" tests/ 2>$null
+        # Only on success: a failed status would write an empty baseline, and an
+        # empty baseline makes every existing change look new.
+        if ($LASTEXITCODE -eq 0) {
+            Set-Content -LiteralPath (Join-Path $snapDir 'af-delegation.snapshot') -Value ($baseline -join "`n")
+        }
+    }
+
     # Terminal commands allowed (git, investigation, etc.)
     Write-Output '{}'
     exit 0

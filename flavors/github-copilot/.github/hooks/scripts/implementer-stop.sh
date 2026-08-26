@@ -23,8 +23,10 @@ set -uo pipefail
 SRC_DIR=$(af_conf_get SRC_DIR src)
 BASE_BRANCH=$(af_conf_get BASE_BRANCH '')
 
-# Read stdin (hook input JSON — required by protocol)
-cat > /dev/null
+# Read stdin (hook input JSON — required by protocol). Kept rather than
+# discarded: `session_id` and `transcript_path` locate this session's subagent
+# logs, which is how the gate below tells its own edits from a peer's (#101).
+stdin_raw=$(cat)
 
 # A missing test runner disables the TEST gate only. Provenance, quality,
 # linting and ignore hygiene need neither pytest nor a tests/ directory, and
@@ -69,7 +71,11 @@ elif [[ "$from_log" == true ]]; then
     exit_code=0
     output="Tests: accepted from test log (${log_info} passed, no code changes since)"
 else
-    output=$(.github/scripts/run-tests.sh --scope all 2>&1) || true
+    # `output=$(...) || true` followed by `exit_code=$?` reads the status of
+    # `true`, which is 0 on every path -- so the Green gate treated every run as
+    # passing and could not block a failing suite at all (issue #123, finding 1).
+    # Same bug, same fix as scan-secrets.sh.
+    output=$(.github/scripts/run-tests.sh --scope all 2>&1)
     exit_code=$?
 fi
 
@@ -79,6 +85,17 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
     if [ -z "$changed_py" ]; then
         changed_py=$(git diff --name-only HEAD --diff-filter=AM -- '*.py' 2>/dev/null)
     fi
+
+    # `git diff` is global to the checkout, so a producer running alongside this
+    # one puts its in-flight edits in this scope. The gate then demands work on
+    # a file this agent was told not to touch, and the provenance gate stamps a
+    # marker naming the wrong author (issue #101).
+    #
+    # Applied to the authorship and quality scopes ONLY. A lint violation is
+    # real whoever produced it, so subtracting from the lint scope would be a
+    # genuine bypass rather than a correction -- the same boundary #86 drew for
+    # `--list-authored`. The peer's own Stop hook lints the peer's files.
+    peer_edits=$(af_peer_edits "$stdin_raw" implementer)
 
     # The unit of accountability is the branch delta: what the merge will add.
     # Resolved here rather than at each gate so provenance, quality and hygiene
@@ -107,9 +124,9 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
     # without writing a word of it, and a diff cannot tell the two apart
     # (issue #86). If the query cannot run, keep the whole diff: an
     # unanswerable question must not silence the gate.
-    authored_py="$changed_py"
-    if [ -n "$changed_py" ] && [ -n "$merge_base" ] && [ -n "$python_exe" ] && [ -f "$quality_script" ]; then
-        if authored_out=$(echo "$changed_py" | xargs "$python_exe" "$quality_script" $diff_base_args --list-authored --files 2>/dev/null); then
+    authored_py=$(af_strip_lines "$changed_py" "$peer_edits")
+    if [ -n "$authored_py" ] && [ -n "$merge_base" ] && [ -n "$python_exe" ] && [ -f "$quality_script" ]; then
+        if authored_out=$(echo "$authored_py" | xargs "$python_exe" "$quality_script" $diff_base_args --list-authored --files 2>/dev/null); then
             authored_py="$authored_out"
         fi
     fi
@@ -137,8 +154,20 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
     changed_lint_py=""
     if [ -n "$changed_py" ]; then
         while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            # A concurrent peer's file is not this agent's to document (#101).
+            # Filtered here rather than with af_strip_lines because the entries
+            # below carry a trailing space, which an exact line match misses.
+            # The lint branch is deliberately left whole: a ruff violation is
+            # real whoever produced it.
+            is_peer=false
+            if [ -n "$peer_edits" ] && printf '%s\n' "$peer_edits" | grep -qxF "$f"; then
+                is_peer=true
+            fi
             if [[ "$f" == "$SRC_DIR/"* ]]; then
-                changed_src_py+="$f "$'\n'
+                if [ "$is_peer" = false ]; then
+                    changed_src_py+="$f "$'\n'
+                fi
                 changed_lint_py+="$f "$'\n'
             elif [[ "$f" == tests/* ]]; then
                 changed_lint_py+="$f "$'\n'

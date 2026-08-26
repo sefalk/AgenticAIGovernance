@@ -79,8 +79,19 @@ foreach ($logFile in $hookLogs) {
             $event = $Matches[2]
             $message = $Matches[3]
 
+            # Every pattern below is anchored to the start of the message.
+            #
+            # The log records each tool's response, so anything printed into a
+            # terminal -- including an excerpt of this very log, or this script's
+            # own output -- comes back as text inside a later PostToolUse line.
+            # Unanchored patterns match that quoted text and count it as hook
+            # activity. Observed: printing one raw 'Running: ... session-context.ps1'
+            # line made the next run report that hook as firing, with no hook
+            # having run in between. 'Completed (Failure)' is the costly case,
+            # since a phantom match fails the suite and turns the CI gate red.
+
             # Track Executing lines (show hook count per event)
-            if ($message -match 'Executing (\d+) hook\(s\)') {
+            if ($message -match '^Executing (\d+) hook\(s\)') {
                 $hookCount = [int]$Matches[1]
                 $script:totalInvocations++
                 if (-not $script:totalEvents.ContainsKey($event)) {
@@ -94,14 +105,14 @@ foreach ($logFile in $hookLogs) {
             }
 
             # Track which scripts are being run
-            if ($message -match 'Running:.*?File\s+[^\s]+\\\\([^\\]+\.ps1)') {
+            if ($message -match '^Running:.*?File\s+[^\s]+\\\\([^\\]+\.ps1)') {
                 $scriptName = $Matches[1]
                 if (-not $script:hookScripts.ContainsKey($scriptName)) {
                     $script:hookScripts[$scriptName] = 0
                 }
                 $script:hookScripts[$scriptName]++
             }
-            elseif ($message -match 'Running:.*?scripts/([^/"]+\.sh)') {
+            elseif ($message -match '^Running:.*?scripts/([^/"]+\.sh)') {
                 $scriptName = $Matches[1]
                 if (-not $script:hookScripts.ContainsKey($scriptName)) {
                     $script:hookScripts[$scriptName] = 0
@@ -110,7 +121,7 @@ foreach ($logFile in $hookLogs) {
             }
 
             # Track tool names from Input JSON
-            if ($message -match 'Input:.*?"tool_name":"([^"]+)"') {
+            if ($message -match '^Input:.*?"tool_name":"([^"]+)"') {
                 $toolName = $Matches[1]
                 if (-not $script:toolsSeen.ContainsKey($toolName)) {
                     $script:toolsSeen[$toolName] = 0
@@ -119,13 +130,13 @@ foreach ($logFile in $hookLogs) {
             }
 
             # Track failures
-            if ($message -match 'Completed \(Failure\)') {
+            if ($message -match '^Completed \(Failure\)') {
                 $script:failures++
                 $script:warnings += "FAILURE: [$event] #$seqNum in $sessionDir"
             }
 
             # Track denials (hook returned output suggesting deny/ask)
-            if ($message -match 'Completed.*with output') {
+            if ($message -match '^Completed.*with output') {
                 $script:denials++
                 if ($Verbose) {
                     Write-Output "  [#$seqNum] [$event] returned output (deny/ask/advisory)"
@@ -231,28 +242,49 @@ foreach ($es in $expectedScripts) {
     }
 }
 
-# Check 6: Verify agent-hooks.json global hooks (session-context, session-mcp-readiness, block-dangerous, scan-secrets, stop-tests)
-$globalScripts = @(
+# Check 6: Verify the hooks declared in agent-hooks.json are firing.
+#
+# Split by scope. One combined list conflates two findings with very
+# different base rates, and so reports the harmless one as if it were a fault:
+#
+#   Tool-scoped hooks fire on every matching tool call. Their absence from a
+#   log holding hundreds of invocations is real evidence of a problem.
+#
+#   SessionStart fires once per session, but this log file is created per
+#   window. A window reload opens a fresh log mid-session, and that log can
+#   never contain the SessionStart that preceded it. Absence is the normal
+#   case, not a defect.
+#
+# Measured across 8 logs (7,127 recorded hook events): exactly 1 SessionStart,
+# and it ran session-context.ps1 to completion (Success, 3330ms, returning
+# additionalContext). The event works; it is simply rarely captured.
+$globalToolScripts = @(
     'block-dangerous.ps1',
     'scan-secrets.ps1',
-    'session-context.ps1',
-    'session-mcp-readiness.ps1',
     'stop-tests.ps1'
 )
-$globalMissing = @()
-foreach ($gs in $globalScripts) {
-    if (-not $script:hookScripts.ContainsKey($gs)) {
-        $globalMissing += $gs
-    }
-}
+$globalSessionScripts = @(
+    'session-context.ps1',
+    'session-mcp-readiness.ps1'
+)
+$globalMissing = @($globalToolScripts | Where-Object { -not $script:hookScripts.ContainsKey($_) })
+$sessionMissing = @($globalSessionScripts | Where-Object { -not $script:hookScripts.ContainsKey($_) })
+
 if ($globalMissing.Count -eq 0) {
-    Write-Output "  PASS  All global hooks (agent-hooks.json) are firing"
+    Write-Output "  PASS  Tool-scoped global hooks (agent-hooks.json) are firing"
     $checksPassed++
 } else {
-    Write-Output "  WARN  Global hooks NOT firing: $($globalMissing -join ', ')"
-    Write-Output "        -> agent-hooks.json may not be loaded by VS Code."
-    Write-Output "        -> Wire these into agent .agent.md frontmatter instead."
+    Write-Output "  WARN  Tool-scoped global hooks NOT firing: $($globalMissing -join ', ')"
+    Write-Output "        -> Check the matcher in agent-hooks.json against the tools"
+    Write-Output "           this log actually contains, and that the script path resolves."
     # Advisory — but important to track
+}
+
+if ($sessionMissing.Count -gt 0) {
+    Write-Output "  INFO  No SessionStart record in this log for: $($sessionMissing -join ', ')"
+    Write-Output "        Expected whenever the log began mid-session. This is not"
+    Write-Output "        evidence that agent-hooks.json is unloaded -- the tool-scoped"
+    Write-Output "        hooks reported above are declared in that same file."
 }
 
 # Check 7: Verify multiple tools are being intercepted
@@ -286,14 +318,17 @@ if (Test-Path $projectHooksDir) {
 
     $orphaned = $allHookScripts | Where-Object { -not $script:hookScripts.ContainsKey($_) }
     if ($orphaned.Count -gt 0) {
-        Write-Output "## Orphan Detection"
-        Write-Output "  Scripts in hooks/scripts/ never invoked by VS Code:"
+        Write-Output "## Orphan Candidates"
+        Write-Output "  Scripts in hooks/scripts/ not seen in this log:"
         foreach ($o in ($orphaned | Sort-Object)) {
             Write-Output "    $o"
         }
         Write-Output ""
-        Write-Output "  These scripts exist but VS Code never called them."
-        Write-Output "  Either wire them into agent frontmatter or remove them."
+        Write-Output "  These scripts were not called during the sessions this log covers."
+        Write-Output "  That is not proof they are orphaned: a hook bound to an agent or"
+        Write-Output "  an event that never occurred here looks identical to an unused one."
+        Write-Output "  Confirm against the declarations before deleting anything -- check"
+        Write-Output "  agent-hooks.json and the hooks: frontmatter of every .agent.md."
         Write-Output ""
     }
 }
