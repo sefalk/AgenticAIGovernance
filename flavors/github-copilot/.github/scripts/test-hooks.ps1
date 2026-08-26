@@ -39,16 +39,20 @@ if (-not (Test-Path $scriptDir)) {
 # people to ignore it, or to revert the setting to make it pass.
 #
 # So the suite states its policy and points the hooks at it via AF_CONF_PATH.
-# Only the AUTONOMY_* keys are declared; everything else (SRC_DIR, branch
-# names, allowlists) is carried over from the real config, because those cases
-# assert against the deployment they run in.
+# Only the AUTONOMY_* keys and the customisable destinations are declared;
+# everything else (SRC_DIR, branch names, allowlists) is carried over from the
+# real config, because those cases assert against the deployment they run in.
+#
+# RETRO_DIR joined the declared set after the identical failure recurred under
+# a different key: the first consumer to use the RETRO_DIR the framework itself
+# introduced saw 14 red cases, none of them a defect (issue #209).
 $script:policyDir = Join-Path ([System.IO.Path]::GetTempPath()) "af-hook-policy-$(Get-Random)"
 New-Item -ItemType Directory -Path $script:policyDir -Force | Out-Null
 
 $script:realConf = Join-Path $githubDir 'af-env.conf'
 $script:confBase = if (Test-Path $script:realConf) {
-    # Drop the AUTONOMY_ lines; the declared policy supplies them.
-    (Get-Content $script:realConf) | Where-Object { $_ -notmatch '^\s*AUTONOMY_' }
+    # Drop the declared keys; the policy below supplies them.
+    (Get-Content $script:realConf) | Where-Object { $_ -notmatch '^\s*(AUTONOMY_|RETRO_DIR=)' }
 } else { @() }
 
 # The policy the unqualified cases speak for: shipped defaults, nothing opted in.
@@ -63,6 +67,7 @@ $script:basePolicy = [ordered]@{
     AUTONOMY_CAT_DATABRICKS  = ''
     AUTONOMY_CAT_CLOUD_READ  = ''
     AUTONOMY_CAT_FS_WRITE    = ''
+    RETRO_DIR                = '.github/retros/auto'
 }
 $script:activePolicy = $null
 
@@ -731,6 +736,22 @@ Assert-True "the two read-back outcomes are distinguishable by assertion" `
     ((Test-AssertionOutcome { Assert-NotContains 'probe' $rbHit.ReadBack '2099' }) -eq 'pass' -and `
      (Test-AssertionOutcome { Assert-NotContains 'probe' $rbMiss.ReadBack '2099' }) -eq 'fail') `
     "seeded: $(Test-AssertionOutcome { Assert-NotContains 'probe' $rbHit.ReadBack '2099' }), absent: $(Test-AssertionOutcome { Assert-NotContains 'probe' $rbMiss.ReadBack '2099' })"
+
+# The portability property, asserted rather than trusted: without it the suite
+# is green in this repository and red in any consumer that uses a customisable
+# key -- which is how issue #209 reached a consumer at all.
+$cfgDefault = Invoke-Hook -Script 'block-dangerous.ps1' -JsonInput $DEC_PROBE_JSON -Branch 'agent/cfg-x' `
+    -ReadBack '.github/af-env.conf' -Files @{ 'README.md' = 'x' }
+$cfgOverride = Invoke-Hook -Script 'block-dangerous.ps1' -JsonInput $DEC_PROBE_JSON -Branch 'agent/cfg-x' `
+    -ReadBack '.github/af-env.conf' -Files @{ '.github/af-env.conf' = "RETRO_DIR=docs/retros`n" }
+
+Assert-True "the fixture pins customisable keys to their shipped defaults" `
+    ($cfgDefault.ReadBack -match '(?m)^RETRO_DIR=\.github/retros/auto\s*$') `
+    "got: $($cfgDefault.ReadBack)" -Subject $cfgDefault.ReadBack
+
+Assert-True "a case that supplies its own config still overrides the pin" `
+    ($cfgOverride.ReadBack -match '(?m)^RETRO_DIR=docs/retros\s*$') `
+    "got: $($cfgOverride.ReadBack)" -Subject $cfgOverride.ReadBack
 
 Write-Output ""
 
@@ -2071,13 +2092,28 @@ $REAL_CONF = Get-Content $confPath -Raw
 # If this fails, every override case below silently tests the default instead:
 # the replace would match nothing, the hook would fall back, and the
 # assertions would pass while proving nothing.
-Assert-True "the shipped af-env.conf carries RETRO_DIR at the unchanged default" `
-    ($REAL_CONF -match '(?m)^RETRO_DIR=\.github/retros/auto\s*$') `
-    "an upgrading consumer must not have its retro destination move under it"
+#
+# It is a claim about the file this framework ships, so it can only be made
+# where that file lives. A consumer's copy is [customizable] and is expected to
+# differ -- asserting the default into it teaches the consumer to ignore red
+# output, which is worse than shipping no test at all (issue #209).
+if (Test-Path (Join-Path $githubDir '../../../.githooks/pre-commit')) {
+    Assert-True "the shipped af-env.conf carries RETRO_DIR at the unchanged default" `
+        ($REAL_CONF -match '(?m)^RETRO_DIR=\.github/retros/auto\s*$') `
+        "an upgrading consumer must not have its retro destination move under it"
+} else {
+    Write-Output "  SKIP  shipped-default RETRO_DIR -- a consumer's af-env.conf is meant to differ"
+}
 
 function New-ConfWith {
     param([string]$Dir)
-    $out = $REAL_CONF -replace '(?m)^RETRO_DIR=.*$', "RETRO_DIR=$Dir"
+    # A consumer may have dropped the key rather than changed it; appending is
+    # the same statement to the hook and keeps the override exercised there too.
+    $out = if ($REAL_CONF -match '(?m)^RETRO_DIR=') {
+        $REAL_CONF -replace '(?m)^RETRO_DIR=.*$', "RETRO_DIR=$Dir"
+    } else {
+        $REAL_CONF.TrimEnd() + "`nRETRO_DIR=$Dir`n"
+    }
     if ($out -eq $REAL_CONF) { throw "RETRO_DIR not substituted -- the override would be untested" }
     return $out
 }

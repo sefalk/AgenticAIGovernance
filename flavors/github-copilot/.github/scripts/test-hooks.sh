@@ -36,13 +36,16 @@ fail=0
 # failures that were that project's configuration, not defects. So the suite
 # states its policy and points the hooks at it through AF_CONF_PATH.
 #
-# Only the AUTONOMY_ keys are declared; the rest of the real config is carried
-# over, because other cases assert against the deployment they run in.
+# Only the AUTONOMY_ keys and the customisable destinations are declared; the
+# rest of the real config is carried over, because other cases assert against
+# the deployment they run in. RETRO_DIR joined the declared set after the same
+# failure recurred under it: 14 red cases in the first consumer to use it, none
+# of them a defect (issue #209).
 POLICY_DIR=$(mktemp -d)
 trap 'rm -rf "$POLICY_DIR"' EXIT
 
 if [ -f "$GITHUB_DIR/af-env.conf" ]; then
-    grep -v '^[[:space:]]*AUTONOMY_' "$GITHUB_DIR/af-env.conf" > "$POLICY_DIR/base.conf" 2>/dev/null || :
+    grep -vE '^[[:space:]]*(AUTONOMY_|RETRO_DIR=)' "$GITHUB_DIR/af-env.conf" > "$POLICY_DIR/base.conf" 2>/dev/null || :
 else
     : > "$POLICY_DIR/base.conf"
 fi
@@ -54,6 +57,7 @@ set_policy() {
     : > "$out"
     for kv in "$@"; do printf '%s\n' "$kv" >> "$out"; done
     printf 'AUTONOMY_LEVEL=balanced\n' >> "$out"
+    printf 'RETRO_DIR=.github/retros/auto\n' >> "$out"
     for key in GIT_READ GIT_FEATURE GIT_MERGE TESTS FS_READ PKG_INSTALL \
                DATABRICKS CLOUD_READ FS_WRITE; do
         printf 'AUTONOMY_CAT_%s=\n' "$key" >> "$out"
@@ -800,14 +804,32 @@ echo "## retro destination is configurable (RETRO_DIR)"
 CONF_DOCS_B='RETRO_DIR=docs/retros\n'
 
 # If the shipped config lost the key, every override case below would still
-# pass -- against the default, proving nothing.
-if grep -qE '^RETRO_DIR=\.github/retros/auto[[:space:]]*$' "$GITHUB_DIR/af-env.conf" 2>/dev/null; then
-    conf_default_ok=1
+# pass -- against the default, proving nothing. It is a claim about the file
+# this framework ships, so it can only be made where that file lives: a
+# consumer's copy is [customizable] and is meant to differ (issue #209).
+if [ -f "$GITHUB_DIR/../../../.githooks/pre-commit" ]; then
+    if grep -qE '^RETRO_DIR=\.github/retros/auto[[:space:]]*$' "$GITHUB_DIR/af-env.conf" 2>/dev/null; then
+        conf_default_ok=1
+    else
+        conf_default_ok=0
+    fi
+    assert_true "the shipped af-env.conf carries RETRO_DIR at the unchanged default" \
+        "$conf_default_ok" "an upgrading consumer must not have its retro destination move under it"
 else
-    conf_default_ok=0
+    echo "SKIP: shipped-default RETRO_DIR -- a consumer's af-env.conf is meant to differ"
 fi
-assert_true "the shipped af-env.conf carries RETRO_DIR at the unchanged default" \
-    "$conf_default_ok" "an upgrading consumer must not have its retro destination move under it"
+
+# The portability property, asserted rather than trusted. Without the pin, the
+# cases below seed their retro at the default while the fixture carries the
+# host's setting -- green here, red in every consumer that uses the key as
+# intended, which is how #209 reached one.
+if grep -qE '^RETRO_DIR=\.github/retros/auto[[:space:]]*$' "$(af_policy_conf)" 2>/dev/null; then
+    policy_pin_ok=1
+else
+    policy_pin_ok=0
+fi
+assert_true "the declared policy pins RETRO_DIR to the shipped default" \
+    "$policy_pin_ok" "fixtures would inherit the host's retro destination and judge it as the hook's"
 
 doc_stop_case "with no RETRO_DIR configured the default destination still satisfies the gate" \
     pass "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
