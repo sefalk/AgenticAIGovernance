@@ -14,8 +14,9 @@ checker, so globs, budgets and ``applyTo`` semantics keep exactly one
 definition.
 
 The check runs only when the commit stages something the budget depends on
-(``copilot-instructions.md``, ``instructions/*.md``, ``agents/*.agent.md``, or
-the ``af-env.conf`` that sets the ceiling), so every other commit pays nothing.
+(``copilot-instructions.md``, ``instructions/*.md``, ``agents/*.agent.md``,
+``skills/*/SKILL.md``, or the ``af-env.conf`` that sets the ceiling), so every
+other commit pays nothing.
 
 That scoping has a failure mode of its own: a guard with nothing to measure
 emits nothing, and nothing is exactly what a passing guard emits. A project
@@ -82,6 +83,11 @@ def _is_budget_input(relative: str) -> bool:
     parts = relative.split("/")
     if len(parts) == 1:
         return parts[0] in BUDGET_FILES
+    # A skill body is loaded on demand and costs the budget nothing. Its
+    # frontmatter description is announced on every request, so SKILL.md is a
+    # budget input and the reference files beside it are not.
+    if len(parts) == 3:
+        return parts[0] == "skills" and parts[2] == "SKILL.md"
     if len(parts) != 2:
         return False
     if parts[0] == "instructions":
@@ -118,6 +124,11 @@ def _on_disk(root: str) -> set[str]:
             relative = f"{sub}/{entry.name}"
             if entry.is_file() and _is_budget_input(relative):
                 found.add(relative)
+    skills = base / "skills"
+    if skills.is_dir():
+        for entry in skills.iterdir():
+            if entry.is_dir() and (entry / "SKILL.md").is_file():
+                found.add(f"skills/{entry.name}/SKILL.md")
     return found
 
 
@@ -241,6 +252,11 @@ def _export_index(root: str, dest: Path) -> bool:
         f":(literal){root}/.af-manifest",
         f":(literal){root}/instructions",
         f":(literal){root}/agents",
+        # Only the SKILL.md files, never the reference material beside them.
+        # Exporting whole skill directories would copy megabytes on every
+        # commit that touches one, to measure a few hundred characters of
+        # frontmatter.
+        f":(glob){root}/skills/*/SKILL.md",
     ]
     names = _git_bytes(["-c", "core.quotePath=false", "ls-files", "-z", "--", *pathspecs])
     if not names.strip(b"\0"):

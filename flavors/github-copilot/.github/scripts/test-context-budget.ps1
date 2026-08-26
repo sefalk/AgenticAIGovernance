@@ -658,11 +658,14 @@ try {
     # Y: a commit that stages nothing the budget depends on pays nothing and
     #    says nothing -- even with an over-budget payload in the index (AC2).
     #    The file sits inside .github, which is where scoping is actually decided.
+    #    This used to stage a SKILL.md, which stopped being an honest example
+    #    when skill descriptions entered the catalogue budget (#206). A prompt
+    #    file is loaded only when someone runs it, so it still costs nothing.
     git -C $repoOver commit -qm seed 2>&1 | Out-Null
-    $skillDir = Join-Path $repoOver '.github/skills/demo'
-    New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
-    'skill' | Set-Content (Join-Path $skillDir 'SKILL.md')
-    git -C $repoOver add -- ':(literal).github/skills/demo/SKILL.md' 2>&1 | Out-Null
+    $promptDir = Join-Path $repoOver '.github/prompts'
+    New-Item -ItemType Directory -Path $promptDir -Force | Out-Null
+    'prompt' | Set-Content (Join-Path $promptDir 'demo.prompt.md')
+    git -C $repoOver add -- ':(literal).github/prompts/demo.prompt.md' 2>&1 | Out-Null
     $results['Y_unmeasured_file_not_checked'] = ((Invoke-Guard $repoOver).Code -eq 0)
 
     # Y2: the ceiling is part of what the payload must satisfy. Lowering it puts
@@ -757,6 +760,31 @@ try {
     } else {
         Write-Host '  (II_af_repo_dispatches_guards skipped: not an AF source tree)'
     }
+
+    # YY: the commit gate must see the catalogue kind that dominates it. Skills
+    #     are the largest share of the catalogue payload, and the guard exported
+    #     everything except them -- so a description could be grown to any size
+    #     and the pre-commit check would report a total that did not contain it.
+    #     Caught by reading the guard's own output on the commit that added the
+    #     catalogue ceiling: it reported 1,416 tok where the checker said 3,322.
+    $catGuardConf = $guardConf + "AF_CATALOGUE_BUDGET_TOKENS=200`n"
+    $gh = New-Fixture -RootTokens 100 -Conf $catGuardConf -Skills @{
+        'windbag' = @{ Description = ('y' * 4000) }
+    } -Instructions @{ 'ok.instructions.md' = @{ Tokens = 100; ApplyTo = '**' } }
+    $fixtures += $gh
+    $r = Invoke-Guard (New-StagedRepo $gh)
+    $results['YY_staged_skill_description_measured'] = ($r.Code -eq 1)
+    $results['YY_staged_skill_named'] = ($r.Output -match 'windbag')
+
+    # A skill's reference files are loaded on demand and cost the budget
+    # nothing. Staging a large one must not block a commit, or the guard would
+    # be charging for the level of loading it is not measuring.
+    $gh = New-Fixture -RootTokens 100 -Conf $catGuardConf -Skills @{
+        'alpha' = @{ Description = 'does alpha things' }
+    } -Instructions @{ 'ok.instructions.md' = @{ Tokens = 100; ApplyTo = '**' } }
+    $fixtures += $gh
+    [IO.File]::WriteAllText((Join-Path $gh 'skills/alpha/REFERENCE.md'), ('z' * 60000))
+    $results['YY_skill_reference_file_not_charged'] = ((Invoke-Guard (New-StagedRepo $gh)).Code -eq 0)
 
     # --- The guard's own blind spot (issue #125) --------------------------
     # The guard measures the index, so a project that gitignores .github/ can
