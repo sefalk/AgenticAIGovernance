@@ -64,10 +64,18 @@ function New-LlmRequest {
         [string]$DebugName = 'panel/editAgent',
         [long]$Ts = 0,
         [switch]$OmitTokenFields,
-        [string]$SecretText = ''
+        [string]$SecretText = '',
+        [switch]$Payloads
     )
     if ($Ts -eq 0) { $Ts = $T0 + 1000 }
     $attrs = [ordered]@{ model = $Model; debugName = $DebugName }
+    if ($Payloads) {
+        # The collector must take the payload KIND from which attribute named
+        # the file, never from the filename -- so the fixture names them the
+        # wrong way round on purpose.
+        $attrs.systemPromptFile = 'dump_a.json'
+        $attrs.toolsFile        = 'dump_b.json'
+    }
     if (-not $OmitTokenFields) {
         $attrs.inputTokens  = $InputTokens
         $attrs.outputTokens = $OutputTokens
@@ -83,6 +91,61 @@ function New-LlmRequest {
 }
 
 # Creates a session directory. $Main / $Child are arrays of JSONL lines.
+function New-ToolCall([string]$Name, [long]$Ts = 0) {
+    if ($Ts -eq 0) { $Ts = $T0 + 1200 }
+    [ordered]@{
+        ts = $Ts; dur = 5; sid = $SID
+        type = 'tool_call'; name = $Name; spanId = 't1'; parentSpanId = 's0'; status = 'ok'
+        # args/result are the call's payload and carry user text; the collector
+        # must count the name and read neither.
+        attrs = [ordered]@{ args = 'SUPERSECRET-ARGS'; result = 'SUPERSECRET-RESULT' }
+    } | ConvertTo-Json -Compress -Depth 6
+}
+
+function New-Customization([string]$Details, [long]$Ts = 0) {
+    if ($Ts -eq 0) { $Ts = $T0 + 1300 }
+    [ordered]@{
+        ts = $Ts; dur = 1; sid = $SID
+        type = 'generic'; name = 'Resolve Customizations'; spanId = 'g1'; parentSpanId = 's0'; status = 'ok'
+        attrs = [ordered]@{ category = 'customization'; details = $Details }
+    } | ConvertTo-Json -Compress -Depth 6
+}
+
+# The two payload dumps a request can name. Both are `{"content": "<json>"}`,
+# a JSON string holding more JSON -- the shape the real dumps use.
+function Write-Dumps([string]$Dir, [switch]$Unparseable, [switch]$Mixed) {
+    if ($Unparseable) {
+        [IO.File]::WriteAllText((Join-Path $Dir 'dump_a.json'), '{"content": "not json at all"}')
+        [IO.File]::WriteAllText((Join-Path $Dir 'dump_b.json'), 'not even a json object')
+        return
+    }
+    $tools = @(
+        [ordered]@{ name = 'read_file';               description = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
+        [ordered]@{ name = 'mcp_pylance_mcp_s_alpha'; description = 'BBBBBBBBBBBBBBBBBBBB' },
+        [ordered]@{ name = 'mcp_pylance_mcp_s_beta';  description = 'CCCCCCCCCCCCCCCCCCCC' }
+    )
+    $toolsJson = '[' + (($tools | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 4 }) -join ',') + ']'
+    # The file NAMED by `toolsFile` is dump_b; see New-LlmRequest.
+    [IO.File]::WriteAllText((Join-Path $Dir 'dump_b.json'),
+        ([ordered]@{ content = $toolsJson } | ConvertTo-Json -Compress -Depth 4))
+
+    $prompt = @(
+        '<skill><name>alpha</name><file>x/alpha/SKILL.md</file></skill>',
+        '<skill><name>beta</name><file>x/beta/SKILL.md</file></skill>',
+        '<agent><name>gamma</name><description>d</description></agent>',
+        '<instruction><file>x/y/delta.instructions.md</file><description>d</description></instruction>',
+        '<attachment filePath="a\b\epsilon.instructions.md">BODYBODYBODYBODYBODYBODYBODY</attachment>'
+    ) -join "`n"
+    $blockJson = '[' + (([ordered]@{ type = 'text'; content = $prompt } | ConvertTo-Json -Compress -Depth 4)) + ']'
+    if ($Mixed) {
+        # One payload readable, one not: degradation is per payload.
+        [IO.File]::WriteAllText((Join-Path $Dir 'dump_a.json'), '{"content": "not json at all"}')
+        return
+    }
+    [IO.File]::WriteAllText((Join-Path $Dir 'dump_a.json'),
+        ([ordered]@{ content = $blockJson } | ConvertTo-Json -Compress -Depth 4))
+}
+
 function New-SessionFixture {
     param(
         [string[]]$Main = @(),
@@ -91,7 +154,10 @@ function New-SessionFixture {
         [string[]]$Child2 = @(),
         [string]$ChildName2 = 'runSubagent-implementer-toolu_second.jsonl',
         [switch]$NoMainFile,
-        [switch]$RateCard
+        [switch]$RateCard,
+        [switch]$Dumps,
+        [switch]$BadDumps,
+        [switch]$MixedDumps
     )
     $base = Join-Path ([IO.Path]::GetTempPath()) ("sesscost-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
     $dir  = Join-Path $base $SID
@@ -130,6 +196,9 @@ function New-SessionFixture {
         )
         [IO.File]::WriteAllText((Join-Path $dir 'models.json'), ($card | ConvertTo-Json -Depth 8))
     }
+    if ($Dumps)    { Write-Dumps -Dir $dir }
+    if ($BadDumps) { Write-Dumps -Dir $dir -Unparseable }
+    if ($MixedDumps) { Write-Dumps -Dir $dir -Mixed }
     if (-not $NoMainFile) {
         [IO.File]::WriteAllText((Join-Path $dir 'main.jsonl'), (($Main -join "`n") + "`n"))
     }
@@ -172,7 +241,7 @@ try {
     $results['A_session_reported'] = ($r.Output -match [regex]::Escape($SID))
     $results['A_environment']      = ($r.Output -match 'vscode:\s*"?1\.131\.0' -and
                                       $r.Output -match 'copilot_chat:\s*"?0\.59\.0')
-    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*4\s*$')
+    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*5\s*$')
     $results['A_collector_named']  = ($r.Output -match 'collector:\s*"?collect-session-cost\.py@')
 
     # --- B: subagent child file is summed, per model ------------------------
@@ -472,7 +541,7 @@ try {
         'main', 'environment', 'vscode', 'copilot_chat', 'claude-opus-5',
         'claude-haiku-4.5', 'rate_card', 'credits_by_kind', 'cache_read',
         'unexplained', 'facts', 'by_purpose', 'agent_work', 'compaction',
-        'background', 'other', 'unbilled'
+        'background', 'other', 'unbilled', 'by_entity'
     )
     $keys = [regex]::Matches($r.Output, '(?m)(?:^\s*|[{,]\s*)([A-Za-z][\w.\-]*)\s*:') |
             ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
@@ -513,6 +582,207 @@ print(mod.NANO_AIU_PER_CREDIT)
     Remove-Item $probeFile -Force -ErrorAction SilentlyContinue
     $results['M_watched_attrs_pinned'] = ($probeOut -match 'cachedTokens,copilotUsageNanoAiu,inputTokens,model,outputTokens')
     $results['M_credit_unit_pinned']   = ($probeOut -match '(?m)^1000000000\s*$')
+
+    # --- S: the entity axis (issue #214) ------------------------------------
+    # Get-Bucket slices a 4-space agent bucket; `by_entity` sits at the top
+    # level next to `by_agent`, so it needs its own slicer. Sliced rather than
+    # matched across the whole output, so a check cannot pass on a line that
+    # belongs to a different block.
+    function Get-TopBlock([string]$text, [string]$name) {
+        $pattern = '(?m)^  ' + [regex]::Escape($name) + ':\s*$([\s\S]*?)(?=^  \S|^\S|\z)'
+        $m = [regex]::Match($text, $pattern)
+        if ($m.Success) { return $m.Groups[1].Value } else { return '' }
+    }
+    # What the payload carried, as opposed to what the request cost. Two calls
+    # on one built-in tool; the pylance pair is never called, which is exactly
+    # the finding the block exists to make visible.
+    $em = [char]0x2014
+    $custom = "Resolved 3 customizations in 4ms | [applying] git-workflow.instructions.md $em always applied, " +
+              "[skipped] testing.instructions.md $em applyTo '**/test_*.py' did not match any attached files, " +
+              '[custom-agent] Explore'
+    $dir = New-SessionFixture -Dumps -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1500000000 -Payloads),
+        (New-LlmRequest -NanoAiu 2500000000 -Payloads),
+        (New-ToolCall -Name 'read_file'),
+        (New-ToolCall -Name 'read_file'),
+        (New-Customization -Details $custom)
+    )
+    $fixtures += $dir
+    $ef = Join-Path $dir 'entities.ndjson'
+    $r  = Invoke-Collector @('--session-dir', $dir, '--entities-out', $ef)
+    $blk = Get-TopBlock $r.Output 'by_entity'
+    $results['S_block_available']    = ($blk -match '(?m)^\s*available:\s*true\s*$')
+    # Stated in the block itself, not only in the README: the reader who would
+    # multiply a footprint by a price is reading this file, not the docs.
+    $results['S_credits_disclaimed'] = ($blk -match '(?m)^\s*credits_attributable:\s*false\s*$')
+    $results['S_payloads_counted']   = ($blk -match 'system_prompt:\s*1,\s*tools:\s*1,\s*unreadable:\s*0')
+    # Kind comes from the attribute, not the filename: the fixture names the
+    # system prompt `dump_a` and the tools `dump_b`, so a filename-based parse
+    # would swap them and this check would fail.
+    $results['S_classes_parsed'] = (
+        $blk -match '(?m)^\s*tool:\s*\{\s*entities:\s*3,' -and
+        $blk -match '(?m)^\s*skill:\s*\{\s*entities:\s*2,' -and
+        $blk -match '(?m)^\s*agent:\s*\{\s*entities:\s*1,' -and
+        $blk -match '(?m)^\s*instruction:\s*\{\s*entities:\s*1,' -and
+        $blk -match '(?m)^\s*instruction_attached:\s*\{\s*entities:\s*1,')
+    # A zero next to a token figure reads as "never used". Skills and agents
+    # are read, not called, so no count is honest there -- and none is emitted.
+    $results['S_invoked_only_where_measurable'] = (
+        $blk -notmatch '(?m)^\s*(skill|agent|instruction|instruction_attached|tool):.*invoked')
+    $results['S_tool_groups_split'] = (
+        $blk -match '(?m)^\s*built-in:\s*\{\s*entities:\s*1,[^}]*invoked:\s*2\s*\}' -and
+        $blk -match '(?m)^\s*mcp:pylance:\s*\{\s*entities:\s*2,[^}]*invoked:\s*0\s*\}')
+    # Class total must equal the sum of its groups; a dropped or double-counted
+    # row shows up here and nowhere else.
+    $classTok = -1
+    if ($blk -match '(?m)^\s*tool:\s*\{\s*entities:\s*3,\s*tokens_est_per_request:\s*(\d+)') { $classTok = [int]$Matches[1] }
+    $grpTok = 0
+    foreach ($m in [regex]::Matches($blk, '(?m)^\s*(?:built-in|mcp:pylance):\s*\{[^}]*tokens_est_per_request:\s*(\d+)')) {
+        $grpTok += [int]$m.Groups[1].Value
+    }
+    $results['S_class_equals_groups'] = ($classTok -gt 0 -and $classTok -eq $grpTok)
+    $results['S_customizations_split'] = (
+        $blk -match 'git-workflow\.instructions\.md:\s*\{\s*applying:\s*1,\s*skipped:\s*0' -and
+        $blk -match 'testing\.instructions\.md:\s*\{\s*applying:\s*0,\s*skipped:\s*1')
+    # The skip reason is the actionable half: it says whether to narrow the
+    # applyTo pattern or delete the file.
+    $results['S_skip_reason_kept'] = ($blk -match "applyTo '\*\*/test_\*\.py' did not match any attached files")
+    # ...and it must stop at the next bracketed marker instead of swallowing it.
+    $results['S_reason_not_overrun'] = ($blk -notmatch 'custom-agent')
+    # Never-applied first: paid for on every request, used on none.
+    $results['S_never_applied_first'] = (
+        $blk.IndexOf('testing.instructions.md') -lt $blk.IndexOf('git-workflow.instructions.md'))
+    $results['S_no_prompt_leak'] = ($r.Output -notmatch 'SUPERSECRET' -and $r.Output -notmatch 'BODYBODY' -and
+                                    (-not (Test-Path $ef) -or
+                                     ([IO.File]::ReadAllText($ef) -notmatch 'SUPERSECRET|BODYBODY|<skill>')))
+
+    # Structural keys inside the block are an allowlist; entity NAMES are data
+    # and are excluded, which is why this cannot ride on J_key_allowlist.
+    $entAllowed = @(
+        'by_entity', 'available', 'credits_attributable', 'payloads', 'system_prompt',
+        'tools', 'unreadable', 'classes', 'tools_by_group', 'customizations', 'rows'
+    )
+    $structural = (($blk -split "`n") | Where-Object { $_ -notmatch '^\s+\S.*:\s*\{' }) -join "`n"
+    $entKeys = [regex]::Matches($structural, '(?m)(?:^\s*|[{,]\s*)([A-Za-z][\w.\-]*)\s*:') |
+               ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+    $entUnexpected = @($entKeys | Where-Object { $entAllowed -notcontains $_ })
+    $results['S_entity_key_allowlist'] = ($entUnexpected.Count -eq 0)
+    if ($entUnexpected.Count -gt 0) { Write-Host "  (unexpected entity keys: $($entUnexpected -join ', '))" }
+
+    # --- S: the entity artifact, at its own grain ---------------------------
+    $results['S_entities_written'] = (Test-Path $ef)
+    if (Test-Path $ef) {
+        $el = @([IO.File]::ReadAllLines($ef) | Where-Object { $_.Trim() })
+        # 8 definitions x 1 payload each, plus the header.
+        $results['S_entity_rows'] = ($el.Count -eq 9)
+        $results['S_entity_header'] = (
+            $el[0] -match '"entity_schema_version":\s*1' -and
+            $el[0] -match '"grain":\s*"payload x entity"' -and
+            $el[0] -match '"credits_attributable":\s*false')
+        # No credit figure exists at this grain, so none may appear here --
+        # not even one derived from the facts file. The whole key set is
+        # pinned, not just the credit-ish names: the artifact is the shareable
+        # thing, so a new field must be a deliberate act, and prompt text
+        # smuggled into a row is caught here rather than by a name pattern.
+        $rowKeys = @()
+        foreach ($line in $el[1..($el.Count - 1)]) {
+            $rowKeys += [regex]::Matches($line, '"([^"]+)":') | ForEach-Object { $_.Groups[1].Value }
+        }
+        $rowKeys = $rowKeys | Sort-Object -Unique
+        $results['S_entity_row_keys_pinned'] =
+            (($rowKeys -join ',') -eq 'chars,class,group,name,payload,record,requests,tokens_est')
+        $results['S_entity_no_credit_column'] =
+            (($el[1..($el.Count - 1)] -join "`n") -notmatch '"[^"]*(credit|nano|aiu|price|cost)[^"]*":')
+        # The fan-out is visible in the file's own shape: `requests` is a
+        # multiplier, so summing it exceeds the session's real request count.
+        # 8 rows x 2 requests = 16 against 2 requests actually made.
+        $reqSum = 0
+        foreach ($line in $el[1..($el.Count - 1)]) {
+            if ($line -match '"requests":\s*(\d+)') { $reqSum += [int]$Matches[1] }
+        }
+        $results['S_entities_not_summable'] = ($reqSum -eq 16 -and $r.Output -match '(?m)^\s*requests:\s*2\s*$')
+        # Re-aggregating the rows must reproduce the rendered mean, or the
+        # summary and the artifact are telling different stories.
+        $w = 0; $den = @{}
+        foreach ($line in $el[1..($el.Count - 1)]) {
+            if ($line -match '"class":\s*"tool"' -and $line -match '"tokens_est":\s*(\d+)') {
+                $tok = [int]$Matches[1]
+                $rq = 0
+                if ($line -match '"requests":\s*(\d+)') { $rq = [int]$Matches[1] }
+                if ($line -match '"payload":\s*"([^"]+)"') { $den[$Matches[1]] = $rq }
+                $w += $tok * $rq
+            }
+        }
+        $d = 0; foreach ($v in $den.Values) { $d += $v }
+        $results['S_entities_reconcile_block'] = ($d -gt 0 -and [math]::Round($w / $d) -eq $classTok)
+    }
+    # Opt-in, like the facts file: no flag, no file, and the block says so.
+    $r2 = Invoke-Collector @('--session-dir', $dir)
+    $results['S_entities_opt_in'] = ((Get-TopBlock $r2.Output 'by_entity') -match '(?m)^\s*rows:\s*null\s*$')
+
+    # --- S: degradation, never a silent zero --------------------------------
+    # (a) no request ever named a payload -- there is nothing to attribute to.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1500000000)
+    )
+    $fixtures += $dir
+    $blk = Get-TopBlock (Invoke-Collector @('--session-dir', $dir)).Output 'by_entity'
+    $results['S_no_payload_named'] = ($blk -match '(?m)^\s*available:\s*false\s*$' -and
+                                      $blk -match 'reason:\s*payload_not_named')
+
+    # (b) payloads named but the dumps are gone -- they expire with the log.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1500000000 -Payloads)
+    )
+    $fixtures += $dir
+    $blk = Get-TopBlock (Invoke-Collector @('--session-dir', $dir)).Output 'by_entity'
+    $results['S_dumps_missing'] = ($blk -match '(?m)^\s*available:\s*false\s*$' -and
+                                   $blk -match 'reason:\s*payload_dumps_unreadable')
+
+    # (c) dumps present but unparseable -- degrade, do not guess.
+    $dir = New-SessionFixture -BadDumps -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1500000000 -Payloads)
+    )
+    $fixtures += $dir
+    $blk = Get-TopBlock (Invoke-Collector @('--session-dir', $dir)).Output 'by_entity'
+    $results['S_dumps_unparseable'] = ($blk -match '(?m)^\s*available:\s*false\s*$' -and
+                                       $blk -match 'reason:\s*payload_dumps_unreadable')
+
+    # (d) one payload readable, one not. Degradation is per payload: the
+    # readable half is still attributed and the loss is counted, rather than
+    # the whole block going dark or the gap being silently absorbed.
+    $dir = New-SessionFixture -MixedDumps -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1500000000 -Payloads)
+    )
+    $fixtures += $dir
+    $blk = Get-TopBlock (Invoke-Collector @('--session-dir', $dir)).Output 'by_entity'
+    $results['S_partial_dumps'] = (
+        $blk -match '(?m)^\s*available:\s*true\s*$' -and
+        $blk -match 'system_prompt:\s*0,\s*tools:\s*1,\s*unreadable:\s*1' -and
+        $blk -match '(?m)^\s*tool:\s*\{\s*entities:\s*3,' -and
+        $blk -notmatch '(?m)^\s*skill:')
+
+    # (e) truncated: every row is still accurate, but the request weighting
+    # behind the mean is not, so the block is withheld and the rows survive.
+    $dir = New-SessionFixture -Dumps -Main @(
+        (New-LlmRequest -NanoAiu 1500000000 -Payloads),
+        (New-LlmRequest -NanoAiu 2500000000 -Payloads)
+    )
+    $fixtures += $dir
+    $tef = Join-Path $dir 'trunc-entities.ndjson'
+    $r = Invoke-Collector @('--session-dir', $dir, '--entities-out', $tef)
+    $results['S_truncated_withheld'] = ($r.Output -match '(?m)^\s*coverage:\s*truncated\s*$' -and
+                                        $r.Output -match '(?m)^\s*by_entity:\s*null\s*$')
+    $results['S_truncated_rows_kept'] = (Test-Path $tef)
+    if (Test-Path $tef) {
+        $tel = @([IO.File]::ReadAllLines($tef) | Where-Object { $_.Trim() })
+        $results['S_truncated_header_coverage'] = ($tel.Count -eq 9 -and $tel[0] -match '"coverage":\s*"truncated"')
+    }
 }
 finally {
     foreach ($f in $fixtures) {

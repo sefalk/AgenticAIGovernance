@@ -59,6 +59,21 @@ cost:
         claude-sonnet-5: { requests: 55, credits: 285.082 }
       by_purpose:
         agent_work: { requests: 55, unbilled: 0, credits: 285.082 }
+  by_entity:                # what the payload carried, not what it cost
+    available: true
+    credits_attributable: false
+    payloads: { system_prompt: 57, tools: 4, unreadable: 0 }
+    classes:
+      tool: { entities: 197, tokens_est_per_request: 61651 }
+      instruction_attached: { entities: 4, tokens_est_per_request: 5062 }
+      skill: { entities: 30, tokens_est_per_request: 3631 }
+    tools_by_group:
+      mcp:azure: { entities: 40, tokens_est_per_request: 17614, invoked: 3 }
+      mcp:pylance: { entities: 19, tokens_est_per_request: 9926, invoked: 0 }
+    customizations:
+      testing.instructions.md: { applying: 0, skipped: 61, listed: 0, reason: "applyTo '**/test_*.py' did not match any attached files" }
+      git-workflow.instructions.md: { applying: 61, skipped: 0, listed: 0 }
+    rows: "<path>"          # null unless --entities-out was passed
   facts: "<path>"           # null unless --facts-out was passed
   environment: { vscode: "1.131.0", copilot_chat: "0.59.0" }
 ```
@@ -121,6 +136,62 @@ Reading it:
   gap is stated rather than distributed across the kinds that *are* known,
   because a plausible total is worse than an honest one. The four kinds always
   sum to `credits`.
+- **`by_entity` answers a different question from every block above it: not who
+  spent the credits, but which *definitions* were in the payload they paid
+  for.** The other blocks can only ever say "the coordinator on opus is
+  expensive"; none of them can say *why* its prompt is large. This one names
+  the tools, skills, agents and instruction files that were actually delivered,
+  measured from the dumps the editor wrote next to the log — not from the
+  source files on disk, which is the difference between what shipped and what
+  exists.
+- **`credits_attributable: false` is rendered in the block, not only here.** An
+  entity's tokens are inside a request's `inputTokens`, and a request-level
+  billing record cannot be split by which span of the prompt produced it. A
+  per-entity credit figure could only be invented by dividing, so none is
+  emitted at any grain — not in the block, not in the rows. What is honest is
+  the footprint, how many requests carried it, and how often it was used.
+- **`tokens_est_per_request` is an estimate and says so in its name.** It is
+  characters over four, the usual English rule of thumb; the vendor's tokenizer
+  is not ours to run. It is a *request-weighted mean*, because the payload
+  changes during a session — picking one payload would be a choice, averaging
+  over the requests that carried each one is a measure.
+- **`invoked` appears only where it is complete.** Tool calls are logged, so
+  tool groups carry a count and a group with `invoked: 0` is the finding the
+  block exists for: definitions shipped on every request and called on none. A
+  skill or an agent description is *read* by the model, not called — a zero
+  next to its token count would read as "never used" when it means "not
+  measurable", so none is emitted.
+- **`tools_by_group` can merge two MCP servers, never split one.** VS Code
+  prefixes MCP tools `mcp_{server}_{tool}` and server names contain underscores
+  themselves, so the boundary is not recoverable from the name; grouping on the
+  first token is deliberate. The direction of the error matters: the question
+  is whether a whole server earns its place in the payload, and a merge keeps
+  that answerable while a split would not.
+- **`customizations` reports instruction and chat-mode resolutions, never-applied
+  first, with the skip reason.** The reason is the actionable half — it says
+  whether the fix is to narrow the `applyTo` pattern or to remove the file.
+  Measured on one real session: four of seven instruction files were skipped on
+  all 61 resolutions, every one of them for `applyTo` patterns that matched no
+  attached file. Note the denominator: only resolutions are counted, not
+  requests, so `61` is not a share of that session's 808 requests.
+- **The payload *kind* comes from which attribute named the file**
+  (`systemPromptFile` vs `toolsFile`), never from the filename. `payloads`
+  counts how many of each were read and how many could not be; an unreadable
+  dump is counted there rather than dropping the block, so a session with one
+  bad payload still attributes the rest.
+- **It degrades like everything else.** `available: false` with
+  `payload_not_named` (no request named a dump) or `payload_dumps_unreadable`
+  (named but gone or unparseable — dumps expire with the log); `by_entity: null`
+  under `coverage: truncated`, where each row is still accurate but the request
+  set behind the weighting is not.
+- **`rows` names the entity artifact** (`--entities-out`, NDJSON) and it is a
+  **different grain from the facts file: one row is one definition inside one
+  delivered payload, not one request.** The two must never be joined and summed.
+  `requests` on a row is a *multiplier*, not something the row did: adding it up
+  counts each request once per definition it carried — on a real session, 158300
+  against 808 requests actually made. The fan-out is left visible as a column
+  rather than materialised as duplicate rows, the header states the grain
+  and `credits_attributable: false`, and there is no credit column to sum.
 - **`facts` names the per-request artifact** (`--facts-out`, NDJSON, one row per
   request). The debug log is capped and expires; a row that was never extracted
   while it existed answers no question ever again. The aggregates above are
