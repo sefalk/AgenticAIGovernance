@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The catalogue payload now has a ceiling (#206).** Every skill, agent and
+  instruction file announces itself by name and description on every chat
+  request — the discovery level of the editor's three-level loading — and until
+  now that payload was gated by nothing. It is the same accretion problem the
+  always-on ceiling exists to stop, with none of the friction: adding a skill
+  *feels* free precisely because its body is not sent, and the description that
+  is sent never appeared on any ledger. `AF_CATALOGUE_BUDGET_TOKENS` and
+  `AF_PROJECT_CATALOGUE_BUDGET_TOKENS` close that gap, split by ownership like
+  the three ceilings before them, and the breakdown names the kind and the five
+  widest entries so a breach says what to shorten.
+
+  The framework's share measures 3322 tokens — 29 skills at 1906, 17 agents at
+  1040, 7 instruction entries at 376 — and the ceiling is set at 3400. That is
+  roughly the size of the entire always-on set, paid on every request, and it
+  was not on any budget. Note an always-on instruction file is charged twice:
+  once for its catalogue entry, once for the full attachment.
+
+  Two facts were checked rather than assumed. The absolute `<file>` path the
+  editor emits with each entry is deliberately **not** counted, because a gate
+  whose number moves when someone clones to a different directory is measuring
+  the directory; the omission errs low, and the delivered payload measured in
+  #214 says by how much — agent entries carry no path and the model lands
+  within one entry of the real block, instruction entries do carry one and the
+  229-token gap is exactly seven Windows paths. And a description written as a
+  YAML block scalar is followed rather than truncated, which a first-line read
+  would have scored as two characters — an undercount that grows with precisely
+  the descriptions worth catching.
+
+  Skills in a `_`-prefixed directory are dormant and cost nothing here. That is
+  the intended behaviour and also the defect #222 tracks: invisible is cheap,
+  and indistinguishable from absent.
+
+  The pre-commit guard needed a fix to make any of this bind at commit time. It
+  exported `copilot-instructions.md`, `instructions/` and `agents/` and never
+  `skills/`, so the first commit carrying the new ceiling reported 1416 tokens
+  where the checker reported 3322 — agents plus instruction entries, with the
+  largest kind missing entirely. It now exports `skills/*/SKILL.md`, and only
+  that: the reference material beside a skill loads on demand and costs the
+  budget nothing.
+
 - **Cost can now be traced to the definitions that cause it, not only to the
   agents that spend it (#214).** Every block so far answered *who spent*. None
   could answer *why a prompt is that large*, because none of them knew what was
@@ -424,6 +464,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Existing projects may see a red gate on the first run after upgrading.**
   That is the drift this change exists to surface. `run-lint.ps1 -Fix` clears
   it in one commit.
+
+### Changed
+
+- **`--seed-project-budget` now fills in only the ceilings that were never
+  set.** Adding a ceiling used to force a project that had already seeded to
+  choose between re-baselining the ones it had tuned (`--force`) and leaving
+  the new one ungated forever. Neither is a decision anyone should have to make
+  to receive an upgrade. `--force` still replaces everything.
 
 ### Fixed
 

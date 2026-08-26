@@ -53,6 +53,7 @@ function New-Fixture {
         [byte[]]$RootBytes = $null,
         [hashtable]$Instructions = @{},   # name -> @{ Tokens; ApplyTo }  (ApplyTo $null = omit)
         [hashtable]$Agents = @{},         # name -> tokens
+        [hashtable]$Skills = @{},         # dir -> @{ Description; Block } (omit Description = none)
         [string]$Conf = $null,
         [byte[]]$ConfBytes = $null,
         [string[]]$Customizable = @(),    # manifest paths marked [customizable]
@@ -90,6 +91,21 @@ function New-Fixture {
         if ($Agents.Count -eq 0) { $Agents = @{ 'stub' = 10 } }
         foreach ($name in $Agents.Keys) {
             [IO.File]::WriteAllText((Join-Path $agentDir "$name.agent.md"), ('x' * ($Agents[$name] * 4)))
+        }
+    }
+    if ($Skills.Count -gt 0) {
+        $skillRoot = Join-Path $gh 'skills'
+        foreach ($dir in $Skills.Keys) {
+            $spec = $Skills[$dir]
+            $skillDir = Join-Path $skillRoot $dir
+            New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
+            $front = "---`nname: $dir`n"
+            if ($spec.ContainsKey('Description')) {
+                $front += if ($spec.Block) { "description: >-`n  $($spec.Description)`n" }
+                          else { "description: $($spec.Description)`n" }
+            }
+            $front += "---`n"
+            [IO.File]::WriteAllText((Join-Path $skillDir 'SKILL.md'), $front + ('x' * 400))
         }
     }
     if ($null -ne $ConfBytes) {
@@ -478,6 +494,101 @@ try {
     $results['RR_seed_refuses_silent_overwrite'] = ($r.Code -eq 1 -and $r.Output -match 'refusing to overwrite')
     $results['RR_seed_force_overwrites'] = ((Invoke-Checker $gh @('--seed-project-budget', '--force')).Code -eq 0)
 
+    # XX: the catalogue set. Every skill, agent and instruction file announces
+    #     itself by name and description on every request, before anything is
+    #     invoked. That payload is always-on and, until issue #206, gated by
+    #     nothing -- which is what made adding a skill feel free.
+    $catConf = $conf + "AF_CATALOGUE_BUDGET_TOKENS=1000`n"
+    $long = 'y' * 600
+    $gh = New-Fixture -RootTokens 100 -Conf $catConf -Skills @{
+        'alpha' = @{ Description = 'does alpha things' }
+        'beta'  = @{ Description = 'does beta things' }
+    } -Instructions @{ 'wide.instructions.md' = @{ Tokens = 200; ApplyTo = '**' } }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh @('--verbose')
+    $results['XX_catalogue_reported'] = ($r.Code -eq 0 -and $r.Output -match 'catalogue set')
+    $results['XX_catalogue_counts_skills'] = ($r.Output -match 'skills\s+2 entries')
+    $results['XX_catalogue_counts_instructions'] = ($r.Output -match 'instructions\s+1 entries')
+
+    # A description is paid for even though the body it advertises is not. Make
+    # one long enough to breach and the gate must say so, and say whose it is.
+    $gh = New-Fixture -RootTokens 100 -Conf $catConf -Skills @{
+        'windbag' = @{ Description = $long + $long + $long + $long + $long + $long + $long }
+    }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh
+    $results['XX_catalogue_over_budget_fails'] = ($r.Code -eq 1)
+    $results['XX_catalogue_fail_is_distinct'] = ($r.Output -match 'AF catalogue set is')
+    $results['XX_catalogue_names_offender'] = ($r.Output -match 'windbag')
+
+    # A skill body is not part of the announcement. Growing it must not move the
+    # catalogue total, or the gate would be measuring the wrong payload.
+    $gh = New-Fixture -RootTokens 100 -Conf $catConf -Skills @{ 'alpha' = @{ Description = 'does alpha things' } }
+    $fixtures += $gh
+    $before = (Invoke-Checker $gh @('--verbose')).Output
+    Add-Content (Join-Path $gh 'skills/alpha/SKILL.md') ('z' * 40000)
+    $after = (Invoke-Checker $gh @('--verbose')).Output
+    $catLine = { param($t) if ($t -match '(?m)^\s+([\d,]+) tok\s+skills') { $matches[1] } else { 'nomatch' } }
+    $results['XX_skill_body_not_in_catalogue'] =
+        ((& $catLine $before) -eq (& $catLine $after) -and (& $catLine $before) -ne 'nomatch')
+
+    # A YAML block scalar is how a long description is normally written. Reading
+    # only the first line would score it as two characters -- an undercount that
+    # grows with exactly the descriptions worth catching.
+    $text = 'a description long enough that someone would reasonably fold it'
+    $gh = New-Fixture -RootTokens 100 -Conf $catConf -Skills @{ 'inline' = @{ Description = $text } }
+    $fixtures += $gh
+    $flat = (Invoke-Checker $gh @('--verbose')).Output
+    $gh = New-Fixture -RootTokens 100 -Conf $catConf -Skills @{ 'inline' = @{ Description = $text; Block = $true } }
+    $fixtures += $gh
+    $folded = (Invoke-Checker $gh @('--verbose')).Output
+    $results['XX_block_scalar_matches_inline'] =
+        ((& $catLine $flat) -eq (& $catLine $folded) -and (& $catLine $flat) -ne 'nomatch')
+
+    # Dormant skills are not announced, so they cost nothing here. That is also
+    # why they are invisible -- see issue #222.
+    $gh = New-Fixture -RootTokens 100 -Conf $catConf -Skills @{
+        'alpha'   = @{ Description = 'does alpha things' }
+        '_parked' = @{ Description = $long }
+    }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh @('--verbose')
+    $results['XX_dormant_skill_excluded'] = ($r.Code -eq 0 -and $r.Output -match 'skills\s+1 entries')
+
+    # Announced without a description is the worst of both: it is paid for and
+    # it tells the model nothing.
+    $gh = New-Fixture -RootTokens 100 -Conf $catConf -Skills @{ 'mute' = @{} }
+    $fixtures += $gh
+    $results['XX_missing_description_warns'] =
+        ((Invoke-Checker $gh).Output -match 'mute.*announced but not discoverable')
+
+    # The project's own catalogue entries are charged to the project, and an
+    # unseeded project share is named rather than silently ignored.
+    $gh = New-Fixture -RootTokens 100 -Conf $splitConf -Customizable @('instructions/wide.instructions.md') `
+        -Instructions @{ 'wide.instructions.md' = @{ Tokens = 200; ApplyTo = '**' } }
+    $fixtures += $gh
+    $results['XX_unseeded_project_catalogue_named'] =
+        ((Invoke-Checker $gh).Output -match 'UNBUDGETED.*catalogue')
+
+    $r = Invoke-Checker $gh @('--seed-project-budget')
+    $results['XX_seed_writes_catalogue_key'] =
+        ($r.Code -eq 0 -and (Get-Content (Join-Path $gh 'af-env.conf') -Raw) -match 'AF_PROJECT_CATALOGUE_BUDGET_TOKENS=\d')
+
+    # The upgrade path: a project that seeded before this ceiling existed must
+    # get the new one without being made to choose between re-baselining the
+    # ceilings it already tuned and leaving the new one ungated forever.
+    $oldConf = $splitConf + "AF_PROJECT_CONTEXT_BUDGET_TOKENS=150`nAF_PROJECT_CONDITIONAL_BUDGET_TOKENS=150`n"
+    $gh = New-Fixture -RootTokens 100 -Conf $oldConf -Customizable @('instructions/wide.instructions.md') `
+        -Instructions @{ 'wide.instructions.md' = @{ Tokens = 200; ApplyTo = '**' } }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh @('--seed-project-budget')
+    $written = Get-Content (Join-Path $gh 'af-env.conf') -Raw
+    $results['XX_seed_fills_only_the_missing_ceiling'] =
+        ($r.Code -eq 0 -and $written -match 'AF_PROJECT_CATALOGUE_BUDGET_TOKENS=\d')
+    $results['XX_seed_leaves_tuned_ceilings_alone'] =
+        (([regex]::Matches($written, 'AF_PROJECT_CONTEXT_BUDGET_TOKENS=')).Count -eq 1 -and
+         $written -match 'AF_PROJECT_CONTEXT_BUDGET_TOKENS=150')
+
     # SS: deploy is where a consumer gets its baseline. A fresh install that
     #     silently kept the framework's own numbers would ship the arrival
     #     failure again, so both dialects must carry the seeding step. Only
@@ -547,11 +658,14 @@ try {
     # Y: a commit that stages nothing the budget depends on pays nothing and
     #    says nothing -- even with an over-budget payload in the index (AC2).
     #    The file sits inside .github, which is where scoping is actually decided.
+    #    This used to stage a SKILL.md, which stopped being an honest example
+    #    when skill descriptions entered the catalogue budget (#206). A prompt
+    #    file is loaded only when someone runs it, so it still costs nothing.
     git -C $repoOver commit -qm seed 2>&1 | Out-Null
-    $skillDir = Join-Path $repoOver '.github/skills/demo'
-    New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
-    'skill' | Set-Content (Join-Path $skillDir 'SKILL.md')
-    git -C $repoOver add -- ':(literal).github/skills/demo/SKILL.md' 2>&1 | Out-Null
+    $promptDir = Join-Path $repoOver '.github/prompts'
+    New-Item -ItemType Directory -Path $promptDir -Force | Out-Null
+    'prompt' | Set-Content (Join-Path $promptDir 'demo.prompt.md')
+    git -C $repoOver add -- ':(literal).github/prompts/demo.prompt.md' 2>&1 | Out-Null
     $results['Y_unmeasured_file_not_checked'] = ((Invoke-Guard $repoOver).Code -eq 0)
 
     # Y2: the ceiling is part of what the payload must satisfy. Lowering it puts
@@ -646,6 +760,31 @@ try {
     } else {
         Write-Host '  (II_af_repo_dispatches_guards skipped: not an AF source tree)'
     }
+
+    # YY: the commit gate must see the catalogue kind that dominates it. Skills
+    #     are the largest share of the catalogue payload, and the guard exported
+    #     everything except them -- so a description could be grown to any size
+    #     and the pre-commit check would report a total that did not contain it.
+    #     Caught by reading the guard's own output on the commit that added the
+    #     catalogue ceiling: it reported 1,416 tok where the checker said 3,322.
+    $catGuardConf = $guardConf + "AF_CATALOGUE_BUDGET_TOKENS=200`n"
+    $gh = New-Fixture -RootTokens 100 -Conf $catGuardConf -Skills @{
+        'windbag' = @{ Description = ('y' * 4000) }
+    } -Instructions @{ 'ok.instructions.md' = @{ Tokens = 100; ApplyTo = '**' } }
+    $fixtures += $gh
+    $r = Invoke-Guard (New-StagedRepo $gh)
+    $results['YY_staged_skill_description_measured'] = ($r.Code -eq 1)
+    $results['YY_staged_skill_named'] = ($r.Output -match 'windbag')
+
+    # A skill's reference files are loaded on demand and cost the budget
+    # nothing. Staging a large one must not block a commit, or the guard would
+    # be charging for the level of loading it is not measuring.
+    $gh = New-Fixture -RootTokens 100 -Conf $catGuardConf -Skills @{
+        'alpha' = @{ Description = 'does alpha things' }
+    } -Instructions @{ 'ok.instructions.md' = @{ Tokens = 100; ApplyTo = '**' } }
+    $fixtures += $gh
+    [IO.File]::WriteAllText((Join-Path $gh 'skills/alpha/REFERENCE.md'), ('z' * 60000))
+    $results['YY_skill_reference_file_not_charged'] = ((Invoke-Guard (New-StagedRepo $gh)).Code -eq 0)
 
     # --- The guard's own blind spot (issue #125) --------------------------
     # The guard measures the index, so a project that gitignores .github/ can
