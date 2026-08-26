@@ -41,11 +41,16 @@ import re
 import sys
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 4
-COLLECTOR_VERSION = 4
+SCHEMA_VERSION = 5
+COLLECTOR_VERSION = 5
 FACTS_SCHEMA_VERSION = 1
+ENTITY_SCHEMA_VERSION = 1
 
 NANO_AIU_PER_CREDIT = 1_000_000_000
+
+# The usual English rule of thumb. The vendor's tokenizer is not ours to run, so
+# every count derived from it is named `_est` and never crossed with a price.
+CHARS_PER_TOKEN = 4
 
 # Dumped into the session directory by VS Code; carries the billing rate card.
 RATE_CARD_FILE = "models.json"
@@ -75,6 +80,25 @@ REQUIRED_REQUEST_ATTRS = ("model", "inputTokens", "cachedTokens", "outputTokens"
 
 BILLING_ATTR = "copilotUsageNanoAiu"
 
+# Definitions carried by the system prompt. Matched as whole elements so the
+# measurement is the delivered bytes -- framing and envelope included -- rather
+# than the source file the entry was generated from.
+PROMPT_ENTITY = {
+    "skill": re.compile(r"<skill>(.*?)</skill>", re.S),
+    "agent": re.compile(r"<agent>(.*?)</agent>", re.S),
+    "instruction": re.compile(r"<instruction>(.*?)</instruction>", re.S),
+}
+ENTITY_NAME = re.compile(r"<(?:name|file)>(.*?)</(?:name|file)>", re.S)
+# An always-on instruction file is not listed but pasted in full, which is a
+# different order of magnitude and a separate class for that reason.
+ATTACHED = re.compile(r'<attachment filePath="(.*?)"[^>]*>.*?</attachment>', re.S)
+# `[skipped] testing.instructions.md \u2014 applyTo '...' did not match any attached files`.
+# The reason ends at the next bracketed marker, which is not always a status:
+# the record also carries `[custom-agent]` and friends.
+CUSTOMIZATION = re.compile(r"\[(applying|skipped|listed)\]\s+(.+?)\s+\u2014\s+(.*?)(?=,\s*\[|$)")
+CUSTOMIZATION_CATEGORY = "customization"
+REASON_LIMIT = 100
+
 
 class Drift(Exception):
     """The log no longer carries the fields this collector depends on."""
@@ -89,6 +113,103 @@ def purpose_of(debug_name: str) -> str:
     if debug_name.startswith("tool/runSubagent-") or debug_name.startswith("panel/"):
         return "agent_work"
     return "other"
+
+
+def _basename(path: str) -> str:
+    """Last segment, on either separator -- the dumps carry Windows paths."""
+    return re.split(r"[\\/]", path.strip())[-1]
+
+
+def tool_group(name: str) -> str:
+    """Which server a tool came from, as far as the name allows.
+
+    VS Code prefixes MCP tools `mcp_{server}_{tool}` and server names contain
+    underscores themselves, so the boundary is not recoverable from the name
+    alone. Grouping on the first token can therefore merge two servers that
+    share it; it can never split one, which is the direction that matters when
+    the question is whether a whole server earns its place in the payload.
+    """
+    if not name.startswith("mcp_"):
+        return "built-in"
+    head = name[len("mcp_") :].split("_", 1)[0]
+    return f"mcp:{head}" if head else "built-in"
+
+
+def dump_text(session_dir: str, name: Any) -> str | None:
+    """Decode a payload dump, or None if it is absent or not what we expect."""
+    if not isinstance(name, str) or not name or _basename(name) != name:
+        # The name comes from the log; a dump is a bare filename in the session
+        # directory, and anything with a path in it is not ours to open.
+        return None
+    try:
+        with open(os.path.join(session_dir, name), encoding="utf-8", errors="replace") as handle:
+            outer = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    content = outer.get("content") if isinstance(outer, dict) else None
+    return content if isinstance(content, str) else None
+
+
+def tool_entities(text: str) -> list[dict[str, Any]] | None:
+    """One row per tool schema as delivered. None when the dump is unusable."""
+    try:
+        tools = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(tools, list):
+        return None
+    rows = []
+    for tool in tools:
+        if not isinstance(tool, dict) or not tool.get("name"):
+            continue
+        name = str(tool["name"])
+        rows.append(
+            {
+                "class": "tool",
+                "name": name,
+                "group": tool_group(name),
+                "chars": len(json.dumps(tool, separators=(",", ":"))),
+            }
+        )
+    return rows
+
+
+def prompt_entities(text: str) -> list[dict[str, Any]] | None:
+    """One row per definition in the system prompt. None when unusable.
+
+    Only element names and lengths are taken. The prompt body is instructions
+    and attached file content, and nothing from it is copied out.
+    """
+    try:
+        blocks = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(blocks, list):
+        return None
+    body = "".join(b.get("content") or "" for b in blocks if isinstance(b, dict))
+
+    rows = []
+    for entity_class, pattern in PROMPT_ENTITY.items():
+        for match in pattern.finditer(body):
+            named = ENTITY_NAME.search(match.group(1))
+            rows.append(
+                {
+                    "class": entity_class,
+                    "name": _basename(named.group(1)) if named else "unnamed",
+                    "group": entity_class,
+                    "chars": len(match.group(0)),
+                }
+            )
+    for match in ATTACHED.finditer(body):
+        rows.append(
+            {
+                "class": "instruction_attached",
+                "name": _basename(match.group(1)),
+                "group": "instruction",
+                "chars": len(match.group(0)),
+            }
+        )
+    return rows
 
 
 def rate_card(session_dir: str) -> dict[str, dict[str, float]] | None:
@@ -156,6 +277,79 @@ def _reasoning_effort(options: Any) -> str | None:
         return None
     effort = (parsed.get("reasoning") or {}).get("effort")
     return str(effort) if isinstance(effort, str) else None
+
+
+def collect_entities(
+    session_dir: str,
+    facts: list[dict[str, Any]],
+    invoked: dict[str, int],
+) -> dict[str, Any]:
+    """Measure the static payload every request carried, at grain payload x entity.
+
+    A definition's tokens are part of a request's `inputTokens`, and a
+    request-level billing record cannot be split by which span of the prompt it
+    came from. So this axis reports what was *sent* and how often, never what it
+    cost. The payload is identified from the request's own `systemPromptFile` /
+    `toolsFile`, so which dump is which is read off the log rather than guessed
+    from the filename.
+    """
+    used: dict[str, dict[str, Any]] = {}
+    for fact in facts:
+        for key, kind in (("system_prompt_file", "system_prompt"), ("tools_file", "tools")):
+            name = fact.get(key)
+            if isinstance(name, str) and name:
+                entry = used.setdefault(name, {"kind": kind, "requests": 0})
+                entry["requests"] += 1
+    if not used:
+        return {"available": False, "reason": "payload_not_named"}
+
+    rows: list[dict[str, Any]] = []
+    payloads = {"system_prompt": 0, "tools": 0, "unreadable": 0}
+    for name in sorted(used):
+        kind = used[name]["kind"]
+        text = dump_text(session_dir, name)
+        parsed = None
+        if text is not None:
+            parsed = tool_entities(text) if kind == "tools" else prompt_entities(text)
+        if parsed is None:
+            payloads["unreadable"] += 1
+            continue
+        payloads[kind] += 1
+        for row in parsed:
+            row["payload"] = name
+            row["requests"] = used[name]["requests"]
+            row["tokens_est"] = row["chars"] // CHARS_PER_TOKEN
+            rows.append(row)
+
+    if not rows:
+        return {"available": False, "reason": "payload_dumps_unreadable"}
+    return {"available": True, "rows": rows, "payloads": payloads, "invoked": invoked}
+
+
+def _weighted(rows: list[dict[str, Any]], key: str, invoked_by: dict[str, int] | None) -> dict[str, dict[str, int]]:
+    """Group entity rows and average their footprint over the requests that carried it.
+
+    The mean is request-weighted rather than a pick of one payload: the payload
+    changes during a session, and "what a request carried on average" is a
+    measure, while "what the last payload happened to contain" is a choice.
+    """
+    agg: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        bucket = agg.setdefault(row[key], {"names": set(), "weighted": 0, "payloads": {}})
+        bucket["names"].add(row["name"])
+        bucket["weighted"] += row["tokens_est"] * row["requests"]
+        bucket["payloads"][row["payload"]] = row["requests"]
+
+    out: dict[str, dict[str, int]] = {}
+    for group, bucket in agg.items():
+        deliveries = sum(bucket["payloads"].values())
+        out[group] = {
+            "entities": len(bucket["names"]),
+            "tokens_est_per_request": round(bucket["weighted"] / deliveries) if deliveries else 0,
+        }
+        if invoked_by is not None:
+            out[group]["invoked"] = invoked_by.get(group, 0)
+    return out
 
 
 def build_fact(event: dict[str, Any], session: str, log: str, agent: str) -> dict[str, Any]:
@@ -350,6 +544,8 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
     facts: list[dict[str, Any]] = []
     span_kind: dict[str, str] = {}
     agent_files: list[str] = []
+    invoked: dict[str, int] = {}
+    customizations: dict[str, dict[str, Any]] = {}
     parsed = 0
 
     for path in log_files(session_dir):
@@ -375,6 +571,14 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
                     return {"available": False, "reason": "schema_drift"}
                 price(fact, cards)
                 facts.append(fact)
+            elif kind == "tool_call":
+                # Only the name. `attrs.args` and `attrs.result` are the call's
+                # payload and carry whatever the user put in front of it.
+                called = event.get("name")
+                if isinstance(called, str) and called:
+                    invoked[called] = invoked.get(called, 0) + 1
+            elif kind == "generic":
+                _record_customizations(event, customizations)
 
     if parsed == 0:
         return {"available": False, "reason": "log_unparseable"}
@@ -400,6 +604,8 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
         "environment": _environment(session_start),
         "facts": facts,
         "rate_card": RATE_CARD_FILE if cards else None,
+        "entities": collect_entities(session_dir, facts, invoked),
+        "customizations": customizations,
     }
 
     if session_start is None:
@@ -409,6 +615,9 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
         result["coverage"] = "truncated"
         result["totals"] = None
         result["by_agent"] = None
+        # Each entity row is still accurate; only the set of requests behind
+        # the weighting is incomplete, so the rows survive and the mean does not.
+        result["by_entity"] = None
         return result
 
     started = session_start.get("ts")
@@ -418,7 +627,29 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
         result["coverage"] = "full"
     result["totals"] = totals
     result["by_agent"] = per_agent
+    result["by_entity"] = result["entities"]
     return result
+
+
+def _record_customizations(event: dict[str, Any], sink: dict[str, dict[str, Any]]) -> None:
+    """Aggregate the per-turn `[applying] / [skipped]` record with its reason.
+
+    An instruction file that never applies is pure cost: its catalogue entry is
+    sent on every request regardless. The reason is the vendor's own words for
+    why, and it is the part that says whether the fix is to narrow `applyTo` or
+    to delete the file.
+    """
+    attrs = event.get("attrs") or {}
+    if attrs.get("category") != CUSTOMIZATION_CATEGORY:
+        return
+    details = attrs.get("details")
+    if not isinstance(details, str) or "|" not in details:
+        return
+    for status, name, reason in CUSTOMIZATION.findall(details.split("|", 1)[1]):
+        bucket = sink.setdefault(_basename(name), {"applying": 0, "skipped": 0, "listed": 0, "reason": None})
+        bucket[status] += 1
+        if status != "applying" and not bucket["reason"]:
+            bucket["reason"] = reason.strip()[:REASON_LIMIT]
 
 
 def _environment(session_start: dict[str, Any] | None) -> dict[str, str | None]:
@@ -441,7 +672,7 @@ def _scalar(value: Any) -> str:
     return json.dumps(str(value))
 
 
-def render(result: dict[str, Any], facts_path: str | None = None) -> str:
+def render(result: dict[str, Any], facts_path: str | None = None, entities_path: str | None = None) -> str:
     """Render the block. Only numbers and short identifiers are ever emitted.
 
     No field is copied from the log unless it is constructed here: request
@@ -491,6 +722,7 @@ def render(result: dict[str, Any], facts_path: str | None = None) -> str:
         lines[-1] = "  by_model: {}"
     lines.extend(_by_purpose(totals.by_purpose if totals else {}, "  "))
     lines.extend(_by_agent(result.get("by_agent")))
+    lines.extend(_by_entity(result, entities_path))
     # Names the artifact a third party can re-aggregate, not just this summary.
     lines.append(f"  facts: {_scalar(facts_path)}")
     lines.append(f"  environment: {{ vscode: {_scalar(env['vscode'])}, copilot_chat: {_scalar(env['copilot_chat'])} }}")
@@ -556,6 +788,90 @@ def _by_purpose(by_purpose: dict[str, dict[str, int]], indent: str) -> list[str]
     return lines
 
 
+def _by_entity(result: dict[str, Any], entities_path: str | None) -> list[str]:
+    """What the requests carried, not what it cost (issue #214).
+
+    Deliberately has no credits column anywhere. An entity's tokens are inside
+    a request's `inputTokens`, and a request-level billing record cannot be
+    split by which span of the prompt produced it, so a per-entity credit
+    figure could only be invented by dividing. What is honest is the footprint,
+    how many requests carried it, and how often it was actually used.
+    """
+    entities = result.get("by_entity")
+    if entities is None:
+        # Withheld, not empty -- the weighting behind the mean is incomplete.
+        return ["  by_entity: null"]
+    if not entities.get("available"):
+        return [
+            "  by_entity:",
+            "    available: false",
+            f"    reason: {entities.get('reason')}",
+        ]
+
+    rows = entities["rows"]
+    payloads = entities["payloads"]
+    invoked = entities["invoked"]
+    by_group: dict[str, int] = {}
+    for name, count in invoked.items():
+        group = tool_group(name)
+        by_group[group] = by_group.get(group, 0) + count
+
+    lines = [
+        "  by_entity:",
+        "    available: true",
+        # Stated in the block, not only in the docs: the next reader of this
+        # file is the one who would otherwise cross a footprint with a price.
+        "    credits_attributable: false",
+        f"    payloads: {{ system_prompt: {payloads['system_prompt']}, tools: {payloads['tools']},"
+        f" unreadable: {payloads['unreadable']} }}",
+        "    classes:",
+    ]
+    classes = _weighted(rows, "class", None)
+    for name, bucket in sorted(classes.items(), key=lambda kv: (-kv[1]["tokens_est_per_request"], kv[0])):
+        lines.append(f"      {name}: {{ {_entity_fields(bucket)} }}")
+
+    # `invoked` is reported only where it is complete. A skill or an agent
+    # description is read by the model, not called, so a zero there would mean
+    # "not measurable", which is not what a zero next to a token count reads as.
+    lines.append("    tools_by_group:")
+    tools = [row for row in rows if row["class"] == "tool"]
+    groups = _weighted(tools, "group", by_group)
+    if not groups:
+        lines[-1] = "    tools_by_group: {}"
+    for name, bucket in sorted(groups.items(), key=lambda kv: (-kv[1]["tokens_est_per_request"], kv[0])):
+        lines.append(f"      {name}: {{ {_entity_fields(bucket)} }}")
+
+    lines.extend(_customizations(result.get("customizations") or {}))
+    lines.append(f"    rows: {_scalar(entities_path)}")
+    return lines
+
+
+def _entity_fields(bucket: dict[str, int]) -> str:
+    fields = f"entities: {bucket['entities']}, tokens_est_per_request: {bucket['tokens_est_per_request']}"
+    if "invoked" in bucket:
+        fields += f", invoked: {bucket['invoked']}"
+    return fields
+
+
+def _customizations(customizations: dict[str, dict[str, Any]]) -> list[str]:
+    """Which definitions applied and which were skipped, with the reason why.
+
+    Never-applied first: those are the ones whose entry was paid for on every
+    request and used on none, and the reason states whether the fix is to
+    narrow `applyTo` or to remove the file.
+    """
+    if not customizations:
+        return ["    customizations: {}"]
+    lines = ["    customizations:"]
+    order = sorted(customizations.items(), key=lambda kv: (kv[1]["applying"] > 0, kv[0]))
+    for name, bucket in order:
+        fields = f"applying: {bucket['applying']}, skipped: {bucket['skipped']}, listed: {bucket['listed']}"
+        if bucket["reason"]:
+            fields += f", reason: {_scalar(bucket['reason'])}"
+        lines.append(f"      {name}: {{ {fields} }}")
+    return lines
+
+
 def write_facts(path: str, result: dict[str, Any]) -> str | None:
     """Write the per-request rows as NDJSON. Returns the path, or None.
 
@@ -588,6 +904,45 @@ def write_facts(path: str, result: dict[str, Any]) -> str | None:
     return path
 
 
+def write_entities(path: str, result: dict[str, Any]) -> str | None:
+    """Write the entity rows as NDJSON at grain payload x entity.
+
+    Its own schema version and its own header, because it is a different grain
+    from the facts file and the two must never be summed together. A row says
+    "this definition was inside this delivered payload, and that payload went
+    out on `requests` requests". `requests` is a multiplier, not a count of
+    anything the row itself did: adding it up across rows counts each request
+    once per definition it carried. The fan-out is left visible as a column
+    rather than materialised as duplicate rows, and there is no credits column
+    at any grain -- see `_by_entity`.
+    """
+    entities = result.get("entities") or {}
+    rows = entities.get("rows")
+    if not rows:
+        return None
+    header = {
+        "record": "header",
+        "entity_schema_version": ENTITY_SCHEMA_VERSION,
+        "collector": f"collect-session-cost.py@{COLLECTOR_VERSION}",
+        "session": result["sessions"][0],
+        "coverage": result.get("coverage"),
+        "grain": "payload x entity",
+        "credits_attributable": False,
+        "requests_is_a_multiplier": True,
+    }
+    try:
+        directory = os.path.dirname(os.path.abspath(path))
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(header, sort_keys=True) + "\n")
+            for row in rows:
+                handle.write(json.dumps({"record": "entity", **row}, sort_keys=True) + "\n")
+    except OSError:
+        return None
+    return path
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Collect billed session cost from the agent debug log.",
@@ -608,11 +963,17 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Write the per-request facts as NDJSON here. The debug log expires; these rows do not.",
     )
+    parser.add_argument(
+        "--entities-out",
+        default=None,
+        help="Write the payload-by-entity rows as NDJSON here. Different grain from --facts-out.",
+    )
     args = parser.parse_args(argv)
 
     result = collect(args.session_dir, args.workflow_start)
     written = write_facts(args.facts_out, result) if args.facts_out else None
-    sys.stdout.write(render(result, written))
+    entities = write_entities(args.entities_out, result) if args.entities_out else None
+    sys.stdout.write(render(result, written, entities))
     return 0
 
 
