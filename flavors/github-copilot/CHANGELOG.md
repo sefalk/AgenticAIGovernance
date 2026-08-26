@@ -475,6 +475,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The shipped hook suite failed in any consumer that customised `RETRO_DIR`
+  — 14 red cases, not one of them a defect (#209).** `RETRO_DIR` is marked
+  `[customizable]`, and the first consumer to use it as intended got a suite
+  that read its own configuration back as broken hooks. The fixtures inherited
+  the host's `af-env.conf`, while the behavioural cases seeded their retro at
+  the hardcoded `.github/retros/auto/`. Cases expecting a pass got a block,
+  cases expecting a block got a pass, and eight timestamp cases read their log
+  back unmodified because the gate had stopped the run before enrichment. A
+  ninth failure was structural: one case asserted the framework's default into
+  the *consumer's* real config, a claim that cannot be true anywhere but here.
+
+  The proof that the hooks were right sat in the failing output itself — the
+  gate reported `artifact gate PASS for '72-x' + timestamps measured`, having
+  correctly found the retro at the configured path. The suite was wrong about
+  the hook, not the hook about the retro.
+
+  The fix is not new machinery. The suite already declares its own policy and
+  points the hooks at it through `AF_CONF_PATH`, built after the identical
+  failure under a different key: a consumer that had set
+  `AUTONOMY_CAT_FS_WRITE=auto` once produced nine phantom failures (#108).
+  `RETRO_DIR` simply was not in the declared set. It is now, in both harnesses,
+  stripped from the carried-over config and supplied by the policy — so the
+  32 hardcoded path literals across the two files needed no change, and the
+  cases that deliberately override the key still do, because a fixture's own
+  `af-env.conf` outranks the policy.
+
+  The consumer-only assertion is now framework-only, with an audible skip
+  rather than a silent one. It was worth keeping — if the shipped config ever
+  loses the key, every override case below it would still pass, against the
+  default, proving nothing — but it can only be made where the shipped file
+  lives.
+
+  Two checks now watch the property that was violated: one asserts a fixture
+  carries the pinned default, the other that a case supplying its own config
+  still overrides it. Without them the suite is green here and red in every
+  consumer that uses a supported setting, which is how this reached a consumer
+  at all. That is the failure mode worth naming: a suite that goes red for a
+  documented configuration does not merely mislead, it teaches the people
+  running it to discount red output — or to revert the setting until the tests
+  agree. Either way the next real defect arrives to an audience that has
+  learned not to look.
+
 - **Producer stop-hook gates scoped themselves from shared git state, so
   parallel subagents on one branch authored — and falsely claimed provenance
   for — each other's files (#101).** `git diff` is global to the checkout.
