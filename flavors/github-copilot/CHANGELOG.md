@@ -475,6 +475,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`test-context-budget.ps1` dropped two checks in a consumer without saying
+  so (#224).** `SS_deploy_ps1_seeds_project_budget` and
+  `SS_deploy_sh_seeds_project_budget` are guarded by the presence of the deploy
+  scripts, which exist only in the framework source tree. In a consumer the
+  guard was false, the block was skipped, and nothing was printed — the summary
+  reported `Checks passed: 96 / Checks failed: 0`, which was true and also
+  complete-looking. A consumer comparing its run against the framework's had no
+  way to tell *"these do not apply here"* from *"these disappeared in the last
+  upgrade"*.
+
+  Skips are now a third outcome: named, printed with their reason, and counted.
+  That makes the inventory identical everywhere — 99 checks, whether as 99
+  passed or as 96 passed and 3 skipped — so the run now asserts that total. A
+  check that quietly stops running, or a guard condition that silently stops
+  matching, fails the gate instead of shrinking a green number nobody compares.
+
+  The argument for enforcing rather than merely printing it was made during
+  #209, one issue earlier: a framework-detection marker written one directory
+  level too shallow would have disabled an assertion in *every* environment,
+  and was caught only because that particular skip happened to be audible. The
+  convention existed; relying on each author to remember it is what produced
+  this issue.
+
 - **The shipped hook suite failed in any consumer that customised `RETRO_DIR`
   — 14 red cases, not one of them a defect (#209).** `RETRO_DIR` is marked
   `[customizable]`, and the first consumer to use it as intended got a suite

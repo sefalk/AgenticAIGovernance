@@ -138,6 +138,12 @@ function Invoke-Checker([string]$githubDir, [string[]]$extraArgs = @()) {
 $results = [ordered]@{}
 $fixtures = @()
 
+# A green summary is a claim about coverage as much as about correctness. A
+# consumer cannot otherwise tell a check that does not apply here from one that
+# vanished in the last upgrade (issue #224).
+$skipped = [ordered]@{}
+function Skip-Check([string]$name, [string]$why) { $skipped[$name] = $why }
+
 try {
     $conf = "AF_CONTEXT_BUDGET_TOKENS=1000`nAF_AGENT_CONTEXT_BUDGET_TOKENS=5000`n"
 
@@ -600,6 +606,9 @@ try {
             ((Get-Content $deployPs1 -Raw) -match '--seed-project-budget')
         $results['SS_deploy_sh_seeds_project_budget'] =
             ((Get-Content $deploySh -Raw) -match '--seed-project-budget')
+    } else {
+        Skip-Check 'SS_deploy_ps1_seeds_project_budget' 'no deploy scripts here -- not an AF source tree'
+        Skip-Check 'SS_deploy_sh_seeds_project_budget'  'no deploy scripts here -- not an AF source tree'
     }
 
     # --- The commit guard (issue #85) ------------------------------------
@@ -758,7 +767,7 @@ try {
         $results['II_af_repo_dispatches_guards'] =
             ((Get-Content $afHook -Raw) -match '(^|\n)\s*sh\s+"\$PAYLOAD_HOOK"')
     } else {
-        Write-Host '  (II_af_repo_dispatches_guards skipped: not an AF source tree)'
+        Skip-Check 'II_af_repo_dispatches_guards' 'not an AF source tree'
     }
 
     # YY: the commit gate must see the catalogue kind that dominates it. Skills
@@ -889,9 +898,23 @@ foreach ($name in $results.Keys) {
     if ($results[$name]) { Write-Host "  PASS: $name" }
     else { Write-Host "  FAIL: $name"; $failed++ }
 }
+foreach ($name in $skipped.Keys) { Write-Host "  SKIP: $name -- $($skipped[$name])" }
 Write-Host ''
 Write-Host "  Checks passed: $($results.Count - $failed)"
 Write-Host "  Checks failed: $failed"
+Write-Host "  Checks skipped: $($skipped.Count)"
+
+# The count is the same everywhere precisely because skips are counted, so a
+# check that quietly stops running in a consumer -- or a guard condition that
+# silently stops matching, as one nearly did in #209 -- shows up as a shortfall
+# instead of as a smaller green number nobody compares. Raise it deliberately
+# when adding a check.
+$EXPECTED_CHECK_TOTAL = 99
+$actualTotal = $results.Count + $skipped.Count
+if ($actualTotal -ne $EXPECTED_CHECK_TOTAL) {
+    Write-Host "  FAIL: check inventory is $actualTotal, expected $EXPECTED_CHECK_TOTAL -- a check was added without raising the total, or one stopped running without announcing a skip"
+    $failed++
+}
 if ($failed -gt 0) { Write-Host '  RESULT: CONTEXT BUDGET GATE IS BROKEN'; exit 1 }
 Write-Host '  RESULT: CONTEXT BUDGET GATE IS WORKING'
 exit 0
