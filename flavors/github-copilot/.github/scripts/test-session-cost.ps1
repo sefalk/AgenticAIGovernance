@@ -65,7 +65,8 @@ function New-LlmRequest {
         [long]$Ts = 0,
         [switch]$OmitTokenFields,
         [string]$SecretText = '',
-        [switch]$Payloads
+        [switch]$Payloads,
+        [string]$Status = 'ok'
     )
     if ($Ts -eq 0) { $Ts = $T0 + 1000 }
     $attrs = [ordered]@{ model = $Model; debugName = $DebugName }
@@ -85,7 +86,7 @@ function New-LlmRequest {
     if ($SecretText) { $attrs.userRequest = $SecretText; $attrs.inputMessages = $SecretText }
     [ordered]@{
         ts = $Ts; dur = 100; sid = $SID
-        type = 'llm_request'; name = "chat:$Model"; spanId = 'r1'; parentSpanId = 's0'; status = 'ok'
+        type = 'llm_request'; name = "chat:$Model"; spanId = 'r1'; parentSpanId = 's0'; status = $Status
         attrs = $attrs
     } | ConvertTo-Json -Compress -Depth 6
 }
@@ -241,7 +242,7 @@ try {
     $results['A_session_reported'] = ($r.Output -match [regex]::Escape($SID))
     $results['A_environment']      = ($r.Output -match 'vscode:\s*"?1\.131\.0' -and
                                       $r.Output -match 'copilot_chat:\s*"?0\.59\.0')
-    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*5\s*$')
+    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*6\s*$')
     $results['A_collector_named']  = ($r.Output -match 'collector:\s*"?collect-session-cost\.py@')
 
     # --- B: subagent child file is summed, per model ------------------------
@@ -541,7 +542,7 @@ try {
         'main', 'environment', 'vscode', 'copilot_chat', 'claude-opus-5',
         'claude-haiku-4.5', 'rate_card', 'credits_by_kind', 'cache_read',
         'unexplained', 'facts', 'by_purpose', 'agent_work', 'compaction',
-        'background', 'other', 'unbilled', 'by_entity'
+        'background', 'other', 'unbilled', 'by_entity', 'no_usage_requests'
     )
     $keys = [regex]::Matches($r.Output, '(?m)(?:^\s*|[{,]\s*)([A-Za-z][\w.\-]*)\s*:') |
             ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
@@ -582,6 +583,84 @@ print(mod.NANO_AIU_PER_CREDIT)
     Remove-Item $probeFile -Force -ErrorAction SilentlyContinue
     $results['M_watched_attrs_pinned'] = ($probeOut -match 'cachedTokens,copilotUsageNanoAiu,inputTokens,model,outputTokens')
     $results['M_credit_unit_pinned']   = ($probeOut -match '(?m)^1000000000\s*$')
+
+    # --- N: the documented example cannot fall behind the collector ---------
+    # It fell three versions behind unnoticed (issue #227). A hand-kept example
+    # is documentation only for as long as something compares it to the code.
+    $readme  = Join-Path $repoRootAF '.github/logs/README.md'
+    $docVer  = -1
+    $codeVer = -1
+    $readmeText = ''
+    if (Test-Path $readme) {
+        $readmeText = [IO.File]::ReadAllText($readme)
+        if ($readmeText -match '(?m)^\s*schema_version:\s*(\d+)\s*$') { $docVer = [int]$Matches[1] }
+    }
+    if ((Get-Content $collector -Raw) -match '(?m)^SCHEMA_VERSION\s*=\s*(\d+)') { $codeVer = [int]$Matches[1] }
+    $results['N_readme_version_matches'] = ($codeVer -gt 0 -and $docVer -eq $codeVer)
+    $results['N_readme_collector_tag']   = ($codeVer -gt 0 -and
+                                            $readmeText -match "collect-session-cost\.py@$codeVer")
+    if ($docVer -ne $codeVer) { Write-Host "  (README documents v$docVer, collector emits v$codeVer)" }
+
+    # --- T: a request that reported no usage is not drift (issue #238) ------
+    # A failed compaction carries no token counts and no billing attribute: it
+    # consumed nothing, so there is nothing to account for. Reading that
+    # absence as drift discarded the whole session's cost -- and compaction
+    # only happens in long sessions, so the data died where it was worth most.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -InputTokens 1000 -CachedTokens 400 -OutputTokens 50 -NanoAiu 1500000000),
+        (New-LlmRequest -OmitTokenFields -NanoAiu $null -Status 'error' -DebugName 'summarizeConversationHistory'),
+        (New-LlmRequest -InputTokens 2000 -CachedTokens 900 -OutputTokens 60 -NanoAiu 2500000000)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['T_available_true'] = ($r.Output -match '(?m)^\s*available:\s*true\s*$')
+    $results['T_billed_still_summed'] = ($r.Output -match '(?m)^\s*requests:\s*2\s*$' -and
+                                         $r.Output -match '(?m)^\s*credits:\s*4(\.0+)?\s*$')
+    # Counted, not swallowed: the request was made, it just cost nothing.
+    $results['T_no_usage_counted'] = ($r.Output -match '(?m)^\s*no_usage_requests:\s*1\s*$')
+    # And not folded into `unbilled`, which is for requests that DID spend
+    # tokens -- merging the two would hide a failure inside a normal category.
+    $results['T_not_counted_unbilled'] = ($r.Output -match '(?m)^\s*unbilled_requests:\s*0\s*$')
+
+    # One such record in 51 carried `status: ok`, so the test is "reported no
+    # usage", not "said it failed". A status-based check would let that one
+    # through and void the session anyway.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1500000000),
+        (New-LlmRequest -OmitTokenFields -NanoAiu $null)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['T_ok_status_no_usage'] = ($r.Output -match '(?m)^\s*available:\s*true\s*$' -and
+                                        $r.Output -match '(?m)^\s*no_usage_requests:\s*1\s*$')
+
+    # --- U: real drift degrades per record, not per session -----------------
+    # A BILLED request missing its token fields is genuine drift. It must not
+    # take the requests that parsed cleanly down with it.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -InputTokens 1000 -CachedTokens 400 -OutputTokens 50 -NanoAiu 1500000000),
+        (New-LlmRequest -OmitTokenFields -NanoAiu 1500000000),
+        (New-LlmRequest -InputTokens 2000 -CachedTokens 900 -OutputTokens 60 -NanoAiu 2500000000)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['U_partial_drift_available'] = ($r.Output -match '(?m)^\s*available:\s*true\s*$' -and
+                                             $r.Output -match '(?m)^\s*requests:\s*2\s*$')
+    # The loss is stated at the grain that lets a reader judge it: which field
+    # moved, and how many records it cost out of how many.
+    $results['U_drift_named'] = ($r.Output -match 'drift:\s*\{\s*records:\s*1,\s*of:\s*3,\s*fields:\s*\[inputTokens\]\s*\}')
+
+    # Silence is the bug the key exists to prevent -- but a clean session must
+    # not carry it either, or it stops meaning anything.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1500000000)
+    )
+    $fixtures += $dir
+    $results['U_no_drift_no_key'] = ((Invoke-Collector @('--session-dir', $dir)).Output -notmatch '(?m)^\s*drift:')
 
     # --- S: the entity axis (issue #214) ------------------------------------
     # Get-Bucket slices a 4-space agent bucket; `by_entity` sits at the top

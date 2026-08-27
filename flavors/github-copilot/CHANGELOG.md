@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A request that consumed nothing no longer voids the session's cost (#238).**
+  The collector required four attributes on every `llm_request` and read a
+  missing one as a changed log schema. A failed compaction reports none of the
+  three token counts and no billing attribute — it consumed nothing, so there
+  is nothing to account for — and reading that absence as drift returned
+  `available: false, reason: schema_drift` for the whole session.
+
+  Measured across 25 session directories: 10,734 requests, 51 of them shaped
+  that way, every one an aborted compaction. They are not spread evenly. 39 of
+  the 51 sit in a single 231 MB session, 4 in another, 8 in a third, and the
+  remaining 22 sessions have none — compaction only happens once a session has
+  grown long, so the cost data died in exactly the sessions worth measuring. A
+  consumer project's workflow logs had been emitting an empty cost block on
+  that account, and the session that previously reported `schema_drift` now
+  reports 306 requests and 2327 credits.
+
+  The test is "reported no usage", not "said it failed". Of the 51 records, 50
+  carried `status: error` and one carried `status: ok`; a status-based check
+  would have let that one through and voided its session anyway. These requests
+  are counted as `no_usage_requests`, held apart from `unbilled_requests`,
+  which counts requests that did spend tokens without being charged — folding
+  the two together would file a failure inside a normal category.
+
+  Genuine drift is now subtracted instead of fatal. A *billed* request missing
+  its token fields is still drift, but it costs that one record: the rest are
+  still priced, and `drift: { records, of, fields }` names the field, the loss
+  and the base, so a reader can judge whether the total is still worth reading.
+  `schema_drift` survives and now means what it says — every request was
+  unreadable.
+
+- **The documented cost block had fallen two versions behind (#227, partly).**
+  The example in `logs/README.md` announced `schema_version: 4` against a
+  collector emitting 5. A hand-kept example is documentation only for as long
+  as something compares it to the code, so the suite now does: the version and
+  the collector tag in the README are checked against `SCHEMA_VERSION`, and the
+  check was confirmed to fail against the stale text before it was refreshed.
+  #227's wider ask — that the block's *content* and its documentation cannot
+  diverge — is untouched.
+
+### Changed
+
+- **The cost block is at `schema_version: 6`.** It gains `no_usage_requests` on
+  every block, and `drift` on the blocks that lost a record.
+
 ## [1.23.0] -- 2026-08-26
 
 ### Added
