@@ -82,6 +82,15 @@ try {
     $results['E_header_printed'] = ($e.Output -match '=== Cost Tracking Source ===')
     $results['E_brief_suppresses_header'] = ($f.Output -notmatch '=== Cost Tracking Source ===')
     $results['E_brief_keeps_verdict'] = ($f.Output -match '\bOK:')
+
+    # F -- the deploy summary captures the lines to indent and colour them.
+    # Write-Host would render on the console and hand back nothing, so the
+    # advisory must travel the pipeline. Measured: it did not, at first.
+    $piped = @(& $SCRIPT -UserDir $live -Brief)
+    $results['F_output_is_pipeable'] = ($piped.Count -gt 0 -and ($piped -join ' ') -match '\bOK:')
+
+    $pipedAdvisory = @(& $SCRIPT -UserDir $empty -Brief)
+    $results['F_advisory_is_pipeable'] = ($pipedAdvisory.Count -ge 6 -and ($pipedAdvisory -join ' ') -match 'ADVISORY')
 }
 finally {
     foreach ($root in $fixtures) {
@@ -96,6 +105,17 @@ foreach ($name in $results.Keys) {
     if ($results[$name]) { Write-Host "  PASS: $name" }
     else { Write-Host "  FAIL: $name"; $failed++ }
 }
+
+# Check inventory (#224 pattern). The probes run inside a try/finally, so a
+# throw part-way through would leave the later checks unassigned and the suite
+# would still report zero failures. Pin the count so a check cannot go missing
+# in silence.
+$EXPECTED_CHECK_TOTAL = 22
+if ($results.Count -ne $EXPECTED_CHECK_TOTAL) {
+    Write-Host "  FAIL: check inventory is $($results.Count), expected $EXPECTED_CHECK_TOTAL"
+    $failed++
+}
+
 Write-Host ''
 Write-Host "  Checks passed: $($results.Count - $failed)"
 Write-Host "  Checks failed: $failed"
