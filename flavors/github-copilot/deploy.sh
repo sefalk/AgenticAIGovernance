@@ -1166,6 +1166,22 @@ if [[ -f "$curated_json" ]]; then
     echo "  -> Run /af-curate-skills --reapply to restore them (the MCP af_deploy prompt does this automatically)."
 fi
 
+# ── Cost tracking source ───────────────────────────────────────────────────
+# A workflow log records `cost: available: false` when VS Code's agent debug
+# log is off, and that file is not one anybody opens unprompted. A deploy is
+# the one moment an existing consumer is already reading framework output, and
+# it is the only channel that reaches installs predating the setting -- the
+# .vscode/settings.json that would carry the key is PRESERVE'd on update.
+# Advisory only: never fatal, never gating (issue #228).
+cost_probe="$SOURCE_GITHUB/scripts/check-cost-source.sh"
+if [[ -f "$cost_probe" ]]; then
+    cost_output=$(bash "$cost_probe" --brief 2>/dev/null)
+    if [[ -n "$cost_output" ]]; then
+        echo ""
+        echo "$cost_output"
+    fi
+fi
+
 # Prune stale backups from previous deploy runs
 prune_old_backups "$TARGET_DIR" "$BACKUP_PRUNE_DAYS" "$BACKUP_DIR"
 

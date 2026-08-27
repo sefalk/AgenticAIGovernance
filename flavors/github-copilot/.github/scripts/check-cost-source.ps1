@@ -59,10 +59,12 @@ function Measure-SessionLog([string[]]$dirs) {
 $dirs = if ($UserDir.Count -gt 0) { $UserDir } else { Get-DefaultUserDir }
 $sessions = Measure-SessionLog $dirs
 
-if (-not $Brief) { Write-Host '=== Cost Tracking Source ===' }
+# Write-Output, not Write-Host: the deploy summary captures these lines to
+# indent and colour them, and Write-Host bypasses the pipeline entirely.
+if (-not $Brief) { Write-Output '=== Cost Tracking Source ===' }
 
 if ($sessions -gt 0) {
-    Write-Host "  OK: agent debug logging is producing session logs ($sessions found)."
+    Write-Output "  OK: agent debug logging is producing session logs ($sessions found)."
     exit 0
 }
 
@@ -70,12 +72,12 @@ if ($sessions -gt 0) {
 # relocated VS Code install is a false alarm the consumer can recognise.
 $where = if ($dirs.Count -gt 0) { $dirs -join '; ' } else { '(no VS Code user directory found)' }
 
-Write-Host "  ADVISORY: no agent debug logs found -- workflow cost blocks will be empty."
-Write-Host "    Searched: $where"
-Write-Host "    Enable the VS Code setting: $SETTING"
-Write-Host "    While it is off, every workflow log records 'cost: available: false'"
-Write-Host "    and no token or credit figures can be reconciled."
-Write-Host "    The setting is experiment-flagged and vendor-controlled; it may be"
-Write-Host "    withdrawn. Nothing gates on it -- this notice is advisory only."
+Write-Output "  ADVISORY: no agent debug logs found -- workflow cost blocks will be empty."
+Write-Output "    Searched: $where"
+Write-Output "    Enable the VS Code setting: $SETTING"
+Write-Output "    While it is off, every workflow log records 'cost: available: false'"
+Write-Output "    and no token or credit figures can be reconciled."
+Write-Output "    The setting is experiment-flagged and vendor-controlled; it may be"
+Write-Output "    withdrawn. Nothing gates on it -- this notice is advisory only."
 
 exit 0
