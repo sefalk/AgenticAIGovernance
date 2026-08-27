@@ -744,8 +744,7 @@ def render(result: dict[str, Any], facts_path: str | None = None, entities_path:
     drift = result.get("drift")
     if drift:
         lines.append(
-            f"  drift: {{ records: {drift['records']}, of: {drift['of']},"
-            f" fields: [{', '.join(drift['fields'])}] }}"
+            f"  drift: {{ records: {drift['records']}, of: {drift['of']}, fields: [{', '.join(drift['fields'])}] }}"
         )
     lines.append(
         "  tokens: {{ input_uncached: {0}, cached: {1}, output: {2} }}".format(
