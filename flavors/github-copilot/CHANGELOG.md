@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A switched-off cost source now announces itself (#228).** Cost collection
+  depends on a VS Code setting that is off by default. When it is off the
+  collector correctly writes `cost: available: false` into a workflow log —
+  a file nobody opens unless they already suspect something is wrong. A
+  consumer could therefore run for months with an empty cost series and no way
+  to discover why short of reading framework source.
+
+  `scripts/check-cost-source.ps1` (and its `.sh` twin) probes the effect rather
+  than the configuration: it counts session logs on disk. Reading the setting
+  is unreliable — it may live in user, workspace, or profile settings, and
+  those files are JSONC, which no JSON parser accepts. A session log that
+  exists is proof the source is live.
+
+  The advisory is emitted by the deploy summary, which is the only channel that
+  reaches **existing** installs: the `.vscode/settings.json` that would carry
+  the key is PRESERVE'd on update, so shipping the key upstream would reach new
+  consumers only. It names the setting, what is lost while it is off, and the
+  caveat that the setting is experiment-flagged and the vendor may withdraw it.
+
+  Nothing gates on it. The probe always exits 0, and a dark source fails no
+  workflow, hook, or suite. This generalises the #224 principle — a check that
+  does not run must announce itself — to the data source behind it.
+
 ### Fixed
 
 - **A request that consumed nothing no longer voids the session's cost (#238).**

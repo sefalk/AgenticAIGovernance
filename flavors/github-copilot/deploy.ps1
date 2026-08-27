@@ -1193,6 +1193,24 @@ if ($filesChanged -gt 0 -and $DeployedInfo) {
     }
 }
 
+# ── Cost tracking source ───────────────────────────────────────────────────
+# A workflow log records `cost: available: false` when VS Code's agent debug
+# log is off, and that file is not one anybody opens unprompted. A deploy is
+# the one moment an existing consumer is already reading framework output, and
+# it is the only channel that reaches installs predating the setting -- the
+# .vscode/settings.json that would carry the key is PRESERVE'd on update.
+# Advisory only: never fatal, never gating (issue #228).
+$costProbe = Join-Path $SourceGitHub 'scripts\check-cost-source.ps1'
+if (Test-Path $costProbe) {
+    $costLines = @()
+    try { $costLines = @(& $costProbe -Brief 2>&1 | ForEach-Object { $_.ToString() }) } catch { $costLines = @() }
+    if ($costLines.Count -gt 0) {
+        $costColor = if (($costLines -join ' ') -match 'ADVISORY') { 'Yellow' } else { 'DarkGray' }
+        Write-Host ""
+        foreach ($costLine in $costLines) { Write-Host $costLine -ForegroundColor $costColor }
+    }
+}
+
 # Prune stale backups from previous deploy runs
 Invoke-PruneOldBackups -RootDir $TargetDir -Days $resolvedBackupPruneDays -ActiveBackupDir $script:BackupDir
 
