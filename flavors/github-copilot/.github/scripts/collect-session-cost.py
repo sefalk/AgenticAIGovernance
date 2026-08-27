@@ -41,8 +41,8 @@ import re
 import sys
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 5
-COLLECTOR_VERSION = 5
+SCHEMA_VERSION = 6
+COLLECTOR_VERSION = 6
 FACTS_SCHEMA_VERSION = 1
 ENTITY_SCHEMA_VERSION = 1
 
@@ -79,6 +79,13 @@ SUBAGENT = re.compile(r"^runSubagent-(?P<agent>.+)-(?P<call>[^-]+)\.jsonl$")
 REQUIRED_REQUEST_ATTRS = ("model", "inputTokens", "cachedTokens", "outputTokens")
 
 BILLING_ATTR = "copilotUsageNanoAiu"
+
+# The subset that records what a request consumed. A request can end without
+# consuming anything -- a failed compaction reports none of these and no
+# billing attribute either -- and that absence is a fact about the request, not
+# a changed log schema. `model` is excluded on purpose: it was present on every
+# such record observed, so losing it would still be drift.
+USAGE_ATTRS = ("inputTokens", "cachedTokens", "outputTokens")
 
 # Definitions carried by the system prompt. Matched as whole elements so the
 # measurement is the delivered bytes -- framing and envelope included -- rather
@@ -352,6 +359,17 @@ def _weighted(rows: list[dict[str, Any]], key: str, invoked_by: dict[str, int] |
     return out
 
 
+def reports_no_usage(event: dict[str, Any]) -> bool:
+    """True when the request accounts for nothing: no billing, no token counts.
+
+    Deliberately not a test on `status`: of 51 such records measured, one
+    carried `status: ok`, and a status-based check would have let that one
+    through and voided the session anyway (issue #238).
+    """
+    attrs = event.get("attrs") or {}
+    return attrs.get(BILLING_ATTR) is None and all(attrs.get(field) is None for field in USAGE_ATTRS)
+
+
 def build_fact(event: dict[str, Any], session: str, log: str, agent: str) -> dict[str, Any]:
     """One row per request: every dimension the log carries, no prompt text.
 
@@ -547,6 +565,9 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
     invoked: dict[str, int] = {}
     customizations: dict[str, dict[str, Any]] = {}
     parsed = 0
+    requests_seen = 0
+    no_usage = 0
+    drifted: dict[str, int] = {}
 
     for path in log_files(session_dir):
         if not os.path.isfile(path):
@@ -565,10 +586,17 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
             if kind == "session_start" and session_start is None:
                 session_start = event
             elif kind == "llm_request":
+                requests_seen += 1
+                if reports_no_usage(event):
+                    no_usage += 1
+                    continue
                 try:
                     fact = build_fact(event, session, log, agent)
-                except Drift:
-                    return {"available": False, "reason": "schema_drift"}
+                except Drift as missing:
+                    # One unreadable record is a hole in the total, not a
+                    # reason to discard the records that read cleanly.
+                    drifted[str(missing)] = drifted.get(str(missing), 0) + 1
+                    continue
                 price(fact, cards)
                 facts.append(fact)
             elif kind == "tool_call":
@@ -582,6 +610,11 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
 
     if parsed == 0:
         return {"available": False, "reason": "log_unparseable"}
+
+    # Every request drifted and none survived: there is no total to degrade,
+    # only one to withhold.
+    if drifted and not facts:
+        return {"available": False, "reason": "schema_drift"}
 
     # The trace states what the filename only implies: every request has a
     # parent span, resolving to the subagent, user message or hook that caused it.
@@ -606,7 +639,17 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
         "rate_card": RATE_CARD_FILE if cards else None,
         "entities": collect_entities(session_dir, facts, invoked),
         "customizations": customizations,
+        "no_usage_requests": no_usage,
     }
+
+    # Only when something was lost. A key that is always present stops being
+    # read; one that appears only on a hole is a signal.
+    if drifted:
+        result["drift"] = {
+            "records": sum(drifted.values()),
+            "of": requests_seen,
+            "fields": sorted(drifted),
+        }
 
     if session_start is None:
         # The size cap drops the OLDEST entries, i.e. the plan and Red phases.
@@ -696,6 +739,14 @@ def render(result: dict[str, Any], facts_path: str | None = None, entities_path:
     lines.append(f"  sessions: [{sessions}]")
     lines.append(f"  requests: {_scalar(totals.requests if totals else None)}")
     lines.append(f"  unbilled_requests: {_scalar(totals.unbilled if totals else None)}")
+    # Separate from `unbilled`, which counts requests that did spend tokens.
+    lines.append(f"  no_usage_requests: {_scalar(result.get('no_usage_requests'))}")
+    drift = result.get("drift")
+    if drift:
+        lines.append(
+            f"  drift: {{ records: {drift['records']}, of: {drift['of']},"
+            f" fields: [{', '.join(drift['fields'])}] }}"
+        )
     lines.append(
         "  tokens: {{ input_uncached: {0}, cached: {1}, output: {2} }}".format(
             _scalar(totals.input_uncached if totals else None),

@@ -27,13 +27,15 @@ the chat debug log of the current session:
 
 ```yaml
 cost:
-  schema_version: 4
-  collector: "collect-session-cost.py@4"
+  schema_version: 6
+  collector: "collect-session-cost.py@6"
   available: true
   coverage: full            # full | partial | truncated
   sessions: ["<session-id>"]
   requests: 205             # billed requests only
   unbilled_requests: 9
+  no_usage_requests: 2      # no tokens and no billing: nothing to account for
+  drift: { records: 1, of: 216, fields: [outputTokens] }   # omitted when none
   tokens: { input_uncached: 1259777, cached: 21963581, output: 234002 }
   credits: 2385.082
   rate_card: "models.json"  # null when the dump is absent or unusable
@@ -86,6 +88,13 @@ Reading it:
   gates on it are forbidden.
 - **`available: false` carries a `reason`** (`session_dir_missing`,
   `main_log_missing`, `log_unparseable`, `schema_drift`) and is never an error.
+  `schema_drift` now means *every* request was unreadable. A record that drifts
+  while others parse is subtracted, not fatal: the total stands and `drift`
+  names the field, the count and the base, so the reader can judge the hole.
+- **`no_usage_requests` is not `unbilled_requests`.** Unbilled requests spent
+  tokens that were not charged; a no-usage request reported no tokens and no
+  billing at all — an aborted or failed call. Counting the second as the first
+  would put a failure inside a normal category.
 - **`coverage` qualifies the number.** `truncated` means the log lost its start
   (the 100 MB cap drops the *oldest* entries, i.e. the plan and Red phases) and
   no total is emitted at all — a total would look complete while being biased
