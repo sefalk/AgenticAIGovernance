@@ -61,8 +61,16 @@ if ($filePaths.Count -eq 0) {
 function Test-AfPlanPath {
     param([string]$Path, [string]$Root)
 
+    # `Join-Path` concatenates unconditionally, so an absolute path -- the only
+    # kind the planner's write tool accepts -- became `C:\repo\C:\repo\...`, and
+    # the gate denied it as malformed instead of judging where it points (#232).
+    # The bash twin already branched here; this puts the two back in step.
     try {
-        $full = [System.IO.Path]::GetFullPath((Join-Path $Root $Path))
+        $full = if ([System.IO.Path]::IsPathRooted($Path)) {
+            [System.IO.Path]::GetFullPath($Path)
+        } else {
+            [System.IO.Path]::GetFullPath((Join-Path $Root $Path))
+        }
     } catch {
         return $false
     }
