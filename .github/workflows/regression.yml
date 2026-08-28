@@ -231,6 +231,15 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-env-change-gate.py
 
+      # check-issue-drift.py is a reporting tool, not a gate: it never fails a
+      # build and never changes issue state. Its suite runs here for the same
+      # reason as the one above -- CI's own machinery is otherwise a shipped
+      # script nobody executes, and a classifier that silently stops matching
+      # would leave the drift it detects invisible again (#231).
+      - name: Test the issue drift detector
+        shell: powershell
+        run: python .github\scripts\test-issue-drift.py
+
       # #124 made `ruff format` blocking for consumers while the framework's
       # own Python went unformatted (#167). The file list comes from git rather
       # than a hardcoded glob, so a new file is covered the moment it is
