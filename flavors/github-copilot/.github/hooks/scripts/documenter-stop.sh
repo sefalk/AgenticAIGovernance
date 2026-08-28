@@ -48,9 +48,9 @@ BASE_BRANCH=$(af_conf_get BASE_BRANCH dev)
 # workflow still running — the hook mechanically compelled the false artifact
 # it existed to guarantee (issue #72).
 #
-# Intent is not on stdin, so it is read off the plan file: a plan marked
-# COMPLETED is the documenter's own claim that it finalised, and that claim is
-# what this gate holds it to.
+# Intent is not on stdin, so it is read off the artifacts: a plan marked
+# COMPLETED is the documenter's own claim that it finalised, and a workflow log
+# reporting a terminal status is the same claim in the other file.
 
 plan_info=$(af_plan_lifecycle "$workflow_id" "$AF_CODE_ROOT")
 plan_found="${plan_info%%|*}"
@@ -77,9 +77,35 @@ if [ "$plan_found" != "1" ]; then
     exit 0
 fi
 
+# The plan status is a word an agent maintains by hand; the workflow log is an
+# artifact the run produced. Requiring the plan alone let one unset word silence
+# the schema check, the timestamps, the cost block and the invocation census at
+# once — the gate's own failure disabled every measurement behind it (issue
+# #252). Either source asserting an end is now enough.
+#
+# The match is deliberately looser than the schema's closed set: a status of
+# COMPLETED-WITH-ISSUES is invalid and must reach the checker that says so,
+# rather than exit here and take the measurements with it.
+
+lifecycle_note=""
+
 if [ "$plan_status" != "COMPLETED" ]; then
-    echo "{\"systemMessage\": \"documenter:Stop — plan status is ${plan_status:-unset}, not COMPLETED: treated as a mid-workflow documenter call, artifact gate not applied.\"}"
-    exit 0
+    log_status=""
+    for candidate in ".github/logs/${workflow_id}.yaml" ".github/logs/${workflow_id}.yml"; do
+        [ -f "$candidate" ] || continue
+        log_status=$(sed -n 's/^status:[^A-Za-z]*\([A-Za-z][A-Za-z0-9_-]*\).*/\1/p' "$candidate" |
+                     head -n 1 | tr '[:lower:]' '[:upper:]')
+        [ -n "$log_status" ] && break
+    done
+    case "$log_status" in
+        COMPLETED*|FAILED*|ESCALATED*)
+            lifecycle_note=" — NOTE: plan status is ${plan_status:-unset} but the workflow log reports ${log_status}, so this call was treated as finalisation; one of the two is wrong and should be corrected"
+            ;;
+        *)
+            echo "{\"systemMessage\": \"documenter:Stop — plan status is ${plan_status:-unset}, not COMPLETED: treated as a mid-workflow documenter call, artifact gate not applied.\"}"
+            exit 0
+            ;;
+    esac
 fi
 
 # ---------- Gate 1: Workflow log YAML ----------
@@ -120,7 +146,7 @@ fi
 
 if [ ${#missing[@]} -gt 0 ]; then
     list=$(IFS='; '; echo "${missing[*]}")
-    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Documentation phase violation: required artifacts missing for workflow '${workflow_id}': ${list}. Create these files before completing.\"}}"
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Documentation phase violation: required artifacts missing for workflow '${workflow_id}': ${list}. Create these files before completing.${lifecycle_note}\"}}"
     exit 0
 fi
 
@@ -323,5 +349,5 @@ if [ -f "$checker" ] && [ -f ".vscode/tasks.json" ]; then
     fi
 fi
 
-echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS for '${workflow_id}'${retro_note}${schema_note}${stamp_note}${cost_note}${invocation_note}${scratch_note}\"}"
+echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS for '${workflow_id}'${lifecycle_note}${retro_note}${schema_note}${stamp_note}${cost_note}${invocation_note}${scratch_note}\"}"
 exit 0

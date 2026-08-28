@@ -52,9 +52,9 @@ $BASE_BRANCH = Get-AfConfig -Key 'BASE_BRANCH' -Default 'dev'
 # workflow still running -- the hook mechanically compelled the false artifact
 # it existed to guarantee (issue #72).
 #
-# Intent is not on stdin, so it is read off the plan file: a plan marked
-# COMPLETED is the documenter's own claim that it finalised, and that claim is
-# what this gate holds it to.
+# Intent is not on stdin, so it is read off the artifacts: a plan marked
+# COMPLETED is the documenter's own claim that it finalised, and a workflow log
+# reporting a terminal status is the same claim in the other file.
 
 $plan = Get-AfPlanLifecycle -WorkflowId $workflowId -Root $AfCodeRoot
 
@@ -81,13 +81,36 @@ if (-not $plan.Found) {
     exit 0
 }
 
+# The plan status is a word an agent maintains by hand; the workflow log is an
+# artifact the run produced. Requiring the plan alone let one unset word silence
+# the schema check, the timestamps, the cost block and the invocation census at
+# once -- the gate's own failure disabled every measurement behind it (issue
+# #252). Either source asserting an end is now enough.
+#
+# The match is deliberately looser than the schema's closed set: a status of
+# COMPLETED-WITH-ISSUES is invalid and must reach the checker that says so,
+# rather than exit here and take the measurements with it.
+
+$lifecycleNote = ''
+
 if ($plan.Status -ne 'COMPLETED') {
+    $logStatus = ''
+    foreach ($candidate in @(".github/logs/$workflowId.yaml", ".github/logs/$workflowId.yml")) {
+        if (Test-Path $candidate) {
+            $m = [regex]::Match((Get-Content $candidate -Raw),
+                                '(?m)^status:[^A-Za-z\r\n]*([A-Za-z][A-Za-z0-9_-]*)')
+            if ($m.Success) { $logStatus = $m.Groups[1].Value.ToUpperInvariant(); break }
+        }
+    }
     $seen = if ($plan.Status) { $plan.Status } else { 'unset' }
-    $output = @{
-        systemMessage = "documenter:Stop -- plan status is $seen, not COMPLETED: treated as a mid-workflow documenter call, artifact gate not applied."
-    } | ConvertTo-Json -Compress
-    Write-Output $output
-    exit 0
+    if ($logStatus -notmatch '^(COMPLETED|FAILED|ESCALATED)') {
+        $output = @{
+            systemMessage = "documenter:Stop -- plan status is $seen, not COMPLETED: treated as a mid-workflow documenter call, artifact gate not applied."
+        } | ConvertTo-Json -Compress
+        Write-Output $output
+        exit 0
+    }
+    $lifecycleNote = " -- NOTE: plan status is $seen but the workflow log reports $logStatus, so this call was treated as finalisation; one of the two is wrong and should be corrected"
 }
 
 # ---------- Gate 1: Workflow log YAML ----------
@@ -139,7 +162,7 @@ if ($missing.Count -gt 0) {
         hookSpecificOutput = @{
             hookEventName = "Stop"
             decision = "block"
-            reason = "Documentation phase violation: required artifacts missing for workflow '$workflowId': $list. Create these files before completing."
+            reason = "Documentation phase violation: required artifacts missing for workflow '$workflowId': $list. Create these files before completing.$lifecycleNote"
         }
     } | ConvertTo-Json -Compress -Depth 3
     Write-Output $output
@@ -387,7 +410,7 @@ catch {
 }
 
 $output = @{
-    systemMessage = "documenter:Stop -- artifact gate PASS for '$workflowId'$retroNote$schemaNote$stampNote$costNote$invocationNote$scratchNote"
+    systemMessage = "documenter:Stop -- artifact gate PASS for '$workflowId'$lifecycleNote$retroNote$schemaNote$stampNote$costNote$invocationNote$scratchNote"
 } | ConvertTo-Json -Compress
 Write-Output $output
 exit 0

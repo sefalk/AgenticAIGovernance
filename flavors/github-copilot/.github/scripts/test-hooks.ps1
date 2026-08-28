@@ -1856,6 +1856,48 @@ Assert-True "another workflow's COMPLETED plan does not finalise this one" `
     ((Get-StopDecision @{ 'docs/plans/fix-2026-01-01-other.md' = ($PLAN_DONE -replace '72-x', '99-other') }) -eq 'pass') `
     "the plan must name this branch to speak for this workflow"
 
+# ── the plan is not the only witness (issue #252) ─────────────────────────
+#
+# A real workflow finished, merged, and measured nothing: its plan still read
+# APPROVED, so the gate exited before the schema check, the timestamps, the
+# cost block and the invocation census — while the log had said COMPLETED all
+# along. One hand-maintained word disabled four measurements at once.
+
+$LOG_RUNNING = "workflow_id: `"72-x`"`nstatus: `"IN_PROGRESS`"`n"
+$LOG_INVALID = "workflow_id: `"72-x`"`nstatus: `"COMPLETED-WITH-ISSUES`"`n"
+
+$stalePlan = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_RUNNING
+    '.github/logs/72-x.yaml'         = $LOG_YAML
+    '.github/retros/auto/72-x.md'    = $RETRO_MD
+}
+Assert-True "a log reporting a terminal status finalises even when the plan does not" `
+    ($stalePlan.Output -notmatch 'artifact gate not applied') `
+    "got: $($stalePlan.Output)" -Subject $stalePlan.Output
+
+Assert-True "the plan/log divergence is reported, not resolved in silence" `
+    ($stalePlan.Output -match 'plan status is IN_PROGRESS' -and $stalePlan.Output -match 'COMPLETED') `
+    "got: $($stalePlan.Output)" -Subject $stalePlan.Output
+
+$bothRunning = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_RUNNING
+    '.github/logs/72-x.yaml'         = $LOG_RUNNING
+}
+Assert-True "a log claiming no end still leaves the mid-workflow call alone" `
+    ($bothRunning.Output -match 'artifact gate not applied') `
+    "got: $($bothRunning.Output)" -Subject $bothRunning.Output
+
+# The value is invalid and the schema check exists to say so. Exiting here
+# instead would suppress the report and the measurements together.
+$invalidStatus = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_RUNNING
+    '.github/logs/72-x.yaml'         = $LOG_INVALID
+    '.github/retros/auto/72-x.md'    = $RETRO_MD
+}
+Assert-True "an out-of-schema status reaches the checker instead of exiting the gate" `
+    ($invalidStatus.Output -notmatch 'artifact gate not applied') `
+    "got: $($invalidStatus.Output)" -Subject $invalidStatus.Output
+
 # Unclassifiable is not the same as fine. The gate says which one it is rather
 # than passing in silence -- the failure mode this whole issue family is about.
 $noPlan = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{ 'README.md' = 'x' }
@@ -2355,10 +2397,24 @@ Assert-True "a log without timestamps gets both from the hook" `
 
 # The artifact gate already distinguishes the two documenter lifecycles. A
 # call made while the workflow is still running must not date its completion.
-$midRun = Get-StampedLog $LOG_INVENTED $PLAN_RUNNING
+#
+# "Still running" has to hold in both witnesses. Since #252 a log reporting a
+# terminal status finalises on its own, so a fixture whose log already says
+# COMPLETED is a divergence case and not a mid-workflow one -- the log below
+# says what the plan says.
+$LOG_INVENTED_RUNNING = "workflow_id: `"72-x`"`nstarted: `"2099-01-01T09:00:00Z`"`ncompleted: `"2099-01-01T16:30:00Z`"`nstatus: `"IN_PROGRESS`"`n"
+
+$midRun = Get-StampedLog $LOG_INVENTED_RUNNING $PLAN_RUNNING
 Assert-Contains "a workflow that has not finished is not stamped as finished" `
     $midRun '2099' `
     "the mid-workflow call rewrote a log for a workflow still in progress"
+
+# The other half of the same rule: once the log reports its own end, invented
+# dates are exactly what the hook exists to replace (#173). A stale plan word
+# must not protect them.
+$divergedStamp = Get-StampedLog $LOG_INVENTED $PLAN_RUNNING
+Assert-NotContains "a log that reports its own end has its invented dates replaced" `
+    $divergedStamp '2099'
 
 # The schema is the instruction. Leaving the fields in it and adding prose
 # against them elsewhere is how the fabrication happened in the first place.
