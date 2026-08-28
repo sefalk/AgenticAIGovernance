@@ -128,6 +128,19 @@ print(n)
 '
 }
 
+# Sets FIXTURE_DIR, or ends the run. `cd ""` succeeds in bash, so an empty
+# fixture path leaves the fixture's `git init` and `git checkout -b` loose in
+# the real repository -- which is how a suite run created `agent/72-x` in a
+# maintainer's checkout (#248). Returning the path would not work: `exit`
+# inside a command substitution ends the substitution, not the script.
+new_fixture() {
+    FIXTURE_DIR=$(mktemp -d) || FIXTURE_DIR=''
+    if [ -z "$FIXTURE_DIR" ]; then
+        echo "FATAL  no fixture directory could be created; refusing to run hooks in $(pwd)" >&2
+        exit 1
+    fi
+}
+
 # run_case <name> <hook> <branch|--detach> <json> <deny|allow|ask|silent|notdeny>
 # 'notdeny' is for cases whose point is that the DENY tier stayed out of it,
 # and whose allow/ask outcome is decided by tiers this test has no opinion on.
@@ -138,7 +151,7 @@ run_case() {
     local seed="${6:-}"
     local fixture out err rc=0 ok=0 stmts
     local fixture out err rc=0 ok=0
-    fixture=$(mktemp -d)
+    new_fixture; fixture=$FIXTURE_DIR
 
     mkdir -p "$fixture/.github/hooks/scripts"
     if [ -n "$seed" ]; then mkdir -p "$fixture/$seed"; fi
@@ -151,7 +164,7 @@ run_case() {
     _conf=$(af_policy_conf); [ -f "$_conf" ] && cp "$_conf" "$fixture/.github/af-env.conf"
 
     (
-        cd "$fixture" || exit 1
+        cd "${fixture:?empty fixture path (#248)}" || exit 1
         use_fixture_conf
         git init -q .
         if [ "$mode" = "--detach" ]; then
@@ -574,7 +587,7 @@ stop_case() {
     local name="$1" hook="$2" expect="$3"; shift 3
     local fixture rc=0 out ok=0 spec path content stmts
 
-    fixture=$(mktemp -d)
+    new_fixture; fixture=$FIXTURE_DIR
     mkdir -p "$fixture/.github/hooks/scripts"
     cp "${HOOK_SRC:-$HOOK_DIR}/$hook" "$fixture/.github/hooks/scripts/"
     cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
@@ -589,7 +602,7 @@ stop_case() {
     done
 
     (
-        cd "$fixture" || exit 1
+        cd "${fixture:?empty fixture path (#248)}" || exit 1
         use_fixture_conf
         git init -q .
         git checkout -q -b agent/72-x
@@ -723,7 +736,7 @@ LEGACY_RETRO='# Retro 72-x\n\n- lesson\n'
 stop_output() {
     local hook="$1"; shift
     local fixture out spec path content
-    fixture=$(mktemp -d)
+    new_fixture; fixture=$FIXTURE_DIR
     mkdir -p "$fixture/.github/hooks/scripts"
     cp "${HOOK_SRC:-$HOOK_DIR}/$hook" "$fixture/.github/hooks/scripts/"
     cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
@@ -734,7 +747,7 @@ stop_output() {
         printf '%b' "$content" > "$fixture/$path"
     done
     out=$(
-        cd "$fixture" || exit 1
+        cd "${fixture:?empty fixture path (#248)}" || exit 1
         use_fixture_conf
         git init -q .
         git checkout -q -b agent/72-x
@@ -936,7 +949,7 @@ RETRO_MD='# Retro 72-x\n\n- lesson\n'
 # repository cannot be judged by its verdict alone.
 stamp_log() {
     local plan="$1" log="$2" fixture out
-    fixture=$(mktemp -d)
+    new_fixture; fixture=$FIXTURE_DIR
     mkdir -p "$fixture/.github/hooks/scripts" "$fixture/.github/logs" \
              "$fixture/.github/retros/auto" "$fixture/docs/plans"
     cp "$HOOK_DIR/documenter-stop.sh" "$fixture/.github/hooks/scripts/"
@@ -946,7 +959,7 @@ stamp_log() {
     printf '%b' "$log" > "$fixture/.github/logs/72-x.yaml"
     printf '%b' "$RETRO_MD" > "$fixture/.github/retros/auto/72-x.md"
     (
-        cd "$fixture" || exit 1
+        cd "${fixture:?empty fixture path (#248)}" || exit 1
         use_fixture_conf
         git init -q .
         git checkout -q -b agent/72-x
@@ -1657,7 +1670,7 @@ gate_case() {
     local name="$1" hook="$2" expect="$3" stub="$4" stub_exit="$5" stub_out="$6"
     local fixture rc=0 out ok=0 stmts stub_path
 
-    fixture=$(mktemp -d)
+    new_fixture; fixture=$FIXTURE_DIR
     mkdir -p "$fixture/.github/hooks/scripts" "$fixture/tests" "$fixture/bin"
     cp "${HOOK_SRC:-$HOOK_DIR}/$hook" "$fixture/.github/hooks/scripts/"
     cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
@@ -1689,7 +1702,7 @@ gate_case() {
     printf 'def test_seeded():\n    assert True\n' > "$fixture/tests/test_seeded.py"
 
     (
-        cd "$fixture" || exit 1
+        cd "${fixture:?empty fixture path (#248)}" || exit 1
         use_fixture_conf
         PATH="$fixture/bin:$PATH"; export PATH
         git init -q .

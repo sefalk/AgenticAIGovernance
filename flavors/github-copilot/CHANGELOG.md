@@ -50,6 +50,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The bash hook suite no longer runs its fixtures in the real repository
+  (#248).** Five fixture helpers guarded their working directory with
+  `cd "$fixture" || exit 1`. That stops a *wrong* path and not an *empty* one:
+  `cd ""` succeeds in bash and stays where it was. With the current directory
+  still at the repository root, the fixture's `git init` and
+  `git checkout -b agent/72-x` ran against the checkout itself — measured, not
+  theorised: a suite run created `agent/72-x` in a maintainer's repository and
+  two later commits landed on it.
+
+  Fixture creation now fails loudly instead of continuing with nothing, and the
+  guards use `${fixture:?}`, which refuses an empty value. Why `mktemp -d`
+  returned nothing is not established; the fix does not depend on knowing,
+  because a harness must not be able to write into the repository it is
+  testing whatever the reason.
+
 - **A request that consumed nothing no longer voids the session's cost (#238).**
   The collector required four attributes on every `llm_request` and read a
   missing one as a changed log schema. A failed compaction reports none of the
