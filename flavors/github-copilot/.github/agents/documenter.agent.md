@@ -214,13 +214,15 @@ case — write the log accurately and the condition follows.
 `af-env.conf`; it defaults to `.github/retros/auto`. Your Stop hook resolves
 the same key, so writing anywhere else is a blocked finalisation.
 
-**Format:**
+**Format:** `Outcome` is the same closed set as the log's `status:`. A run that
+finished with problems is `COMPLETED`; the problems belong in the sections
+below, not in the word.
 
 ```markdown
 # {workflow-id} — {date}
 
 **Task:** {1-line summary}
-**Outcome:** {COMPLETED | COMPLETED-WITH-ISSUES | FAILED | ESCALATED}
+**Outcome:** {COMPLETED | FAILED | ESCALATED}
 
 ## What went well
 - {1–3 bullet points from the workflow}
