@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The shipped bash hook suite is now executed (#190, #183).**
+  `run-all-tests.ps1` sweeps `test-*.ps1`, so `test-hooks.sh` — the only
+  executing coverage the `.sh` hooks have — was committed, maintained, and run
+  by nothing. Reading was doing the work that running was believed to do,
+  which is #61 in the other half of the payload.
+
+  A CI step runs it on the Windows runner through the bash that Git for
+  Windows installs at `C:\Program Files\Git\bin\bash.exe`. The suite exits 0
+  when it finds no usable Python interpreter, so the step also fails on a
+  `SKIP:` line and on a missing pass count — a suite that skipped itself must
+  not report green.
+
+  First measured run: **187 assertions, 0 failures.** Five are new. The cases
+  the #183 fix was written against existed only in the PowerShell harness, so
+  the `.sh` copy of that fix had been reviewed and never measured; it holds.
+
 - **A switched-off cost source now announces itself (#228).** Cost collection
   depends on a VS Code setting that is off by default. When it is off the
   collector correctly writes `cost: available: false` into a workflow log —
@@ -33,6 +49,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does not run must announce itself — to the data source behind it.
 
 ### Fixed
+
+- **The bash hook suite no longer runs its fixtures in the real repository
+  (#248).** Five fixture helpers guarded their working directory with
+  `cd "$fixture" || exit 1`. That stops a *wrong* path and not an *empty* one:
+  `cd ""` succeeds in bash and stays where it was. With the current directory
+  still at the repository root, the fixture's `git init` and
+  `git checkout -b agent/72-x` ran against the checkout itself — measured, not
+  theorised: a suite run created `agent/72-x` in a maintainer's repository and
+  two later commits landed on it.
+
+  Fixture creation now fails loudly instead of continuing with nothing, and the
+  guards use `${fixture:?}`, which refuses an empty value. Why `mktemp -d`
+  returned nothing is not established; the fix does not depend on knowing,
+  because a harness must not be able to write into the repository it is
+  testing whatever the reason.
 
 - **A request that consumed nothing no longer voids the session's cost (#238).**
   The collector required four attributes on every `llm_request` and read a
