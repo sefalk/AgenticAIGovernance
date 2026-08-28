@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A capability only the tests use is now a failure (#253).**
+  `scripts/check-cli-callers.py` reads the long options every shipped Python
+  CLI defines and requires at least one production file — a hook, a workflow,
+  another script — to name each of them. Test harnesses do not count: they are
+  the thing being distrusted, since a suite vouching for its own flag is
+  exactly how #217's artifacts passed eleven assertions while being written by
+  nobody.
+
+  This is #61 in a third place: reading was doing the work that running was
+  believed to do. The guard runs inside `test-hooks.ps1`, with seeded cases in
+  both directions — an option no production file passes fails, one a test file
+  passes still fails, one a hook passes clears. A CLI that no hook is meant to
+  invoke declares itself with `af-caller-ok` in its module docstring, and a
+  single option can do the same on the line above it; both existing analysis
+  tools and one test-only override are now declared rather than silently
+  tolerated.
+
 - **The shipped bash hook suite is now executed (#190, #183).**
   `run-all-tests.ps1` sweeps `test-*.ps1`, so `test-hooks.sh` — the only
   executing coverage the `.sh` hooks have — was committed, maintained, and run
@@ -53,6 +70,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does not run must announce itself — to the data source behind it.
 
 ### Fixed
+
+- **The durable cost artifacts are now actually written (#253, #217).** The
+  per-request facts file and the per-entity file were built, documented and
+  covered by eleven assertions — and no shipped file ever passed
+  `--facts-out` or `--entities-out`. The only caller was the suite proving the
+  feature worked. Every workflow rendered its `cost:` block from rows that were
+  then discarded, and the debug log they came from expires, so the dimensions
+  the block does not render were lost for every run since #217 landed.
+
+  `documenter-stop` (both twins) now passes both flags on every finalising
+  call, writing to `.github/logs/cost/{workflow-id}.{facts,entities}.ndjson`.
+  The location is deliberate: this directory's `.gitignore` matches `*`, which
+  covers subdirectories, so the artifacts are never committed — the same rule,
+  for the same lineage of data, as the workflow logs beside them.
+
+  The writers changed from overwrite to append with dedup, because a workflow
+  can span several chat sessions while the collector reads one at a time.
+  Overwriting would have made the last session the only one that ever existed,
+  and by the time the second session finalises, the log the first one's rows
+  came from is gone. Rows are keyed on the request — `(session, span, ts,
+  response_id)`, and `(session, payload, kind, name)` for entities; each
+  session contributes its own header, since coverage and rate card belong to
+  the session rather than to the file. Re-running a session already in the file
+  adds nothing, which is what lets the collector run on every finalising call
+  while the YAML block — a duplicate key would be invalid — is still written
+  once. Entity rows now carry the session they came from, so both artifact
+  schema versions move to 2.
+
+  The collector's claim that the debug log is "capped at 100 MB" and that
+  truncation "drops the oldest entries" is removed from its docstring and from
+  `logs/README.md`. It was never measured. Across 610 debug logs on one
+  machine, three exceeded 95 MB — 231, 160 and 138 MB — and the 138 MB one
+  still carried its first entry, written four days earlier. `coverage:
+  truncated` detects a log that starts mid-session; what removes the start is
+  not established, and the guess is dropped rather than replaced with another.
 
 - **One stale word no longer switches off four measurements (#252).** The
   documenter's stop hook decided whether a workflow had ended by reading

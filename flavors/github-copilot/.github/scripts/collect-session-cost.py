@@ -7,13 +7,20 @@ documenter stays the only writer of it and this script stays testable without a
 workflow. With ``--facts-out`` it also writes a per-request facts file, the one
 artifact it does write.
 
-The facts file exists because the debug log does not survive. It is capped at
-100 MB, truncation drops the *oldest* entries, and it contains every prompt
-verbatim, so it can never be committed or shared. Any dimension not extracted
-while the log still exists is lost for that run permanently. The aggregates
-below are therefore derived from the facts rows rather than from a second pass
-over the log: a question nobody asked yet stays answerable, and the block can
-never disagree with the rows it came from.
+The facts file exists because the debug log does not survive. It is machine-
+local, it is deleted with the session store, it can lose its own beginning (a
+log whose rows start mid-session is reported as ``coverage: truncated``), and
+it contains every prompt verbatim, so it can never be committed or shared. Any
+dimension not extracted while the log still exists is lost for that run
+permanently. The aggregates below are therefore derived from the facts rows
+rather than from a second pass over the log: a question nobody asked yet stays
+answerable, and the block can never disagree with the rows it came from.
+
+Both artifacts accumulate. A workflow can span several chat sessions while the
+collector reads one at a time, so a rerun adds the rows the file does not
+already carry -- keyed on the request, and on the payload for entities --
+instead of replacing it. By the time the second session finalises, the log the
+first session's rows came from is gone.
 
 Exit codes:
     0  a block was emitted -- including ``available: false``
@@ -39,12 +46,14 @@ import json
 import os
 import re
 import sys
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 SCHEMA_VERSION = 6
 COLLECTOR_VERSION = 6
-FACTS_SCHEMA_VERSION = 1
-ENTITY_SCHEMA_VERSION = 1
+# v2: the file accumulates instead of being replaced, so it carries one header
+# per session and every row names the session it came from.
+FACTS_SCHEMA_VERSION = 2
+ENTITY_SCHEMA_VERSION = 2
 
 NANO_AIU_PER_CREDIT = 1_000_000_000
 
@@ -922,13 +931,85 @@ def _customizations(customizations: dict[str, dict[str, Any]]) -> list[str]:
     return lines
 
 
+def _fact_key(record: dict[str, Any]) -> tuple:
+    """Identify a request. `span` is unique per session; the rest disambiguates
+    a log that reported none."""
+    return (
+        record.get("session"),
+        record.get("span"),
+        record.get("ts"),
+        record.get("response_id"),
+    )
+
+
+def _entity_key(record: dict[str, Any]) -> tuple:
+    return (
+        record.get("session"),
+        record.get("payload"),
+        record.get("kind"),
+        record.get("name"),
+    )
+
+
+def _append_ndjson(
+    path: str,
+    header: dict[str, Any],
+    records: list[dict[str, Any]],
+    key_of: Callable[[dict[str, Any]], tuple],
+) -> str | None:
+    """Add the records this file does not already carry. Returns the path, or None.
+
+    A workflow can span several chat sessions and the collector reads one
+    session at a time, so the file is written more than once for the same
+    workflow. Overwriting would make the last session the only one that ever
+    existed -- and the debug log the earlier rows came from is gone by then, so
+    that loss is permanent and silent. Appending with a dedup key instead makes
+    a repeat call idempotent: re-running against the same session adds nothing.
+
+    One header per session, so a reader can tell which coverage and which rate
+    card the rows after it were priced under. Failure to write is reported,
+    never raised: the cost block is advisory and must still be emitted.
+    """
+    seen: set[tuple] = set()
+    header_written = False
+    try:
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        record = json.loads(line)
+                    except ValueError:
+                        # A half-written last line must not void the whole file.
+                        continue
+                    if record.get("record") == "header":
+                        if record.get("session") == header.get("session"):
+                            header_written = True
+                    else:
+                        seen.add(key_of(record))
+
+        new = [record for record in records if key_of(record) not in seen]
+        if header_written and not new:
+            return path
+
+        directory = os.path.dirname(os.path.abspath(path))
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with open(path, "a", encoding="utf-8", newline="\n") as handle:
+            if not header_written:
+                handle.write(json.dumps(header, sort_keys=True) + "\n")
+            for record in new:
+                handle.write(json.dumps(record, sort_keys=True) + "\n")
+    except OSError:
+        return None
+    return path
+
+
 def write_facts(path: str, result: dict[str, Any]) -> str | None:
     """Write the per-request rows as NDJSON. Returns the path, or None.
 
-    One header row carries the schema version and the rate card the prices came
+    A header row carries the schema version and the rate card the prices came
     from, so a row can be re-priced later without guessing which card was in
-    force. Failure to write is reported, never raised: the block is advisory and
-    must still be emitted.
+    force.
     """
     facts = result.get("facts")
     if not facts:
@@ -941,17 +1022,7 @@ def write_facts(path: str, result: dict[str, Any]) -> str | None:
         "coverage": result.get("coverage"),
         "rate_card": result.get("rate_card"),
     }
-    try:
-        directory = os.path.dirname(os.path.abspath(path))
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        with open(path, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(json.dumps(header, sort_keys=True) + "\n")
-            for fact in facts:
-                handle.write(json.dumps(fact, sort_keys=True) + "\n")
-    except OSError:
-        return None
-    return path
+    return _append_ndjson(path, header, facts, _fact_key)
 
 
 def write_entities(path: str, result: dict[str, Any]) -> str | None:
@@ -970,27 +1041,21 @@ def write_entities(path: str, result: dict[str, Any]) -> str | None:
     rows = entities.get("rows")
     if not rows:
         return None
+    session = result["sessions"][0]
     header = {
         "record": "header",
         "entity_schema_version": ENTITY_SCHEMA_VERSION,
         "collector": f"collect-session-cost.py@{COLLECTOR_VERSION}",
-        "session": result["sessions"][0],
+        "session": session,
         "coverage": result.get("coverage"),
         "grain": "payload x entity",
         "credits_attributable": False,
         "requests_is_a_multiplier": True,
     }
-    try:
-        directory = os.path.dirname(os.path.abspath(path))
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        with open(path, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(json.dumps(header, sort_keys=True) + "\n")
-            for row in rows:
-                handle.write(json.dumps({"record": "entity", **row}, sort_keys=True) + "\n")
-    except OSError:
-        return None
-    return path
+    # The session is on the row, not only the header: once the file accumulates
+    # more than one session, a payload name alone no longer identifies a row.
+    records = [{"record": "entity", "session": session, **row} for row in rows]
+    return _append_ndjson(path, header, records, _entity_key)
 
 
 def main(argv: list[str] | None = None) -> int:

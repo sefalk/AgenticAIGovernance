@@ -158,10 +158,13 @@ function New-SessionFixture {
         [switch]$RateCard,
         [switch]$Dumps,
         [switch]$BadDumps,
-        [switch]$MixedDumps
+        [switch]$MixedDumps,
+        # The collector takes the session identity from the directory name, so
+        # this is how a fixture stands for a different chat session.
+        [string]$SessionId = $SID
     )
     $base = Join-Path ([IO.Path]::GetTempPath()) ("sesscost-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
-    $dir  = Join-Path $base $SID
+    $dir  = Join-Path $base $SessionId
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
     if ($RateCard) {
         # Shape mirrors the real models.json dump: prices per `batch_size`
@@ -377,7 +380,7 @@ try {
         # One header plus one row per request. An aggregate cannot be
         # un-aggregated, so a missing row is a question never askable again.
         $results['Q_facts_row_per_request'] = ($factLines.Count -eq 3)
-        $results['Q_facts_header_versioned'] = ($factLines[0] -match '"facts_schema_version":\s*1' -and
+        $results['Q_facts_header_versioned'] = ($factLines[0] -match '"facts_schema_version":\s*2' -and
                                                 $factLines[0] -match '"record":\s*"header"')
         # The facts file is meant to be keepable; a prompt in it would make it
         # exactly as unshareable as the debug log it replaces.
@@ -399,6 +402,34 @@ try {
     # Writing the artifact is opt-in: the collector is not the log's writer.
     $r = Invoke-Collector @('--session-dir', $dir)
     $results['Q_facts_opt_in'] = ($r.Output -match '(?m)^\s*facts:\s*null\s*$')
+
+    # --- V: a later call adds to the artifact, it never replaces it (#253) --
+    #
+    # A workflow that spans two chat sessions runs the collector twice, and by
+    # the second call the debug log the first session's rows came from is gone.
+    # An overwrite would therefore delete the only surviving copy of them.
+    $accPath = Join-Path $dir 'accumulate.ndjson'
+    $second = New-SessionFixture -RateCard -SessionId 'a1b2c3d4-0000-4000-8000-000000000002' -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 2500000000)
+    )
+    $fixtures += $second
+
+    $null = Invoke-Collector @('--session-dir', $dir, '--facts-out', $accPath)
+    $firstPass = @([IO.File]::ReadAllLines($accPath) | Where-Object { $_.Trim() })
+    $null = Invoke-Collector @('--session-dir', $second, '--facts-out', $accPath)
+    $secondPass = @([IO.File]::ReadAllLines($accPath) | Where-Object { $_.Trim() })
+    $results['V_later_session_appends'] = ($secondPass.Count -eq ($firstPass.Count + 2))
+    # One header per session: a reader has to know which coverage and which
+    # rate card the rows following it were priced under.
+    $results['V_header_per_session'] =
+        (@($secondPass | Where-Object { $_ -match '"record":\s*"header"' }).Count -eq 2)
+
+    # The hook fires on every finalising call, so re-reading a session already
+    # in the file must add nothing at all.
+    $null = Invoke-Collector @('--session-dir', $second, '--facts-out', $accPath)
+    $thirdPass = @([IO.File]::ReadAllLines($accPath) | Where-Object { $_.Trim() })
+    $results['V_repeat_call_adds_nothing'] = ($thirdPass.Count -eq $secondPass.Count)
 
     # --- R: the purpose axis (issue #215) -----------------------------------
     # Compaction is the price of the session having grown too long. Folded into
@@ -756,7 +787,7 @@ print(mod.NANO_AIU_PER_CREDIT)
         # 8 definitions x 1 payload each, plus the header.
         $results['S_entity_rows'] = ($el.Count -eq 9)
         $results['S_entity_header'] = (
-            $el[0] -match '"entity_schema_version":\s*1' -and
+            $el[0] -match '"entity_schema_version":\s*2' -and
             $el[0] -match '"grain":\s*"payload x entity"' -and
             $el[0] -match '"credits_attributable":\s*false')
         # No credit figure exists at this grain, so none may appear here --
@@ -770,7 +801,7 @@ print(mod.NANO_AIU_PER_CREDIT)
         }
         $rowKeys = $rowKeys | Sort-Object -Unique
         $results['S_entity_row_keys_pinned'] =
-            (($rowKeys -join ',') -eq 'chars,class,group,name,payload,record,requests,tokens_est')
+            (($rowKeys -join ',') -eq 'chars,class,group,name,payload,record,requests,session,tokens_est')
         $results['S_entity_no_credit_column'] =
             (($el[1..($el.Count - 1)] -join "`n") -notmatch '"[^"]*(credit|nano|aiu|price|cost)[^"]*":')
         # The fan-out is visible in the file's own shape: `requests` is a

@@ -38,6 +38,9 @@ Exit codes:
     0 -- report produced
     1 -- no usage records found
     2 -- fatal error (bad arguments, storage not found)
+
+No hook runs this: it answers a question a human asked, at a terminal, about a
+store that already exists (af-caller-ok).
 """
 
 from __future__ import annotations
