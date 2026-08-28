@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The shipped bash hook suite is now executed (#190, #183).**
+  `run-all-tests.ps1` sweeps `test-*.ps1`, so `test-hooks.sh` — the only
+  executing coverage the `.sh` hooks have — was committed, maintained, and run
+  by nothing. Reading was doing the work that running was believed to do,
+  which is #61 in the other half of the payload.
+
+  A CI step runs it on the Windows runner through the bash that Git for
+  Windows installs at `C:\Program Files\Git\bin\bash.exe`. The suite exits 0
+  when it finds no usable Python interpreter, so the step also fails on a
+  `SKIP:` line and on a missing pass count — a suite that skipped itself must
+  not report green.
+
+  First measured run: **187 assertions, 0 failures.** Five are new. The cases
+  the #183 fix was written against existed only in the PowerShell harness, so
+  the `.sh` copy of that fix had been reviewed and never measured; it holds.
+
 - **A switched-off cost source now announces itself (#228).** Cost collection
   depends on a VS Code setting that is off by default. When it is off the
   collector correctly writes `cost: available: false` into a workflow log —

@@ -269,3 +269,35 @@ jobs:
             -FailOnSkip `
             -Exclude test-hooks-integration.ps1 `
             -TimeoutSeconds 1200
+
+      # run-all-tests.ps1 sweeps `test-*.ps1` only, so the one suite covering
+      # the shipped bash hooks has never been executed by anything (#190) --
+      # the defect class of #61, in the half of the payload that reading alone
+      # was trusted to verify. Git for Windows puts bash on every Windows
+      # runner; it is simply not on PATH. The suite exits 0 when it finds no
+      # usable interpreter, which here has to fail rather than pass quietly.
+      - name: Run the bash hook suite
+        shell: powershell
+        run: |
+          $bash = 'C:\Program Files\Git\bin\bash.exe'
+          if (-not (Test-Path $bash)) {
+            Write-Error "No bash at $bash -- this step would prove nothing."
+            exit 1
+          }
+          $out = & $bash -c 'bash flavors/github-copilot/.github/scripts/test-hooks.sh 2>&1' | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $out
+          if ($code -ne 0) {
+            Write-Error "The bash hook suite failed (exit $code)."
+            exit 1
+          }
+          if ($out -match 'SKIP:') {
+            Write-Error 'The suite skipped itself, so it asserted nothing.'
+            exit 1
+          }
+          $passed = [regex]::Match($out, 'Passed:\s*(\d+)')
+          if (-not $passed.Success -or [int]$passed.Groups[1].Value -lt 1) {
+            Write-Error 'No passing assertions reported -- the suite ran but proved nothing.'
+            exit 1
+          }
+          Write-Host "Bash hook suite: $($passed.Groups[1].Value) assertions passed."
