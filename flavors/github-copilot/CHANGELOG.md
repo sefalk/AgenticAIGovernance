@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the #183 fix was written against existed only in the PowerShell harness, so
   the `.sh` copy of that fix had been reviewed and never measured; it holds.
 
+  `hooks/README.md` now says where that interpreter is and how to invoke the
+  suite by hand, because "not on `PATH`" had been indistinguishable from "not
+  installed" for as long as nobody ran it.
+
 - **A switched-off cost source now announces itself (#228).** Cost collection
   depends on a VS Code setting that is off by default. When it is off the
   collector correctly writes `cost: available: false` into a workflow log —

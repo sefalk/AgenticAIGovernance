@@ -228,6 +228,24 @@ the whole `hooks/` tree, so a regression fails the suite. For the rare line
 where a finding is genuinely correct, append `af-resolution-ok` in a comment
 on that line and say why.
 
+## Running the Suites
+
+`scripts/test-hooks.ps1` covers the PowerShell hooks, `scripts/test-hooks.sh`
+the bash ones. `run-all-tests.ps1` sweeps `test-*.ps1` and therefore does not
+include the bash suite; CI runs it as its own step.
+
+On Windows there is a bash even when `bash` is not on `PATH`: Git for Windows
+installs one at `C:\Program Files\Git\bin\bash.exe`. It inherits the current
+directory, so this runs from the repository root:
+
+```powershell
+& 'C:\Program Files\Git\bin\bash.exe' -c 'bash flavors/github-copilot/.github/scripts/test-hooks.sh'
+```
+
+Read the summary line, not only the exit code. The suite exits **0** when it
+finds no usable Python interpreter — it prints `SKIP:` and asserts nothing,
+which is a pass that means the opposite of one (#190).
+
 ## Included Hooks
 
 ### `agent-hooks.json` — Active Hooks (ready to use)
