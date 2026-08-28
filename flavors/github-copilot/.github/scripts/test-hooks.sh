@@ -630,6 +630,13 @@ stop_case() {
                 [[ "$out" != *'"block"'* && "$out" == *'AF_WORKFLOW_LOG_COVERAGE=all'* ]] && ok=1 ;;
             no-coverage)
                 [[ "$out" != *'"block"'* && "$out" != *'AF_WORKFLOW_LOG_COVERAGE'* ]] && ok=1 ;;
+            finalised)
+                [[ "$out" != *'artifact gate not applied'* ]] && ok=1 ;;
+            mid-workflow)
+                [[ "$out" == *'artifact gate not applied'* ]] && ok=1 ;;
+            divergence)
+                [[ "$out" == *'plan status is IN_PROGRESS'* &&
+                   "$out" == *'workflow log reports COMPLETED'* ]] && ok=1 ;;
             pending) [[ "$out" == *'PENDING'* && "$out" != *'WARNING'* ]] && ok=1 ;;
             warning) [[ "$out" == *'WARNING'* ]] && ok=1 ;;
         esac
@@ -675,6 +682,32 @@ doc_stop_case "a commented-out status line does not count as the status" \
 
 doc_stop_case "another workflow's COMPLETED plan does not finalise this one" \
     pass "docs/plans/fix-2026-01-01-other.md=$PLAN_OTHER"
+
+# --- the plan is not the only witness (issue #252) -------------------------
+#
+# A real workflow finished, merged, and measured nothing: its plan still read
+# APPROVED, so the gate exited before the schema check, the timestamps, the
+# cost block and the invocation census — while the log had said COMPLETED all
+# along. One hand-maintained word disabled four measurements at once.
+
+LOG_DONE='.github/logs/72-x.yaml=workflow_id: "72-x"\nstatus: "COMPLETED"\n'
+LOG_RUNNING='.github/logs/72-x.yaml=workflow_id: "72-x"\nstatus: "IN_PROGRESS"\n'
+LOG_INVALID='.github/logs/72-x.yaml=workflow_id: "72-x"\nstatus: "COMPLETED-WITH-ISSUES"\n'
+RETRO_FILE='.github/retros/auto/72-x.md=# Retro 72-x\n\n- lesson\n'
+
+doc_stop_case "a log reporting a terminal status finalises even when the plan does not" \
+    finalised "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING" "$LOG_DONE" "$RETRO_FILE"
+
+doc_stop_case "the plan/log divergence is reported, not resolved in silence" \
+    divergence "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING" "$LOG_DONE" "$RETRO_FILE"
+
+doc_stop_case "a log claiming no end still leaves the mid-workflow call alone" \
+    mid-workflow "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING" "$LOG_RUNNING"
+
+# The value is invalid and the schema check exists to say so. Exiting here
+# instead would suppress the report and the measurements together.
+doc_stop_case "an out-of-schema status reaches the checker instead of exiting the gate" \
+    finalised "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING" "$LOG_INVALID" "$RETRO_FILE"
 
 # Unclassifiable is not the same as fine. The gate says which one it is rather
 # than passing in silence -- the failure mode this whole issue family is about.
@@ -999,9 +1032,23 @@ assert_true "a log without timestamps gets both from the hook" \
 
 # The artifact gate already tells the two documenter lifecycles apart. A call
 # made while the workflow is still running must not date its completion.
-mid=$(stamp_log "$PLAN_RUNNING" "$LOG_INVENTED")
+#
+# "Still running" has to hold in both witnesses. Since #252 a log reporting a
+# terminal status finalises on its own, so a fixture whose log already says
+# COMPLETED is a divergence case and not a mid-workflow one — the log below
+# says what the plan says.
+LOG_INVENTED_RUNNING='workflow_id: "72-x"\nstarted: "2099-01-01T09:00:00Z"\ncompleted: "2099-01-01T16:30:00Z"\nstatus: "IN_PROGRESS"\n'
+
+mid=$(stamp_log "$PLAN_RUNNING" "$LOG_INVENTED_RUNNING")
 assert_contains "a workflow that has not finished is not stamped as finished" \
     "$mid" "2099" "the mid-workflow call rewrote the log"
+
+# The other half of the same rule: once the log reports its own end, invented
+# dates are exactly what the hook exists to replace (#173). A stale plan word
+# must not protect them.
+diverged=$(stamp_log "$PLAN_RUNNING" "$LOG_INVENTED")
+assert_not_contains "a log that reports its own end has its invented dates replaced" \
+    "$diverged" "2099"
 
 # The schema is the instruction. Leaving the fields in it and arguing against
 # them in prose elsewhere is how the fabrication happened in the first place.

@@ -54,6 +54,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **One stale word no longer switches off four measurements (#252).** The
+  documenter's stop hook decided whether a workflow had ended by reading
+  `**Status:**` out of the plan file. Anything other than `COMPLETED` was read
+  as a mid-workflow call and the hook exited at its first gate — before the log
+  schema check, the timestamp check, the cost block and the invocation census.
+  The plan status is a word an agent maintains by hand, so forgetting to write
+  it disabled every measurement behind it silently, and the run reported green.
+  Observed twice, both times on workflows that had finished and merged while
+  their log said `COMPLETED` all along.
+
+  The hook now finalises when *either* the plan says `COMPLETED` or the
+  workflow log reports a terminal status, and it names the disagreement in its
+  output instead of resolving it in silence. The log match is deliberately
+  looser than the schema's closed set: an invalid value such as
+  `COMPLETED-WITH-ISSUES` must reach the schema checker that reports it, not
+  exit the gate and take the measurements with it. A log that claims no end
+  still leaves a genuine mid-workflow call alone. Both hook twins changed;
+  four assertions were added to each suite.
+
 - **The bash hook suite no longer runs its fixtures in the real repository
   (#248).** Five fixture helpers guarded their working directory with
   `cd "$fixture" || exit 1`. That stops a *wrong* path and not an *empty* one:
@@ -109,6 +128,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   diverge — is untouched.
 
 ### Changed
+
+- **The retro template no longer offers a status the schema rejects (#252).**
+  `documenter.agent.md` told the documenter that a workflow log's `status:` is
+  one of `COMPLETED`, `FAILED`, `ESCALATED`, and eleven lines later offered
+  `COMPLETED-WITH-ISSUES` as a retro outcome. Two vocabularies for one fact
+  invite the invalid value into the log. The template now uses the same closed
+  set, and says where a run's problems belong: in the sections below the
+  outcome, not in the word.
 
 - **The cost block is at `schema_version: 6`.** It gains `no_usage_requests` on
   every block, and `drift` on the blocks that lost a record.
