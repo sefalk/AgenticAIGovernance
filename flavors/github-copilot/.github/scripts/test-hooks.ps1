@@ -2105,6 +2105,27 @@ foreach ($pair in @(@{ n = 'documenter-stop.sh'; t = $docSh }, @{ n = 'stop-test
         "the dual-path condition survives"
 }
 
+# The cost artifacts are the only copy of these rows that outlives the debug
+# log they were read from (#253), and they accumulate across the sessions one
+# workflow can span. So the collector has to run on every finalising call --
+# only the YAML block, which cannot carry a duplicate key, is written once.
+$docPs1Text = Get-Content (Join-Path $scriptDir 'documenter-stop.ps1') -Raw
+foreach ($pair in @(
+        @{ n = 'documenter-stop.sh';  t = $docSh;      call = '"$python_exe" "$collector"' },
+        @{ n = 'documenter-stop.ps1'; t = $docPs1Text; call = '& $python $collector' })) {
+    Assert-True "$($pair.n) asks the collector for the durable fact rows" `
+        ($pair.t -match '--facts-out') `
+        "no --facts-out reaches the collector"
+    Assert-True "$($pair.n) asks the collector for the durable entity rows" `
+        ($pair.t -match '--entities-out') `
+        "no --entities-out reaches the collector"
+    $callAt  = $pair.t.IndexOf($pair.call)
+    $guardAt = $pair.t.IndexOf("'^cost:'")
+    Assert-True "$($pair.n) still collects when the log already carries a cost block" `
+        ($callAt -ge 0 -and $guardAt -gt $callAt) `
+        "the '^cost:' test precedes the collector call, so the artifacts would stop at the first finalising call"
+}
+
 Write-Output ""
 
 # ── The retro destination is configurable (issue #117) ───────────────────
@@ -3100,6 +3121,39 @@ if ((Test-Path $resolveChecker) -and $pyExe) {
     Remove-Item (Join-Path $seed 'seeded-hook.ps1') -Force -ErrorAction SilentlyContinue
     & $pyExe $resolveChecker $seed *> $null
     Assert-True "checker flags an unvalidated interpreter lookup" ($LASTEXITCODE -ne 0) "checker exit $LASTEXITCODE"
+
+    Remove-Item $seed -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# A capability nothing calls is not shipped. #217's durable artifacts passed
+# eleven assertions and were never written, because the only file that ever
+# passed --facts-out was the suite proving it worked (#253).
+$callerChecker = Join-Path $PSScriptRoot 'check-cli-callers.py'
+Assert-True "CLI caller checker present" (Test-Path $callerChecker) "expected $callerChecker"
+
+if ((Test-Path $callerChecker) -and $pyExe) {
+    & $pyExe $callerChecker $PSScriptRoot $githubDir *> $null
+    Assert-True "every shipped CLI option has a production caller" ($LASTEXITCODE -eq 0) "checker exit $LASTEXITCODE"
+
+    $seed = Join-Path ([System.IO.Path]::GetTempPath()) "af-caller-$(Get-Random)"
+    New-Item -ItemType Directory -Path (Join-Path $seed 'scripts') -Force | Out-Null
+    Set-Content -Path (Join-Path $seed 'scripts\seeded-cli.py') -Value @'
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--orphan-out", default=None)
+'@
+    & $pyExe $callerChecker (Join-Path $seed 'scripts') $seed *> $null
+    Assert-True "checker flags an option nothing outside a suite would pass" ($LASTEXITCODE -ne 0) "checker exit $LASTEXITCODE"
+
+    # A suite is exactly what this guard distrusts, so it cannot vouch for the
+    # option -- otherwise the failure mode reappears with a test as its alibi.
+    Set-Content -Path (Join-Path $seed 'test-seeded.sh') -Value 'python seeded-cli.py --orphan-out "$tmp"'
+    & $pyExe $callerChecker (Join-Path $seed 'scripts') $seed *> $null
+    Assert-True "checker does not accept a test file as the caller" ($LASTEXITCODE -ne 0) "checker exit $LASTEXITCODE"
+
+    Set-Content -Path (Join-Path $seed 'seeded-hook.sh') -Value 'python seeded-cli.py --orphan-out "$out"'
+    & $pyExe $callerChecker (Join-Path $seed 'scripts') $seed *> $null
+    Assert-True "checker clears an option a production file passes" ($LASTEXITCODE -eq 0) "checker exit $LASTEXITCODE"
 
     Remove-Item $seed -Recurse -Force -ErrorAction SilentlyContinue
 }
