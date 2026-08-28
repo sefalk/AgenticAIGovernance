@@ -418,6 +418,17 @@ FETCH_URLS_CRED='{"tool_name":"fetch_webpage","tool_input":{"urls":["https://use
 # a password on an arbitrary host.
 FETCH_URLS_SPOOF='{"tool_name":"fetch_webpage","tool_input":{"urls":["https://docs.python.org:x@evil.example.com/"],"query":"x"}}'
 CO_PYTEST='{"tool_name":"runInTerminal","tool_input":{"command":"pytest tests/ -q"}}'
+# The five cases the #183 fix was written against existed only in the
+# PowerShell harness, so the `.sh` twin's copy of that fix was reviewed and
+# never measured. The line the gate must draw is between naming pytest and
+# invoking it: the first command below runs no test at all -- it greps the
+# config header `[tool.pytest` -- while the last three invoke one through a
+# separator, a path, and a runner.
+CO_PYTEST_GREP='{"tool_name":"runInTerminal","tool_input":{"command":"Get-Content \".github/test-log.json\" ;\nGet-Process java ;\nSelect-String -Path \"pyproject.toml\" -Pattern \"^\\[tool\\.pytest\" -Context 0,14 ;\nGet-ChildItem -Recurse -Filter conftest.py"}}'
+CO_PYTEST_INI='{"tool_name":"runInTerminal","tool_input":{"command":"Get-Content pytest.ini"}}'
+CO_PYTEST_HIDDEN='{"tool_name":"runInTerminal","tool_input":{"command":"git status --porcelain ; pytest tests/ -q"}}'
+CO_PYTEST_PATH='{"tool_name":"runInTerminal","tool_input":{"command":"& \".venv\\\\Scripts\\\\pytest.exe\" -q tests/"}}'
+CO_PYTEST_UV='{"tool_name":"runInTerminal","tool_input":{"command":"uv run pytest tests/ -q"}}'
 CO_MSG_BAD='{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"[agent:implementer] make tests pass\""}}'
 CO_MSG_OK='{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"[agent:implementer] make tests pass: extract the pure alignment step\""}}'
 # The worktree gate shipped with no cases in either harness, which is how a
@@ -442,6 +453,16 @@ run_case "delegation gate denies a direct file edit"  coordinator-pretooluse.sh 
 run_case "delegation gate denies a batched edit"      coordinator-pretooluse.sh agent/fixture "$SRC_BATCH"  deny
 run_case "reading a file is not the gate's business"  coordinator-pretooluse.sh agent/fixture "$READ_FILE"  silent
 run_case "pytest via terminal is denied"              coordinator-pretooluse.sh agent/fixture "$CO_PYTEST"  deny
+run_case "grepping a pytest config header is not a test run" \
+    coordinator-pretooluse.sh agent/fixture "$CO_PYTEST_GREP" silent
+run_case "reading a file named after pytest is not a test run" \
+    coordinator-pretooluse.sh agent/fixture "$CO_PYTEST_INI" silent
+run_case "pytest hidden after a statement separator is denied" \
+    coordinator-pretooluse.sh agent/fixture "$CO_PYTEST_HIDDEN" deny
+run_case "a path-qualified pytest.exe is denied" \
+    coordinator-pretooluse.sh agent/fixture "$CO_PYTEST_PATH" deny
+run_case "pytest through a runner is denied" \
+    coordinator-pretooluse.sh agent/fixture "$CO_PYTEST_UV" deny
 run_case "phase-only commit message is denied"        coordinator-pretooluse.sh agent/fixture "$CO_MSG_BAD" deny
 run_case "described commit message passes"            coordinator-pretooluse.sh agent/fixture "$CO_MSG_OK"  silent
 run_case "worktree: a quoted path with spaces does not fake a bad branch" \
