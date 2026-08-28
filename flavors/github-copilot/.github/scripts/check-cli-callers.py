@@ -134,8 +134,7 @@ def main(argv: list[str]) -> int:
         for number, option in options:
             if not any(option in text for text in texts):
                 violations.append(
-                    f"{script}:{number}: {option} has no production caller "
-                    f"-- only tests would ever pass it"
+                    f"{script}:{number}: {option} has no production caller -- only tests would ever pass it"
                 )
 
     for line in violations:
