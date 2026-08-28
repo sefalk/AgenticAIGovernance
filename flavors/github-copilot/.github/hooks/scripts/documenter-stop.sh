@@ -236,37 +236,49 @@ cost_note=""
 log_path=".github/logs/${workflow_id}.yaml"
 [ -f "$log_path" ] || log_path=".github/logs/${workflow_id}.yml"
 
-# Appending twice would produce a duplicate YAML key; first write wins.
-if ! grep -q '^cost:' "$log_path" 2>/dev/null; then
-    sid=$(printf '%s' "$stdin_raw" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
-    transcript=$(printf '%s' "$stdin_raw" | grep -o '"transcript_path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+sid=$(printf '%s' "$stdin_raw" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+transcript=$(printf '%s' "$stdin_raw" | grep -o '"transcript_path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
 
-    if [ -n "$sid" ] && [ -n "$transcript" ]; then
-        # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
-        chat_dir=$(dirname "$(dirname "$transcript")")
-        session_dir="${chat_dir}/debug-logs/${sid}"
+if [ -n "$sid" ] && [ -n "$transcript" ]; then
+    # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
+    chat_dir=$(dirname "$(dirname "$transcript")")
+    session_dir="${chat_dir}/debug-logs/${sid}"
 
-        collector=".github/scripts/collect-session-cost.py"
-        python_exe=""
-        for c in .venv/bin/python .venv/Scripts/python.exe; do
-            [ -x "$c" ] && python_exe="$c" && break
-        done
-        if [ -z "$python_exe" ]; then
-            # AF_PYTHON is already validated, not merely resolved: on Windows
-            # `python3` is the Store stub -- present on PATH, executes nothing.
-            python_exe="$AF_PYTHON"
+    collector=".github/scripts/collect-session-cost.py"
+    python_exe=""
+    for c in .venv/bin/python .venv/Scripts/python.exe; do
+        [ -x "$c" ] && python_exe="$c" && break
+    done
+    if [ -z "$python_exe" ]; then
+        # AF_PYTHON is already validated, not merely resolved: on Windows
+        # `python3` is the Store stub -- present on PATH, executes nothing.
+        python_exe="$AF_PYTHON"
+    fi
+
+    if [ -n "$python_exe" ] && [ -f "$collector" ]; then
+        # Oldest commit on the branch approximates the workflow start;
+        # a session that began later means earlier phases are unlogged.
+        args=(--session-dir "$session_dir")
+        oldest=$(git log --format=%ct "${BASE_BRANCH}..HEAD" 2>/dev/null | tail -1)
+        if [ -n "$oldest" ]; then
+            args+=(--workflow-start "$((oldest * 1000))")
         fi
 
-        if [ -n "$python_exe" ] && [ -f "$collector" ]; then
-            # Oldest commit on the branch approximates the workflow start;
-            # a session that began later means earlier phases are unlogged.
-            args=(--session-dir "$session_dir")
-            oldest=$(git log --format=%ct "${BASE_BRANCH}..HEAD" 2>/dev/null | tail -1)
-            if [ -n "$oldest" ]; then
-                args+=(--workflow-start "$((oldest * 1000))")
-            fi
+        # The debug log the numbers come from expires; these rows do not. They
+        # sit beside the workflow log, under the same .gitignore that keeps
+        # verbatim prompts out of the repository (#253).
+        cost_dir="$(dirname "$log_path")/cost"
+        args+=(--facts-out "${cost_dir}/${workflow_id}.facts.ndjson")
+        args+=(--entities-out "${cost_dir}/${workflow_id}.entities.ndjson")
 
-            if block=$("$python_exe" "$collector" "${args[@]}" 2>/dev/null) && [ -n "$block" ]; then
+        if block=$("$python_exe" "$collector" "${args[@]}" 2>/dev/null) && [ -n "$block" ]; then
+            # Appending twice would produce a duplicate YAML key; first write
+            # wins. The artifacts above have no such constraint -- they
+            # accumulate and dedup, which is why the collector runs on every
+            # finalising call and not only the first.
+            if grep -q '^cost:' "$log_path" 2>/dev/null; then
+                cost_note=" + cost artifacts updated"
+            else
                 printf '\n%s\n' "$block" >> "$log_path"
                 cost_note=" + cost block appended"
             fi

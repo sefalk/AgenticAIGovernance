@@ -277,45 +277,57 @@ $costNote = ''
 try {
     $logPath = if (Test-Path $logPath1) { $logPath1 } else { $logPath2 }
 
-    # Appending twice would produce a duplicate YAML key; first write wins.
-    if ((Select-String -Path $logPath -Pattern '^cost:' -Quiet) -ne $true) {
-        $hookInput = $null
-        if ($stdinRaw) { $hookInput = $stdinRaw | ConvertFrom-Json }
-        $sid = $hookInput.session_id
-        $transcript = $hookInput.transcript_path
+    $hookInput = $null
+    if ($stdinRaw) { $hookInput = $stdinRaw | ConvertFrom-Json }
+    $sid = $hookInput.session_id
+    $transcript = $hookInput.transcript_path
 
-        if ($sid -and $transcript) {
-            # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
-            $chatDir = Split-Path -Parent (Split-Path -Parent $transcript)
-            $sessionDir = Join-Path (Join-Path $chatDir 'debug-logs') $sid
+    if ($sid -and $transcript) {
+        # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
+        $chatDir = Split-Path -Parent (Split-Path -Parent $transcript)
+        $sessionDir = Join-Path (Join-Path $chatDir 'debug-logs') $sid
 
-            $collector = '.github/scripts/collect-session-cost.py'
-            $python = $null
-            foreach ($c in @('.venv/Scripts/python.exe', '.venv/bin/python')) {
-                if (Test-Path $c) { $python = $c; break }
+        $collector = '.github/scripts/collect-session-cost.py'
+        $python = $null
+        foreach ($c in @('.venv/Scripts/python.exe', '.venv/bin/python')) {
+            if (Test-Path $c) { $python = $c; break }
+        }
+        if (-not $python) {
+            # The shared preamble already validated the interpreter by
+            # running it -- a resolvable-but-dead stub never gets here.
+            $python = $AfPython
+        }
+
+        if ($python -and (Test-Path $collector)) {
+            # Oldest commit on the branch approximates the workflow start;
+            # a session that began later means earlier phases are unlogged.
+            $collectorArgs = @('--session-dir', $sessionDir)
+            $base = if ($BASE_BRANCH) { $BASE_BRANCH } else { 'dev' }
+            $stamps = & git log --format=%ct "$base..HEAD" 2>$null
+            if ($stamps) {
+                $oldest = @($stamps)[-1]
+                $collectorArgs += @('--workflow-start', ([string]([int64]$oldest * 1000)))
             }
-            if (-not $python) {
-                # The shared preamble already validated the interpreter by
-                # running it -- a resolvable-but-dead stub never gets here.
-                $python = $AfPython
-            }
 
-            if ($python -and (Test-Path $collector)) {
-                # Oldest commit on the branch approximates the workflow start;
-                # a session that began later means earlier phases are unlogged.
-                $collectorArgs = @('--session-dir', $sessionDir)
-                $base = if ($BASE_BRANCH) { $BASE_BRANCH } else { 'dev' }
-                $stamps = & git log --format=%ct "$base..HEAD" 2>$null
-                if ($stamps) {
-                    $oldest = @($stamps)[-1]
-                    $collectorArgs += @('--workflow-start', ([string]([int64]$oldest * 1000)))
-                }
+            # The debug log the numbers come from expires; these rows do not.
+            # They sit beside the workflow log, under the same .gitignore that
+            # keeps verbatim prompts out of the repository (#253).
+            $costDir = Join-Path (Split-Path -Parent $logPath) 'cost'
+            $collectorArgs += @('--facts-out', (Join-Path $costDir "$workflowId.facts.ndjson"))
+            $collectorArgs += @('--entities-out', (Join-Path $costDir "$workflowId.entities.ndjson"))
 
-                $block = & $python $collector @collectorArgs 2>$null
-                if ($LASTEXITCODE -eq 0 -and $block) {
+            $block = & $python $collector @collectorArgs 2>$null
+            if ($LASTEXITCODE -eq 0 -and $block) {
+                # Appending twice would produce a duplicate YAML key; first
+                # write wins. The artifacts above have no such constraint --
+                # they accumulate and dedup, which is why the collector runs
+                # on every finalising call and not only the first.
+                if ((Select-String -Path $logPath -Pattern '^cost:' -Quiet) -ne $true) {
                     Add-Content -Path $logPath -Value ''
                     Add-Content -Path $logPath -Value $block
                     $costNote = ' + cost block appended'
+                } else {
+                    $costNote = ' + cost artifacts updated'
                 }
             }
         }
