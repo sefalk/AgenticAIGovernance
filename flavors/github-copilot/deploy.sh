@@ -1167,15 +1167,35 @@ if [[ "$DRY_RUN" == "true" ]]; then
     echo "  [DRY RUN — no files were changed. Remove --dry-run to apply.]"
 fi
 
-# ── Curated skills reminder ────────────────────────────────────────────────
-# If the project has a curated-assignments.json, remind the user to reapply
-# curated skill state after deploy (agent sections, activated/deactivated folders).
+# ── Curated skills consistency ─────────────────────────────────────────────
+# Curated state lives in three records (curated-assignments.json, the agent
+# regions, .af-skills-curated/INDEX.md) and nothing used to compare them, so a
+# lost assignment was silent (#257). Report the actual disagreement; say
+# nothing when they agree. Advisory only -- never fails the deploy.
 curated_json="$TARGET_GITHUB/skills/curated-assignments.json"
 if [[ -f "$curated_json" ]]; then
-    echo ""
-    echo "  Post-deploy step: curated skills detected."
-    echo "  A deploy overwrites AF-owned files (agents) and resets curated skill assignments."
-    echo "  -> Run /af-curate-skills --reapply to restore them (the MCP af_deploy prompt does this automatically)."
+    curation_probe="$SOURCE_GITHUB/scripts/check-curation-consistency.py"
+    python_bin=""
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            python_bin="$candidate"
+            break
+        fi
+    done
+
+    if [[ -f "$curation_probe" && -n "$python_bin" ]]; then
+        curation_out="$("$python_bin" "$curation_probe" --project-dir "$TARGET_DIR" --brief 2>&1 || true)"
+        if [[ -n "$curation_out" ]]; then
+            echo ""
+            echo "$curation_out"
+        fi
+    else
+        # No Python: fall back to the reminder, minus the claim that a deploy
+        # resets assignments -- managed regions made that false.
+        echo ""
+        echo "  Curated skills detected; consistency was not checked (no Python interpreter)."
+        echo "  -> Run /af-curate-skills --reapply if agent skill sections look wrong."
+    fi
 fi
 
 # ── Cost tracking source ───────────────────────────────────────────────────

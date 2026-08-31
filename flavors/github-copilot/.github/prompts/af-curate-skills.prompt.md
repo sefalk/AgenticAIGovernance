@@ -255,6 +255,33 @@ previous_state:
 
 ---
 
+## Step 9: Verify the Records Agree
+
+Curation has just written three records of the same state:
+`curated-assignments.json`, the agent managed regions, and
+`.af-skills-curated` plus `skills/INDEX.md`. Nothing else compares them, so a
+skill dropped from one of them is invisible until an agent silently runs
+without it (#257). Check your own output before reporting success.
+
+Run:
+
+```
+python .github/scripts/check-curation-consistency.py
+```
+
+- **Exit 0 (no output):** the records agree. Report the curation summary.
+- **Exit 1:** the script prints each disagreement by name. These are defects in
+  what you just wrote — correct them and re-run, do not report them to the user
+  as findings.
+- **Script or Python missing:** say so in the summary
+  ("consistency not verified: no Python interpreter"). Do not claim it passed.
+
+A promoted base skill is not a disagreement: when a curated skill already
+exists as a base bullet outside the region, Step 7.3 deliberately drops it from
+both the region and `assignments`. The checker knows this and stays silent.
+
+---
+
 ## Reapply Mode
 
 Deterministic replay of curated skill state after a deploy. No tech-stack
@@ -280,6 +307,8 @@ re-discovery, no user confirmation.
 6. Update `copilot-instructions.md` Available Skills table.
 7. Print summary: "Reapplied curated skills: {N} activated, {M} deactivated,
    {K} agent files updated."
+8. Run the **Step 9** consistency check. A reapply exists to restore agreement
+   between the records; ending with them still in disagreement means it failed.
 
 ---
 
