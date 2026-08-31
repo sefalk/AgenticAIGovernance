@@ -44,6 +44,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   2.9s. Half of them assert that the checker stays *silent* — a consistency
   check that cries wolf gets ignored, and then it is worth nothing.
 
+  Building it surfaced a blind spot in the CLI caller guard (#253): it searched
+  `.github` only, while `deploy.sh` and `deploy.ps1` sit one level above it. A
+  CLI invoked by the deploy itself therefore counted as *uncalled*, and this
+  was simply the first such CLI to arrive — the next one would have hit the
+  same wall. The suite now passes the payload root as a second caller root when
+  a `deploy.sh` is present there, so the guard can see the framework's most
+  central production caller. Consumer projects carry no `deploy.sh`, so nothing
+  changes for them and their trees are not walked.
+
 - **The formatting verdict is now available at commit time (#242).** CI checks
   `ruff format` over every tracked `.py`, and it was the *only* place that
   check existed. A one-character slip in a file the commit already touched

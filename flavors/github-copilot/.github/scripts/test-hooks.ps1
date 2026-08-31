@@ -3132,7 +3132,13 @@ $callerChecker = Join-Path $PSScriptRoot 'check-cli-callers.py'
 Assert-True "CLI caller checker present" (Test-Path $callerChecker) "expected $callerChecker"
 
 if ((Test-Path $callerChecker) -and $pyExe) {
-    & $pyExe $callerChecker $PSScriptRoot $githubDir *> $null
+    # deploy.sh/deploy.ps1 live above .github and were never searched, so a CLI
+    # the deploy itself calls still counted as uncalled (#257).
+    $callerRoots = @($githubDir)
+    $payloadRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+    if (Test-Path (Join-Path $payloadRoot 'deploy.sh')) { $callerRoots += $payloadRoot }
+
+    & $pyExe $callerChecker $PSScriptRoot @callerRoots *> $null
     Assert-True "every shipped CLI option has a production caller" ($LASTEXITCODE -eq 0) "checker exit $LASTEXITCODE"
 
     $seed = Join-Path ([System.IO.Path]::GetTempPath()) "af-caller-$(Get-Random)"
