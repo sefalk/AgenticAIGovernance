@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Auto-version pre-commit hook for the Agent Framework.
+# Pre-commit hook for the Agent Framework's own repository.
 #
-# Keeps flavors/github-copilot/VERSION in lockstep with source edits so the
-# version can never silently go stale (the drift that stranded 1.18.26).
+# Runs the shipped commit guards, refuses a commit whose staged Python CI's
+# formatter would reject, and keeps flavors/github-copilot/VERSION in lockstep
+# with source edits so the version can never silently go stale (the drift that
+# stranded 1.18.26).
 #
 # Behaviour:
 #   - If any staged file is under `flavors/github-copilot/` or `core/`, AND
@@ -28,6 +30,39 @@ set -euo pipefail
 PAYLOAD_HOOK="flavors/github-copilot/.github/hooks/git/pre-commit"
 if [ -f "$PAYLOAD_HOOK" ]; then
     sh "$PAYLOAD_HOOK" || exit 1
+fi
+
+# CI runs `ruff format --check` over every tracked .py, so a one-character slip
+# in a file this commit already touches is found only after a push -- and has
+# been twice (#241, PR #255). The same check on the staged subset is the
+# difference between a push-fail-fix-push round trip and a re-stage.
+#
+# It reports and stops; it does not reformat. A hook that edits the files it
+# was asked to commit changes what the author reviewed after they reviewed it.
+#
+# The verdict belongs to CI, so it is only cast with CI's ruff, read from the
+# workflow rather than repeated here. A different version can legitimately
+# disagree, and a local red that CI would call green teaches people to pass
+# --no-verify. When that ruff is not the one on PATH the check says so and
+# stands aside: an unannounced skip is indistinguishable from a pass (#224).
+pin="$(grep -oE 'ruff==[0-9]+\.[0-9]+\.[0-9]+' .github/workflows/regression.yml 2>/dev/null | head -n1 | cut -d= -f3)" || pin=""
+if [ -n "$pin" ]; then
+    staged_py=()
+    while IFS= read -r -d '' f; do
+        staged_py+=("$f")
+    done < <(git diff --cached --name-only --diff-filter=ACM -z -- '*.py')
+
+    if [ ${#staged_py[@]} -gt 0 ]; then
+        have="$(ruff --version 2>/dev/null | awk '{print $2}')" || have=""
+        if [ "$have" != "$pin" ]; then
+            echo "[pre-commit] ruff ${have:-is not installed}, CI uses $pin -- formatting check skipped (pip install ruff==$pin)." >&2
+        elif ! fmt="$(ruff format --check --no-respect-gitignore -- "${staged_py[@]}" 2>&1)"; then
+            echo "[pre-commit] staged Python is not formatted the way CI requires:" >&2
+            printf '%s\n' "$fmt" >&2
+            echo "[pre-commit] fix: ruff format <the files above>, then stage them again." >&2
+            exit 1
+        fi
+    fi
 fi
 
 VERSION_FILE="flavors/github-copilot/VERSION"
