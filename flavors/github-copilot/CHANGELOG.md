@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The formatting verdict is now available at commit time (#242).** CI checks
+  `ruff format` over every tracked `.py`, and it was the *only* place that
+  check existed. A one-character slip in a file the commit already touched
+  therefore cost a full push-fail-fix-push round trip — twice in the last two
+  pull requests alone (#241, #255), both times on code that `ruff check` was
+  perfectly happy with.
+
+  `.githooks/pre-commit` now runs `ruff format --check` over the staged Python
+  before it bumps `VERSION`, prints the offending paths and the one-line
+  remedy, and stops. It does not reformat: a hook that edits the files it was
+  asked to commit changes what the author reviewed after they reviewed it.
+
+  The verdict belongs to CI, so it is only cast with CI's ruff — the pinned
+  version is read out of `regression.yml` rather than repeated in the hook,
+  because two copies of a version number is how the next disagreement starts.
+  When that version is not the one on `PATH`, the hook says which it found,
+  which CI uses, and how to close the gap, then stands aside. It does not
+  block on a verdict CI might not share, and it does not skip in silence
+  either: an unannounced skip is indistinguishable from a pass (#224).
+
+  This is the AF repository's own hook, so the payload sweep never reaches it.
+  `.github/scripts/test-precommit-format-gate.py` copies the real hook into a
+  throwaway repository and drives it through eight cases in both directions —
+  including a staged path containing a space, an unstaged offender that must
+  be ignored, a deletion that must not be checked, and both stand-aside
+  branches. **8/8 passed.**
+
 - **A capability only the tests use is now a failure (#253).**
   `scripts/check-cli-callers.py` reads the long options every shipped Python
   CLI defines and requires at least one production file — a hook, a workflow,

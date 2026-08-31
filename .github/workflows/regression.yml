@@ -240,6 +240,14 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-issue-drift.py
 
+      # .githooks/pre-commit is this repository's own hook, so the payload
+      # sweep never reaches it either. Its formatting gate is the local half of
+      # the CI check below, and a gate that blocks a commit has to be exercised
+      # in both directions before it is trusted with anyone's working tree.
+      - name: Test the pre-commit formatting gate
+        shell: powershell
+        run: python .github\scripts\test-precommit-format-gate.py
+
       # #124 made `ruff format` blocking for consumers while the framework's
       # own Python went unformatted (#167). The file list comes from git rather
       # than a hardcoded glob, so a new file is covered the moment it is
