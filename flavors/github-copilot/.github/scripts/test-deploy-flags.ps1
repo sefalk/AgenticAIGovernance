@@ -44,6 +44,7 @@ try {
     $out = Invoke-DeployDryRun -TargetDir $target1
     Assert-Contains -Output $out -Needle 'Backup prune: enabled (older than 14 day(s))' -Label 'Default backup prune is 14 days'
     Assert-Contains -Output $out -Needle 'DRYRUN_JSON {' -Label 'Dry-run emits machine-readable summary'
+    Assert-Contains -Output $out -Needle 'Note: Target is not a git repository -- branch checks skipped.' -Label 'Non-repo target says so instead of skipping in silence (#244)'
 } finally {
     Remove-Item $target1 -Recurse -Force -ErrorAction SilentlyContinue
 }

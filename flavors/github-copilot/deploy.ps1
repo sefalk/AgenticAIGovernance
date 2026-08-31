@@ -305,6 +305,17 @@ function Resolve-BackupPruneDays {
     return $defaultDays
 }
 
+function Test-TargetIsGitRepo {
+    param([string]$RepoDir)
+
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $false }
+    # Outside a repo git reports on stderr, and PS 5.1 raises redirected native
+    # stderr as a NativeCommandError while EAP is 'Stop'. Contain it to this scope.
+    $ErrorActionPreference = 'Continue'
+    & git -C $RepoDir rev-parse --is-inside-work-tree 2>&1 | Out-Null
+    return ($LASTEXITCODE -eq 0)
+}
+
 function Get-CurrentGitBranch {
     param([string]$RepoDir)
 
@@ -986,9 +997,13 @@ if ($resolvedBackupPruneDays -gt 0) {
 } else {
     Write-Host "  Backup prune: disabled"
 }
-$currentBranch = Get-CurrentGitBranch -RepoDir $TargetDir
-if ($currentBranch -like 'agent/*') {
-    Write-Host "  WARNING: Target repo is on '$currentBranch'. Prefer running framework rollouts on dev/main." -ForegroundColor Yellow
+if (Test-TargetIsGitRepo -RepoDir $TargetDir) {
+    $currentBranch = Get-CurrentGitBranch -RepoDir $TargetDir
+    if ($currentBranch -like 'agent/*') {
+        Write-Host "  WARNING: Target repo is on '$currentBranch'. Prefer running framework rollouts on dev/main." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host '  Note: Target is not a git repository -- branch checks skipped.'
 }
 if ($DryRun) { Write-Host '  [DRY RUN -- no changes will be made]' -ForegroundColor Yellow }
 Write-Host ""
