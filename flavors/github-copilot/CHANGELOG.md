@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Curated skill state is now reconciled instead of assumed (#257).** Curation
+  writes the same fact into three records — `skills/curated-assignments.json`,
+  the `AF:MANAGED:curated-skills` region in each agent file, and
+  `.af-skills-curated` plus `skills/INDEX.md` — and nothing compared them. When
+  they disagreed, nothing said so: `--reapply` iterates `assignments`, so an
+  agent missing from that one file is simply never visited, and the agent runs
+  without the skill it was assigned. There is no error, no empty section, no
+  symptom to notice.
+
+  Measured in a real consumer project while building this: two of the three
+  records assign `python-dev` to `refactorer`, and `assignments` has no
+  `refactorer` key at all. The drift was already there, unnoticed, in the
+  project the framework is developed against.
+
+  `.github/scripts/check-curation-consistency.py` compares all four
+  relationships the records must satisfy and names each disagreement by agent
+  and skill rather than reporting a count. It knows that a curated skill which
+  already exists as a base bullet outside the region is deliberately dropped
+  from both the region and `assignments` (Step 7.3), so the deduplication that
+  curation performs on purpose is not reported as damage.
+
+  Two call sites. The end of a deploy previously printed a reminder whenever
+  `curated-assignments.json` existed — advice that could not know whether
+  anything was wrong, and whose stated reason ("a deploy resets curated skill
+  assignments") stopped being true when managed regions arrived. It is now
+  content-triggered: silent when the records agree, and the actual
+  disagreement when they do not. It remains advisory and never fails a deploy.
+  `/af-curate-skills` runs the same check over its own output, in both curation
+  and reapply, so a run cannot report success having produced records that
+  disagree.
+
+  `test-curation-consistency.ps1` covers eight scenarios: 8 passed, 0 failed in
+  2.9s. Half of them assert that the checker stays *silent* — a consistency
+  check that cries wolf gets ignored, and then it is worth nothing.
+
+  Building it surfaced a blind spot in the CLI caller guard (#253): it searched
+  `.github` only, while `deploy.sh` and `deploy.ps1` sit one level above it. A
+  CLI invoked by the deploy itself therefore counted as *uncalled*, and this
+  was simply the first such CLI to arrive — the next one would have hit the
+  same wall. The suite now passes the payload root as a second caller root when
+  a `deploy.sh` is present there, so the guard can see the framework's most
+  central production caller. Consumer projects carry no `deploy.sh`, so nothing
+  changes for them and their trees are not walked.
+
 - **The formatting verdict is now available at commit time (#242).** CI checks
   `ruff format` over every tracked `.py`, and it was the *only* place that
   check existed. A one-character slip in a file the commit already touched

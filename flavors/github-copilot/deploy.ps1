@@ -1181,15 +1181,40 @@ if ($retroIgnoreMissing) {
     Write-Host "  -> Copy .github/retros/auto/.gitignore from the AF payload, or re-run deploy with retros/ enabled." -ForegroundColor Yellow
 }
 
-# ── Curated skills reminder ────────────────────────────────────────────────
-# If the project has a curated-assignments.json, remind the user to reapply
-# curated skill state after deploy (agent sections, activated/deactivated folders).
+# ── Curated skills consistency ─────────────────────────────────────────────
+# Curated state lives in three records (curated-assignments.json, the agent
+# regions, .af-skills-curated/INDEX.md) and nothing used to compare them, so a
+# lost assignment was silent (#257). Report the actual disagreement; say
+# nothing when they agree. Advisory only -- never fails the deploy.
 $curatedJsonPath = Join-Path $TargetGitHub 'skills\curated-assignments.json'
 if (Test-Path $curatedJsonPath) {
-    Write-Host ""
-    Write-Host "  Post-deploy step: curated skills detected." -ForegroundColor Cyan
-    Write-Host "  A deploy overwrites AF-owned files (agents) and resets curated skill assignments." -ForegroundColor Cyan
-    Write-Host "  -> Run /af-curate-skills --reapply to restore them (the MCP af_deploy prompt does this automatically)." -ForegroundColor Cyan
+    $curationProbe = Join-Path $SourceGitHub 'scripts\check-curation-consistency.py'
+    $curationLines = @()
+    $probeRan = $false
+    if (Test-Path $curationProbe) {
+        $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+        if (-not $pythonCmd) { $pythonCmd = Get-Command python3 -ErrorAction SilentlyContinue }
+        if ($pythonCmd) {
+            try {
+                $curationLines = @(& $pythonCmd.Source $curationProbe --project-dir $TargetDir --brief 2>&1 |
+                    ForEach-Object { $_.ToString() })
+                $probeRan = $true
+            } catch { $probeRan = $false }
+        }
+    }
+
+    if ($probeRan) {
+        if ($curationLines.Count -gt 0) {
+            Write-Host ""
+            foreach ($line in $curationLines) { Write-Host $line -ForegroundColor Yellow }
+        }
+    } else {
+        # No Python: fall back to the reminder, minus the claim that a deploy
+        # resets assignments -- managed regions made that false.
+        Write-Host ""
+        Write-Host "  Curated skills detected; consistency was not checked (no Python interpreter)." -ForegroundColor Cyan
+        Write-Host "  -> Run /af-curate-skills --reapply if agent skill sections look wrong." -ForegroundColor Cyan
+    }
 }
 
 # ── Version-stale detection ────────────────────────────────────────────────
