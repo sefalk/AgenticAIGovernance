@@ -129,9 +129,19 @@ At the start of each invocation:
 
 ## Branch Publication Precondition (Mandatory)
 
-1. Confirm the head branch exists on the remote via `list_branches`.
-2. If it is absent, return `BLOCKED` with reason `branch not published` so the
-   coordinator pushes it first.
+1. Confirm the head branch exists on the remote via `list_branches`. Match the
+   full ref including the `agent/` prefix. `list_branches` is **paginated** —
+   a page that does not contain the ref is not evidence of absence unless you
+   reached the last page.
+2. Report the query you ran and what it returned, then classify:
+   - ref found → proceed;
+   - the listing was complete and the ref is not in it → `BLOCKED` with reason
+     `BLOCKED_BRANCH_NOT_PUBLISHED`, so the coordinator pushes it first;
+   - the query errored, was truncated, or returned an unusable shape →
+     `BLOCKED` with reason `BLOCKED_BRANCH_PROBE_INDETERMINATE`.
+   Never report a probe you could not complete as a branch that does not
+   exist — that states a fact about the remote you did not establish, and it
+   invites a re-push that can orphan an already-merged branch.
 3. Never attempt to push or mutate refs yourself.
 
 ## Pull Request Rules
@@ -151,7 +161,12 @@ At the start of each invocation:
    report `none`.
 6. Post one traceability comment with `add_issue_comment` summarising the linked
    issue, the plan reference, and the merge mode applied. Check for an existing
-   one first — do not repeat it on re-invocation.
+   one first — do not repeat it on re-invocation. The plan path may come only
+   from the coordinator's prompt or from a verified remote read
+   (`get_file_contents`); **never reconstruct one from the naming convention**.
+   Report `none` when neither yields it — an invented path in a traceability
+   comment is worse than an omitted one, because it is the artifact a later
+   auditor trusts without re-checking.
 7. Apply the merge policy for the resolved base.
 
 ## Explicit Non-Scope
@@ -174,7 +189,8 @@ At the start of each invocation:
 - **Base branch:** {name} → {allowlisted | human-only | unresolved → human-only}
 - **Merge mode:** {A2 autonomous | A1 human-only | safe-default human-only}
 - **PR number / URL:** {#n — url, or pending}
-- **Remote branch:** {present | absent → BLOCKED}
+- **Remote branch:** {present | absent → BLOCKED | indeterminate → BLOCKED (coordinator verifies with ls-remote)}
+- **Branch probe:** {query run → response summary}
 - **Capability probe:** {READY | DEGRADED | BLOCKED}
 - **Merge attempt:** {merged | refused by platform ({reason}) | not attempted (human-only) | not attempted (checks not required)}
 - **Issue reference:** {#n, closing keyword used: yes/no + why}
@@ -209,7 +225,7 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 |---|---|---|---|
 | No terminal or git operation performed | HARD | Only MCP and read tools were used | Standard+ |
 | Capability probe outcome recorded | HARD | `get_me` result reported as READY/DEGRADED/BLOCKED | Trivial+ |
-| Remote head branch present before PR | HARD | Branch confirmed via `list_branches`, or `BLOCKED (branch not published)` | Standard+ |
+| Remote head branch probe conclusive | HARD | Ref matched on its full path, or `BLOCKED_BRANCH_NOT_PUBLISHED` from a complete listing, or `BLOCKED_BRANCH_PROBE_INDETERMINATE` — with the raw query and response reported | Standard+ |
 | No duplicate pull request | HARD | Existing open PR for the head branch was searched before creating | Standard+ |
 | Merge attempted only for an allowlisted base | HARD | `merge_pull_request` was called only when the base is in `GH_PR_AUTOMERGE_BRANCHES` | Trivial+ |
 | Default branch never merged | HARD | The base was not the repository default branch; if it was allowlisted, `BLOCKED` was returned instead | Trivial+ |

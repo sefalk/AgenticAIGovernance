@@ -88,6 +88,11 @@ A PR/MR provider capability is enabled (e.g. Azure DevOps via
     creates the request; a human completes it.
 - Merge into shared branches happens **through the request**, never via local
   `git merge`.
+- If the worker reports the branch as unpublished or its probe as
+  indeterminate, **confirm with `git ls-remote --heads origin agent/{id}`
+  before pushing again.** Push only when that returns nothing: re-pushing a
+  branch that is already published, or already merged and deleted, recreates
+  it as an orphan with no request attached.
 
 The completion control is a **server-side branch policy plus permission
 scoping** (no policy-bypass on the agent identity) — agent prompts are

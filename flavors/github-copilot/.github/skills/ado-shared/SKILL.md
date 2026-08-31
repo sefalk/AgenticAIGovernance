@@ -251,8 +251,15 @@ After a clean post-flight, the coordinator pushes the feature branch
 `WORKTREE_ENABLED`) with `git push -u origin agent/{id}` — never a protected
 branch, never force. Then it invokes `ado-pr-manager` to open/update the PR and
 apply the branch-scoped completion policy: an integration branch autocompletes,
-a protected branch is human-only. If the PR manager returns
-`BLOCKED (branch not published)`, push and re-invoke.
+a protected branch is human-only.
+
+If the PR manager returns `BLOCKED_BRANCH_NOT_PUBLISHED` or
+`BLOCKED_BRANCH_PROBE_INDETERMINATE`, **verify with
+`git ls-remote --heads origin agent/{id}` before pushing again** — the probe
+is the agent's, the ref is the remote's, and only one of them is authoritative.
+Push only when `ls-remote` returns nothing. Re-pushing a branch that is already
+published, or already merged and deleted, recreates it as an orphan with no PR,
+leaving that commit outside the integration branch unnoticed.
 
 ### Post-Merge Reconciliation (mandatory, request-based)
 

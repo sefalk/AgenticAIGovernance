@@ -121,10 +121,18 @@ is available.
 You have no terminal access and never push. The coordinator publishes the
 feature branch before invoking you. Before creating the PR:
 
-1. Confirm the source branch exists on the remote using
-   `repo_branch` (action `get`, or action `list`).
-2. If the branch is **not** present on the remote, return `BLOCKED` with
-   reason `branch not published` so the coordinator pushes it first.
+1. Confirm the source branch exists on the remote using `repo_branch`
+   (action `get`, or action `list`). Match the full ref including the
+   `agent/` prefix; a truncated `list` page is not evidence of absence.
+2. Report the query you ran and what it returned, then classify:
+   - ref found → proceed;
+   - query succeeded and the ref is not in the result → `BLOCKED` with reason
+     `BLOCKED_BRANCH_NOT_PUBLISHED`, so the coordinator pushes it first;
+   - query errored, was truncated, or returned an unusable shape → `BLOCKED`
+     with reason `BLOCKED_BRANCH_PROBE_INDETERMINATE`.
+   Never report a probe you could not complete as a branch that does not
+   exist — that states a fact about the remote you did not establish, and it
+   invites a re-push that can orphan an already-merged branch.
 3. Never attempt to push, merge, or mutate refs yourself.
 
 ## PR Creation Rules
@@ -144,11 +152,15 @@ feature branch before invoking you. Before creating the PR:
    artifact link to the work item (`wit_work_item_link_write` action
    `add_artifact_link`, or action `link_to_pull_request`). Always state
    which linkage path was used.
-6. **Add the implementation plan reference.** Before posting a clickable
-   plan URL, verify the file exists on the target branch/ref using
-   `repo_file` (action `get_content`). If the plan is not yet on the remote
-   (branch not pushed, or file absent), mark the reference as `pending push`
-   instead of posting a URL that 404s.
+6. **Add the implementation plan reference.** The path may come only from the
+   coordinator's prompt or from a verified remote read — `repo_file` (action
+   `get_content`). **Never reconstruct a filename from the naming
+   convention.** A traceability thread is what a later auditor trusts without
+   re-checking, so a plausible invented path is worse than no path at all.
+   - verified on the remote → post the clickable URL;
+   - supplied by the coordinator but not yet on the remote → name it and mark
+     it `pending push`;
+   - neither → report `none`.
 7. **Assign reviewers** from `ADO_PR_DEFAULT_REVIEWERS` when configured via
    `repo_pull_request_write` (action `update_reviewers`); otherwise report `none`.
 8. **Post a traceability thread** on the PR via
@@ -180,7 +192,8 @@ feature branch before invoking you. Before creating the PR:
 - **Completion mode:** {A2 autonomous | A1 human-only | safe-default human-only}
 - **PR id:** {id or n/a}
 - **PR URL:** {clickable url or pending}
-- **Remote branch:** {present | absent → BLOCKED (coordinator must push)}
+- **Remote branch:** {present | absent → BLOCKED (coordinator must push) | indeterminate → BLOCKED (coordinator verifies with ls-remote)}
+- **Branch probe:** {query run → response summary}
 - **Work item linked:** {id | none}
 - **Work item link method:** {workItems at creation | deferred to work-item-manager | none}
 - **Plan reference:** {clickable (verified) | pending push | none}
@@ -207,12 +220,12 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Gate | Type | How to Verify | Tier |
 |---|---|---|---|
 | No terminal/git operations performed | HARD | Verify the agent used only MCP/read tools (no push/merge) | Standard+ |
-| Remote branch present before PR | HARD | Verify source branch exists on remote, or `BLOCKED (branch not published)` reported | Standard+ |
+| Remote branch probe conclusive | HARD | Ref matched on its full path, or `BLOCKED_BRANCH_NOT_PUBLISHED`, or `BLOCKED_BRANCH_PROBE_INDETERMINATE` — with the raw query and response reported | Standard+ |
 | Target branch resolved | HARD | Verify PR target branch present (default `ADO_DEFAULT_TARGET_BRANCH`) | Standard+ |
 | PR created or existing PR updated (no duplicate) | HARD | Verify single active PR for the source branch | Standard+ |
 | Work item linked to PR | HARD | Verify work item linked at creation, or `NEEDS_WORKITEM_LINK` reported for deferred linking, or explicit none-with-reason | Standard+ |
 | Completion policy applied by target | HARD | Integration branch → autocomplete set; protected/unresolved → human-only, no autocomplete | Standard+ |
 | No work-item auto-transition on autocomplete | HARD | The autocomplete call passed `transitionWorkItems: false` (never `true`; the azure-devops-mcp default is `true`) | Standard+ |
-| Plan reference attached | SOFT | Reviewer checks clickable URL (remote-verified) or `pending push` fallback | Standard+ |
+| Plan reference attached | SOFT | Reviewer checks the path came from the prompt or a remote read — clickable URL, `pending push`, or `none`, never reconstructed | Standard+ |
 | Traceability thread posted | SOFT | Reviewer checks a PR thread summarizes work item, plan, and completion mode (idempotent) | Standard+ |
 | Reviewers/PR description quality | SOFT | Reviewer checks description completeness and reviewer assignment | Deep |
