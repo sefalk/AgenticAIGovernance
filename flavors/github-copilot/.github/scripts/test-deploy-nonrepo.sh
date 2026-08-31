@@ -7,8 +7,8 @@
 #
 # Each case stops the deploy once it is provably past the branch check rather
 # than waiting for it to finish: a full dry run of ~213 files takes over five
-# minutes under Git-for-Windows bash, and every claim this suite makes is
-# already settled by then.
+# minutes under Git-for-Windows bash (#260), and every claim this suite makes
+# is already settled by then.
 
 set -uo pipefail
 

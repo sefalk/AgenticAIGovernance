@@ -130,8 +130,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `test-deploy-flags.ps1` gained the matching assertion. Per #190, the two
   deploy paths are only equivalent if both are executed. Each case stops its
   deploy once it is provably past the branch check: a full dry run takes over
-  five minutes under Git-for-Windows bash, and waiting it out three times
-  would buy the suite nothing it does not already know.
+  five minutes under Git-for-Windows bash (#260), and waiting it out three
+  times would buy the suite nothing it does not already know.
 
 - **A PR manager that could not see a branch no longer reports it as missing
   (#245).** The branch probe had two outcomes where the world has three. "The
