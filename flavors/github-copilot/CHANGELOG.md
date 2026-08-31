@@ -98,6 +98,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A PR manager that could not see a branch no longer reports it as missing
+  (#245).** The branch probe had two outcomes where the world has three. "The
+  query said the ref is not there" and "the query told me nothing" both
+  collapsed into `BLOCKED (branch not published)`, and the recovery guidance
+  for that verdict was a bare *push and re-invoke*. Re-pushing a branch that
+  was in fact already merged and deleted recreates it as an orphan with no
+  request attached — the commit then sits outside the integration branch with
+  nothing pointing at it.
+
+  Both PR managers now match the ref on its **full path** including the
+  `agent/` prefix, treat a truncated listing as evidence of nothing, and
+  separate `BLOCKED_BRANCH_NOT_PUBLISHED` from
+  `BLOCKED_BRANCH_PROBE_INDETERMINATE`. Either way they report the raw query
+  and its response, so the coordinator sees the measurement and not only the
+  verdict. On the receiving side, `skills/git-workflow` and `skills/ado-shared`
+  now require `git ls-remote --heads origin agent/{id}` before a second push:
+  the probe belongs to the agent, the ref belongs to the remote, and only one
+  of those is authoritative.
+
+  The same report named a second habit worth closing. A plan reference in a
+  traceability thread may now come only from the coordinator's prompt or from
+  a verified remote read; reconstructing a plausible filename from the naming
+  convention is forbidden outright. An invented path is worse than an absent
+  one, because it is exactly the artifact a later auditor trusts without
+  re-checking. Where neither source yields a path, the answer is `none`.
+
 - **The durable cost artifacts are now actually written (#253, #217).** The
   per-request facts file and the per-entity file were built, documented and
   covered by eleven assertions — and no shipped file ever passed
