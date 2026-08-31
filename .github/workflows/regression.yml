@@ -309,3 +309,28 @@ jobs:
             exit 1
           }
           Write-Host "Bash hook suite: $($passed.Groups[1].Value) assertions passed."
+
+      # deploy.sh aborted at exit 128 on a target that was not yet a git
+      # repository, while deploy.ps1 handled the same case (#244). Nothing
+      # executed the bash deploy, so the two paths could disagree unobserved.
+      - name: Run the bash deploy non-repo suite
+        shell: powershell
+        run: |
+          $bash = 'C:\Program Files\Git\bin\bash.exe'
+          if (-not (Test-Path $bash)) {
+            Write-Error "No bash at $bash -- this step would prove nothing."
+            exit 1
+          }
+          $out = & $bash -c 'bash flavors/github-copilot/.github/scripts/test-deploy-nonrepo.sh 2>&1' | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $out
+          if ($code -ne 0) {
+            Write-Error "The bash deploy non-repo suite failed (exit $code)."
+            exit 1
+          }
+          $passed = [regex]::Match($out, 'Passed:\s*(\d+)')
+          if (-not $passed.Success -or [int]$passed.Groups[1].Value -lt 1) {
+            Write-Error 'No passing assertions reported -- the suite ran but proved nothing.'
+            exit 1
+          }
+          Write-Host "Bash deploy non-repo suite: $($passed.Groups[1].Value) assertions passed."

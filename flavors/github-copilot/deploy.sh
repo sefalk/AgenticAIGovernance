@@ -137,13 +137,20 @@ resolve_backup_prune_days() {
     echo "$default_days"
 }
 
+target_is_git_repo() {
+    local repo_dir="$1"
+    command -v git >/dev/null 2>&1 || return 1
+    git -C "$repo_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
 get_current_git_branch() {
     local repo_dir="$1"
     if ! command -v git >/dev/null 2>&1; then
         echo ""
         return
     fi
-    git -C "$repo_dir" branch --show-current 2>/dev/null | tr -d '[:space:]'
+    # Outside a repo this exits 128, which `set -e` turned into a silent abort (#244).
+    git -C "$repo_dir" branch --show-current 2>/dev/null | tr -d '[:space:]' || true
 }
 
 # ── Read versions ──────────────────────────────────────────────────────────
@@ -1041,9 +1048,14 @@ if [[ "$BACKUP_PRUNE_DAYS" -gt 0 ]]; then
 else
     echo "  Backup prune: disabled"
 fi
-CURRENT_BRANCH="$(get_current_git_branch "$TARGET_DIR")"
-if [[ "$CURRENT_BRANCH" == agent/* ]]; then
-    echo "  WARNING: Target repo is on '$CURRENT_BRANCH'. Prefer running framework rollouts on dev/main."
+if target_is_git_repo "$TARGET_DIR"; then
+    CURRENT_BRANCH="$(get_current_git_branch "$TARGET_DIR")"
+    if [[ "$CURRENT_BRANCH" == agent/* ]]; then
+        echo "  WARNING: Target repo is on '$CURRENT_BRANCH'. Prefer running framework rollouts on dev/main."
+    fi
+else
+    CURRENT_BRANCH=""
+    echo "  Note: Target is not a git repository -- branch checks skipped."
 fi
 if [[ "$DRY_RUN" == "true" ]]; then
     echo "  [DRY RUN — no changes will be made]"

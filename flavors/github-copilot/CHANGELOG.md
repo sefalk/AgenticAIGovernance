@@ -98,6 +98,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A deploy into a directory that is not yet a git repository no longer stops
+  without saying anything (#244).** `git branch --show-current` exits 128
+  outside a repository. `deploy.sh` runs under `set -euo pipefail`, so that
+  status propagated out of the command substitution that captured the branch
+  and terminated the script between the header and the first file — no error,
+  no summary, nothing deployed. Measured before: the run printed its four
+  header lines and exited 128. Measured after: the same run reaches its
+  summary with 213 files planned and exits 0.
+
+  `deploy.ps1` survived the identical situation only because its branch helper
+  happens to sit in a `try/catch`. That accident is the whole reason the two
+  paths disagreed, and it is why the first run of a project — before
+  `git init` — worked on Windows and failed on bash.
+
+  A non-repo target is now treated as what it is: a supported first
+  installation. Both paths ask `rev-parse --is-inside-work-tree` first, skip
+  the branch check when the answer is no, and print the same line saying so.
+  Silence was the defect; the skip itself was never wrong.
+
+  Fixing the PowerShell side surfaced the same class of bug one layer down.
+  `2>$null` on a native command does not suppress anything while
+  `$ErrorActionPreference` is `Stop` — PS 5.1 re-raises redirected native
+  stderr as a `NativeCommandError` — which aborted `test-deploy-flags.ps1`
+  before its first assertion. The redirect is now scoped locally instead of
+  trusted.
+
+  Both behaviours are now executed by tests rather than assumed:
+  `test-deploy-nonrepo.sh` is new (7 assertions across a non-repo target, a
+  repository on an `agent/` branch, and one on `dev`) and runs in CI, and
+  `test-deploy-flags.ps1` gained the matching assertion. Per #190, the two
+  deploy paths are only equivalent if both are executed. Each case stops its
+  deploy once it is provably past the branch check: a full dry run takes over
+  five minutes under Git-for-Windows bash, and waiting it out three times
+  would buy the suite nothing it does not already know.
+
 - **A PR manager that could not see a branch no longer reports it as missing
   (#245).** The branch probe had two outcomes where the world has three. "The
   query said the ref is not there" and "the query told me nothing" both
