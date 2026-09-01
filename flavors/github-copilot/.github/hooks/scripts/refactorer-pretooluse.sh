@@ -24,10 +24,10 @@ PYTHON="$AF_PYTHON"
 
 raw=$(cat)
 
-if [ -z "$PYTHON" ]; then
-    echo '{}'
-    exit 0
-fi
+# No interpreter means neither the branch-context proof nor the creation ban
+# can be evaluated, so writes are refused rather than waved through
+# (issue #251). Reads stay allowed.
+af_require_python "$raw" af_is_write_tool "refactorer branch-context"
 
 # Extract tool name
 tool_name=$(echo "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_name',''))" 2>/dev/null)
