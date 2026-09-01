@@ -48,7 +48,7 @@ file_paths=$(printf '%s' "$raw" | af_write_paths)
 # Failing open here would let an unrecognised payload shape carry the very
 # edit the gate exists to prevent (the #64 defect).
 if [ -z "$file_paths" ]; then
-    echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Plan directory confinement: planner called a write tool with no readable file path, so the target cannot be checked against the plan directory. The planner may only create the plan document."}}'
+    echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Plan directory confinement: planner called a write tool with no readable file path, so the target cannot be checked against the plan directory. The planner may only write the plan document."}}'
     exit 0
 fi
 
@@ -76,7 +76,7 @@ while IFS= read -r file_path; do
     fi
 
     if [ "$allowed" -eq 0 ]; then
-        echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Plan directory confinement: planner cannot write to '"${file_path}"'. The planner may create only the plan document — a .md file inside a '"'"'plans'"'"' directory within the repository (default docs/plans/). Everything else in this workflow is written by the test-writer, implementer, refactorer or documenter."}}'
+        echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Plan directory confinement: planner cannot write to '"${file_path}"'. The planner may write only the plan document — a .md file inside a '"'"'plans'"'"' directory within the repository (default docs/plans/). Everything else in this workflow is written by the test-writer, implementer, refactorer or documenter."}}'
         exit 0
     fi
 done <<< "$file_paths"
