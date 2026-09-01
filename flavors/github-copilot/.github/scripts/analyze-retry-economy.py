@@ -24,6 +24,9 @@ Exit codes:
     0  report produced, no drift
     1  report produced, drift found (named in the Drift section)
     2  cannot measure at all -- no logs, or no YAML parser
+
+No hook runs this: it answers a question a human asked, at a terminal, about a
+corpus that already exists (af-caller-ok).
 """
 
 from __future__ import annotations

@@ -6,13 +6,13 @@ applyTo: '**'
 
 # Quality Gate System
 
-Every agent must satisfy its exit gates before handing off work. This
-instruction defines what those gates are, how they scale with task
-complexity, and how agents report gate status.
+Every agent must satisfy its exit gates before handing off work. This file
+defines what they are, how they scale with task complexity, and how to report
+them.
 
 ## Gate Taxonomy
 
-Every quality gate is classified into one of three types:
+Three types:
 
 | Type | Definition | Enforcement |
 |---|---|---|
@@ -30,11 +30,15 @@ proofreading your own work.
 the gate as **BLOCKED** — not PASS or FAIL — and include the reason.
 The coordinator treats BLOCKED gates as escalation triggers.
 
+**Evidence durability:** when the deliverable is a value, not a file, the
+artifact is the gate. Return a reference a third party can open — run id, URL,
+table, committed file — not the number. No durable channel → BLOCKED.
+
 ## Complexity Tiers
 
-The complexity tier determines which gates activate and at what strictness.
-The planner sets the tier in the plan file; the coordinator sets it for Trivial Fix
-and Quick Fix workflows.
+The complexity tier determines which gates activate and at what strictness. The
+planner sets it in the plan file; the coordinator sets it for Trivial Fix and
+Quick Fix workflows.
 
 | Tier | When | Examples | Gate Behaviour |
 |---|---|---|---|
@@ -46,43 +50,31 @@ and Quick Fix workflows.
 minimum tier is **Standard** regardless of file count. Domain core changes
 carry architectural risk disproportionate to their size.
 
-**Exemption:** Pure documentation changes (docstrings, comments, README
-updates) in domain core files do not trigger the layer override. The
-change must affect **logic** (executable code, type signatures, imports)
-to count.
+**Exemption:** pure documentation changes (docstrings, comments, README
+updates) in domain core files do not trigger the layer override — the change
+must affect **logic** (executable code, type signatures, imports) to count.
 
 **Human override:** The human can change the tier at plan approval time.
 
 ## Agent Naming Convention (Provider Workers)
 
-Provider-scoped integration workers should use the pattern
-`{provider}-{capability}-{role}` to keep responsibilities explicit and portable.
-
-Examples:
-
-- `ado-work-item-manager`
-- `ado-wiki-manager`
-- `ado-pr-manager`
-- `ado-pipeline-manager`
-- `gh-issue-manager`
-- `gh-pr-manager`
-
-Naming violations are SOFT unless they cause broken orchestration references,
-which is treated as HARD.
+The `{provider}-{capability}-{role}` pattern and its examples live in
+MANIFEST § 7 (Agent Identity). Naming violations are SOFT unless they cause
+broken orchestration references, which is treated as HARD.
 
 ## Per-Agent Exit Gates
 
-Each agent's own gate table lives in its agent file
-(`agents/{agent}.agent.md`, section **Exit Gates**) — it is loaded exactly
-when that agent runs, instead of every agent carrying all of them. Consult
-the table in your own agent file; do not apply another agent's gates.
+Each agent's gate table lives in its own file (`agents/{agent}.agent.md`,
+section **Exit Gates**), loaded exactly when that agent runs instead of every
+agent carrying all of them. Use the table in your own file; never another
+agent's.
 
 ## Agent Exit Protocol
 
-Before returning results, every agent follows this protocol:
+Before returning results, every agent:
 
 1. **Determine the complexity tier** from the plan file (or the coordinator's
-   prompt for Trivial Fix and Quick Fix workflows). Default to **Standard** if unclear.
+   prompt for Trivial Fix and Quick Fix). Default to **Standard** if unclear.
 2. **Identify applicable gates** from the Exit Gates table in your own agent
    file, filtered by the current tier.
 3. **Evaluate HARD gates** using the specified verification method.
@@ -97,7 +89,7 @@ Before returning results, every agent follows this protocol:
 
 ## Gate Summary Format
 
-Every agent appends this section to their return:
+Append this section to every return:
 
 ```markdown
 ### Gate Summary

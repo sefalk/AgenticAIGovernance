@@ -199,7 +199,7 @@ What the preamble provides:
 | `AF_SCRIPT_DIR` | `$AfScriptDir` | Directory the hook scripts live in |
 | `AF_MAIN_ROOT` | `$AfMainRoot` | Checkout where `.github/` is deployed |
 | `AF_CODE_ROOT` | `$AfCodeRoot` | Active worktree if `.github/.active-worktree` points at one, else main root |
-| `AF_CONF` / `AF_CONF_FOUND` | `$AfConfPath` / `$AfConfFound` | Path to `af-env.conf` and whether it exists |
+| `AF_CONF` / `AF_CONF_FOUND` | `$AfConfPath` / `$AfConfFound` | Path to the config (`AF_CONF_PATH` if set, else `af-env.conf`) and whether it exists |
 | `AF_PYTHON` | `$AfPython` | An interpreter **proven to run**, or empty |
 | `af_conf_get KEY [DEFAULT]` | `Get-AfConfig -Key <name> [-Default <value>]` | Config lookup that never fails the hook |
 
@@ -209,6 +209,16 @@ runs in a git worktree. Set `AF_PYTHON_OVERRIDE` to force a specific
 interpreter; the preamble probes it like any other candidate, so an override
 pointing at something broken is rejected rather than trusted.
 
+Set `AF_CONF_PATH` to make a different file the config for one process. It
+exists so a test can state the policy it asserts under instead of inheriting
+whatever `af-env.conf` the checkout ships — `test-hooks.ps1` writes a config
+holding a declared autonomy policy and points the hooks at it, which is why its
+verdict no longer changes with a project's `AUTONOMY_CAT_*` settings. A path
+that does not exist counts as **no config**, not as a fallback to the deployed
+file: falling back would put those settings back in play behind a typo. The
+variable configures the ask/auto boundary only — the deny tier is hardcoded and
+resolved before any category is read, so no config can approve what it covers.
+
 **The rule is enforced, not merely documented.**
 `.github/scripts/check-hook-resolution.py` scans `hooks/` for cwd-relative
 config reads, `git rev-parse --show-toplevel` root discovery, bare
@@ -217,6 +227,24 @@ config reads, `git rev-parse --show-toplevel` root discovery, bare
 the whole `hooks/` tree, so a regression fails the suite. For the rare line
 where a finding is genuinely correct, append `af-resolution-ok` in a comment
 on that line and say why.
+
+## Running the Suites
+
+`scripts/test-hooks.ps1` covers the PowerShell hooks, `scripts/test-hooks.sh`
+the bash ones. `run-all-tests.ps1` sweeps `test-*.ps1` and therefore does not
+include the bash suite; CI runs it as its own step.
+
+On Windows there is a bash even when `bash` is not on `PATH`: Git for Windows
+installs one at `C:\Program Files\Git\bin\bash.exe`. It inherits the current
+directory, so this runs from the repository root:
+
+```powershell
+& 'C:\Program Files\Git\bin\bash.exe' -c 'bash flavors/github-copilot/.github/scripts/test-hooks.sh'
+```
+
+Read the summary line, not only the exit code. The suite exits **0** when it
+finds no usable Python interpreter — it prints `SKIP:` and asserts nothing,
+which is a pass that means the opposite of one (#190).
 
 ## Included Hooks
 

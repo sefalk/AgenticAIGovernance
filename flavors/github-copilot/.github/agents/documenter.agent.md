@@ -134,7 +134,20 @@ escalation:
   trigger: "<why escalated>"
   resolution: "<human decision or arbiter verdict>"
   step_at_escalation: <step number>
+
+# Appended by your Stop hook from the editor's own subagent logs. Do not write
+# it, and do not anticipate what it will say.
+agent_invocations: <appended by your Stop hook>
 ```
+
+**A step is a record of a call that happened.** Your Stop hook reads which
+subagents the editor actually invoked and appends the counts, then lists any
+agent your `steps` name that has no invocation behind it. A workflow log once
+carried a complete `agent: arbiter` step — action, verdict, review findings —
+for an arbiter nobody had called, and the conclusion drawn from it was plausible
+enough that only a cross-check caught it (issue #173). If you cannot say which
+call a step describes, leave the step out; a gap is recoverable, an invented
+step is not.
 
 For the `verdict` field in step entries, use the parseable format from
 MANIFEST § 13 (Inter-Agent Contracts → Verdict Format): APPROVED,
@@ -201,13 +214,15 @@ case — write the log accurately and the condition follows.
 `af-env.conf`; it defaults to `.github/retros/auto`. Your Stop hook resolves
 the same key, so writing anywhere else is a blocked finalisation.
 
-**Format:**
+**Format:** `Outcome` is the same closed set as the log's `status:`. A run that
+finished with problems is `COMPLETED`; the problems belong in the sections
+below, not in the word.
 
 ```markdown
 # {workflow-id} — {date}
 
 **Task:** {1-line summary}
-**Outcome:** {COMPLETED | COMPLETED-WITH-ISSUES | FAILED | ESCALATED}
+**Outcome:** {COMPLETED | FAILED | ESCALATED}
 
 ## What went well
 - {1–3 bullet points from the workflow}
@@ -246,6 +261,20 @@ The human should review these during periodic governance audits.
 - Never stage or commit the retro either. At its default location it is gitignored; a project may point `RETRO_DIR` at a tracked directory, and then the **coordinator** commits it — staging is never yours
 - Do NOT modify production code or test code
 - Never fabricate metrics — use only values reported by the coordinator
+
+## Log-Only Invocation
+
+Review Only and Plan Only workflows invoke you for the YAML log alone — no
+plan status, no provenance scan, no retro, no architecture update. They exist
+in the log so the cost and usage series has no holes, not because they
+produced code.
+
+Such a run has no phases, no verdicts and no changed files. **Omit those keys.**
+Do not emit an empty `phases:` list, a `verdict: SKIPPED`, or a zeroed metric to
+fill the shape — a reader cannot distinguish an invented zero from a measured
+one, and the series is being built precisely to be read later. Set
+`workflow_type` to the workflow that ran and record what the single agent
+returned.
 
 ## Return Format
 
@@ -301,7 +330,7 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Gate | Type | How to Verify | Tier |
 |---|---|---|---|
 | Plan file status set to COMPLETED | HARD | Verify status field updated | Standard+ |
-| YAML workflow log created and valid | HARD | Verify file exists, mandatory fields present | Standard+ |
+| YAML workflow log created and valid | HARD | Verify file exists, mandatory fields present | All (`Standard+` if `AF_WORKFLOW_LOG_COVERAGE=standard+`) |
 | Provenance markers verified on all AI-touched files | HARD | Scan changed files for markers | Standard+ |
 | Retro snippet in `RETRO_DIR` when the run had something to teach | HARD | Verify file created with required fields | Standard+ |
 | Architecture docs updated (if new modules/ports) | SOFT | Self-check: applicable only if new elements | Deep |

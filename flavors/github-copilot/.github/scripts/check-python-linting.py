@@ -348,6 +348,7 @@ def main() -> int:
         ),
     )
     parser.add_argument("--files", nargs="+", required=True, help="Python files to lint")
+    # af-caller-ok: production auto-detects the conf; the flag points a run at a fixture instead.
     parser.add_argument("--conf", default=None, help="Path to af-env.conf (auto-detected if omitted)")
     parser.add_argument("--strictness", default=None, help="Override strictness from af-env.conf")
     args = parser.parse_args()

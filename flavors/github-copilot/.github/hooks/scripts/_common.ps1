@@ -8,7 +8,8 @@
 #   $AfScriptDir   directory this file lives in
 #   $AfMainRoot    checkout where .github/ is deployed
 #   $AfCodeRoot    active worktree if the sentinel points at one, else MAIN
-#   $AfConfPath    absolute path to .github/af-env.conf
+#   $AfConfPath    absolute path to the config: $env:AF_CONF_PATH if set,
+#                  else .github/af-env.conf
 #   $AfConfFound   $true if that file exists
 #   $AfPython      an interpreter that was proven to run, or ''
 #   Get-AfConfig -Key <name> [-Default <value>]
@@ -33,7 +34,27 @@ if (Test-Path $afSentinel) {
     if ($afWt -and (Test-Path $afWt)) { $script:AfCodeRoot = $afWt }
 }
 
-$script:AfConfPath = Join-Path $script:AfMainRoot '.github/af-env.conf'
+# AF_CONF_PATH names the config for this process, overriding the deployed one
+# (issue #108). It exists so a test can state the policy it asserts under: a
+# suite that reads whatever af-env.conf the consumer happens to ship reports
+# that consumer's settings as failures, and teaches people to revert a
+# legitimate policy choice to make a test pass.
+#
+# A path that does not exist counts as NO config, not as a fallback to the
+# deployed one. Falling back would put the consumer's file back in play behind
+# a typo -- the exact confusion this variable removes -- and the caller who set
+# it would never learn that its file was missed.
+#
+# It cannot lift a hard-deny: the deny tier in block-dangerous is hardcoded and
+# runs before any category is consulted. Policy widens or narrows the ask/auto
+# boundary only. Anyone able to set this variable on the hook process already
+# controls that process; the hook is started by the extension host, so a
+# $env: assignment in an agent terminal does not reach it.
+$script:AfConfPath = if ($env:AF_CONF_PATH) {
+    $env:AF_CONF_PATH
+} else {
+    Join-Path $script:AfMainRoot '.github/af-env.conf'
+}
 $script:AfConfFound = Test-Path $script:AfConfPath
 
 function Get-AfConfig {
@@ -327,4 +348,54 @@ function Test-AfProvenanceMarker {
 
     $pattern = if ($Kind -eq 'generated') { 'copilot:generated' } else { 'copilot:(generated|modified)' }
     return [bool]($text -match $pattern)
+}
+
+# ── Files a concurrent peer agent edited (issue #101) ──────────────────
+#
+# Producer stop-hook gates scope themselves from `git diff`, which is global to
+# the checkout. Two producers on one branch therefore see each other's in-flight
+# edits, and the gate demands work on a file the agent was told not to touch --
+# then the provenance gate makes it stamp an authorship marker recording the
+# wrong agent.
+#
+# Returns the files a DIFFERENT subagent edited while this one was running, so
+# the caller can drop them from its own scope. Every failure path returns an
+# empty array: no stdin, no session id, no session directory, no interpreter,
+# a non-zero exit. Subtracting nothing is exactly today's behaviour, which is
+# the only direction this may fail in -- a watchdog that fails a legitimate
+# workflow gets switched off (issue #108).
+function Get-AfPeerEdits {
+    param(
+        [string]$StdinRaw,
+        [string]$Agent,
+        [string]$CodeRoot,
+        [string]$MainRoot
+    )
+
+    if (-not $StdinRaw -or -not $Agent) { return @() }
+
+    try { $payload = $StdinRaw | ConvertFrom-Json } catch { return @() }
+    $sid = $payload.session_id
+    $transcript = $payload.transcript_path
+    if (-not $sid -or -not $transcript) { return @() }
+
+    # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
+    $chatDir = Split-Path -Parent (Split-Path -Parent $transcript)
+    if (-not $chatDir) { return @() }
+    $sessionDir = Join-Path (Join-Path $chatDir 'debug-logs') $sid
+    if (-not (Test-Path $sessionDir)) { return @() }
+
+    $reader = Join-Path $MainRoot '.github/hooks/scripts/concurrent-agent-edits.py'
+    if (-not (Test-Path $reader)) { return @() }
+
+    $python = Join-Path $CodeRoot '.venv/Scripts/python.exe'
+    if (-not (Test-Path $python)) {
+        $python = if ($AfPython) { $AfPython } else { $null }
+    }
+    if (-not $python) { return @() }
+
+    $out = & $python $reader '--session-dir' $sessionDir '--agent' $Agent '--repo-root' $CodeRoot 2>$null
+    if ($LASTEXITCODE -ne 0) { return @() }
+
+    return @($out | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })
 }

@@ -118,6 +118,96 @@ if ($File) {
 $filterDisplay = if ($Filter) { $Filter } else { 'none' }
 Write-Output "=== Test Runner: $targetDisplay filter=$filterDisplay ==="
 
+# ---------- Test log (.github/test-log.json) ----------
+$testLogPath = Join-Path $workspaceRoot '.github/test-log.json'
+
+# Which entry this run owns. $null means the run cannot be attributed to a
+# scope (a -File run outside the known test trees), and such a run records
+# nothing rather than guessing.
+function Get-LogScopeKey {
+    if ($File) {
+        if ($File -match 'tests/domain')     { return 'domain' }
+        if ($File -match 'tests/adapters')   { return 'adapters' }
+        if ($File -match 'tests/properties') { return 'properties' }
+        if ($File -match 'tests/contracts')  { return 'contracts' }
+        return $null
+    }
+    return $Scope
+}
+
+# Read existing log (cumulative merge).
+#
+# Not `ConvertFrom-Json -AsHashtable`: that parameter is PowerShell 6+, and
+# Windows PowerShell 5.1 is the default host for the shipped VS Code tasks. It
+# threw there on every run, and the catch below turned that into a log holding
+# only the scope that had just run.
+#
+# An absent file is legitimately empty. A file that exists and cannot be parsed
+# is data loss, so it is announced and kept -- overwriting it would destroy the
+# only artifact that could explain what happened.
+#
+# The warnings are queued instead of written here: in PowerShell everything a
+# function writes joins its return value, so a Write-Output inside this function
+# turns the returned hashtable into an array and the caller's $log[$scope]
+# assignment fails with "cannot convert 'domain' to System.Int32".
+$script:logWarnings = @()
+function Read-TestLog {
+    $log = @{}
+    if (Test-Path $testLogPath) {
+        try {
+            $existing = Get-Content $testLogPath -Raw | ConvertFrom-Json
+            foreach ($p in $existing.PSObject.Properties) { $log[$p.Name] = $p.Value }
+        } catch {
+            $keptPath = "$testLogPath.unreadable"
+            Copy-Item $testLogPath $keptPath -Force -ErrorAction SilentlyContinue
+            $script:logWarnings += "WARNING: could not read $testLogPath ($($_.Exception.Message))"
+            $script:logWarnings += "WARNING: previously recorded scopes are lost; the unreadable file was kept at $keptPath"
+            $log = @{}
+        }
+    }
+    return $log
+}
+
+function Show-LogWarnings {
+    foreach ($w in $script:logWarnings) { Write-Output $w }
+    $script:logWarnings = @()
+}
+
+function Save-TestLog($log) {
+    $log | ConvertTo-Json -Depth 3 | Set-Content -Path $testLogPath -Encoding utf8
+}
+
+# Claim the entry BEFORE pytest starts.
+#
+# The entry used to be built only after pytest returned. A run that was
+# interrupted -- terminal closed, agent cancelled, machine slept -- left the
+# previous entry untouched, still saying status ok with yesterday's counters.
+# Nothing distinguished it from a fresh green result, and a reader working to a
+# once-per-workflow test budget skips the suite on exactly that evidence.
+#
+# Counters are null, never 0, for the same reason the runner-failure path uses
+# null: "0 failed" is indistinguishable from a clean green run.
+$logScope  = Get-LogScopeKey
+$startedAt = (Get-Date -Format 'o')
+if ($logScope) {
+    $startLog = Read-TestLog
+    Show-LogWarnings
+    $startLog[$logScope] = @{
+        last_run         = $startedAt
+        started          = $startedAt
+        passed           = $null
+        failed           = $null
+        errors           = $null
+        total            = $null
+        runtime_seconds  = $null
+        run_by           = 'run-tests.ps1'
+        exit_code        = $null
+        coverage_percent = $null
+        status           = 'running'
+    }
+    Save-TestLog $startLog
+}
+
 # Run pytest. stderr is captured to a file rather than discarded: it is noise
 # on a successful run (PySpark), but it is the ONLY diagnosis when the runner
 # itself fails, and discarding it is what made this failure mode silent.
@@ -136,7 +226,6 @@ if (Test-Path $stderrPath) {
 }
 
 # ---------- Update test log (.github/test-log.json) ----------
-$testLogPath = Join-Path $workspaceRoot '.github/test-log.json'
 
 # Parse pytest summary line: "619 passed in 5.33s" or "617 passed, 2 failed in 5.33s"
 $passed = 0; $failed = 0; $errors = 0; $runtime = 0
@@ -158,33 +247,15 @@ $total = $passed + $failed + $errors
 # the counters are recorded as null and the entry is labelled an error instead.
 $runnerFailed = ((-not $summaryLine) -and $pytestExit -ne 0)
 
-# Read existing log (cumulative merge).
-#
-# Not `ConvertFrom-Json -AsHashtable`: that parameter is PowerShell 6+, and
-# Windows PowerShell 5.1 is the default host for the shipped VS Code tasks. It
-# threw there on every run, and the catch below turned that into a log holding
-# only the scope that had just run.
-#
-# An absent file is legitimately empty. A file that exists and cannot be parsed
-# is data loss, so it is announced and kept -- overwriting it would destroy the
-# only artifact that could explain what happened.
-$testLog = @{}
-if (Test-Path $testLogPath) {
-    try {
-        $existing = Get-Content $testLogPath -Raw | ConvertFrom-Json
-        foreach ($p in $existing.PSObject.Properties) { $testLog[$p.Name] = $p.Value }
-    } catch {
-        $keptPath = "$testLogPath.unreadable"
-        Copy-Item $testLogPath $keptPath -Force -ErrorAction SilentlyContinue
-        Write-Output "WARNING: could not read $testLogPath ($($_.Exception.Message))"
-        Write-Output "WARNING: previously recorded scopes are lost; the unreadable file was kept at $keptPath"
-        $testLog = @{}
-    }
-}
+# Re-read: the interim write above is not the only thing that may have touched
+# the file, and the other scopes' entries must survive this write too.
+$testLog = Read-TestLog
+Show-LogWarnings
 
 # Build scope entry
 $entry = @{
     last_run        = (Get-Date -Format 'o')
+    started         = $startedAt
     passed          = $passed
     failed          = $failed
     errors          = $errors
@@ -216,26 +287,13 @@ if ($Coverage -and $stdout) {
     }
 }
 
-# Determine which scopes to update
-if ($File) {
-    # File-specific run: detect scope from path
-    $fileScope = 'file'
-    if ($File -match 'tests/domain')     { $fileScope = 'domain' }
-    if ($File -match 'tests/adapters')   { $fileScope = 'adapters' }
-    if ($File -match 'tests/properties') { $fileScope = 'properties' }
-    if ($File -match 'tests/contracts')  { $fileScope = 'contracts' }
-    if ($fileScope -ne 'file') {
-        $testLog[$fileScope] = $entry
-    }
-} elseif ($Scope -eq 'all') {
-    # 'all' scope: update a summary entry
-    $testLog['all'] = $entry
-} else {
-    $testLog[$Scope] = $entry
+# Record the result under the entry claimed before the run.
+if ($logScope) {
+    $testLog[$logScope] = $entry
 }
 
 # Write merged log
-$testLog | ConvertTo-Json -Depth 3 | Set-Content -Path $testLogPath -Encoding utf8
+Save-TestLog $testLog
 
 # Write output file if requested
 if ($OutputFile) {

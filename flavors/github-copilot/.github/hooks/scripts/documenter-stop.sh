@@ -48,9 +48,9 @@ BASE_BRANCH=$(af_conf_get BASE_BRANCH dev)
 # workflow still running — the hook mechanically compelled the false artifact
 # it existed to guarantee (issue #72).
 #
-# Intent is not on stdin, so it is read off the plan file: a plan marked
-# COMPLETED is the documenter's own claim that it finalised, and that claim is
-# what this gate holds it to.
+# Intent is not on stdin, so it is read off the artifacts: a plan marked
+# COMPLETED is the documenter's own claim that it finalised, and a workflow log
+# reporting a terminal status is the same claim in the other file.
 
 plan_info=$(af_plan_lifecycle "$workflow_id" "$AF_CODE_ROOT")
 plan_found="${plan_info%%|*}"
@@ -61,13 +61,51 @@ if [ "$plan_found" != "1" ]; then
     # Unclassifiable is not the same as fine, and saying nothing would repeat
     # the defect this gate is meant to prevent. Completeness is still enforced
     # once, by the compliance-checker post-flight gate.
-    echo "{\"systemMessage\": \"documenter:Stop — no plan file names 'agent/${workflow_id}', so a mid-workflow call cannot be told from finalisation; artifact gate not applied. Completeness is enforced by the compliance-checker post-flight gate.\"}"
+    #
+    # Review Only and Plan Only never write a plan file, so this branch is the
+    # only place their log-only documenter call is observable at all. The
+    # notice below is advisory on purpose: a mid-workflow documenter call has
+    # no log yet and must not be blocked for it (issue #210).
+    coverage=$(af_conf_get AF_WORKFLOW_LOG_COVERAGE all)
+    coverage_note=""
+    if [ "$coverage" = "all" ] &&
+       [ ! -f ".github/logs/${workflow_id}.yaml" ] &&
+       [ ! -f ".github/logs/${workflow_id}.yml" ]; then
+        coverage_note=" NOTE: AF_WORKFLOW_LOG_COVERAGE=all and .github/logs/${workflow_id}.yaml does not exist — if this call is finalising the workflow, write the log now; a run without one is indistinguishable from a cheap run."
+    fi
+    echo "{\"systemMessage\": \"documenter:Stop — no plan file names 'agent/${workflow_id}', so a mid-workflow call cannot be told from finalisation; artifact gate not applied. Completeness is enforced by the compliance-checker post-flight gate.${coverage_note}\"}"
     exit 0
 fi
 
+# The plan status is a word an agent maintains by hand; the workflow log is an
+# artifact the run produced. Requiring the plan alone let one unset word silence
+# the schema check, the timestamps, the cost block and the invocation census at
+# once — the gate's own failure disabled every measurement behind it (issue
+# #252). Either source asserting an end is now enough.
+#
+# The match is deliberately looser than the schema's closed set: a status of
+# COMPLETED-WITH-ISSUES is invalid and must reach the checker that says so,
+# rather than exit here and take the measurements with it.
+
+lifecycle_note=""
+
 if [ "$plan_status" != "COMPLETED" ]; then
-    echo "{\"systemMessage\": \"documenter:Stop — plan status is ${plan_status:-unset}, not COMPLETED: treated as a mid-workflow documenter call, artifact gate not applied.\"}"
-    exit 0
+    log_status=""
+    for candidate in ".github/logs/${workflow_id}.yaml" ".github/logs/${workflow_id}.yml"; do
+        [ -f "$candidate" ] || continue
+        log_status=$(sed -n 's/^status:[^A-Za-z]*\([A-Za-z][A-Za-z0-9_-]*\).*/\1/p' "$candidate" |
+                     head -n 1 | tr '[:lower:]' '[:upper:]')
+        [ -n "$log_status" ] && break
+    done
+    case "$log_status" in
+        COMPLETED*|FAILED*|ESCALATED*)
+            lifecycle_note=" — NOTE: plan status is ${plan_status:-unset} but the workflow log reports ${log_status}, so this call was treated as finalisation; one of the two is wrong and should be corrected"
+            ;;
+        *)
+            echo "{\"systemMessage\": \"documenter:Stop — plan status is ${plan_status:-unset}, not COMPLETED: treated as a mid-workflow documenter call, artifact gate not applied.\"}"
+            exit 0
+            ;;
+    esac
 fi
 
 # ---------- Gate 1: Workflow log YAML ----------
@@ -108,7 +146,7 @@ fi
 
 if [ ${#missing[@]} -gt 0 ]; then
     list=$(IFS='; '; echo "${missing[*]}")
-    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Documentation phase violation: required artifacts missing for workflow '${workflow_id}': ${list}. Create these files before completing.\"}}"
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Documentation phase violation: required artifacts missing for workflow '${workflow_id}': ${list}. Create these files before completing.${lifecycle_note}\"}}"
     exit 0
 fi
 
@@ -198,39 +236,100 @@ cost_note=""
 log_path=".github/logs/${workflow_id}.yaml"
 [ -f "$log_path" ] || log_path=".github/logs/${workflow_id}.yml"
 
+sid=$(printf '%s' "$stdin_raw" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+transcript=$(printf '%s' "$stdin_raw" | grep -o '"transcript_path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+
+if [ -n "$sid" ] && [ -n "$transcript" ]; then
+    # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
+    chat_dir=$(dirname "$(dirname "$transcript")")
+    session_dir="${chat_dir}/debug-logs/${sid}"
+
+    collector=".github/scripts/collect-session-cost.py"
+    python_exe=""
+    for c in .venv/bin/python .venv/Scripts/python.exe; do
+        [ -x "$c" ] && python_exe="$c" && break
+    done
+    if [ -z "$python_exe" ]; then
+        # AF_PYTHON is already validated, not merely resolved: on Windows
+        # `python3` is the Store stub -- present on PATH, executes nothing.
+        python_exe="$AF_PYTHON"
+    fi
+
+    if [ -n "$python_exe" ] && [ -f "$collector" ]; then
+        # Oldest commit on the branch approximates the workflow start;
+        # a session that began later means earlier phases are unlogged.
+        args=(--session-dir "$session_dir")
+        oldest=$(git log --format=%ct "${BASE_BRANCH}..HEAD" 2>/dev/null | tail -1)
+        if [ -n "$oldest" ]; then
+            args+=(--workflow-start "$((oldest * 1000))")
+        fi
+
+        # The debug log the numbers come from expires; these rows do not. They
+        # sit beside the workflow log, under the same .gitignore that keeps
+        # verbatim prompts out of the repository (#253).
+        cost_dir="$(dirname "$log_path")/cost"
+        args+=(--facts-out "${cost_dir}/${workflow_id}.facts.ndjson")
+        args+=(--entities-out "${cost_dir}/${workflow_id}.entities.ndjson")
+
+        if block=$("$python_exe" "$collector" "${args[@]}" 2>/dev/null) && [ -n "$block" ]; then
+            # Appending twice would produce a duplicate YAML key; first write
+            # wins. The artifacts above have no such constraint -- they
+            # accumulate and dedup, which is why the collector runs on every
+            # finalising call and not only the first.
+            if grep -q '^cost:' "$log_path" 2>/dev/null; then
+                cost_note=" + cost artifacts updated"
+            else
+                printf '\n%s\n' "$block" >> "$log_path"
+                cost_note=" + cost block appended"
+            fi
+        fi
+    fi
+fi
+
+# ---------- Agent invocations (ADVISORY — never blocks) ----------
+#
+# Which subagents actually ran, read from the editor's own subagent log
+# filenames so the record never passes through a language model. Measured: a
+# Deep-tier workflow log carried a complete `agent: arbiter` step — action,
+# verdict, review findings — for an arbiter that was never invoked, and only
+# the coordinator's cross-check caught it (issue #173).
+#
+# Advisory rather than blocking, on purpose. The count covers one chat session,
+# so a workflow resumed in a later window would fail a gate it did not deserve,
+# and a hook that fails honest work is a hook that gets switched off (#108).
+# The contradiction is written into the log instead, where any reader meets it.
+
+invocation_note=""
+log_path=".github/logs/${workflow_id}.yaml"
+[ -f "$log_path" ] || log_path=".github/logs/${workflow_id}.yml"
+
 # Appending twice would produce a duplicate YAML key; first write wins.
-if ! grep -q '^cost:' "$log_path" 2>/dev/null; then
+if ! grep -q '^agent_invocations:' "$log_path" 2>/dev/null; then
     sid=$(printf '%s' "$stdin_raw" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
     transcript=$(printf '%s' "$stdin_raw" | grep -o '"transcript_path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
 
     if [ -n "$sid" ] && [ -n "$transcript" ]; then
-        # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
         chat_dir=$(dirname "$(dirname "$transcript")")
         session_dir="${chat_dir}/debug-logs/${sid}"
 
-        collector=".github/scripts/collect-session-cost.py"
-        python_exe=""
+        recorder=".github/hooks/scripts/collect-agent-invocations.py"
+        inv_python=""
         for c in .venv/bin/python .venv/Scripts/python.exe; do
-            [ -x "$c" ] && python_exe="$c" && break
+            [ -x "$c" ] && inv_python="$c" && break
         done
-        if [ -z "$python_exe" ]; then
-            # AF_PYTHON is already validated, not merely resolved: on Windows
-            # `python3` is the Store stub -- present on PATH, executes nothing.
-            python_exe="$AF_PYTHON"
+        if [ -z "$inv_python" ]; then
+            inv_python="$AF_PYTHON"
         fi
 
-        if [ -n "$python_exe" ] && [ -f "$collector" ]; then
-            # Oldest commit on the branch approximates the workflow start;
-            # a session that began later means earlier phases are unlogged.
-            args=(--session-dir "$session_dir")
-            oldest=$(git log --format=%ct "${BASE_BRANCH}..HEAD" 2>/dev/null | tail -1)
-            if [ -n "$oldest" ]; then
-                args+=(--workflow-start "$((oldest * 1000))")
-            fi
-
-            if block=$("$python_exe" "$collector" "${args[@]}" 2>/dev/null) && [ -n "$block" ]; then
+        if [ -n "$inv_python" ] && [ -f "$recorder" ]; then
+            if block=$("$inv_python" "$recorder" --session-dir "$session_dir" --log "$log_path" 2>/dev/null) && [ -n "$block" ]; then
                 printf '\n%s\n' "$block" >> "$log_path"
-                cost_note=" + cost block appended"
+                invocation_note=" + agent invocations measured"
+                case "$block" in
+                    *claimed_without_invocation*)
+                        invocation_note="${invocation_note} (steps name agents with no invocation log — check them)"
+                        ;;
+                esac
             fi
         fi
     fi
@@ -262,5 +361,5 @@ if [ -f "$checker" ] && [ -f ".vscode/tasks.json" ]; then
     fi
 fi
 
-echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS for '${workflow_id}'${retro_note}${schema_note}${stamp_note}${cost_note}${scratch_note}\"}"
+echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS for '${workflow_id}'${lifecycle_note}${retro_note}${schema_note}${stamp_note}${cost_note}${invocation_note}${scratch_note}\"}"
 exit 0

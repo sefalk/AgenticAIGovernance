@@ -1,7 +1,14 @@
 # Regression tests for the canonical test runner (run-tests.ps1 / run-tests.sh).
 #
-# Covers issues #73 and #93. Both are the same class: the runner writes an
-# artifact that looks authoritative and is wrong, and exits 0 while doing it.
+# Covers issues #73, #93 and #179. All three are the same class: the runner
+# writes an artifact that looks authoritative and is wrong, and exits 0 while
+# doing it.
+#
+# #179 -- the log entry was built only after pytest returned. A run that was
+#         interrupted (terminal closed, agent cancelled, machine slept) left
+#         the PREVIOUS entry in place, still saying status ok. Nothing
+#         distinguished it from a fresh green result, so the next reader
+#         skipped the suite on the strength of a run that never finished.
 #
 # #93 -- the test log is documented as a cumulative merge across scopes. The
 #        read used `ConvertFrom-Json -AsHashtable`, which exists only in
@@ -105,6 +112,17 @@ _p = os.environ.get('AF_FAKE_PYTEST_ARGV')
 if _p:
     with open(_p, 'w') as fh:
         json.dump(sys.argv[1:], fh)
+_s = os.environ.get('AF_FAKE_PYTEST_LOGSNAP')
+if _s:
+    # Copy the log as it stands WHILE the runner is blocked on pytest. This is
+    # the only moment an interrupted run can be observed without a race.
+    try:
+        with open(os.path.join('.github', 'test-log.json')) as src:
+            _t = src.read()
+        with open(_s, 'w') as dst:
+            dst.write(_t)
+    except OSError:
+        pass
 print('3 passed in 0.42s')
 '@
     return $ws
@@ -463,6 +481,154 @@ print('3 passed in 0.42s')
     }
 
     # ---------------------------------------------------------------------
+    # L (#179): a run that was interrupted must not read as the previous run's
+    #           result. The marker is asserted from INSIDE the run: the fake
+    #           pytest copies the log while the runner is blocked on it. Killing
+    #           the runner mid-flight would test the same property with a race,
+    #           and a race that usually passes is worse than no case at all.
+    # ---------------------------------------------------------------------
+    $lKeys = @('L1_running_marker_written_before_pytest',
+               'L2_running_marker_carries_no_counters',
+               'L3_running_marker_write_keeps_other_scopes',
+               'L4_running_marker_replaced_by_the_result')
+    $wsR = New-FakePytestWorkspace 'running'
+    if (-not $wsR) {
+        foreach ($k in $lKeys) { $results[$k] = $false; $details[$k] = 'fake-pytest fixture could not be created' }
+    } else {
+        $runnerR = Join-Path $wsR '.github/scripts/run-tests.ps1'
+        $logR    = Join-Path $wsR '.github/test-log.json'
+
+        # A stale green entry for a DIFFERENT scope, plus a stale green entry
+        # for the scope about to run. The second is the one #179 is about: it
+        # must stop reading as a result the moment the new run starts.
+        Set-Content -Path $logR -Encoding utf8 -Value @'
+{
+  "domain":    { "last_run": "2026-01-01T00:00:00+00:00", "passed": 1317, "failed": 0, "errors": 0, "total": 1317, "runtime_seconds": 12.5, "run_by": "run-tests.ps1", "exit_code": 0, "coverage_percent": null, "status": "ok" },
+  "contracts": { "last_run": "2026-01-01T00:00:00+00:00", "passed": 42,   "failed": 0, "errors": 0, "total": 42,   "runtime_seconds": 2.5,  "run_by": "run-tests.ps1", "exit_code": 0, "coverage_percent": null, "status": "ok" }
+}
+'@
+        $snap = Join-Path $wsR 'log-during-run.json'
+        $env:AF_FAKE_PYTEST_LOGSNAP = $snap
+        try { & $runnerR -Scope contracts *> $null }
+        finally { Remove-Item Env:AF_FAKE_PYTEST_LOGSNAP -ErrorAction SilentlyContinue }
+
+        $during = $null
+        if (Test-Path $snap) { try { $during = Get-Content $snap -Raw | ConvertFrom-Json } catch { $during = $null } }
+
+        # L1: while the run is in flight the entry says so, and carries the
+        #     start time -- so a reader can tell a live run from an abandoned one.
+        $results['L1_running_marker_written_before_pytest'] =
+            ($null -ne $during) -and ($during.contracts.status -eq 'running') -and
+            ([bool]$during.contracts.started)
+        $details['L1_running_marker_written_before_pytest'] =
+            if ($null -eq $during) { 'no snapshot taken during the run' }
+            else { "status=$($during.contracts.status) started='$($during.contracts.started)'" }
+
+        # L2: null, not 0. Zero counters next to a stale timestamp are exactly
+        #     the shape a consumer reads as a clean green run.
+        $results['L2_running_marker_carries_no_counters'] =
+            ($null -ne $during) -and ($null -eq $during.contracts.passed) -and
+            ($null -eq $during.contracts.failed) -and ($null -eq $during.contracts.total)
+        $details['L2_running_marker_carries_no_counters'] =
+            "passed=$($during.contracts.passed) failed=$($during.contracts.failed) total=$($during.contracts.total)"
+
+        # L3: the interim write is a merge as well. A marker that evicts the
+        #     other scopes would trade #179 for #93.
+        $results['L3_running_marker_write_keeps_other_scopes'] =
+            ($null -ne $during) -and ($during.domain.passed -eq 1317) -and ($during.domain.status -eq 'ok')
+        $details['L3_running_marker_write_keeps_other_scopes'] =
+            "domain.passed=$($during.domain.passed) domain.status=$($during.domain.status)"
+
+        # L4: and it is replaced, not accumulated -- the completed run is the
+        #     record afterwards.
+        $after = $null
+        if (Test-Path $logR) { try { $after = Get-Content $logR -Raw | ConvertFrom-Json } catch { $after = $null } }
+        $results['L4_running_marker_replaced_by_the_result'] =
+            ($null -ne $after) -and ($after.contracts.status -eq 'ok') -and
+            ($after.contracts.passed -eq 3) -and ($after.domain.passed -eq 1317)
+        $details['L4_running_marker_replaced_by_the_result'] =
+            "status=$($after.contracts.status) passed=$($after.contracts.passed) domain.passed=$($after.domain.passed)"
+    }
+
+    # ---------------------------------------------------------------------
+    # M (#179): the same property for run-tests.sh. The two runners write the
+    #           same file for the same readers, so a marker in only one of them
+    #           is a marker a reader cannot rely on.
+    # ---------------------------------------------------------------------
+    $mKeys = @('M1_sh_running_marker_written_before_pytest',
+               'M2_sh_running_marker_carries_no_counters',
+               'M3_sh_running_marker_write_keeps_other_scopes',
+               'M4_sh_running_marker_replaced_by_the_result',
+               'N_sh_summary_counters_are_parsed')
+    if (-not $bashExe) {
+        foreach ($k in $mKeys) { $results[$k] = $false; $details[$k] = 'no bash interpreter found' }
+    } else {
+        $wsS = New-SpacedFixture 'shrun'
+        New-Item -ItemType Directory -Path (Join-Path $wsS '.github/scripts') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $wsS 'tests/contracts') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $wsS '.venv/bin') -Force | Out-Null
+        Copy-Item $runTestsSh (Join-Path $wsS '.github/scripts/run-tests.sh')
+
+        # The shim copies the log while the runner is blocked on it -- the bash
+        # equivalent of the fake pytest snapshot used above.
+        $shimS = Join-Path $wsS '.venv/bin/python'
+        [IO.File]::WriteAllText($shimS,
+            ("#!/bin/sh`ncp .github/test-log.json `"`$AF_SHIM_LOGSNAP`" 2>/dev/null`necho '3 passed in 0.42s'`n" -replace "`r", ''))
+        & $bashExe -c "chmod +x '$($shimS -replace '\\', '/')'" 2>&1 | Out-Null
+
+        $logS = Join-Path $wsS '.github/test-log.json'
+        Set-Content -Path $logS -Encoding utf8 -Value @'
+{
+  "domain":    { "last_run": "2026-01-01T00:00:00+00:00", "passed": 1317, "failed": 0, "errors": 0, "total": 1317, "runtime_seconds": 12.5, "run_by": "run-tests.ps1", "exit_code": 0, "coverage_percent": null, "status": "ok" },
+  "contracts": { "last_run": "2026-01-01T00:00:00+00:00", "passed": 42, "failed": 0, "errors": 0, "total": 42, "runtime_seconds": 2.5, "run_by": "run-tests.ps1", "exit_code": 0, "coverage_percent": null, "status": "ok" }
+}
+'@
+        $snapS     = Join-Path $wsS 'log-during-run.json'
+        $runnerShS = ((Join-Path $wsS '.github/scripts/run-tests.sh') -replace '\\', '/')
+        $shRunOut  = (& $bashExe -c "AF_SHIM_LOGSNAP='$($snapS -replace '\\', '/')' '$runnerShS' --scope contracts" 2>&1 | Out-String)
+
+        $duringS = $null
+        if (Test-Path $snapS) { try { $duringS = Get-Content $snapS -Raw | ConvertFrom-Json } catch { $duringS = $null } }
+
+        $results['M1_sh_running_marker_written_before_pytest'] =
+            ($null -ne $duringS) -and ($duringS.contracts.status -eq 'running') -and ([bool]$duringS.contracts.started)
+        $details['M1_sh_running_marker_written_before_pytest'] =
+            if ($null -eq $duringS) { "no snapshot taken during the run; runner said: $(($shRunOut -replace '\s+', ' ').Trim())" }
+            else { "status=$($duringS.contracts.status) started='$($duringS.contracts.started)'" }
+
+        $results['M2_sh_running_marker_carries_no_counters'] =
+            ($null -ne $duringS) -and ($null -eq $duringS.contracts.passed) -and
+            ($null -eq $duringS.contracts.failed) -and ($null -eq $duringS.contracts.total)
+        $details['M2_sh_running_marker_carries_no_counters'] =
+            "passed=$($duringS.contracts.passed) failed=$($duringS.contracts.failed) total=$($duringS.contracts.total)"
+
+        $results['M3_sh_running_marker_write_keeps_other_scopes'] =
+            ($null -ne $duringS) -and ($duringS.domain.passed -eq 1317) -and ($duringS.domain.status -eq 'ok')
+        $details['M3_sh_running_marker_write_keeps_other_scopes'] =
+            "domain.passed=$($duringS.domain.passed) domain.status=$($duringS.domain.status)"
+
+        $afterS = $null
+        if (Test-Path $logS) { try { $afterS = Get-Content $logS -Raw | ConvertFrom-Json } catch { $afterS = $null } }
+        $results['M4_sh_running_marker_replaced_by_the_result'] =
+            ($null -ne $afterS) -and ($afterS.contracts.status -eq 'ok') -and
+            ($afterS.contracts.passed -eq 3) -and ($afterS.domain.passed -eq 1317)
+        $details['M4_sh_running_marker_replaced_by_the_result'] =
+            "status=$($afterS.contracts.status) passed=$($afterS.contracts.passed) domain.passed=$($afterS.domain.passed)"
+
+        # N: the counters in that entry are the ones pytest reported. Found by
+        #    M4: the summary pattern used `\d`, which `grep -E` reads as a
+        #    literal 'd', so no summary line ever matched and every completed
+        #    run was logged as 0 passed / 0 total with status ok. The runtime is
+        #    asserted too -- a case that checks only `passed` would still pass
+        #    if the parse regressed to matching the first number it finds.
+        $results['N_sh_summary_counters_are_parsed'] =
+            ($null -ne $afterS) -and ($afterS.contracts.passed -eq 3) -and
+            ($afterS.contracts.total -eq 3) -and ($afterS.contracts.runtime_seconds -eq 0.42)
+        $details['N_sh_summary_counters_are_parsed'] =
+            "passed=$($afterS.contracts.passed) total=$($afterS.contracts.total) runtime=$($afterS.contracts.runtime_seconds)"
+    }
+
+    # ---------------------------------------------------------------------
     # K (#93): the class, not the instance. `-AsHashtable` was one PowerShell
     #          6+ construct in a payload that runs on 5.1; nothing stopped the
     #          next one. This scan is the standing guard.
@@ -497,7 +663,7 @@ finally {
     foreach ($f in $fixtures) { Remove-Item $f -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
-Write-Host '===== test-runner regression tests (issues #73, #93) ====='
+Write-Host '===== test-runner regression tests (issues #73, #93, #179) ====='
 $allPass = $true
 foreach ($k in $results.Keys) {
     if ($results[$k]) {
