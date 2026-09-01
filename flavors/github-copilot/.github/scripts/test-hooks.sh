@@ -506,6 +506,44 @@ run_case "existing file allowed on agent branch" refactorer-pretooluse.sh agent/
 run_case "file creation denied on agent branch" refactorer-pretooluse.sh agent/fixture  "$SRC_CREATE" deny
 run_case "running a task is not a file creation" refactorer-pretooluse.sh agent/fixture '{"tool_name":"run_task","tool_input":{"id":"shell: tests: all","workspaceFolder":"/repo"}}' silent
 
+# The planner gained `editFiles` so it can answer the plan review by revising
+# its own document (issue #235). That widens the write surface of the agent
+# with the narrowest charter, and this allowlist is the only thing holding it
+# — a gate that shipped with no executing case at all (issue #263).
+PLAN_CREATE='{"tool_name":"create_file","tool_input":{"content":"x","filePath":"docs/plans/feat-2026-09-01-x.md"}}'
+PLAN_REVISE='{"tool_name":"replace_string_in_file","tool_input":{"filePath":"docs/plans/feat-2026-09-01-x.md","oldString":"6 subtasks","newString":"7 subtasks"}}'
+PLAN_REVISE_BATCH='{"tool_name":"multi_replace_string_in_file","tool_input":{"explanation":"e","replacements":[{"filePath":"docs/plans/feat-2026-09-01-x.md","oldString":"a","newString":"b"},{"filePath":"docs/plans/feat-2026-09-01-x.md","oldString":"c","newString":"d"}]}}'
+PLAN_BATCH_MIXED='{"tool_name":"multi_replace_string_in_file","tool_input":{"explanation":"e","replacements":[{"filePath":"docs/plans/feat-2026-09-01-x.md","oldString":"a","newString":"b"},{"filePath":"src/main.py","oldString":"a","newString":"b"}]}}'
+PLAN_NOT_MD='{"tool_name":"create_file","tool_input":{"content":"x","filePath":"docs/plans/notes.txt"}}'
+PLAN_NESTED='{"tool_name":"replace_string_in_file","tool_input":{"filePath":"documentation/plans/2026/x.md","oldString":"a","newString":"b"}}'
+PLAN_ROOT_MD='{"tool_name":"create_file","tool_input":{"content":"x","filePath":"plans.md"}}'
+PLAN_ESCAPE='{"tool_name":"create_file","tool_input":{"content":"x","filePath":"../elsewhere/plans/x.md"}}'
+PLAN_NO_PATH='{"tool_name":"create_file","tool_input":{"content":"x"}}'
+
+echo "## planner-pretooluse.sh"
+run_case "the plan document may be created"   planner-pretooluse.sh agent/fixture "$PLAN_CREATE"       silent
+run_case "the plan document may be revised in place" \
+    planner-pretooluse.sh agent/fixture "$PLAN_REVISE" silent
+run_case "a batched revision of the plan is allowed" \
+    planner-pretooluse.sh agent/fixture "$PLAN_REVISE_BATCH" silent
+# One source path in the batch decides it: the tool applies every replacement,
+# so clearing on the first plan file would approve the rest unexamined.
+run_case "a batch that also touches source is denied" \
+    planner-pretooluse.sh agent/fixture "$PLAN_BATCH_MIXED" deny
+run_case "production code is denied"          planner-pretooluse.sh agent/fixture "$SRC_EDIT"          deny
+run_case "a non-markdown file in the plans dir is denied" \
+    planner-pretooluse.sh agent/fixture "$PLAN_NOT_MD" deny
+run_case "a plans directory anywhere satisfies the gate" \
+    planner-pretooluse.sh agent/fixture "$PLAN_NESTED" silent
+run_case "a file named plans.md is not a plans directory" \
+    planner-pretooluse.sh agent/fixture "$PLAN_ROOT_MD" deny
+run_case "climbing out of the repository is denied" \
+    planner-pretooluse.sh agent/fixture "$PLAN_ESCAPE" deny
+run_case "a write tool naming no path is denied" \
+    planner-pretooluse.sh agent/fixture "$PLAN_NO_PATH" deny
+run_case "reading a file is not the gate's business" \
+    planner-pretooluse.sh agent/fixture "$READ_FILE" silent
+
 # scan-secrets reports by exit code, which run_case treats as a crash, so the
 # two paths that matter are asserted directly. Both were dead: the hook never
 # matched a real write tool, and the fallback pattern used `\s` inside a

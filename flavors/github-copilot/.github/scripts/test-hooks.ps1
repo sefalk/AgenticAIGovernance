@@ -1669,6 +1669,62 @@ Assert-Silent "refactorer can run_task" `
 
 Write-Output ""
 
+# ── 4b. planner-pretooluse.ps1 ───────────────────────────────────────────
+
+Write-Output "## planner-pretooluse.ps1"
+
+# The planner gained `editFiles` so it can answer the plan review by revising
+# its own document (issue #235). This allowlist is the only thing confining
+# that wider write surface, and it shipped with no executing case (#263).
+
+Assert-Silent "planner may create the plan document" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"create_file","tool_input":{"content":"x","filePath":"docs/plans/feat-2026-09-01-x.md"}}'
+
+Assert-Silent "planner may revise the plan document in place" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"replace_string_in_file","tool_input":{"filePath":"docs/plans/feat-2026-09-01-x.md","oldString":"6 subtasks","newString":"7 subtasks"}}'
+
+Assert-Silent "planner may revise the plan in a batch" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"multi_replace_string_in_file","tool_input":{"explanation":"e","replacements":[{"filePath":"docs/plans/feat-2026-09-01-x.md","oldString":"a","newString":"b"},{"filePath":"docs/plans/feat-2026-09-01-x.md","oldString":"c","newString":"d"}]}}'
+
+# The tool applies every replacement, so clearing on the first plan file would
+# approve the rest unexamined.
+Assert-Deny "a batch that also touches source is denied" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"multi_replace_string_in_file","tool_input":{"explanation":"e","replacements":[{"filePath":"docs/plans/feat-2026-09-01-x.md","oldString":"a","newString":"b"},{"filePath":"src/main.py","oldString":"a","newString":"b"}]}}'
+
+Assert-Deny "planner cannot write production code" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"replace_string_in_file","tool_input":{"filePath":"src/main.py","oldString":"a","newString":"b"}}'
+
+Assert-Deny "a non-markdown file in the plans dir is denied" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"create_file","tool_input":{"content":"x","filePath":"docs/plans/notes.txt"}}'
+
+Assert-Silent "a plans directory anywhere satisfies the gate" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"replace_string_in_file","tool_input":{"filePath":"documentation/plans/2026/x.md","oldString":"a","newString":"b"}}'
+
+Assert-Deny "a file named plans.md is not a plans directory" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"create_file","tool_input":{"content":"x","filePath":"plans.md"}}'
+
+Assert-Deny "climbing out of the repository is denied" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"create_file","tool_input":{"content":"x","filePath":"../elsewhere/plans/x.md"}}'
+
+Assert-Deny "a write tool naming no path is denied" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"create_file","tool_input":{"content":"x"}}'
+
+Assert-Silent "planner can read_file" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"read_file","tool_input":{"endLine":40,"filePath":"src/main.py","startLine":1}}'
+
+Write-Output ""
+
 # ── 5. researcher-pretooluse.ps1 ─────────────────────────────────────────
 
 Write-Output "## researcher-pretooluse.ps1"

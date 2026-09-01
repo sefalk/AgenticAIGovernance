@@ -142,6 +142,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The planner can revise its own plan, so the review step it is measured
+  against is executable (#235).** The `tdd-orchestration` runbook mandates a
+  plan review whose only remedy is "return the plan to the planner" — but the
+  planner's sole write tool was `createFile`, which refuses to overwrite an
+  existing file. The planner returned BLOCKED, and the one review any plan
+  receives could not be acted on. Observed in a consumer project: the
+  correction was applied eleven minutes later by the **implementer**, which
+  stamped its own provenance marker on a document it does not own. Design
+  authority went to whichever agent happened to hold a write tool, and nobody
+  decided that as policy.
+
+  The planner now carries `edit/editFiles`. Its write surface does not widen:
+  `planner-pretooluse` is an allowlist over the **target path**, not over the
+  tool, so the planner still writes exactly one kind of file — a `.md` inside
+  a `plans` directory — and every other path is denied no matter which tool
+  asks. The runbook now also names the commit for the revision, since the plan
+  is committed before the review and a corrected plan that is never committed
+  leaves the reviewed and the recorded document different.
+
+  The uncomfortable half is that this gate had no executing test in either
+  harness: the only thing confining the planner was itself unverified. It now
+  has 11 cases in `test-hooks.sh` and 11 in `test-hooks.ps1` — including a
+  batch mixing a plan file with a source file, because the tool applies every
+  replacement and clearing on the first path would approve the rest
+  unexamined. The wider absence is #263.
+
 - **A deploy into a directory that is not yet a git repository no longer stops
   without saying anything (#244).** `git branch --show-current` exits 128
   outside a repository. `deploy.sh` runs under `set -euo pipefail`, so that

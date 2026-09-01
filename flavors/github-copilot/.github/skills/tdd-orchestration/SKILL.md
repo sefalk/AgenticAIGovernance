@@ -158,7 +158,11 @@ from the plan, and the plan is the only artifact no critic reads. Read
 5. Is anything in the plan not traceable to the request?
 
 A "no" is not an escalation. Return the plan to the planner once, naming the
-question; escalate on the second failure.
+question; escalate on the second failure. The planner edits `{plan_file}` in
+place and returns the path — it does not regenerate the document. Commit the
+correction as `[agent:planner] revise plan: {what the review asked for}`
+before proceeding, or the plan you reviewed and the plan on record are two
+different documents.
 
 You commissioned this plan, so this is a self-check, and a self-check nobody
 reads stops happening. Record the five answers — the documenter persists them
