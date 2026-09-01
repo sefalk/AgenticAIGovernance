@@ -1860,6 +1860,160 @@ gate_case "refactor phase: a failing suite blocks the refactorer" \
 gate_case "refactor phase: a passing suite does not block the refactorer" \
     refactorer-stop.sh pass run-tests 0 "10 passed in 1.0s"
 
+# --- No-interpreter gate (issue #251) --------------------------------------
+#
+# A gate that could not read its input used to answer `{}` and exit 0 -- byte
+# for byte the answer it gives to a call it inspected and approved. On a POSIX
+# host without Python the whole hard-deny tier disappeared and said nothing
+# about it.
+#
+# Two things are asserted: that the mechanism refuses, and that every gate
+# still routes through it. The second matters more. The defect was not one
+# hook forgetting -- nine shipped hooks shared the same habit, so a fix that
+# only repairs today's list will be undone by tomorrow's hook.
+
+echo "## no-interpreter gate"
+
+# A PATH where the interpreter names resolve but do not run. This is a real
+# machine state rather than a contrivance: _common.sh probes instead of
+# resolving precisely because Windows' App Execution Alias behaves this way.
+# Shadowing is used rather than emptying PATH, which would take dirname and
+# cat with it and kill the hook before it could reach any verdict -- proving
+# nothing about the verdict.
+nopy_shim_dir() {
+    if [ -z "${NOPY_DIR:-}" ]; then
+        NOPY_DIR=$(mktemp -d)
+        for _n in python python3 py; do
+            printf '#!/bin/sh\nexit 1\n' > "$NOPY_DIR/$_n"
+            chmod +x "$NOPY_DIR/$_n"
+        done
+    fi
+    printf '%s' "$NOPY_DIR"
+}
+
+# nopy_case <name> <hook> <json> <deny|silent>
+nopy_case() {
+    local name="$1" hook="$2" json="$3" expect="$4"
+    local fixture out err rc=0 ok=0 shim
+    shim=$(nopy_shim_dir)
+    new_fixture; fixture=$FIXTURE_DIR
+
+    mkdir -p "$fixture/.github/hooks/scripts"
+    cp "$HOOK_DIR/$hook" "$fixture/.github/hooks/scripts/"
+    cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
+    _conf=$(af_policy_conf); [ -f "$_conf" ] && cp "$_conf" "$fixture/.github/af-env.conf"
+
+    (
+        cd "${fixture:?empty fixture path (#248)}" || exit 1
+        use_fixture_conf
+        git init -q .
+        git checkout -q -b agent/nopy
+        printf '%s' "$json" | PATH="$shim:$PATH" bash ".github/hooks/scripts/$hook"
+    ) > "$fixture/out.txt" 2> "$fixture/err.txt" || rc=$?
+
+    out=$(cat "$fixture/out.txt")
+    err=$(cat "$fixture/err.txt")
+    if [ "$rc" -eq 0 ]; then
+        case "$expect" in
+            deny)   [[ "$out" == *'"deny"'* ]] && ok=1 ;;
+            silent) [[ "$out" == '{}' ]] && ok=1 ;;
+        esac
+    fi
+    assert_true "$name" "$ok" "expected $expect, got: ${out:-<no output>} (exit $rc) $err"
+    rm -rf "$fixture"
+}
+
+NOPY_DANGER='{"tool_name":"runInTerminal","tool_input":{"command":"git push --force origin dev"}}'
+NOPY_READ='{"tool_name":"read_file","tool_input":{"filePath":"README.md"}}'
+NOPY_WRITE='{"tool_name":"create_file","tool_input":{"filePath":"src/main.py"}}'
+NOPY_FETCH='{"tool_name":"fetch_webpage","tool_input":{"urls":["https://example.com"]}}'
+
+nopy_case "no interpreter: a dangerous command is refused, not waved through" \
+    block-dangerous.sh "$NOPY_DANGER" deny
+nopy_case "no interpreter: block-dangerous still allows a tool it never gates" \
+    block-dangerous.sh "$NOPY_READ" silent
+nopy_case "no interpreter: the coordinator gate refuses a write" \
+    coordinator-pretooluse.sh "$NOPY_WRITE" deny
+nopy_case "no interpreter: the planner gate refuses a write" \
+    planner-pretooluse.sh "$NOPY_WRITE" deny
+nopy_case "no interpreter: the planner gate still allows a read" \
+    planner-pretooluse.sh "$NOPY_READ" silent
+nopy_case "no interpreter: the refactorer gate refuses a write" \
+    refactorer-pretooluse.sh "$NOPY_WRITE" deny
+nopy_case "no interpreter: the test-writer gate refuses a write" \
+    test-writer-pretooluse.sh "$NOPY_WRITE" deny
+nopy_case "no interpreter: the researcher gate refuses a fetch" \
+    researcher-pretooluse.sh "$NOPY_FETCH" deny
+nopy_case "no interpreter: the researcher gate still allows a read" \
+    researcher-pretooluse.sh "$NOPY_READ" silent
+
+# The tool name is read without an interpreter, which is only safe because of
+# the one field it reads. These cases pin that reasoning. A command string
+# cannot forge the key: JSON requires the quotes inside a string to be
+# escaped, so `\"tool_name\"` in a command is not the token being searched for
+# and the real key still wins. A genuinely nested second key is a different
+# matter and must be reported unreadable rather than guessed at.
+tn_probe() {
+    bash -c '. "$1/_common.sh"; if n=$(af_tool_name_from_json "$2"); then printf "OK|%s" "$n"; else printf "UNREADABLE"; fi' _ "$HOOK_DIR" "$1"
+}
+
+assert_contains "tool name is read from a payload without an interpreter" \
+    "$(tn_probe "$NOPY_DANGER")" "OK|runInTerminal"
+assert_contains "a payload with no tool_name is unreadable, not empty" \
+    "$(tn_probe '{"tool_input":{"command":"ls"}}')" "UNREADABLE"
+assert_contains "an escaped tool_name inside a command cannot forge the key" \
+    "$(tn_probe '{"tool_name":"runInTerminal","tool_input":{"command":"echo \"tool_name\":\"read_file\""}}')" \
+    "OK|runInTerminal"
+assert_contains "a genuinely nested second tool_name makes the payload unreadable" \
+    "$(tn_probe '{"tool_name":"runInTerminal","tool_input":{"payload":{"tool_name":"read_file"}}}')" \
+    "UNREADABLE"
+
+# The inventory gate. Behavioural cases only cover the hooks this file
+# happens to name, and the defect was exactly a hook nobody named.
+nopy_gates="block-dangerous.sh coordinator-pretooluse.sh planner-pretooluse.sh"
+nopy_gates="$nopy_gates refactorer-pretooluse.sh researcher-pretooluse.sh test-writer-pretooluse.sh"
+
+unrouted=""
+for f in $nopy_gates; do
+    grep -q 'af_require_python' "$HOOK_DIR/$f" 2>/dev/null || unrouted="$unrouted $f"
+done
+if [ -z "$unrouted" ]; then
+    assert_true "every PreToolUse gate routes a missing interpreter through af_require_python" 1
+else
+    assert_true "every PreToolUse gate routes a missing interpreter through af_require_python" 0 \
+        "not routed:$unrouted"
+fi
+
+failopen=""
+for f in $nopy_gates; do
+    if grep -qE 'if \[ -z "\$(AF_)?PYTHON" \]' "$HOOK_DIR/$f" 2>/dev/null; then
+        failopen="$failopen $f"
+    fi
+done
+if [ -z "$failopen" ]; then
+    assert_true "no PreToolUse gate keeps its own missing-interpreter branch" 1
+else
+    assert_true "no PreToolUse gate keeps its own missing-interpreter branch" 0 \
+        "still branching on a missing interpreter:$failopen"
+fi
+
+# A gate added later is a gate nobody listed above. Catch the omission here
+# rather than in the incident it would otherwise cause.
+unlisted=""
+for f in "$HOOK_DIR"/*-pretooluse.sh; do
+    [ -f "$f" ] || continue
+    case " $nopy_gates " in
+        *" $(basename "$f") "*) ;;
+        *) unlisted="$unlisted $(basename "$f")" ;;
+    esac
+done
+if [ -z "$unlisted" ]; then
+    assert_true "every shipped *-pretooluse hook is covered by the no-interpreter gate" 1
+else
+    assert_true "every shipped *-pretooluse hook is covered by the no-interpreter gate" 0 \
+        "not covered:$unlisted"
+fi
+
 # --- Parse gate ------------------------------------------------------------
 #
 # A hook that dies at parse time produces no output, and no output is

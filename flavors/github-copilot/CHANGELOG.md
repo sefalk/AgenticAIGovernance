@@ -142,6 +142,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The hard-deny tier no longer disappears on a host without Python (#251).**
+  `block-dangerous.sh` answered a missing interpreter with `echo '{}'` and exit
+  0 — byte for byte the answer it gives to a command it has inspected and found
+  harmless. On a POSIX machine where Python was simply never installed, the
+  tier that refuses force pushes, `reset --hard` and `rm -rf` was not weakened
+  but absent, and nothing on stdout or stderr said so. The PowerShell twin was
+  never affected: it parses JSON natively, so the primary safety guard had a
+  hard Python dependency on one platform and none on the other.
+
+  Measured while fixing it, and the reason the fix is not a patch to one file:
+  **nine shipped hooks carried the same branch**, six of them PreToolUse gates.
+  The defect was a habit, not an oversight.
+
+  Gates now route a missing interpreter through `af_require_python`, which
+  refuses. The refusal is scoped by each gate's own "do I judge this tool"
+  predicate, because these hooks are registered for *every* tool call:
+  refusing blindly would stop reads and searches too and take the session down
+  with the gate. A tool a gate never judges stays allowed — a real verdict
+  rather than a failure to reach one — and a payload whose `tool_name` cannot
+  be read is refused, because unreadable is not harmless.
+
+  Reading that one field without an interpreter is done with shell parameter
+  expansion, no subprocess, since one reason the interpreter can be missing is
+  a PATH that takes every external binary with it. It is defensible only for
+  this field: tool names are bare identifiers and cannot contain an escape. A
+  command string cannot forge the key — JSON requires the quotes inside a
+  string to be escaped, so the real key still wins — and a payload carrying a
+  genuinely nested second key is reported unreadable rather than guessed at.
+
+  The regression suite gains an inventory gate as well as behavioural cases,
+  because the behavioural cases only cover hooks somebody remembered to name,
+  and a hook nobody named was the defect. It asserts that every shipped
+  `*-pretooluse` hook is listed, that each routes through `af_require_python`,
+  and that none has reintroduced a fail-open branch of its own. The
+  no-interpreter state is reproduced by shadowing `python`, `python3` and `py`
+  with executables that resolve but exit non-zero — the App Execution Alias
+  state `af_find_python` already probes for — rather than by a test-only
+  switch inside the guard, since a guard with a bypass is not the guard that
+  ships.
+
+  Not fixed here: the three hooks that observe rather than gate
+  (`scan-secrets`, `coordinator-posttooluse`, `coordinator-postmerge`) still
+  fall silent without an interpreter. A PreToolUse refusal is not available to
+  them and the right answer differs, so they stay with #168, which tracks the
+  undeclared dependency and the fail-open/fail-closed inconsistency across the
+  payload.
+
 - **The planner can revise its own plan, so the review step it is measured
   against is executable (#235).** The `tdd-orchestration` runbook mandates a
   plan review whose only remedy is "return the plan to the planner" — but the

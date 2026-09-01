@@ -118,6 +118,91 @@ af_find_python() {
 
 AF_PYTHON=$(af_find_python "${AF_PYTHON_OVERRIDE:-}" python3 python py)
 
+# af_tool_name_from_json RAW
+#
+# Prints the payload's tool_name. Returns 1 when it cannot be read with
+# confidence -- "unreadable" is an answer callers must be able to act on,
+# which is why it is not conflated with the empty string.
+#
+# Parameter expansion only: no cat, no grep, no interpreter. That is the
+# entire point. This function exists to answer when the interpreter is gone,
+# and one reason it can be gone is a PATH that takes every external binary
+# with it.
+#
+# Parsing JSON by string surgery is normally a mistake, and it is defensible
+# here only because of the single field it reads: tool names are bare
+# identifiers, so the value cannot contain an escape or an embedded quote.
+# Nothing else may be read this way -- tool_input.command certainly cannot.
+#
+# A command string cannot forge the key, because JSON requires the quotes
+# inside a string to be escaped: `\"tool_name\"` in a command is not the token
+# searched for here. A nested second key is possible, though, and that is
+# reported unreadable rather than guessed at.
+af_tool_name_from_json() {
+    _tn_rest="$1"
+    case "$_tn_rest" in
+        *'"tool_name"'*) ;;
+        *) return 1 ;;
+    esac
+    _tn_rest="${_tn_rest#*\"tool_name\"}"
+    case "$_tn_rest" in
+        *'"tool_name"'*) return 1 ;;
+    esac
+    _tn_rest="${_tn_rest#*:}"
+    case "$_tn_rest" in
+        *\"*) ;;
+        *) return 1 ;;
+    esac
+    _tn_rest="${_tn_rest#*\"}"
+    _tn_rest="${_tn_rest%%\"*}"
+    [ -n "$_tn_rest" ] || return 1
+    printf '%s\n' "$_tn_rest"
+    return 0
+}
+
+# af_require_python RAW PREDICATE GATE
+#
+# The single answer every PreToolUse gate gives when it has no interpreter.
+# Returns normally when one is available, so the caller's happy path is
+# unchanged; otherwise it emits a verdict and exits.
+#
+# A missing interpreter used to mean `echo '{}'; exit 0` -- byte for byte the
+# answer a gate gives to a call it has inspected and approved. The gate
+# vanished and said nothing about it (issue #251). It refuses instead.
+#
+# The refusal is scoped by PREDICATE, the caller's own "do I judge this tool"
+# test, because these hooks are registered for every tool call: refusing
+# blindly would stop reads and edits too and take the session down with the
+# gate. A tool the gate never judges is still allowed, which is a real
+# verdict rather than a failure to reach one. A payload whose tool_name
+# cannot be read is refused, because unreadable is not harmless.
+#
+# GATE names the gate in the refusal and must be a plain literal -- see
+# af_deny_no_python.
+af_require_python() {
+    [ -n "${AF_PYTHON:-}" ] && return 0
+    if _rq_tool=$(af_tool_name_from_json "$1"); then
+        if ! "$2" "$_rq_tool"; then
+            printf '{}\n'
+            exit 0
+        fi
+    fi
+    af_deny_no_python "$3"
+}
+
+# af_deny_no_python GATE
+#
+# Emits the PreToolUse refusal for a missing interpreter, then exits 0.
+#
+# The reason is fixed text and GATE must be a plain literal: this runs
+# precisely when nothing can be trusted to escape anything correctly, and an
+# unparsable verdict is indistinguishable from no verdict at all -- the gate
+# would disarm itself exactly when it had something to say.
+af_deny_no_python() {
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Policy hard-deny: the %s gate found no working Python interpreter (tried AF_PYTHON_OVERRIDE, python3, python, py) and cannot read the payload it exists to judge. A guard that cannot read its input refuses rather than waves through (issue #251). Install Python 3, or set AF_PYTHON_OVERRIDE to an interpreter that runs."}}\n' "$1"
+    exit 0
+}
+
 # af_plan_lifecycle WORKFLOW_ID [ROOT]
 #
 # Prints "FOUND|STATUS|PATH" for the plan file belonging to this workflow:

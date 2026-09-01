@@ -35,22 +35,29 @@ PYTHON="$AF_PYTHON"
 
 raw=$(cat)
 
-if [ -z "$PYTHON" ]; then
-    echo '{}'
-    exit 0
-fi
-
-tool_name=$(echo "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_name',''))" 2>/dev/null)
-
 # create_and_run_task and run_task are the names VS Code actually sends; the
 # camelCase spellings never occur in a captured payload and are kept only so a
 # rename upstream degrades to a stale alias rather than to an inert gate.
-case "$tool_name" in
-    *terminal*|*Terminal*) ;;
-    create_and_run_task|createAndRunTask) ;;
-    run_task|runTask) ;;
-    *) echo '{}'; exit 0 ;;
-esac
+bd_is_gated_tool() {
+    case "$1" in
+        *terminal*|*Terminal*) return 0 ;;
+        create_and_run_task|createAndRunTask) return 0 ;;
+        run_task|runTask) return 0 ;;
+    esac
+    return 1
+}
+
+# No interpreter means this hook cannot read the command it exists to
+# classify, so it refuses the calls it gates rather than emitting the same
+# bytes as consent (issue #251). Calls it never judges stay allowed.
+af_require_python "$raw" bd_is_gated_tool "dangerous-command"
+
+tool_name=$(echo "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_name',''))" 2>/dev/null)
+
+if ! bd_is_gated_tool "$tool_name"; then
+    echo '{}'
+    exit 0
+fi
 
 if [ "$tool_name" = "createAndRunTask" ] || [ "$tool_name" = "create_and_run_task" ]; then
     # ------------------------------------------------------------------

@@ -20,7 +20,21 @@ RAW=$(cat)
 # leave $? = 1 when the guard does not fire, which becomes the hook's exit
 # status if the list is ever the last statement, and it hides the control flow.
 if [ -z "$RAW" ]; then echo '{}'; exit 0; fi
-if [ -z "$AF_PYTHON" ]; then echo '{}'; exit 0; fi
+
+# Read-only and search tools are never judged by this hook. Named once, so the
+# no-interpreter path below and the allow branch further down cannot drift.
+co_is_gated_tool() {
+    case "$1" in
+        *read*|*Read*|*search*|*Search*|*find*|*Find*|*list*|*List*|*get*|*Get*|*problems*)
+            return 1 ;;
+    esac
+    return 0
+}
+
+# No interpreter means neither the command policy nor the commit-message gate
+# can be evaluated, so everything this hook judges is refused rather than
+# waved through (issue #251). Reads and searches stay allowed.
+af_require_python "$RAW" co_is_gated_tool "coordinator command-policy"
 
 TOOL_NAME=$(echo "$RAW" | "$AF_PYTHON" -c "
 import sys, json
@@ -34,10 +48,7 @@ except Exception:
 if [ -z "$TOOL_NAME" ]; then echo '{}'; exit 0; fi
 
 # Allow read-only and search tools unconditionally
-case "$TOOL_NAME" in
-    *read*|*Read*|*search*|*Search*|*find*|*Find*|*list*|*List*|*get*|*Get*|*problems*)
-        echo '{}'; exit 0 ;;
-esac
+if ! co_is_gated_tool "$TOOL_NAME"; then echo '{}'; exit 0; fi
 
 # Intercept terminal tool calls -- block pytest, validate git commit message quality
 # `case` is case-sensitive: the real tool name is `runInTerminal`, so a

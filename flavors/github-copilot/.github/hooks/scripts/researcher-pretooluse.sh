@@ -19,7 +19,19 @@ RAW=$(cat)
 # leave $? = 1 when the guard does not fire, which becomes the hook's exit
 # status if the list is ever the last statement, and it hides the control flow.
 if [ -z "$RAW" ]; then echo '{}'; exit 0; fi
-if [ -z "$AF_PYTHON" ]; then echo '{}'; exit 0; fi
+
+# Only fetch calls are inspected -- named once, so the no-interpreter path and
+# the classifier below cannot drift apart.
+rs_is_gated_tool() {
+    case "$1" in
+        *fetch*|*Fetch*) return 0 ;;
+    esac
+    return 1
+}
+
+# No interpreter means the URL allowlist cannot be evaluated, so fetches are
+# refused rather than waved through (issue #251).
+af_require_python "$RAW" rs_is_gated_tool "researcher fetch-allowlist"
 
 TOOL_NAME=$(echo "$RAW" | "$AF_PYTHON" -c "
 import sys, json
@@ -30,11 +42,7 @@ except Exception:
     print('')
 " 2>/dev/null)
 
-# Only inspect fetch tool calls
-case "$TOOL_NAME" in
-    *fetch*|*Fetch*) ;;
-    *) echo '{}'; exit 0 ;;
-esac
+if ! rs_is_gated_tool "$TOOL_NAME"; then echo '{}'; exit 0; fi
 
 # VS Code's fetch tool sends `urls` -- an array, beside `query`. The single
 # `url`/`uri` string this hook was written against is a legacy shape, so both
