@@ -1476,12 +1476,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   positive, the absence of the destructive advice, tool scoping, and the
   PreToolUse write. Suite: **279 passed, 0 failed**.
 
-  The bash twin carries the same logic **and one further fix**. It used
-  `[ -z "$X" ] && echo '{}' && exit 0`, which evaluates to 1 whenever `$X` is
-  non-empty and so aborted the hook under `set -euo pipefail` — the exact
-  failure mode its own header comment warns about twenty lines above. Both
-  occurrences are now `if` blocks. **This was not executed:** the authoring host
-  has no bash, so every bash change here is reviewed, not measured (#168).
+  The bash twins are no longer a review-only artifact. The host was believed to
+  have no bash; it has one (Git for Windows ships GNU bash 5.2.37, merely absent
+  from `PATH`), so both hooks were run in a real git fixture for the first time:
+  **10 assertions, 0 failures**, covering the same six behaviours plus snapshot
+  consumption. Two defects surfaced that a review had not. The snapshot calls
+  resolved git from the **current working directory** while the PowerShell twin
+  anchors on `AF_CODE_ROOT` — a hook runs from wherever the agent sits, so Pre
+  and Post could address different repositories and the guard would then simply
+  never fire. Both are now `git -C "$AF_CODE_ROOT"`.
+
+  The second is a correction to this repository's own claim. Three hooks carried
+  the comment *"`A && B && exit` returns 1 when A is false, which under `set -e`
+  aborts the hook"*. **Measured: it does not.** `set -e` exempts every command in
+  an `&&` list except the one after the final `&&`, so the failing test is
+  ignored and the script falls through as intended. The real cost of the pattern
+  is a non-zero `$?` when the guard does not fire — which becomes the hook's exit
+  status if the list is ever the last statement — plus opaque control flow. The
+  `if` form is still correct and is now used consistently; the comments state
+  what was measured rather than what was assumed.
 
 - **The test guard denied reading, not running (#183).** `coordinator-pretooluse`
   decided "this is a test run" with `$command -match '\bpytest\b'`. A `.` counts

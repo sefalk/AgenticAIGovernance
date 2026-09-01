@@ -13,8 +13,11 @@ set -euo pipefail
 . "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 
 RAW=$(cat)
-# `A && B && exit` returns 1 when A is false, which under `set -e` aborts the
-# hook instead of falling through. Explicit `if` blocks do not.
+# Explicit `if`, not `[ -z "$X" ] && echo '{}' && exit 0`. Measured on bash
+# 5.2.37: that list does NOT abort under `set -e` -- the failing test is not the
+# command after the final `&&`, so the exception applies. What it does do is
+# leave $? = 1 when the guard does not fire, which becomes the hook's exit
+# status if the list is ever the last statement, and it hides the control flow.
 if [ -z "$RAW" ]; then echo '{}'; exit 0; fi
 if [ -z "$AF_PYTHON" ]; then echo '{}'; exit 0; fi
 
