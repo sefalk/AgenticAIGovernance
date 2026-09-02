@@ -86,7 +86,10 @@ def main() -> int:
     print(f"[deploy-suite] runtime {elapsed:.1f}s")
 
     if proc.returncode != 0:
-        print(f"FAIL pytest exited {proc.returncode}")
+        if proc.returncode == 2:
+            print("FAIL pytest exited 2 -- collection error, so no test ran at all")
+        else:
+            print(f"FAIL pytest exited {proc.returncode}")
         return 1
 
     unexpected = [r.strip() for r in SKIP_LINE.findall(output) if not any(a in r for a in ALLOWED_SKIPS)]
