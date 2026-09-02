@@ -358,6 +358,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install ruff==0.16.2 pyyaml
+          python -m pip install -e "flavors/github-copilot/mcp-deploy[dev]"
 
       # Several suites build throwaway git repositories and commit inside them.
       # A fresh runner has no global git identity, so those commits would fail
@@ -426,6 +427,26 @@ jobs:
       - name: Test the work-item state contract
         shell: powershell
         run: python .github\scripts\test-ado-work-item-states.py
+
+      # 122 tests over the code that decides whether a consumer project's file
+      # is overwritten, preserved, or flagged -- and until #270 nothing ran
+      # them. The first CI-shaped run found a test that had been failing
+      # unnoticed. The runner script owns the parts that must not live in YAML:
+      # Git's unix tools on PATH (without `awk` the sh-parity tests self-skip
+      # and the suite passes while asserting nothing about deploy.sh), and the
+      # rule that an unexpected skip fails the step.
+      - name: Run the deploy engine test suite
+        shell: powershell
+        run: python .github\scripts\run-deploy-suite.py
+
+      # Naming that suite in the step above fixed one instance. The gap was
+      # structural: suites reach CI either through the run-all-tests.ps1 sweep
+      # or by being named here one at a time, and one fitting neither falls
+      # between them -- #190, then #270. This asserts the property instead, so
+      # a suite added in a new place fails on the pull request that adds it.
+      - name: Check that every suite runs in CI
+        shell: powershell
+        run: python .github\scripts\test-ci-suite-coverage.py
 
       # #124 made `ruff format` blocking for consumers while the framework's
       # own Python went unformatted (#167). The file list comes from git rather

@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _probe import usable
 
 from af_deploy_mcp import deploy_core
 
@@ -74,13 +75,17 @@ def test_mcp_apply_then_ps1_dryrun_is_clean(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(
-    shutil.which("bash") is None or not DEPLOY_SH.is_file(),
+    not usable("bash") or not DEPLOY_SH.is_file(),
     reason="bash or deploy.sh not available",
 )
 def test_sh_deploy_then_mcp_dryrun_is_clean(tmp_path: Path) -> None:
     # Guards the hash-casing fix: deploy.sh writes uppercase .af-hashes so the
     # case-sensitive MCP 3-way classifier reads a bash baseline without spurious
-    # CONFLICTs. (Skipped on Windows where bash is absent.)
+    # CONFLICTs. Skipped on Windows -- not because bash is missing (Git ships it,
+    # just off PATH) but because deploy.sh under MSYS exceeds the 300s below
+    # (measured 2026-09-02). Putting bash on PATH turns this into a slow failure.
+    # On a hosted runner the name resolves to the WSL launcher instead, which is
+    # why availability is probed rather than looked up; see _probe.usable.
     target = tmp_path / "proj"
     target.mkdir()
     res = subprocess.run(
