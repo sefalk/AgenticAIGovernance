@@ -21,10 +21,17 @@ tests skip there. Putting them on PATH was tried and measured on 2026-09-02:
 `bash deploy.sh --force` needs longer than the 300s the test itself allows, so
 all eleven turn from skips into five-minute failures. On Windows the skip is
 the correct outcome, not a gap to close by installing something.
+
+Failures are also emitted as a workflow annotation. A step that exits non-zero
+publishes nothing but "Process completed with exit code 1" to anyone who cannot
+open the run log, which is what made the first two failures of this gate
+undiagnosable from outside the repository. An annotation is rendered on the run
+page itself, so the reason travels with the failure.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -60,10 +67,31 @@ PASS_COUNT = re.compile(r"(\d+) passed")
 TIMEOUT = 900
 
 
+def fail(summary: str, detail: str = "") -> int:
+    """Print a failure and, under Actions, raise it as an annotation."""
+    print(f"FAIL {summary}")
+    if detail:
+        print(detail)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        body = summary if not detail else f"{summary}\n{detail}"
+        escaped = body.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::error title=deploy engine suite::{escaped[:3000]}")
+    return 1
+
+
+def salient(output: str) -> str:
+    """The lines of a pytest run that say why it failed, without the noise."""
+    lines = [line.rstrip() for line in output.splitlines() if line.strip()]
+    marked = [
+        line for line in lines if line.startswith("E ") or any(m in line for m in ("FAILED", "ERROR", "Interrupted"))
+    ]
+    picked = list(dict.fromkeys(marked[-15:] + lines[-10:]))
+    return "\n".join(picked)
+
+
 def main() -> int:
     if not SUITE.is_dir():
-        print(f"FAIL suite directory missing: {SUITE}")
-        return 1
+        return fail(f"suite directory missing: {SUITE}")
 
     started = time.monotonic()
     try:
@@ -78,8 +106,7 @@ def main() -> int:
             stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
-        print(f"FAIL the suite did not finish within {TIMEOUT}s")
-        return 1
+        return fail(f"the suite did not finish within {TIMEOUT}s")
     elapsed = time.monotonic() - started
     output = proc.stdout + proc.stderr
     print(output)
@@ -87,27 +114,27 @@ def main() -> int:
 
     if proc.returncode != 0:
         if proc.returncode == 2:
-            print("FAIL pytest exited 2 -- collection error, so no test ran at all")
+            reason = "pytest exited 2 -- collection error, so no test ran at all"
         else:
-            print(f"FAIL pytest exited {proc.returncode}")
-        return 1
+            reason = f"pytest exited {proc.returncode}"
+        return fail(reason, salient(output))
 
     unexpected = [r.strip() for r in SKIP_LINE.findall(output) if not any(a in r for a in ALLOWED_SKIPS)]
     if unexpected:
-        print(f"FAIL {len(unexpected)} unexpected skip(s) -- a skipped test asserts nothing:")
-        for reason in unexpected:
-            print(f"  {reason}")
-        print("Install the missing prerequisite, or add the reason to ALLOWED_SKIPS with a justification.")
-        return 1
+        return fail(
+            f"{len(unexpected)} unexpected skip(s) -- a skipped test asserts nothing",
+            "\n".join(unexpected)
+            + "\nInstall the missing prerequisite, or add the reason to ALLOWED_SKIPS with a justification.",
+        )
 
     passed = PASS_COUNT.search(output)
     if not passed:
-        print("FAIL no pass count in the summary -- cannot tell whether anything ran")
-        return 1
+        return fail("no pass count in the summary -- cannot tell whether anything ran", salient(output))
     if int(passed.group(1)) < MIN_PASSED:
-        print(f"FAIL only {passed.group(1)} tests passed, expected at least {MIN_PASSED}")
-        print("The suite shrank. Restore the tests, or lower MIN_PASSED deliberately.")
-        return 1
+        return fail(
+            f"only {passed.group(1)} tests passed, expected at least {MIN_PASSED}",
+            "The suite shrank. Restore the tests, or lower MIN_PASSED deliberately.",
+        )
 
     print(f"OK  deploy engine suite: {passed.group(1)} passed in {elapsed:.1f}s, no unexpected skips")
     return 0

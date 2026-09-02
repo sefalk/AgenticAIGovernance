@@ -15,6 +15,7 @@ is the only moment the gap is cheap to close.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -30,6 +31,18 @@ EXEMPT: dict[str, str] = {}
 
 failures: list[str] = []
 checks = 0
+
+
+def annotate(body: str) -> None:
+    """Raise a failure as a workflow annotation.
+
+    A step that exits non-zero publishes nothing but its exit code to anyone
+    who cannot open the run log, so the reason is attached to the run itself.
+    """
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    escaped = body.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"::error title=CI suite coverage::{escaped[:3000]}")
 
 
 def check(label: str, condition: bool, detail: str = "") -> None:
@@ -112,7 +125,9 @@ def swept_dirs(text: str) -> set[Path]:
 def main() -> int:
     check("workflow directory exists", WORKFLOWS.is_dir(), str(WORKFLOWS))
     if not WORKFLOWS.is_dir():
-        print("\n".join(f"FAIL {f}" for f in failures))
+        report = "\n".join(f"FAIL {f}" for f in failures)
+        print(report)
+        annotate(report)
         return 1
 
     artifacts = test_artifacts()
@@ -146,8 +161,10 @@ def main() -> int:
         check(f"exemption {rel} carries a reason", len(reason) >= 15, reason)
 
     if failures:
-        print("\n".join(f"FAIL {f}" for f in failures))
+        report = "\n".join(f"FAIL {f}" for f in failures)
+        print(report)
         print(f"\n{len(failures)} of {checks} checks failed")
+        annotate(report)
         return 1
     print(f"OK  CI suite coverage: {len(artifacts)} test artifacts, all reachable ({checks} checks)")
     return 0
