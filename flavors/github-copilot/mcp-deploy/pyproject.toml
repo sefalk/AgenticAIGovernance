@@ -9,7 +9,9 @@ description = "AF deploy MCP server (PoC) — framework status, dry-run, guarded
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-dependencies = ["mcp>=1.2"]
+# Upper bound is load-bearing: server.py imports mcp.server.fastmcp, which mcp 2.x
+# renamed to MCPServer. Migrating is tracked separately.
+dependencies = ["mcp>=1.2,<2"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
