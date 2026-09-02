@@ -55,7 +55,10 @@ and items may appear on an unexpected board/team:
 ## Closure Discipline (two-stage, post-merge)
 
 - Closure is **post-merge**. At finalize the integration PR is not yet merged,
-  so set at most **Resolved** (delivered, pending merge) — never **Closed**.
+  so set at most the type's **delivered** state (pending merge) — never a
+  `Completed`-category state. The delivered state is resolved from the type,
+  not from the name `Resolved`: a Task has none at all. See the
+  State-Applicability Guard in `agents/ado-work-item-manager.agent.md`.
 - Always post an **AC coverage map** (each acceptance criterion -> evidence or
   `UNMET`) before any closure transition. It is the audit trail and the
   checkable artifact.

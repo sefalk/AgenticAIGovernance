@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Work-item transitions are resolved from the type instead of named (#267).**
+  The ADO sync workflow mandated a post-merge transition to `Resolved`, and the
+  work-item worker's exit gate forbade `Closed` at finalize. In the Agile
+  process template the `Task` type has the states New / Active / Closed /
+  Removed — **no `Resolved`**. A Task-typed item therefore had no reachable
+  post-merge target: it stayed Active, indistinguishable on the board from work
+  nobody had started, and the gate that stranded it read as correct prose.
+  Nothing in the repository could notice the contradiction.
+
+  Measuring the types (`wit_work_item` action `get_type`) turned up a second
+  reason the old contract was unsound even where the name existed: `Resolved`
+  sits in category `Resolved` on `Bug` but in category `InProgress` on
+  `User Story`. Matching either the name or a single category is wrong.
+
+  The worker now runs a **State-Applicability Guard** before any transition —
+  the same shape as the Field-Applicability Guard it already had, using the
+  same `get_type` probe. The target is a *role*: a state in category
+  `Resolved`, else an `InProgress` state that is not the item's current one,
+  else none. Several candidates → `NEEDS_CONFIRMATION` rather than a guess.
+
+  When a type has no delivered state, the item is not left to strand and is not
+  force-closed: it stays Active, carries the tag
+  `delivered-pending-verification`, and the worker returns
+  `BLOCKED_NO_DELIVERED_STATE` naming the type and its actual states. The tag
+  is the mirror — a missing intermediate state is not a grant of closing
+  authority, but it must not be invisible either.
+
+  `skills/ado-shared/SKILL.md` gained the type-selection rule that prevents the
+  situation upstream (structural role, not perceived size — a Task only for
+  leaf work whose closure rides on a parent), and records that ADO's own PR
+  auto-transition fires only for the default branch and so never fires against
+  an integration branch such as `dev`.
+
+  The guard against recurrence is
+  `.github/scripts/test-ado-work-item-states.py` (47 checks, wired into
+  Regression): it fails when a transition names a state again, when the guard
+  loses one of its paths, when the measured evidence is edited out of the
+  agent, or when the skill and the agent drift apart on what the target is.
+
 ### Added
 
 - **The framework's delivery paths are a skill now, and each one ends in a

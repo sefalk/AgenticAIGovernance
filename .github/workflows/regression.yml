@@ -416,6 +416,17 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-deployment-skill.py
 
+      # The framework mandated a transition to `Resolved`, the ADO `Task` type
+      # has no such state, and nothing could notice -- items were unclosable by
+      # construction while the gate that caused it read as correct prose
+      # (#267). The contract is now a role resolved from the type via
+      # `get_type`. This fails when a transition names a state again, when the
+      # guard loses one of its paths, or when the skill and the agent drift
+      # apart on what the target is.
+      - name: Test the work-item state contract
+        shell: powershell
+        run: python .github\scripts\test-ado-work-item-states.py
+
       # #124 made `ruff format` blocking for consumers while the framework's
       # own Python went unformatted (#167). The file list comes from git rather
       # than a hardcoded glob, so a new file is covered the moment it is

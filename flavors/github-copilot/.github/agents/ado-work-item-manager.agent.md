@@ -49,6 +49,9 @@ Consult these skills when relevant to the task:
 9. Before writing a type-specific field (e.g. `AcceptanceCriteria`), run the
    **Field-Applicability Guard** — never silently write a field the target
    work-item type does not carry.
+10. Before any state transition, run the **State-Applicability Guard** —
+    resolve the target from the type's own states; never promise a state the
+    type does not have.
 
 ## Databricks Evidence Traceability (When Applicable)
 
@@ -100,6 +103,53 @@ tools, so a field that is on the type yet hidden by a custom form layout is out
 of scope. Never claim “verified visible on the form”; claim “field applicable to
 the type”.
 
+## State-Applicability Guard (Transitions, Mandatory)
+
+A work-item **type defines its own states**. This framework's lifecycle is
+written in *role* names, not in the state names of one process template.
+Never promise a transition to a state the target type does not have.
+
+Measured via `wit_work_item` (action `get_type`) in an Agile-template project:
+
+| Type | States (category) | Delivered state? |
+|---|---|---|
+| Bug | New (Proposed), Active (InProgress), Resolved (**Resolved**), Closed (Completed) | yes |
+| User Story | New (Proposed), Active (InProgress), Resolved (**InProgress**), Closed (Completed), Removed (Removed) | yes |
+| Task | New (Proposed), Active (InProgress), Closed (Completed), Removed (Removed) | **none** |
+
+Two facts there defeat name-matching: `Task` has no `Resolved` at all, and
+`Resolved` sits in a **different category** on `User Story` than on `Bug`.
+Resolve the target from the type; never match the literal string `Resolved`.
+
+**Resolution order.** Call `get_type` for the item's type, read `states[]`
+(`name` + `category`), then:
+
+1. A state with category `Resolved` → that is the delivered state.
+2. Otherwise a state with category `InProgress` that is not the item's current
+   state → that is the delivered state.
+3. More than one candidate survives → `NEEDS_CONFIRMATION`, naming them. Do
+   not guess.
+4. No candidate → **the type has no delivered state.** Say so; do not
+   substitute a neighbouring one.
+
+**When the type has no delivered state**, take exactly one path and report
+which — the same three paths as the Field-Applicability Guard:
+
+- **On create:** choose a type that has one (type-selection rule in
+  `skills/ado-shared/SKILL.md` § Step 0a). This is the only path that prevents
+  the situation instead of working around it.
+- **On an existing item:** recommend a type change; perform it only with
+  explicit human confirmation (a retype can drop type-specific data).
+- **If the type must remain:** keep the item **Active**, post the AC→evidence
+  map, add the tag `delivered-pending-verification`, and return
+  `BLOCKED_NO_DELIVERED_STATE` naming the type and its actual states.
+
+The tag is the mirror, and it is not optional: without it the item is
+indistinguishable on the board from work nobody started, which is exactly how
+delivered items go stale unnoticed. **Never set a `Completed`-category state
+to escape this** — a type missing an intermediate state is not a grant of
+closing authority.
+
 ## Closure Acceptance-Criteria Gate (Mandatory)
 
 Closure is a **two-stage, post-merge** process. Never move a work item to a
@@ -119,10 +169,13 @@ may complete asynchronously). Therefore:
    marked `UNMET`. Post it on success and on failure — it is the audit trail
    and the checkable gate artifact.
 3. **State transition:** all AC delivered and covered by the open PR -> you
-   MAY set **Resolved** (delivered, pending merge), never **Closed**. Any AC
-   unmet/partial/unverifiable -> keep **Active**, mark the unmet AC, report
-   `BLOCKED_CLOSURE`.
-4. Never set **Closed** at finalize.
+   MAY set the type's **delivered** state (State-Applicability Guard above),
+   never a `Completed`-category state. Any AC unmet/partial/unverifiable ->
+   keep **Active**, mark the unmet AC, report `BLOCKED_CLOSURE`.
+4. Never set a `Completed`-category state at finalize. If the type has no
+   delivered state, the item stays Active **with the
+   `delivered-pending-verification` tag** and `BLOCKED_NO_DELIVERED_STATE` —
+   Active alone is a silent outcome and is not acceptable.
 
 ### Stage 2 — Post-merge: Close against merged evidence
 
@@ -130,8 +183,10 @@ Only after the PR is completed/merged:
 
 1. Re-verify each AC against **merged** evidence and refresh the map.
 2. All AC covered -> set **Closed** referencing the merge.
-3. If the merge cannot be confirmed in-session, leave **Resolved** and report
-   `CLOSE_PENDING_MERGE` — closure is deferred to the next run or the human.
+3. If the merge cannot be confirmed in-session, leave the item in its
+   delivered state (or Active + `delivered-pending-verification` for a type
+   that has none) and report `CLOSE_PENDING_MERGE` — closure is deferred to
+   the next run or the human.
 4. **Never bulk-close** multiple linked items; verify AC per item.
 
 For a multi-phase Feature, closure targets the delivered phase's child story,
@@ -167,8 +222,9 @@ stories (`NEEDS_CONFIRMATION`), and keep it open.
 
 ```markdown
 ## ADO Work Item Result
-- **Status:** {LINKED | CREATED | NEEDS_CONFIRMATION | RESOLVED | CLOSED | DEGRADED | BLOCKED | BLOCKED_CLOSURE | CLOSE_PENDING_MERGE}
+- **Status:** {LINKED | CREATED | NEEDS_CONFIRMATION | RESOLVED | CLOSED | DEGRADED | BLOCKED | BLOCKED_CLOSURE | CLOSE_PENDING_MERGE | BLOCKED_NO_DELIVERED_STATE}
 - **Work item id:** {id or n/a}
+- **Delivered-state mapping:** {`<state>` (`<category>`) resolved from `get_type` | none — `<type>` has no delivered state, tagged `delivered-pending-verification` | n/a (no transition)}
 - **Decision path:** {auto-link | user-confirmed | explicit-id | created | fallback}
 - **Actions performed:** {searched | asked | created | updated | linked}
 - **AC coverage map posted:** {yes | no (not a closure step)}
@@ -201,7 +257,8 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Board routing applied on create | SOFT | New items set Area Path from `ADO_DEFAULT_AREA_PATH` (and Iteration from `ADO_DEFAULT_ITERATION_PATH`), or the run warns that the project default area is used | Standard+ |
 | Type-specific field applicability checked before write | HARD | Before writing a type-specific field (e.g. `AcceptanceCriteria`), the field is confirmed present in the target type's `wit_work_item` (action `get_type`) fields; an absent field is not written silently (a type carrying it is chosen, or the content is mirrored to `System.Description` and the path is reported) | Standard+ |
 | Non-destructive update policy followed | SOFT | Reviewer checks append/targeted update behavior | Standard+ |
-| No Close at finalize (Resolve only, pre-merge) | HARD | Finalize never sets Closed; item is Resolved or kept Active | Standard+ |
+| No Close at finalize (delivered state only, pre-merge) | HARD | Finalize never sets a `Completed`-category state; the item is in its type's delivered state, or Active — and Active is never a silent outcome (see the row below) | Standard+ |
+| Transition target resolved from the type, not assumed | HARD | Before any state transition, `wit_work_item` (action `get_type`) supplied the type's states and the target was resolved from them, never from the literal string `Resolved`. A type with no delivered state yields `BLOCKED_NO_DELIVERED_STATE` + the `delivered-pending-verification` tag, never a substituted state | Standard+ |
 | AC coverage map posted before any closure transition | HARD | Verify an AC->evidence map comment exists for the item | Standard+ |
 | Closure only against merged evidence | HARD | Closed only post-merge; otherwise `CLOSE_PENDING_MERGE` or `BLOCKED_CLOSURE` | Standard+ |
 | Working-state block updated when the item's state changed | HARD | `Working state` field is `updated`, or names why no state changed (`skills/work-item-state/SKILL.md` § 5) | Standard+ |
