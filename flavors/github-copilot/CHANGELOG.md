@@ -426,6 +426,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A release no longer re-attests work it did not do (#234).** A `dev` → `main`
+  promotion contains, by construction, every file the cycle touched, so both
+  declaration gates fired on it and the release author had to sign for changes
+  made in other pull requests weeks earlier. Observed on #230, where the
+  promotion changed exactly two files — `VERSION` and `CHANGELOG.md` — and
+  still had to carry a hook attestation and an environment declaration.
+
+  A contentless mandatory field is how a gate stops being a gate: it teaches
+  the author to fill the box rather than check the thing. Both gates say of
+  themselves *"Recorded, not verified"* and *"Declared, not reviewed"* — their
+  whole value is that a person stated something they believed, and a statement
+  nobody can mean is worth less than none.
+
+  The promotion is now exempt from both, and a new step checks the
+  contributing pull requests instead: it walks the first-parent chain from
+  `main` to `dev`, and for every merge that touched a gated path it reads that
+  pull request's body and confirms the declaration was there. A missing one
+  fails the promotion and names the pull request that owes it, because the
+  release author cannot supply it retroactively — the only useful thing to
+  tell them is which change arrived unattested.
+
+  Exempting the promotion would otherwise have opened a hole, since it is the
+  last point at which something that reached `dev` *without* a gate is still
+  visible. The first-parent walk is what closes it: that chain is one entry
+  per merge and one entry per direct push, so a change that arrived outside a
+  pull request is reported by construction rather than assumed absent. It
+  fails only when such a change touched a gated path, where a declaration is
+  genuinely missing. File lists come from the merge diff rather than the pull
+  request's file list, because what matters is what reached `dev`, and a pull
+  request can be edited after it merges.
+
+  `.github/scripts/test-promotion-gate.py` drives the step against a stubbed
+  `git` and `gh` — twelve cases, including the two that make the exemption
+  safe rather than convenient: a hand-run `git merge` with no pull request
+  number, and a direct push carrying a gated path. It also pins the three
+  gates to the same paths and markers, and pins the exemption to the
+  replacement: they are separate steps that cannot share a variable, and a
+  promotion gate looking for a marker the feature gate no longer demands would
+  pass every release while checking nothing.
+
+  One find worth recording, because the test found it and review would not:
+  PowerShell variable names are case-insensitive, so a stub named `$FILES` and
+  the step's own `$files` are one variable. The stub survived the first loop
+  iteration and failed on the second. `test-env-change-gate.py` carried the
+  same collision and got away with it by reading each stub exactly once; both
+  now prefix stub state with `STUB_`.
+
 - **The retro template no longer offers a status the schema rejects (#252).**
   `documenter.agent.md` told the documenter that a workflow log's `status:` is
   one of `COMPLETED`, `FAILED`, `ESCALATED`, and eleven lines later offered
