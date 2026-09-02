@@ -131,9 +131,11 @@ exactly one point: post-merge, evidence-based reconciliation.
   azure-devops-mcp default is `true`). A fast autocomplete merge must not
   auto-close linked items or outrun a corrective call.
 - Work-item lifecycle follows the commit lifecycle:
-  **New → Active** (at work start, before the branch) **→ Resolved**
+  **New → Active** (at work start, before the branch) **→ delivered**
   (post-merge into the integration branch, with an AC→evidence map) **→ Closed**
-  (only at verification / promotion, against merged evidence).
+  (only at verification / promotion, against merged evidence). The *delivered*
+  state is resolved from the work-item type — `Resolved` on a User Story or
+  Bug, absent on a Task — never assumed by name.
 - The `ado-work-item-manager` performs every status transition; the coordinator
   triggers the post-merge reconciliation once the merge is confirmed.
 

@@ -193,7 +193,7 @@ ado-work-item-manager(resolve + set Active)   # WIT-first, BEFORE the branch
    -> ado-work-item-manager(finalize: AC->evidence map, no Close)
    -> compliance-checker(post)
    -> [push feature branch] -> ado-pr-manager (autocomplete, transitionWorkItems:false)
-   -> [merge confirmed] -> ado-work-item-manager(reconcile: Resolved w/ evidence)
+   -> [merge confirmed] -> ado-work-item-manager(reconcile: delivered state w/ evidence)
 ```
 
 Use this only when the project contract defines Azure DevOps capability as
@@ -218,6 +218,31 @@ aligned from the start (this prevents reactive, mis-attributed, or WIT-less work
 The **planner** may propose the work item title/scope; the **coordinator**
 confirms the item and its id before branch creation. This id is the single
 source of truth for the branch slug, the PR link, and post-merge reconciliation.
+
+#### Work-item type selection (on create)
+
+Type follows **structural role**, not how large the task feels. The choice is
+effectively irreversible — a retype can drop type-specific data — and it
+decides which fields and which *states* exist at all.
+
+| The item… | Type |
+|---|---|
+| may acquire children, or spans phases | **Feature** |
+| is one shippable increment with its own acceptance criteria | **User Story** |
+| is a defect in behaviour that already shipped | **Bug** |
+| is leaf work under an existing parent, closed by that parent's verification | **Task** |
+
+**The Task constraint (measured, Agile template).** `Task` has the states
+New / Active / Closed / Removed — **no `Resolved`**. An item whose delivery has
+to be reconciled post-merge therefore cannot be a Task: the reconciliation
+target does not exist on the type, and the item strands in Active. Default to
+**User Story** whenever the item *is* the thing being delivered; use Task only
+for leaf work whose closure rides on a parent. Reported but not measured here:
+ADO also rejects Task-under-Task parenting, so a Task cannot be promoted into
+a container later.
+
+The `ado-work-item-manager`'s State-Applicability Guard catches a bad type at
+transition time — choosing correctly here is what keeps it from firing.
 
 ### ADO Pipeline Workflow
 
@@ -264,9 +289,17 @@ leaving that commit outside the integration branch unnoticed.
 ### Post-Merge Reconciliation (mandatory, request-based)
 
 The PR carries `transitionWorkItems: false`, so it never changes work-item
-status. Once the merge into the integration branch is **confirmed**, invoke
-**ado-work-item-manager** to transition the linked work item to **Resolved**
-with an AC→evidence map (Closed only later, at verification / promotion).
+status. (ADO's own auto-transition fires only for PRs targeting the
+**default** branch, so against an integration branch such as `dev` it would
+never fire anyway — the reconciliation below is the only thing that moves
+status.) Once the merge into the integration branch is **confirmed**, invoke
+**ado-work-item-manager** to transition the linked work item into the state
+its **type** defines as delivered-pending-verification, with an AC→evidence
+map. The target is resolved from `wit_work_item` (action `get_type`), never
+hard-coded: `Resolved` exists on a User Story or Bug but not on a Task, and
+the worker's **State-Applicability Guard** decides what happens when the type
+has none. A `Completed`-category state comes only later, at verification /
+promotion.
 
 This is the single point where the code and work-item state machines reconnect
 — status follows merged evidence, never the PR's auto-transition.
