@@ -61,6 +61,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built the way CI builds one. The CI figure is not measured until the first
   Regression run reports it.
 
+  Two further defects surfaced only once the suite ran on a hosted runner,
+  which is the argument for this change made by the change itself. The first:
+  the parity tests guarded themselves with `shutil.which("bash")`, which
+  answers whether a name resolves, not whether running it does anything. On a
+  GitHub-hosted Windows runner `bash` resolves to
+  `C:\Windows\System32\bash.exe` — the WSL launcher — and a runner with no
+  distribution installed answers every call with "Windows Subsystem for Linux
+  has no installed distributions" and exit 1, which the test faithfully
+  reported as a `deploy.sh` failure. The identical guard skips on a developer
+  machine, where the name does not resolve at all, so the defect was invisible
+  locally in both directions. Availability is now probed rather than looked up
+  (`tests/_probe.py`): the tool is run on something trivial and must exit 0.
+  Probes are explicit per tool, and an unknown tool is refused rather than
+  assumed to accept `--version` — Windows PowerShell 5.1 answers that with a
+  non-zero exit, which would produce precisely the permanent silent skip this
+  gate exists to prevent.
+
+  The second is about diagnosis rather than code. A failing step publishes
+  nothing but "Process completed with exit code 1" to anyone who cannot open
+  the run log, and the log requires sign-in, so the first two failures of this
+  gate were undiagnosable from outside the repository — both had to be found by
+  rebuilding the CI environment locally and guessing what differed. Both new
+  gates now emit their reason as a workflow annotation, which is rendered on
+  the run page itself. The WSL failure above was read straight off the
+  annotation of the following run.
+
 - **Work-item transitions are resolved from the type instead of named (#267).**
   The ADO sync workflow mandated a post-merge transition to `Resolved`, and the
   work-item worker's exit gate forbade `Closed` at finalize. In the Agile
