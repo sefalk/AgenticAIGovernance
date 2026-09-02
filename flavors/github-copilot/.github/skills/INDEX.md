@@ -38,13 +38,14 @@
 | 27 | `copilot-authoring` | Reference depth for authoring Copilot customisation files — subagent pattern, model tiers, managed regions, built-in tool names, hooks JSON, prompt features, skill visibility, custom tool sets. | `copilot-authoring.instructions.md` (any agent editing a customisation file) |
 | 28 | `gh-issue` | GitHub issue lifecycle — repository routing (project vs framework upstream), duplicate search before create, evidence-grounded framework defect reports, sub-issue linking, and degraded-mode fallback. | gh-issue-manager |
 | 29 | `work-item-state` | Provider-agnostic tracker working state — the body-resident working-state block, dated decision records as comments, the read-both/update-on-landing rule, and the narrow trigger. | gh-issue-manager, ado-work-item-manager |
+| 30 | `deployment` | Framework delivery paths — release cut, routine upgrade, hotfix into a mid-flight project, conflict resolution — and the content assertion each one ends in. | coordinator |
 
 ## Agent Skill Matrix
 
 | Agent | Skills |
 |-------|--------|
 | **planner** | task-decomposition, risk-management, design-patterns, git-workflow |
-| **coordinator** | tdd-orchestration, git-workflow, git-worktrees, databricks-execution-patterns, notebook-execution |
+| **coordinator** | tdd-orchestration, git-workflow, git-worktrees, databricks-execution-patterns, notebook-execution, deployment |
 | **test-writer** | unit-testing, property-testing, test-execution, error-handling, human-escalation, notebook-execution |
 | **test-critic** | unit-testing, code-review, property-testing, test-execution |
 | **implementer** | hexagonal-architecture, pydantic, error-handling, design-patterns, static-analysis, dependency-management, test-execution, human-escalation, databricks-execution-patterns, notebook-execution |

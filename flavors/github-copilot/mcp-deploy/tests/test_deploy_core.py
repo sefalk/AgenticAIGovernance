@@ -81,6 +81,76 @@ def test_status_up_to_date_and_stale(tmp_path: Path) -> None:
     assert deploy_core.status(src, target)["state"] == "stale"
 
 
+# ── Payload staleness (#236) ───────────────────────────────────────────────
+
+
+def _bundled(tmp_path: Path, payload_version: str, repo_version: str | None) -> tuple[Path, Path]:
+    """Build a wheel-shaped layout: flavor/mcp-deploy/af_deploy_mcp/payload."""
+    flavor = tmp_path / "flavor"
+    pkg = flavor / "mcp-deploy" / "af_deploy_mcp"
+    src = _make_source(pkg / "payload", payload_version)
+    if repo_version is not None:
+        _write(flavor / "VERSION", repo_version + "\n")
+    return pkg, src
+
+
+def _deployed(tmp_path: Path, version: str) -> Path:
+    target = tmp_path / "proj"
+    _write(target / ".github" / ".af-version", f"version: {version}\n")
+    return target
+
+
+def test_bundled_payload_behind_repository_is_named(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("AF_SOURCE_ROOT", raising=False)
+    monkeypatch.delenv("AF_PAYLOAD_URL", raising=False)
+    pkg, src = _bundled(tmp_path, payload_version="1.2.3", repo_version="1.3.0")
+    result = deploy_core.status(src, _deployed(tmp_path, "1.2.3"), package_dir=pkg)
+    # The target matches the payload, so the old check is happy — that is the trap.
+    assert result["state"] == "up-to-date"
+    assert result["payload_state"] == "behind-repository"
+    assert result["repository_version"] == "1.3.0"
+    assert "1.2.3" in result["payload_note"] and "1.3.0" in result["payload_note"]
+
+
+def test_bundled_payload_matching_repository_is_current(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("AF_SOURCE_ROOT", raising=False)
+    monkeypatch.delenv("AF_PAYLOAD_URL", raising=False)
+    pkg, src = _bundled(tmp_path, payload_version="1.3.0", repo_version="1.3.0")
+    result = deploy_core.status(src, _deployed(tmp_path, "1.3.0"), package_dir=pkg)
+    assert result["payload_state"] == "current"
+    assert "payload_note" not in result
+
+
+def test_bundled_payload_without_a_checkout_says_it_cannot_tell(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("AF_SOURCE_ROOT", raising=False)
+    monkeypatch.delenv("AF_PAYLOAD_URL", raising=False)
+    pkg, src = _bundled(tmp_path, payload_version="1.2.3", repo_version=None)
+    result = deploy_core.status(src, _deployed(tmp_path, "1.2.3"), package_dir=pkg)
+    # Silence would read as "fine"; an installed wheel genuinely cannot know.
+    assert result["payload_state"] == "unverifiable"
+    assert "repository_version" not in result
+    assert "reinstall" in result["payload_note"]
+
+
+def test_in_repo_payload_needs_no_staleness_claim(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("AF_SOURCE_ROOT", raising=False)
+    monkeypatch.delenv("AF_PAYLOAD_URL", raising=False)
+    src = _make_source(tmp_path / "flavor", "1.3.0")
+    pkg = tmp_path / "flavor" / "mcp-deploy" / "af_deploy_mcp"
+    pkg.mkdir(parents=True)
+    result = deploy_core.status(src, _deployed(tmp_path, "1.3.0"), package_dir=pkg)
+    assert result["payload_origin"] == "in-repo"
+    assert result["payload_state"] == "not-applicable"
+
+
+def test_env_override_is_not_reported_as_a_bundled_payload(tmp_path: Path, monkeypatch) -> None:
+    pkg, src = _bundled(tmp_path, payload_version="1.2.3", repo_version="1.3.0")
+    monkeypatch.setenv("AF_SOURCE_ROOT", str(src))
+    result = deploy_core.status(src, _deployed(tmp_path, "1.2.3"), package_dir=pkg)
+    assert result["payload_origin"] == "env-override"
+    assert result["payload_state"] == "not-applicable"
+
+
 # ── Dry-run classification ─────────────────────────────────────────────────
 
 

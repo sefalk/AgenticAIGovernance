@@ -406,6 +406,16 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-precommit-format-gate.py
 
+      # The delivery paths are a skill, not prose, precisely so that they can be
+      # checked (#236). This asserts every path still ends in a verification, that
+      # the hotfix path still names the checkout trap, that the release cut still
+      # rebuilds the wheel, and that the staleness states the skill tells readers
+      # to trust still exist in deploy_core. A fifth path added without a
+      # verification fails here instead of shipping.
+      - name: Test the deployment skill contract
+        shell: powershell
+        run: python .github\scripts\test-deployment-skill.py
+
       # #124 made `ruff format` blocking for consumers while the framework's
       # own Python went unformatted (#167). The file list comes from git rather
       # than a hardcoded glob, so a new file is covered the moment it is

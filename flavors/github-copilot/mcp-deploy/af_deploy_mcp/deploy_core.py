@@ -378,8 +378,41 @@ def read_deployed_version(target_dir: Path) -> str:
     return ""
 
 
-def status(source_root: Path, target_dir: Path) -> dict:
-    """Version comparison between the bundled source and the target."""
+def repository_version(package_dir: Path | None = None) -> str:
+    """VERSION of the source checkout this package sits in, or ``""`` if it sits in none.
+
+    A wheel carries its payload as a copy taken at build time, so from inside it
+    the repository is invisible. When the package runs from a checkout instead
+    (editable install, or a direct run from source) the flavor directory two
+    levels up *is* that repository and the two versions can be compared.
+    """
+    pkg = (package_dir or Path(__file__).resolve().parent).resolve()
+    if len(pkg.parents) < 2:
+        return ""
+    vf = pkg.parents[1] / "VERSION"
+    return vf.read_text(encoding="utf-8").strip() if vf.is_file() else ""
+
+
+def payload_origin(source_root: Path, package_dir: Path | None = None) -> str:
+    """Which branch of :func:`resolve_source_root` produced ``source_root``."""
+    if os.environ.get("AF_SOURCE_ROOT"):
+        return "env-override"
+    if os.environ.get("AF_PAYLOAD_URL"):
+        return "remote-pinned"
+    pkg = (package_dir or Path(__file__).resolve().parent).resolve()
+    if source_root == (pkg / "payload").resolve():
+        return "bundled"
+    return "in-repo"
+
+
+def status(source_root: Path, target_dir: Path, package_dir: Path | None = None) -> dict:
+    """Version comparison between the served payload and the target.
+
+    Also reports whether the payload *being served* is itself behind the
+    repository it was built from. A bundled payload cannot notice that the
+    repository moved on, so without this a deploy reports success while
+    shipping a version older than the fix it was run to deliver (#236).
+    """
     src_v = read_version(source_root)
     dep_v = read_deployed_version(target_dir)
     if not dep_v:
@@ -388,7 +421,41 @@ def status(source_root: Path, target_dir: Path) -> dict:
         state = "up-to-date"
     else:
         state = "stale"
-    return {"source_version": src_v, "deployed_version": dep_v, "state": state}
+
+    origin = payload_origin(source_root, package_dir)
+    repo_v = repository_version(package_dir) if origin == "bundled" else ""
+    note = ""
+    if origin != "bundled":
+        payload_state = "not-applicable"
+    elif not repo_v:
+        payload_state = "unverifiable"
+        note = (
+            "The payload is a copy bundled into the installed wheel and no source checkout is "
+            "visible from it, so whether it is current cannot be determined here. Rebuild and "
+            "reinstall the wheel after a release cut."
+        )
+    elif repo_v == src_v:
+        payload_state = "current"
+    else:
+        payload_state = "behind-repository"
+        note = (
+            f"The bundled payload is version {src_v} while the repository it was built from is at "
+            f"{repo_v}. Rebuild and reinstall the wheel: until then this tool deploys the older "
+            f"payload, and the target will read as up-to-date at the wrong version."
+        )
+
+    result = {
+        "source_version": src_v,
+        "deployed_version": dep_v,
+        "state": state,
+        "payload_origin": origin,
+        "payload_state": payload_state,
+    }
+    if repo_v:
+        result["repository_version"] = repo_v
+    if note:
+        result["payload_note"] = note
+    return result
 
 
 # 3-way classification identical to deploy.ps1 Publish-SingleFile.

@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The framework's delivery paths are a skill now, and each one ends in a
+  verification (#236).** Delivery was documented in `docs/wiki/12-deployment.md`,
+  which is not part of the payload — an agent working inside a consumer project
+  could not read the instructions for the operation it was performing. One path
+  was missing entirely: carrying a hotfix into a project that is already
+  mid-task. And no path ended in a check on the artifact.
+
+  That last gap produced a specific failure worth recording. A `git checkout`
+  after a deploy reverts the deployed files while `.af-hashes` already holds the
+  new hash, so the next apply reports `Updated: 0` and the fix is gone. The same
+  checkout reverted the test file, so the suite printed `RESULT: ALL GREEN` with
+  the relevant cases absent. And the MCP server serves a payload copied into its
+  wheel at build time, so `af_status` reported `up-to-date` about a version that
+  no longer existed. Three green signals, one wrong artifact.
+
+  `skills/deployment/SKILL.md` carries a decision table over four paths —
+  release cut, routine upgrade, hotfix into a running project, conflict
+  resolution — and ends each in an assertion that names something the change
+  introduced. The hotfix path is ordered, because order is the whole difficulty:
+  it records the operator's branch before anything is touched, deploys onto the
+  branch the project is already on, and says why returning to that branch
+  silently un-deploys the fix. The skill links the wiki for merge classification
+  and managed regions rather than copying it, and it is a skill rather than an
+  instruction file so it costs nothing on requests that are not about delivery.
+
+  `af_status` gained `payload_origin` and `payload_state`. When the served
+  payload is the bundled copy and a checkout is visible, it now compares the two
+  and reports `behind-repository` with both versions — the case where the tool
+  would otherwise cheerfully deploy a version older than the fix it was run to
+  deliver. When no checkout is visible it reports `unverifiable` rather than
+  staying silent, because an installed wheel genuinely cannot know and silence
+  reads as "fine".
+
+  `.github/scripts/test-deployment-skill.py` (33 checks, in CI) fails when a
+  path is added without a verification, when the hotfix path stops naming the
+  checkout trap, when the release cut stops rebuilding the wheel, or when the
+  staleness states the skill tells readers to trust disappear from
+  `deploy_core`. Verified by removing exactly one verification block: 31/33, and
+  the two failures named the path that lost it.
+
 - **Curated skill state is now reconciled instead of assumed (#257).** Curation
   writes the same fact into three records — `skills/curated-assignments.json`,
   the `AF:MANAGED:curated-skills` region in each agent file, and
