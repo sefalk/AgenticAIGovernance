@@ -128,6 +128,23 @@ print(n)
 '
 }
 
+# Why OUT is not one readable statement, or nothing when it is.
+#
+# Two ways to fail, one consequence: a client that cannot parse the object
+# discards the decision, and a client handed two acts on the wrong one. Either
+# way the verdict goes unread -- which is why neither may be judged by
+# searching the text for the expected word. It is present in both cases (#202).
+#
+# Silence (0) is not a fault here: a hook with no opinion prints nothing, and
+# whether that is acceptable is the caller's expectation to judge.
+af_statement_fault() {
+    case "$1" in
+        -1)  printf '%s' "the output does not parse as JSON, so a client would discard the decision" ;;
+        0|1) ;;
+        *)   printf '%s' "the hook made $1 statements; the protocol is one" ;;
+    esac
+}
+
 # Sets FIXTURE_DIR, or ends the run. `cd ""` succeeds in bash, so an empty
 # fixture path leaves the fixture's `git init` and `git checkout -b` loose in
 # the real repository -- which is how a suite run created `agent/72-x` in a
@@ -149,8 +166,7 @@ run_case() {
     # Optional 6th arg: a directory to create inside the fixture, so a case
     # about a path collision can collide with something that exists.
     local seed="${6:-}"
-    local fixture out err rc=0 ok=0 stmts
-    local fixture out err rc=0 ok=0
+    local fixture out err rc=0 ok=0 stmts fault
     new_fixture; fixture=$FIXTURE_DIR
 
     mkdir -p "$fixture/.github/hooks/scripts"
@@ -184,12 +200,14 @@ run_case() {
     # on the way out. Judging its stdout alone would credit a crash with an
     # opinion it never formed.
     stmts=$(af_json_statements "$out")
+    fault=$(af_statement_fault "$stmts")
     if [ "$rc" -ne 0 ]; then
         ok=0
-    elif [ "$stmts" -gt 1 ]; then
+    elif [ -n "$fault" ]; then
         # Searching the output for the expected answer would certify a hook
-        # that decides correctly and then contradicts itself.
-        echo "FAIL  $name -- the hook made $stmts statements; the protocol is one: $out"
+        # that decides correctly and then contradicts itself -- or one whose
+        # correct decision never survives the trip to the client.
+        echo "FAIL  $name -- $fault: $out"
         fail=$((fail + 1))
         rm -rf "$fixture"
         return
@@ -356,10 +374,21 @@ cat > /dev/null
 printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"blocked"}}'
 exit 0
 STUB
+# The verdict is right and the client never receives it: `\U` is not a JSON
+# escape, so the object does not parse and the decision is discarded (#202).
+# The word "deny" is still in the text, which is why searching for it certifies
+# a hook that failed open.
+cat > "$STUB_DIR/unparsable-deny.sh" <<'STUB'
+#!/usr/bin/env bash
+cat > /dev/null
+printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"C:\Users\x is outside the worktree"}}'
+exit 0
+STUB
 
 HOOK_SRC="$STUB_DIR"
 R_TWO=$(probe_outcome run_case "probe" two-statements.sh agent/95-x "$READ_FILE" deny)
 R_ONE=$(probe_outcome run_case "probe" one-statement.sh agent/95-x "$READ_FILE" deny)
+R_BAD=$(probe_outcome run_case "probe" unparsable-deny.sh agent/95-x "$READ_FILE" deny)
 R_STOP=$(probe_outcome stop_case "probe" block-then-pass.sh block)
 HOOK_SRC=""
 rm -rf "$STUB_DIR"
@@ -369,6 +398,9 @@ assert_true "a hook that denies and then allows is not certified as denying" \
 
 assert_true "a hook that denies once is still certified as denying" \
     "$([ "$R_ONE" = "pass" ] && echo 1 || echo 0)" "run_case said: $R_ONE"
+
+assert_true "a deny the client cannot parse is not certified as denying" \
+    "$([ "$R_BAD" = "fail" ] && echo 1 || echo 0)" "run_case said: $R_BAD"
 
 assert_true "a Stop hook that blocks and then reports success is not certified as blocking" \
     "$([ "$R_STOP" = "fail" ] && echo 1 || echo 0)" "stop_case said: $R_STOP"
@@ -623,7 +655,7 @@ PLAN_OTHER='# Implementation Plan\n\n**Branch:** `agent/99-other`\n**Status:** C
 #   FILESPEC = relative/path=content   (content goes through printf %b)
 stop_case() {
     local name="$1" hook="$2" expect="$3"; shift 3
-    local fixture rc=0 out ok=0 spec path content stmts
+    local fixture rc=0 out ok=0 spec path content stmts fault
 
     new_fixture; fixture=$FIXTURE_DIR
     mkdir -p "$fixture/.github/hooks/scripts"
@@ -651,10 +683,11 @@ stop_case() {
     out=$(cat "$fixture/out.txt")
 
     stmts=$(af_json_statements "$out")
+    fault=$(af_statement_fault "$stmts")
     if [ "$rc" -ne 0 ]; then
         ok=0
-    elif [ "$stmts" -gt 1 ]; then
-        echo "FAIL  $name -- the hook made $stmts statements; the protocol is one: $out"
+    elif [ -n "$fault" ]; then
+        echo "FAIL  $name -- $fault: $out"
         fail=$((fail + 1))
         rm -rf "$fixture"
         return
@@ -1753,7 +1786,7 @@ echo "## producer stop gates (executed against a stubbed suite)"
 #   STUB   = pytest | run-tests   -- the command the hook shells out to
 gate_case() {
     local name="$1" hook="$2" expect="$3" stub="$4" stub_exit="$5" stub_out="$6"
-    local fixture rc=0 out ok=0 stmts stub_path
+    local fixture rc=0 out ok=0 stmts stub_path fault
 
     new_fixture; fixture=$FIXTURE_DIR
     mkdir -p "$fixture/.github/hooks/scripts" "$fixture/tests" "$fixture/bin"
@@ -1799,10 +1832,11 @@ gate_case() {
     out=$(cat "$fixture/out.txt")
 
     stmts=$(af_json_statements "$out")
+    fault=$(af_statement_fault "$stmts")
     if [ "$rc" -ne 0 ]; then
         ok=0
-    elif [ "$stmts" -gt 1 ]; then
-        echo "FAIL  $name -- the hook made $stmts statements; the protocol is one: $out"
+    elif [ -n "$fault" ]; then
+        echo "FAIL  $name -- $fault: $out"
         fail=$((fail + 1))
         rm -rf "$fixture"
         return
@@ -1859,6 +1893,48 @@ gate_case "refactor phase: a failing suite blocks the refactorer" \
 
 gate_case "refactor phase: a passing suite does not block the refactorer" \
     refactorer-stop.sh pass run-tests 0 "10 passed in 1.0s"
+
+# --- The verdict still has to reach the client (issue #202) ----------------
+#
+# These reasons quote tool output back at the reader, and on Windows pytest and
+# ruff print backslash paths. `\U` is not a JSON escape, so interpolating the
+# summary raw produces an object no client can parse -- and a discarded block
+# is indistinguishable from no block at all.
+#
+# The dangerous character is not the quote but the backslash before it:
+# escaping quotes alone turns \" into \\" , which ends the JSON string early.
+# The summary below carries both, plus a tab, which a helper that deletes
+# control characters instead of replacing them would use to run two words
+# together.
+#
+# No assertion is written here on purpose. The harness parses every verdict it
+# judges, so a case that reaches `block` has already proved the escaping. Run
+# against the old quote-only code, these three report block and emit JSON that
+# does not parse.
+WIN_SUMMARY='2 failed in 1.0s -- C:\Users\me\repo\src\a.py:12	expected \"x\"'
+
+gate_case "a red verdict survives a Windows path in the summary line" \
+    test-writer-stop.sh block pytest 2 "$WIN_SUMMARY"
+
+gate_case "a green-phase block survives a Windows path in the suite output" \
+    implementer-stop.sh block run-tests 1 "$WIN_SUMMARY"
+
+gate_case "a refactor-phase block survives a Windows path in the suite output" \
+    refactorer-stop.sh block run-tests 1 "$WIN_SUMMARY"
+
+# The escaping lives in one place or it does not live at all. `sed 's/"/\"/g'`
+# handles the character an author thinks of first and leaves the one that
+# actually breaks Windows output; it reads as escaping, which is presumably how
+# it survived across five files. A local re-implementation is the same defect
+# with extra steps -- the shared helper also neutralises control characters,
+# and a copy that forgets them fails on a tab instead of a backslash.
+quote_only=$(grep -lF "sed 's/\"/" "$HOOK_DIR"/*.sh 2>/dev/null | tr '\n' ' ')
+assert_true "no hook escapes quotes while leaving backslashes raw" \
+    "$([ -z "${quote_only// /}" ] && echo 1 || echo 0)" "found in: $quote_only"
+
+home_grown=$(grep -lF "s/\\\\/" "$HOOK_DIR"/*.sh 2>/dev/null | grep -v '_common\.sh' | tr '\n' ' ')
+assert_true "no hook re-implements the shared JSON escaping" \
+    "$([ -z "${home_grown// /}" ] && echo 1 || echo 0)" "found in: $home_grown"
 
 # --- No-interpreter gate (issue #251) --------------------------------------
 #

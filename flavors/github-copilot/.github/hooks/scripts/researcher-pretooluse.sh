@@ -69,10 +69,6 @@ except Exception:
 
 if [ -z "$URLS" ]; then echo '{}'; exit 0; fi
 
-json_escape() {
-    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
-}
-
 scan_credentials() {
     local url="$1" found=""
     if echo "$url" | grep -qE '://[^/@]+:[^/@]+@'; then
@@ -156,7 +152,7 @@ EOF
 if [ -n "$FINDINGS" ]; then
     # Build a warning note; do NOT short-circuit to allow here -- a credentialed
     # URL to a non-allowlisted domain must still go through the prompt below.
-    CRED_NOTE=" WARNING: URL contains embedded credentials ($(json_escape "$FINDINGS")). Strip them from your research brief output."
+    CRED_NOTE=" WARNING: URL contains embedded credentials ($(af_json_escape "$FINDINGS")). Strip them from your research brief output."
 else
     CRED_NOTE=""
 fi
@@ -166,9 +162,9 @@ fi
 # array, so approving on the first match would wave the rest through unseen.
 if [ -n "$UNLISTED" ]; then
     if [ "$CONF_FOUND" -eq 1 ]; then
-        WHY="Not in WEB_FETCH_ALLOWLIST: $(json_escape "$UNLISTED")."
+        WHY="Not in WEB_FETCH_ALLOWLIST: $(af_json_escape "$UNLISTED")."
     else
-        WHY="No allowlist available: .github/af-env.conf was not found at $(json_escape "$CONF")."
+        WHY="No allowlist available: .github/af-env.conf was not found at $(af_json_escape "$CONF")."
     fi
     cat <<EOF
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"$WHY Approve to fetch once. To auto-approve in future, add the domain to WEB_FETCH_ALLOWLIST in .github/af-env.conf (the agent can do this on your confirmation).$CRED_NOTE"}}

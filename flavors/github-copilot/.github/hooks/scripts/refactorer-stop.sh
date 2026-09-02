@@ -80,7 +80,7 @@ else
 fi
 
 if [ "$exit_code" -ne 0 ] && [ "$exit_code" -ne 5 ]; then
-    summary=$(echo "$output" | grep -v '^===' | tail -3 | tr '\n' ' ' | sed 's/"/\\"/g')
+    summary=$(echo "$output" | grep -v '^===' | tail -3 | af_json_escape)
     echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Refactor phase violation: tests are failing after refactoring. All tests must remain green. Summary: ${summary}\"}}"
     exit 0
 fi
@@ -97,7 +97,7 @@ done < <(git status --porcelain "${SRC_DIR}/" "tests/" 2>/dev/null | grep -E '^\
 
 if [ -n "$new_files" ]; then
     new_files="${new_files%, }"
-    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Refactor phase violation: new files were created. Refactoring must only modify existing files. New files: ${new_files}\"}}"
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Refactor phase violation: new files were created. Refactoring must only modify existing files. New files: $(af_json_escape "$new_files")\"}}"
     exit 0
 fi
 
@@ -197,7 +197,7 @@ if [ -n "$authored_py" ]; then
 fi
 
 if [ -n "$missing" ]; then
-    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Provenance gate: these refactored .py files carry no copilot:generated or copilot:modified marker anywhere: ${missing}. Add a marker in the position instructions/provenance.instructions.md prescribes before completing.\"}}"
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Provenance gate: these refactored .py files carry no copilot:generated or copilot:modified marker anywhere: $(af_json_escape "$missing"). Add a marker in the position instructions/provenance.instructions.md prescribes before completing.\"}}"
     exit 0
 fi
 
@@ -218,7 +218,7 @@ if [ -n "$changed_src_py" ]; then
     quality_output=$(echo "$changed_src_py" | xargs "$python_exe" "$quality_script" $diff_base_args --files 2>&1)
     quality_exit=$?
     if [ "$quality_exit" -ne 0 ]; then
-        summary=$(echo "$quality_output" | head -10 | tr '\n' ' ' | sed 's/"/\\"/g')
+        summary=$(echo "$quality_output" | head -10 | af_json_escape)
         echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Refactor phase violation: python quality gate failed (type hints/docstrings/ignore hygiene). Summary: ${summary}\"}}"
         exit 0
     fi
@@ -246,7 +246,7 @@ if [ -n "$hygiene_py" ]; then
     hygiene_output=$(echo "$hygiene_py" | xargs "$python_exe" "$quality_script" $diff_base_args --checks ignore-hygiene --files 2>&1)
     hygiene_exit=$?
     if [ "$hygiene_exit" -ne 0 ]; then
-        summary=$(echo "$hygiene_output" | head -10 | tr '\n' ' ' | sed 's/"/\\"/g')
+        summary=$(echo "$hygiene_output" | head -10 | af_json_escape)
         echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Refactor phase violation: ignore hygiene gate failed -- every suppression must be explicit and justified. Findings: ${summary}\"}}"
         exit 0
     fi
@@ -285,14 +285,14 @@ if [ -n "$changed_lint_py" ] || [ -n "$inherited_lint_py" ]; then
             inherited_exit=$?
         fi
         if [ "$lint_exit" -eq 2 ]; then
-            lint_summary=$(echo "$lint_output" | head -15 | tr '\n' ' ' | sed 's/"/\\"/g')
+            lint_summary=$(echo "$lint_output" | head -15 | af_json_escape)
             echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Refactor phase violation: linting gate failed. Fix with: ruff check --fix <files>. Violations: ${lint_summary}\"}}"
             exit 0
         elif [ "$lint_exit" -eq 1 ] || [ "$inherited_exit" -eq 1 ]; then
             echo '{"hookSpecificOutput": {"hookEventName": "Stop", "decision": "block", "reason": "Refactor phase blocked: linting gate unavailable because ruff is not installed. Install dev dependencies or run: pip install ruff"}}'
             exit 0
         elif [ "$inherited_exit" -eq 2 ]; then
-            inherited_summary=$(echo "$inherited_output" | head -15 | tr '\n' ' ' | sed 's/"/\\"/g')
+            inherited_summary=$(echo "$inherited_output" | head -15 | af_json_escape)
             echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Refactor phase violation: linting gate failed on files this branch committed in an EARLIER phase (branch delta vs ${BASE_BRANCH}). You did not author them in this step, but they ship on merge. Two legal moves: fix them (usually ruff check --fix <files>), or acknowledge each one with '# noqa: RULE  # reason' in its own standalone commit ([agent:name] justify ignore: file:line RULE -- reason). Do not leave them unrecorded. Violations: ${inherited_summary}\"}}"
             exit 0
         else
