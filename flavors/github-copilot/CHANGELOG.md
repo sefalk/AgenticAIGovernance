@@ -9,6 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The deploy engine's test suite now runs in CI, and a watchdog keeps every
+  suite reachable (#270).** `mcp-deploy` carries 122 tests over the code that
+  decides whether a consumer project's file is overwritten, preserved, or
+  reported as a conflict. Nothing had ever executed them. The first run was
+  red: `test_expected_agents_carry_exactly_one_empty_region` asserted
+  `with_region == 13` while the repository had grown to 15 such agents — a test
+  pinned to a constant instead of to the set it describes, failing unobserved
+  for however long the count had been wrong. It now asserts against
+  `len(agents) - len(NO_SKILLS_AGENTS)`, so growth cannot break it and a new
+  agent without a region cannot pass quietly.
+
+  The step is `run-deploy-suite.py` rather than a `pytest` line, because a skip
+  is the failure mode here: eleven of the thirteen skips are environmental, so
+  a runner missing an interpreter would report success while asserting nothing
+  about `deploy.sh`. Every tolerated skip reason is listed with why it is
+  tolerated, an unlisted one fails the step, and `MIN_PASSED` puts a floor
+  under tests actually executed — reason-matching alone still passes a suite
+  that has quietly shrunk.
+
+  Making those eleven skips *run* was tried and rejected on evidence. Git for
+  Windows ships `bash` and `awk` on every Windows runner but keeps them off
+  PATH; putting them on it turns each skip into a five-minute failure, because
+  `bash deploy.sh --force` under MSYS exceeds the 300s limit the test sets for
+  itself (measured 2026-09-02). On a Windows runner the skip is the correct
+  outcome, and the comment in `test_cross_tool_parity.py` that blamed a missing
+  `bash` has been corrected to say so.
+
+  Naming this one suite in the workflow would have fixed one instance. The gap
+  was structural: the repository runs suites two ways — `run-all-tests.ps1`
+  sweeps a directory, the workflow names Python gates one at a time — and a
+  suite fitting neither falls between them, which is the second time that has
+  happened (#190 was the first). `test-ci-suite-coverage.py` asserts the
+  property instead: every test artifact is reachable from something CI runs,
+  following one level of indirection so swept directories still count. A suite
+  added in a new place now fails on the pull request that adds it. Both
+  directions were verified against a throwaway file — reported by name when
+  uncovered, silent when dropped into a swept directory — and all three failure
+  paths of the runner were provoked deliberately.
+
+  Local runtime: 122 tests in 60.9s. The CI figure is not measured until the
+  first Regression run reports it.
+
 - **Work-item transitions are resolved from the type instead of named (#267).**
   The ADO sync workflow mandated a post-merge transition to `Resolved`, and the
   work-item worker's exit gate forbade `Closed` at finalize. In the Agile
