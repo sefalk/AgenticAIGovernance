@@ -58,8 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   paths of the runner were provoked deliberately.
 
   Local runtime: 122 tests in 38.8–60.9s, and 45.6s in a clean environment
-  built the way CI builds one. The CI figure is not measured until the first
-  Regression run reports it.
+  built the way CI builds one. In CI the first green Regression run took
+  15m25s end to end (run 33628886686, 2026-09-02); the added step's own share
+  of that is not measured separately.
 
   Two further defects surfaced only once the suite ran on a hosted runner,
   which is the argument for this change made by the change itself. The first:
