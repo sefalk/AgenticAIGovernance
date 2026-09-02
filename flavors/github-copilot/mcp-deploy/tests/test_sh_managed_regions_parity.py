@@ -12,11 +12,11 @@ payload file ships a real ``AF:MANAGED`` region (measure 2b, Option A).
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+from _probe import usable
 
 from af_deploy_mcp import deploy_core
 
@@ -26,7 +26,7 @@ DEPLOY_SH = AF_ROOT / "deploy.sh"
 REGION = "curated-skills"
 
 pytestmark = pytest.mark.skipif(
-    shutil.which("awk") is None or not DEPLOY_SH.is_file(),
+    not usable("awk") or not DEPLOY_SH.is_file(),
     reason="awk or deploy.sh not available",
 )
 

@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _probe import usable
 
 from af_deploy_mcp import deploy_core
 
@@ -132,7 +133,7 @@ def test_ps1_dry_run_suppresses_deactivated_skill(tmp_path: Path) -> None:
 
 
 def test_sh_dry_run_suppresses_deactivated_skill(tmp_path: Path) -> None:
-    if shutil.which("bash") is None or shutil.which("git") is None or not DEPLOY_SH.is_file():
+    if not usable("bash") or not usable("git") or not DEPLOY_SH.is_file():
         pytest.skip("bash/git or deploy.sh not available")
     name = _first_active_skill()
     target = _target_with_available(tmp_path, name)
