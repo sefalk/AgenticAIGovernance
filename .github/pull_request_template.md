@@ -19,6 +19,10 @@ This line is an attestation, not evidence. It records that you state you ran
 the suite; nothing checks that you did, and it must never be cited as proof
 that the hooks were tested. It exists because the failure it prevents is
 forgetting, not lying.
+
+On a dev -> main promotion, leave it commented out. You did not run the suite
+for those changes and could not mean the statement; CI checks the pull
+requests that did instead (#234).
 -->
 
 <!-- local-check: test-hooks-integration.ps1 -->
@@ -32,6 +36,9 @@ instead.
 Uncomment and state why, in your own words. The regression job fails on an
 empty reason, because a marker with nothing after it is a checkbox, and a
 checkbox gets ticked.
+
+On a dev -> main promotion, leave it commented out, for the same reason as
+above (#234).
 -->
 
 <!-- env-change: -->
