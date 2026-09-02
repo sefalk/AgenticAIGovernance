@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `len(agents) - len(NO_SKILLS_AGENTS)`, so growth cannot break it and a new
   agent without a region cannot pass quietly.
 
+  Running it in a clean environment then found a second defect that the local
+  checkout had been hiding: `mcp>=1.2` resolves to mcp 2.x, where `FastMCP` was
+  renamed to `MCPServer`, so `server.py` fails to import and the entire suite
+  errors during collection — 122 tests, none of them run. The declared
+  dependency never expressed the API the code actually needs. The bound is now
+  `mcp>=1.2,<2`; migrating to 2.x is tracked separately. The runner now names
+  an exit code 2 as a collection error, because "nothing ran" and "a test
+  failed" are different problems and only one of them looks alarming.
+
   The step is `run-deploy-suite.py` rather than a `pytest` line, because a skip
   is the failure mode here: eleven of the thirteen skips are environmental, so
   a runner missing an interpreter would report success while asserting nothing
@@ -48,8 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   uncovered, silent when dropped into a swept directory — and all three failure
   paths of the runner were provoked deliberately.
 
-  Local runtime: 122 tests in 60.9s. The CI figure is not measured until the
-  first Regression run reports it.
+  Local runtime: 122 tests in 38.8–60.9s, and 45.6s in a clean environment
+  built the way CI builds one. The CI figure is not measured until the first
+  Regression run reports it.
 
 - **Work-item transitions are resolved from the type instead of named (#267).**
   The ADO sync workflow mandated a post-merge transition to `Resolved`, and the
