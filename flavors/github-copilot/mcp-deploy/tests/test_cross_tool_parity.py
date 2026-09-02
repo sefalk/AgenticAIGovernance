@@ -80,7 +80,9 @@ def test_mcp_apply_then_ps1_dryrun_is_clean(tmp_path: Path) -> None:
 def test_sh_deploy_then_mcp_dryrun_is_clean(tmp_path: Path) -> None:
     # Guards the hash-casing fix: deploy.sh writes uppercase .af-hashes so the
     # case-sensitive MCP 3-way classifier reads a bash baseline without spurious
-    # CONFLICTs. (Skipped on Windows where bash is absent.)
+    # CONFLICTs. Skipped on Windows -- not because bash is missing (Git ships it,
+    # just off PATH) but because deploy.sh under MSYS exceeds the 300s below
+    # (measured 2026-09-02). Putting bash on PATH turns this into a slow failure.
     target = tmp_path / "proj"
     target.mkdir()
     res = subprocess.run(
