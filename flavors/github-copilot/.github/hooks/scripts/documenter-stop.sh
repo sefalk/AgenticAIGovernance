@@ -146,7 +146,7 @@ fi
 
 if [ ${#missing[@]} -gt 0 ]; then
     list=$(IFS='; '; echo "${missing[*]}")
-    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Documentation phase violation: required artifacts missing for workflow '${workflow_id}': ${list}. Create these files before completing.${lifecycle_note}\"}}"
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Documentation phase violation: required artifacts missing for workflow '${workflow_id}': $(af_json_escape "$list"). Create these files before completing.${lifecycle_note}\"}}"
     exit 0
 fi
 
@@ -180,7 +180,7 @@ if [ -f "$schema_checker" ]; then
             schema_note=" + counters derived from steps"
         fi
         if [ "$schema_code" -eq 1 ]; then
-            detail=$(echo "$schema_out" | grep -v 'derived ' | tr '\n' ' ' | sed 's/"/\\"/g')
+            detail=$(echo "$schema_out" | grep -v 'derived ' | af_json_escape)
             echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Workflow log schema violation for '${workflow_id}': ${detail}. Fix the log, then finish. Use the vocabulary in your Workflow Log Schema: status is COMPLETED, FAILED or ESCALATED; a step verdict is APPROVED, REJECTED, ESCALATE, RESOLVED, COMPROMISE or null. Do not invent a value to describe a state the schema has no word for — say it in 'action:' instead.\"}}"
             exit 0
         fi

@@ -427,10 +427,16 @@ af_has_provenance_marker() {
 # Escaping quotes alone, as several call sites do, does not cover this.
 #
 # Backslash must be replaced first, or it would double the backslashes this
-# function itself introduces. Control characters are dropped rather than
-# encoded: these values are single-line human-readable reasons.
+# function itself introduces. Control characters become spaces rather than
+# JSON escapes: these values are single-line human-readable reasons, and
+# deleting the character instead would run the words on either side together,
+# turning a tab in tool output into a misquoted finding.
+#
+# Reads stdin when called with no argument, so a pipeline that already trims
+# tool output can end in this function instead of nesting around it.
 af_json_escape() {
-    printf '%s' "${1:-}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\000-\037'
+    if [ $# -eq 0 ]; then cat; else printf '%s' "$1"; fi \
+        | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr '\000-\037' ' '
 }
 
 # ── Files a concurrent peer agent edited (issue #101) ──────────────────

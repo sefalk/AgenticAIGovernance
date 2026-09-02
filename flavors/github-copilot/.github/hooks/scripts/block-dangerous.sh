@@ -79,7 +79,7 @@ if [ "$tool_name" = "createAndRunTask" ] || [ "$tool_name" = "create_and_run_tas
         # interpolation would emit \s, an invalid JSON escape, and an
         # unparsable verdict reads exactly like no verdict at all.
         local reason
-        reason=$(printf '%s' "$2" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\r' | tr '\n' ' ')
+        reason=$(af_json_escape "$2")
         printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$1" "$reason"
         exit 0
     }
@@ -297,7 +297,7 @@ emit() {
     # JSON, and an unparsable verdict is indistinguishable from no verdict --
     # the gate would disarm itself precisely when it had something to say.
     local reason
-    reason=$(printf '%s' "$2" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\r' | tr '\n' ' ')
+    reason=$(af_json_escape "$2")
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$1" "$reason"
     exit 0
 }

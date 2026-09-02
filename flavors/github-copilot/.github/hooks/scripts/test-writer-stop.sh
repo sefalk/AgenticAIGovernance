@@ -64,7 +64,7 @@ fi
 # by exit code alone. Measured 2026-08-24.
 summary_line=$(printf '%s' "$output" | grep -v '^[[:space:]]*$' | tail -1)
 if [ "$exit_code" -eq 2 ] || printf '%s' "$summary_line" | grep -qE '[0-9]+ error'; then
-    detail=$(printf '%s' "$summary_line" | sed 's/"/\\"/g')
+    detail=$(af_json_escape "$summary_line")
     echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Red phase invalid: the suite reported collection or setup ERRORS, not test failures. A test that cannot be collected or set up never reaches the behaviour it claims to guard, and it stays red after a correct implementation. Fix the test construction — imports, syntax, fixtures, schema-less DataFrames — so the red comes from an assertion. Summary: ${detail}\"}}"
     exit 0
 fi
@@ -86,7 +86,7 @@ done < <(git status --porcelain "tests/" 2>/dev/null | grep -E '^\?\? |^A ')
 
 if [ -n "$missing" ]; then
     missing="${missing%, }"  # trim trailing comma
-    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Provenance violation: these new test files carry no copilot:generated marker anywhere: ${missing}. See instructions/provenance.instructions.md for where to put it.\"}}"
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Provenance violation: these new test files carry no copilot:generated marker anywhere: $(af_json_escape "$missing"). See instructions/provenance.instructions.md for where to put it.\"}}"
     exit 0
 fi
 

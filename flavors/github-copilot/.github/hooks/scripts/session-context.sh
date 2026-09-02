@@ -60,5 +60,5 @@ fi
 context="Project: ${project} | Branch: ${branch} | Last commit: ${commit} | ${py_ver}${test_log_summary}"
 
 # Return JSON — escape double quotes in context for safety
-context_escaped=$(echo "$context" | sed 's/"/\\"/g')
+context_escaped=$(echo "$context" | af_json_escape)
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$context_escaped"
