@@ -439,6 +439,15 @@ jobs:
         shell: powershell
         run: python .github\scripts\run-deploy-suite.py
 
+      # Naming that suite in the step above fixed one instance. The gap was
+      # structural: suites reach CI either through the run-all-tests.ps1 sweep
+      # or by being named here one at a time, and one fitting neither falls
+      # between them -- #190, then #270. This asserts the property instead, so
+      # a suite added in a new place fails on the pull request that adds it.
+      - name: Check that every suite runs in CI
+        shell: powershell
+        run: python .github\scripts\test-ci-suite-coverage.py
+
       # #124 made `ruff format` blocking for consumers while the framework's
       # own Python went unformatted (#167). The file list comes from git rather
       # than a hardcoded glob, so a new file is covered the moment it is
