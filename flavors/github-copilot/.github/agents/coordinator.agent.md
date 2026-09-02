@@ -369,6 +369,13 @@ variant: `skills/tdd-orchestration/SKILL.md` § 2.
 **After the final commit,** narrate to the human:
 `"All local commits complete on branch agent/{id}. Ready for git push when you are."`
 
+### Framework Delivery
+
+Before any deploy or `af_*` tool — release cut, project upgrade, hotfix into a
+mid-flight project, conflict resolution — read `skills/deployment/SKILL.md`. It
+carries the decision table and the content assertion each path ends in: deploy
+counters and a green suite are both consistent with shipping the wrong bytes.
+
 ### Subagent Context Injection
 
 **Every** subagent invocation is prefixed with a context block carrying the
