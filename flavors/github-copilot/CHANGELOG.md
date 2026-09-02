@@ -9,6 +9,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Hook verdicts survive a Windows path, and the harness can finally see when
+  they do not (#202).** Hooks answer in JSON, and their reasons quote tool
+  output back at the reader. On Windows ruff and pytest print backslash paths,
+  and `\U` is not a JSON escape — so a hook that had decided to block emitted
+  an object the client could not parse, and the decision was discarded. The
+  gate failed open while its own text still read `"decision": "block"`.
+
+  Thirteen sites escaped the quote and left the backslash raw:
+  `sed 's/"/\"/g'`. That idiom reads as escaping, which is presumably how it
+  survived across five files — it handles the character an author thinks of
+  first and leaves the one that actually breaks.
+
+  **The issue's premise was wrong, and checking it first changed the work.**
+  It stated that the harness "already rejects unparsable output in
+  `run_case`, so the case is cheap." It did not. `run_case` rejected only
+  *two* statements; an unparsable one fell through to a substring test for
+  `"deny"` — and that word is present in broken JSON too. A stub emitting a
+  correct verdict inside unparsable JSON was certified as denying:
+  `Passed: 219, Failed: 1`, the one failure being the new case reporting
+  `run_case said: pass`. The same block had been copy-pasted into `stop_case`
+  and `gate_case`, so all three were blind in the same way. Verifying the
+  instrument before trusting the measurement is the reason this shipped as a
+  mechanism rather than thirteen edits.
+
+  Judging the verdict now runs through one shared `af_statement_fault` in all
+  three case functions, so **every existing and future case is also a
+  parsability test** — including the nine producer-gate cases nobody wrote for
+  this purpose. `af_json_escape` gained stdin support, so a pipeline that
+  already trims tool output can end in it instead of nesting around it, and it
+  now replaces control characters with spaces rather than deleting them:
+  deletion would run the words on either side of a tab together and misquote
+  the finding it is reporting.
+
+  The issue's "42 sites" turned out to be three different things. Thirteen
+  were the quote-only defect. Three were local re-implementations that escaped
+  both characters correctly but omitted control characters — the same hole
+  reopened by a tab instead of a backslash, and the more dangerous variant
+  because it looks right. The rest interpolate integers or fixed vocabulary,
+  where escaping is moot. Five carry git-relative paths with forward slashes;
+  those were **not** demonstrated defects and were converted only so the rule
+  holds without exception.
+
+  Two watchdogs guard the return. Three runtime cases feed a summary carrying
+  a Windows path, a tab, and an escaped quote through the three producer Stop
+  hooks; a structural check fails if any hook escapes quotes while leaving
+  backslashes raw, and a second if any hook re-implements the shared escaping
+  outside `_common.sh`. The negative control reverted one converted line:
+  `Passed: 223, Failed: 2` — the runtime case and the structural check, one
+  cause, caught at both layers. Restored: `Passed: 225, Failed: 0`.
+
 - **The deploy engine's test suite now runs in CI, and a watchdog keeps every
   suite reachable (#270).** `mcp-deploy` carries 122 tests over the code that
   decides whether a consumer project's file is overwritten, preserved, or
