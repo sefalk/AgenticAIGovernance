@@ -49,8 +49,14 @@ jobs:
       # they ran the suite. It cannot prove they did, and nothing built on it
       # may be described as evidence that the hooks were tested. It is worth
       # having because the failure it prevents is forgetting, not lying.
+      #
+      # A dev -> main promotion is exempt: it contains every file the release
+      # cycle touched, so this gate would always fire and the author would
+      # attest to work they did not do in that pull request. A statement
+      # nobody can mean is worse than no statement (#234). The promotion step
+      # further down checks the contributing pull requests instead.
       - name: Require local-check attestation for hook changes
-        if: github.event_name == 'pull_request'
+        if: ${{ github.event_name == 'pull_request' && !(github.base_ref == 'main' && github.head_ref == 'dev') }}
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
@@ -113,8 +119,10 @@ jobs:
       #
       # It runs even when the step above failed, so that an author learns about
       # both problems in one run rather than in two round trips.
+      #
+      # Exempt on a dev -> main promotion, for the reason given above (#234).
       - name: Require declaration for environment changes
-        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && !(github.base_ref == 'main' && github.head_ref == 'dev') }}
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
@@ -193,6 +201,145 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The two gates above are exempt on a dev -> main promotion, which would
+      # otherwise leave the release the one pull request that declares nothing.
+      # This step is what replaces them: instead of asking the release author
+      # to re-attest work they did not do, it checks that each change actually
+      # arrived through a pull request that carried its own declaration.
+      #
+      # It walks the first-parent chain rather than every commit, because that
+      # chain is exactly the list of things that landed on dev: one entry per
+      # merge, and one entry per direct push. A direct push is the case the
+      # per-feature gates can never see, so it is reported here even though it
+      # is not itself a missing declaration -- it fails only when it carried a
+      # gated path, where a declaration is genuinely absent.
+      #
+      # File lists come from the merge diff, not from the pull request's file
+      # list: what matters is what reached dev, and a pull request can be
+      # edited after it merges.
+      - name: Verify contributing declarations on a promotion
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref == 'dev' }}
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $hookPrefix = 'flavors/github-copilot/.github/hooks/'
+          $envPrefixes = @('.vscode/', '.githooks/', '.github/')
+          $hookMarker = 'local-check: test-hooks-integration.ps1'
+
+          foreach ($ref in @($env:BASE_SHA, $env:HEAD_SHA)) {
+            git cat-file -e "$ref^{commit}" 2>$null
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "::error::Commit $ref is not present in this checkout, so the promotion cannot be examined. Failing rather than passing on an unanswered question."
+              exit 1
+            }
+          }
+
+          # Unit separator, because a commit subject may contain anything else.
+          $log = git log --first-parent --format="%H%x1f%P%x1f%s" "$env:BASE_SHA..$env:HEAD_SHA"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Could not read the commit range. Failing rather than passing on an unanswered question."
+            exit 1
+          }
+          if (-not $log) {
+            Write-Host "Nothing on dev that is not already on main -- no contributing changes to check."
+            exit 0
+          }
+
+          $bodyCache = @{}
+          function Get-PrBody($number) {
+            if ($bodyCache.ContainsKey($number)) { return $bodyCache[$number] }
+            $raw = gh api "repos/$env:REPO/pulls/$number" --jq '.body'
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "::error::Could not read the body of pull request #$number. Failing rather than passing on an unanswered question."
+              exit 1
+            }
+            # Out-String restores the newlines a native command's line array
+            # loses when cast to a string; without it every line anchor below
+            # matches nothing (measured on #165).
+            $text = $raw | Out-String
+            # The template carries both markers commented out, and a template
+            # nobody edited must not satisfy a check about work somebody did.
+            $text = [regex]::Replace([string]$text, '(?s)<!--.*?-->', '')
+            $bodyCache[$number] = $text
+            return $text
+          }
+
+          $violations = @()
+          $unattributed = @()
+          $checked = 0
+
+          foreach ($line in @($log)) {
+            if (-not $line) { continue }
+            $parts = $line -split [char]31
+            $sha = $parts[0]
+            $subject = $parts[2]
+
+            $files = @(git diff --name-only "$sha^1" $sha)
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "::error::Could not diff $sha against its first parent. Failing rather than passing on an unanswered question."
+              exit 1
+            }
+
+            $hookFiles = @($files | Where-Object { $_ -like "$hookPrefix*" })
+            $envFiles = @($files | Where-Object {
+              $path = $_
+              @($envPrefixes | Where-Object { $path.StartsWith($_) }).Count -gt 0
+            })
+            $gated = $hookFiles.Count -gt 0 -or $envFiles.Count -gt 0
+
+            $match = [regex]::Match($subject, '^Merge pull request #(\d+)')
+            if (-not $match.Success) {
+              $short = $sha.Substring(0, 7)
+              $note = if ($gated) { 'touched a gated path' } else { 'no gated path' }
+              $unattributed += "$short  $note  $subject"
+              if ($gated) {
+                $violations += "$short arrived on dev without a pull request and changed a gated path, so no declaration was ever required for it."
+              }
+              continue
+            }
+
+            if (-not $gated) { continue }
+
+            $number = $match.Groups[1].Value
+            $body = Get-PrBody $number
+            $checked++
+
+            if ($hookFiles.Count -gt 0 -and -not ($body -like "*$hookMarker*")) {
+              $violations += "#$number changed $($hookFiles.Count) file(s) under $hookPrefix without the line '$hookMarker' in its body."
+            }
+
+            if ($envFiles.Count -gt 0) {
+              $reason = ''
+              foreach ($m in [regex]::Matches($body, '(?m)^[ \t]*env-change:[ \t]*(.*)$')) {
+                $candidate = $m.Groups[1].Value.Trim()
+                if ($candidate.Length -ge 10) { $reason = $candidate; break }
+              }
+              if (-not $reason) {
+                $violations += "#$number changed $($envFiles.Count) environment file(s) without an 'env-change: <reason>' line of at least 10 characters in its body."
+              }
+            }
+          }
+
+          if ($unattributed.Count -gt 0) {
+            Write-Host "Changes that reached dev outside a pull request:"
+            $unattributed | ForEach-Object { Write-Host "  $_" }
+          }
+
+          if ($violations.Count -eq 0) {
+            Write-Host "$checked contributing pull request(s) touched a gated path; each carried its declaration."
+            Write-Host "Declared per feature, not re-declared here."
+            exit 0
+          }
+
+          Write-Host "The declaration is missing on the change itself, not on this release:"
+          $violations | ForEach-Object { Write-Host "  $_" }
+          Write-Host "::error::$($violations.Count) contributing change(s) reached dev without the declaration their paths require. They are named above. A declaration added to this promotion would cover none of them -- see #234."
+          exit 1
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -230,6 +377,17 @@ jobs:
       - name: Test the env-change declaration gate
         shell: powershell
         run: python .github\scripts\test-env-change-gate.py
+
+      # The promotion gate decides whether a release may merge, and it is the
+      # only gate that runs on no ordinary pull request -- so without this it
+      # would first execute on the release it is supposed to protect. The
+      # suite also pins the three gates to the same paths and markers: they
+      # are separate steps that cannot share a variable, and a promotion gate
+      # looking for a marker the feature gate no longer demands would pass
+      # every release while checking nothing.
+      - name: Test the promotion declaration gate
+        shell: powershell
+        run: python .github\scripts\test-promotion-gate.py
 
       # check-issue-drift.py is a reporting tool, not a gate: it never fails a
       # build and never changes issue state. Its suite runs here for the same
