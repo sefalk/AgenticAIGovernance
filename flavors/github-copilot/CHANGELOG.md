@@ -9,6 +9,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The bash hook suite had never executed the deny tier it exists to guard
+  (#122).** The issue was a false deny: `git commit -m "fix(db): drop table
+  handling"` was blocked as if it were SQL. The rule was already scoped
+  correctly in both dialects — but only the PowerShell twin proved it, and the
+  issue's own working state said so for the wrong reason. It recorded criterion
+  5 as partial because "no executing bash suite exists yet (#190)". That
+  justification is stale: `test-hooks.sh` runs several hundred cases locally
+  and in CI. Re-reading it rather than trusting it is what exposed the rest.
+
+  **Coverage of `block-dangerous` was 92 cases in PowerShell against 32 in
+  bash**, and the missing ones were not stragglers. Absent as test input
+  anywhere in the bash suite: `git reset --hard`, `git rebase`, `git branch
+  -D`, `--no-verify`, `git add .`, and pushes to a protected branch. The
+  entire deny tier — the layer the autonomy boundary rests on — existed in
+  `block-dangerous.sh` and nothing ever ran it. The PowerShell suite grew tier
+  by tier; the bash one grew issue by issue, scan units for #62, tasks for
+  #74, so whole classes were skipped without anyone deciding to skip them.
+
+  Nine deny cases were added and **passed on the first run** (`Passed: 242,
+  Failed: 0`). The rules work. That is the good news and the uncomfortable
+  part: it was luck rather than evidence, because a broken pattern there would
+  have left the PowerShell suite entirely green.
+
+  Eight #122 cases are now mirrored name for name. A negative control
+  restoring the pre-fix behaviour — scoping the cross-unit rules to the raw
+  command — produced `Passed: 229, Failed: 4`: exactly the four predicted
+  cases, including the reported false deny reproduced verbatim, with the four
+  deny cases unmoved.
+
+  **A ratchet keeps the two dialects from drifting further apart.** The suite
+  compares case names across both files and fails if the gap exceeds its
+  measured ceiling of 64. Demanding strict symmetry instead would have
+  reported 64 violations on its first run, and a watchdog that opens that way
+  gets switched off rather than obeyed — which is the erosion of gate
+  authority this issue is about. The check also asserts the absolute counts,
+  not only the difference: a parser blinded by a formatting change would
+  otherwise report a gap of zero and read as success, which is precisely the
+  trap #202 caught this suite in. Verified by adding a PowerShell-only case
+  and watching the gap move 64 → 65. Final state: `Passed: 244, Failed: 0`.
+
+  Criterion 1 of the issue stays deliberately partial: SQL keeps its deny
+  outside recognised prose carriers, because `sqlite3 db "DROP TABLE x"` is a
+  real command and not commentary. The remaining ~64 uncovered cases, mostly
+  ask-tier and task classification, are tracked separately; the ratchet holds
+  the line until they are closed.
+
 - **Hook verdicts survive a Windows path, and the harness can finally see when
   they do not (#202).** Hooks answer in JSON, and their reasons quote tool
   output back at the reader. On Windows ruff and pytest print backslash paths,
