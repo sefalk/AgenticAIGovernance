@@ -47,14 +47,83 @@ try {
     exit 0
 }
 
-# Only inspect terminal tool calls, or the two task-launch tools.
+# Only inspect terminal tool calls, the two task-launch tools, or a
+# code-execution surface.
 # `create_and_run_task` and `run_task` are the names VS Code actually sends;
 # the camelCase spellings never occur in a captured payload and are kept only
 # so a rename upstream degrades to a stale alias rather than to an inert gate.
+#
+# The code-execution tools are gated as a class, not for what they run but for
+# what they are: a second way to reach a subprocess. Issue #138 recorded a
+# subagent denied in the terminal re-running the same CLI call through the
+# Pylance snippet tool, and this hook allowing it -- not because it was
+# misconfigured, but because it looked at the tool name, matched nothing, and
+# emitted `{}`, which is consent. A gate whose set is an allowlist grants
+# everything it forgot to name. Kept identical to bd_is_exec_surface in the
+# .sh twin; test-hooks.sh compares the two lists mechanically.
+$execSurfacePattern = 'runCodeSnippet|run_notebook_cell|runNotebookCell|run_playwright_code|browser_run_code|browser_evaluate|run_vscode_command|runVsCodeCommand'
+
 $toolName = $inputData.tool_name
 $isTaskShaped = ($toolName -eq 'create_and_run_task' -or $toolName -eq 'createAndRunTask')
 $isTaskRun = ($toolName -eq 'run_task' -or $toolName -eq 'runTask')
-if ($toolName -notmatch 'terminal|Terminal' -and -not $isTaskShaped -and -not $isTaskRun) {
+$isExecSurface = ($toolName -match $execSurfacePattern)
+if ($toolName -notmatch 'terminal|Terminal' -and -not $isTaskShaped -and -not $isTaskRun -and -not $isExecSurface) {
+    Write-Output '{}'
+    exit 0
+}
+
+# --- Execution-surface switch (issue #138) ---------------------------------
+# Deliberately not a re-classification of the snippet. Reconstructing the
+# command a program will eventually assemble means guessing, and a gate that
+# guesses is worse than none -- it produces the appearance of coverage. What is
+# decidable is whether the snippet reaches for a subprocess at all, and on
+# these tools that is never legitimate: a gated terminal is available for
+# exactly that. So the rule removes a bypass rather than a capability.
+#
+# Strings are collected recursively because the field holding the code differs
+# per tool (`code`, `snippet`, `cell`, ...) and enumerating them is the same
+# allowlist mistake one level down. Recursion also keeps the two dialects
+# honest: searching the serialised JSON instead would put a notebook's leading
+# `!` off a line start, so .ps1 and .sh would have disagreed about the shell
+# escape from the first commit.
+if ($isExecSurface) {
+    function Get-PayloadStrings($v) {
+        if ($null -eq $v) { return @() }
+        if ($v -is [string]) { return @($v) }
+        if ($v -is [System.Collections.IEnumerable]) {
+            $acc = @()
+            foreach ($x in $v) { $acc += Get-PayloadStrings $x }
+            return $acc
+        }
+        if ($v.PSObject -and $v.PSObject.Properties) {
+            $acc = @()
+            foreach ($p in $v.PSObject.Properties) { $acc += Get-PayloadStrings $p.Value }
+            return $acc
+        }
+        return @()
+    }
+
+    $payloadText = (Get-PayloadStrings $inputData.tool_input) -join "`n"
+    $spawnPattern = 'subprocess|os\.(system|popen|exec|spawn)|Popen|pty\.spawn|child_process|Start-Process|Invoke-Expression|%%(bash|sh)|%system|%sx'
+
+    $spawnHit = ''
+    if ($payloadText -match $spawnPattern) {
+        $spawnHit = $Matches[0]
+    } elseif ($payloadText -match '(?m)^\s*!') {
+        $spawnHit = 'notebook shell escape'
+    }
+
+    if ($spawnHit) {
+        @{
+            hookSpecificOutput = @{
+                hookEventName            = 'PreToolUse'
+                permissionDecision       = 'deny'
+                permissionDecisionReason = "Policy hard-deny: a code-execution tool may not spawn a process. This payload reaches for one ($spawnHit) on $toolName, which is not the surface this hook classifies commands on. Run it in the terminal instead, where it is classified. If the terminal already denied it, that denial stands -- report BLOCKED and escalate. Looking for another route is itself the finding (issue #138)."
+            }
+        } | ConvertTo-Json -Depth 5 -Compress
+        exit 0
+    }
+
     Write-Output '{}'
     exit 0
 }
