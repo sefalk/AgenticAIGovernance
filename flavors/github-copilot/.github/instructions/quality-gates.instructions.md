@@ -30,6 +30,10 @@ proofreading your own work.
 the gate as **BLOCKED** — not PASS or FAIL — and include the reason.
 The coordinator treats BLOCKED gates as escalation triggers.
 
+**A hook denial is terminal.** Report **BLOCKED**, quote it, escalate — never
+retry through another tool. Reaching for a code-execution tool to run what the
+terminal refused is a recorded incident (#138), not a hypothetical.
+
 **Evidence durability:** when the deliverable is a value, not a file, the
 artifact is the gate. Return a reference a third party can open — run id, URL,
 table, committed file — not the number. No durable channel → BLOCKED.

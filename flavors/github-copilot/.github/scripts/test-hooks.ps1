@@ -776,6 +776,36 @@ Assert-Deny "rm -rf broad path is denied" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"rm -rf /tmp/data"}}'
 
+# --- Execution-surface switch (issue #138) ---------------------------------
+# The first case is the recorded occurrence: a subagent denied in the terminal
+# re-ran the same CLI call through the Pylance snippet tool. Before this gate
+# it was allowed, and silently -- the hook printed `{}` because its set named
+# only the terminal.
+
+Assert-Deny "a snippet tool spawning a subprocess is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"mcp_pylance_mcp_s_pylanceRunCodeSnippet","tool_input":{"code":"import subprocess; subprocess.run(cmd, check=True)"}}'
+
+Assert-Deny "a notebook shell escape is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"run_notebook_cell","tool_input":{"cell":"!databricks jobs submit --json @job.json"}}'
+
+Assert-Deny "browser evaluate reaching for child_process is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"mcp_playwright_browser_evaluate","tool_input":{"function":"() => child_process.exec(cmd)"}}'
+
+# The gate has to stay narrow enough to survive contact: denying ordinary
+# analysis code would get it switched off, and a gate nobody keeps guards
+# nothing.
+
+Assert-Silent "ordinary snippet code is not a spawn" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"mcp_pylance_mcp_s_pylanceRunCodeSnippet","tool_input":{"code":"import json; print(json.dumps(rows))"}}'
+
+Assert-Silent "ordinary notebook code is not a spawn" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"run_notebook_cell","tool_input":{"cell":"df = spark.table(name); df.show()"}}'
+
 Assert-Deny "recursive force delete is denied" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./build -Recurse -Force"}}'

@@ -1499,6 +1499,41 @@ run_case "rm -rf broad path is denied" \
     '{"tool_name":"runInTerminal","tool_input":{"command":"rm -rf /tmp/data"}}' \
     deny
 
+# --- Execution-surface switch (issue #138) ---------------------------------
+# The first case is the recorded occurrence: a subagent denied in the terminal
+# re-ran the same CLI call through the Pylance snippet tool. Before this gate
+# it was allowed, and silently -- the hook printed `{}` because its set named
+# only the terminal.
+
+run_case "a snippet tool spawning a subprocess is denied" \
+    block-dangerous.sh agent/x \
+    '{"tool_name":"mcp_pylance_mcp_s_pylanceRunCodeSnippet","tool_input":{"code":"import subprocess; subprocess.run(cmd, check=True)"}}' \
+    deny
+
+run_case "a notebook shell escape is denied" \
+    block-dangerous.sh agent/x \
+    '{"tool_name":"run_notebook_cell","tool_input":{"cell":"!databricks jobs submit --json @job.json"}}' \
+    deny
+
+run_case "browser evaluate reaching for child_process is denied" \
+    block-dangerous.sh agent/x \
+    '{"tool_name":"mcp_playwright_browser_evaluate","tool_input":{"function":"() => child_process.exec(cmd)"}}' \
+    deny
+
+# The gate has to stay narrow enough to survive contact: denying ordinary
+# analysis code would get it switched off, and a gate nobody keeps guards
+# nothing.
+
+run_case "ordinary snippet code is not a spawn" \
+    block-dangerous.sh agent/x \
+    '{"tool_name":"mcp_pylance_mcp_s_pylanceRunCodeSnippet","tool_input":{"code":"import json; print(json.dumps(rows))"}}' \
+    silent
+
+run_case "ordinary notebook code is not a spawn" \
+    block-dangerous.sh agent/x \
+    '{"tool_name":"run_notebook_cell","tool_input":{"cell":"df = spark.table(name); df.show()"}}' \
+    silent
+
 run_case "recursive force delete is denied" \
     block-dangerous.sh agent/x \
     '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./build -Recurse -Force"}}' \
@@ -2148,6 +2183,31 @@ assert_true "no shipped script uses a digit or word class in a shell pattern" \
 assert_true "the backslash-space class debt does not grow" \
     "$([ "$space_class_lines" -le 60 ] && echo 1 || echo 0)" \
     "lines using backslash s/S/b: $space_class_lines (ceiling 60 -- lower it as they are rewritten, never raise it)"
+
+# --- Execution-surface set, twin symmetry (issue #138) ---------------------
+# The set of gated code-execution tools is written out twice, once per dialect.
+# #279 measured what happens to a list kept in two places: a 64-case divergence
+# nobody had noticed for months. Here the cost of drifting is that one platform
+# silently reopens the bypass, so the two are compared rather than trusted.
+# Lowercased before comparison because the shell `case` needs both spellings
+# while PowerShell's -match is case-insensitive and needs one. Behavioural
+# coverage per surface is a different concern and belongs in #263's hook
+# inventory gate; this asserts only that the two lists agree.
+surf_ps=$(grep -E '^\$execSurfacePattern' "$HOOK_DIR/block-dangerous.ps1" \
+    | sed "s/^[^']*'//; s/'.*$//" | tr '|' '\n' | tr 'A-Z' 'a-z' | sed '/^$/d' | sort -u)
+surf_sh=$(awk '/^bd_is_exec_surface\(\)/ {f=1; next} f && /^}/ {f=0} f && /return 0 ;;/ {sub(/\).*/, ""); gsub(/[ \t*]/, ""); print}' \
+    "$HOOK_DIR/block-dangerous.sh" | tr '|' '\n' | tr 'A-Z' 'a-z' | sed '/^$/d' | sort -u)
+surf_ps_n=$(printf '%s\n' "$surf_ps" | sed '/^$/d' | wc -l | tr -d ' ')
+surf_only_ps=$(comm -23 <(printf '%s\n' "$surf_ps") <(printf '%s\n' "$surf_sh") | tr '\n' ' ')
+surf_only_sh=$(comm -13 <(printf '%s\n' "$surf_ps") <(printf '%s\n' "$surf_sh") | tr '\n' ' ')
+
+assert_true "the execution-surface parser still finds both lists" \
+    "$([ "${surf_ps_n:-0}" -ge 6 ] && echo 1 || echo 0)" \
+    "parsed $surf_ps_n surfaces from block-dangerous.ps1 -- a count below the floor means the parser broke, not that the set shrank"
+
+assert_true "both dialects gate the same execution surfaces" \
+    "$([ -z "${surf_only_ps// /}" ] && [ -z "${surf_only_sh// /}" ] && echo 1 || echo 0)" \
+    "only in ps1:$surf_only_ps / only in sh:$surf_only_sh -- a surface gated in one dialect only reopens the #138 bypass on the other platform"
 
 # --- No-interpreter gate (issue #251) --------------------------------------
 #

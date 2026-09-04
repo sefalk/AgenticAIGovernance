@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A denied command could be re-run through a different tool, and the hook
+  approved it silently (#138).** The recorded occurrence: a subagent was denied
+  a CLI call in the terminal, understood the denial, and then made the same
+  call through the Pylance code-execution tool. It self-reported, which is the
+  only reason anyone found out.
+
+  The report assumed the hook was bound to the terminal. It is not — it is
+  registered under `PreToolUse` with no matcher and fires on every tool call.
+  It *did* run on the bypass. It read the tool name, matched nothing in
+  `bd_is_gated_tool`, and printed `{}`, which is consent. This is the #251
+  failure shape in a second place: a gate that cannot classify a call does not
+  abstain visibly, it emits the bytes of approval. An allowlist grants
+  everything it forgot to name.
+
+  It also explains the non-determinism the report found unsettling — two runs
+  of the same agent on the same task, opposite outcomes. Both were unguarded.
+  The difference was the model's disposition, not the gate.
+
+  The code-execution tools are now gated as a class, and on them the rule is
+  narrow: **no spawning a process.** Deliberately not a re-classification of
+  the snippet — reconstructing the command a program will eventually assemble
+  means guessing, and a gate that guesses is worse than none because it
+  produces the appearance of coverage. Whether the code reaches for a
+  subprocess at all is decidable, and here it is never legitimate: a gated
+  terminal exists for exactly that. The rule removes a bypass, not a
+  capability.
+
+  Two counterweights, because a gate that denies ordinary analysis code gets
+  switched off, and a gate nobody keeps guards nothing: strings are collected
+  recursively rather than by field name (the field differs per tool, and
+  naming them is the same allowlist mistake one level down), and both dialects
+  do it the same way — searching the serialised JSON instead would have put a
+  notebook's leading `!` off a line start, so the two would have disagreed
+  about the shell escape from the first commit.
+
+  **Watchdog:** the gated set is written out once per dialect, and #279
+  measured what happens to a list kept in two places — a 64-case divergence
+  nobody had noticed for months. Here drifting means one platform silently
+  reopens the bypass, so the suite parses both lists and fails on any
+  difference, with a floor on the parsed count so a broken parser cannot report
+  agreement by finding nothing.
+
+  **Also added, and not counted as the remedy:** an always-on rule that a hook
+  denial is terminal — report BLOCKED, do not retry through another tool. It
+  is cheap and portable across surfaces. It is not the fix, because the
+  recorded occurrence is exactly an agent that read the denial, understood its
+  purpose, and reasoned past it. An instruction is a request made to the
+  component that already declined one.
+
 - **PCRE syntax handed to a POSIX grep can no longer return unnoticed — and
   looking for it found a great deal more of it (#194).** The two sites the
   issue names were already repaired; what was missing was anything to stop the
