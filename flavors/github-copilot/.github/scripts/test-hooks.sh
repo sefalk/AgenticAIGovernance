@@ -2072,6 +2072,83 @@ home_grown=$(grep -lF "s/\\\\/" "$HOOK_DIR"/*.sh 2>/dev/null | grep -v '_common\
 assert_true "no hook re-implements the shared JSON escaping" \
     "$([ -z "${home_grown// /}" ] && echo 1 || echo 0)" "found in: $home_grown"
 
+# --- PCRE syntax handed to a POSIX grep, as a class (#194) ------------------
+#
+# Two shipped scripts asked a POSIX grep for PCRE and got silence back. In an
+# ERE `\d` is a literal `d`, so `\d+ passed` matched runs of the letter d and
+# nothing else; `grep -P` does not exist on BSD/macOS, and `|| true` swallowed
+# the error. Both failed open: the empty match read as "nothing found", and the
+# check the pattern guarded stopped existing without saying so. A guard that
+# silently stops guarding is indistinguishable from one that passed.
+#
+# Both sites are repaired. These checks are what stops the class returning.
+#
+# Scope of the scan: every shipped .sh, this suite included -- a portability
+# defect in the instrument is still a portability defect. Skipped are comment
+# lines, the lines tagged af-pcre-scan where the patterns below live, and lines
+# that look like the embedded Python, whose regexes are handed to `re` and are
+# correct with backslash classes. That last filter is a heuristic; it is worth
+# it because without it the four Python patterns in block-dangerous.sh would be
+# permanent noise, and a check nobody can read is a check nobody keeps.
+#
+# The scan walks find output rather than calling `grep -r --include`, for two
+# reasons. A watchdog against non-portable grep that itself required GNU grep
+# would be worth nothing. And a read loop, not a `for`, because at least one
+# consumer keeps the payload under a path with spaces in it.
+pcre_flag_pat='grep[^|;]*[[:space:]]-[a-zA-Z]*P([[:space:]]|$)'  # af-pcre-scan
+digit_class_pat='\\[dDwW]'                                       # af-pcre-scan
+space_class_pat='\\[sSb]'                                        # af-pcre-scan
+pcre_flag_hits=""
+digit_class_hits=""
+space_class_lines=0
+scanned=0
+while IFS= read -r shipped; do
+    [ -n "$shipped" ] || continue
+    scanned=$((scanned + 1))
+    body=$(grep -v '^[[:space:]]*#' "$shipped" 2>/dev/null | grep -v 'af-pcre-scan' \
+        | grep -vE 're\.(compile|sub|match|search|I)|r"|\\x27')
+    if printf '%s\n' "$body" | grep -qE "$pcre_flag_pat"; then
+        pcre_flag_hits="$pcre_flag_hits $(basename "$shipped")"
+    fi
+    if printf '%s\n' "$body" | grep -qE "$digit_class_pat"; then
+        digit_class_hits="$digit_class_hits $(basename "$shipped")"
+    fi
+    n=$(printf '%s\n' "$body" | grep -cE "$space_class_pat")
+    space_class_lines=$((space_class_lines + n))
+done < <(find "$GITHUB_DIR" -name '*.sh' -type f 2>/dev/null)
+
+# Without this the checks below pass by scanning nothing at all -- the exact
+# failure #194 is about, reproduced by the watchdog written against it.
+assert_true "the portability scan actually reached the shipped scripts" \
+    "$([ "$scanned" -ge 20 ] && echo 1 || echo 0)" \
+    "scanned $scanned .sh files under $GITHUB_DIR -- too few means find failed, not that the payload shrank"
+
+assert_true "no shipped script asks a POSIX grep for PCRE" \
+    "$([ -z "${pcre_flag_hits// /}" ] && echo 1 || echo 0)" \
+    "PCRE flag found in:$pcre_flag_hits -- absent on BSD/macOS, and the error is swallowed"
+
+assert_true "no shipped script uses a digit or word class in a shell pattern" \
+    "$([ -z "${digit_class_hits// /}" ] && echo 1 || echo 0)" \
+    "backslash d/D/w/W found in:$digit_class_hits -- an ERE reads it as the bare letter"
+
+# The space and word-boundary classes are a different matter, and this ceiling
+# is an admission rather than a target. 60 shipped lines use them, 58 of those
+# in block-dangerous.sh, and they reach grep through the pattern arrays -- so
+# on a grep without the GNU extensions the hard-deny tier would read `git\s+push`
+# as g-i-t, one-or-more `s`, `push`, and match nothing. Simulated by rewriting
+# the escapes the way a POSIX reading would: all seven deny patterns tried went
+# from matching to not matching. Not measured on BSD; no such host was available.
+#
+# They are not rewritten here on purpose. `\b` has no POSIX equivalent -- it is
+# zero-width and every replacement consumes a character -- so this is 58 edits
+# of judgement in the file the whole autonomy boundary rests on, and the bash
+# suite currently proves only 32 cases of it. The net has to be spanned before
+# the jump, not after. Tracked separately; the ceiling only stops the debt from
+# growing while that happens.
+assert_true "the backslash-space class debt does not grow" \
+    "$([ "$space_class_lines" -le 60 ] && echo 1 || echo 0)" \
+    "lines using backslash s/S/b: $space_class_lines (ceiling 60 -- lower it as they are rewritten, never raise it)"
+
 # --- No-interpreter gate (issue #251) --------------------------------------
 #
 # A gate that could not read its input used to answer `{}` and exit 0 -- byte

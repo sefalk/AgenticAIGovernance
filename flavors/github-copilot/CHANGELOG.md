@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **PCRE syntax handed to a POSIX grep can no longer return unnoticed — and
+  looking for it found a great deal more of it (#194).** The two sites the
+  issue names were already repaired; what was missing was anything to stop the
+  class coming back. `\d` in an ERE is a literal `d`, `grep -P` does not exist
+  on BSD/macOS, and both failures are silent: the empty match reads as "nothing
+  found", and the check the pattern guarded stops existing without a word. A
+  guard that silently stops guarding is indistinguishable from one that passed.
+
+  The suite now scans every shipped `.sh` — itself included, because a
+  portability defect in the instrument is still a portability defect — and
+  refuses `grep -P` and the `\d`/`\w` classes outright. Both are at zero.
+  Comment lines are skipped, since both repairs explain themselves in prose
+  that names the bad idiom, as are the lines holding the scan's own patterns.
+
+  Three details that would each have quietly broken it. The scan asserts that
+  it **reached** the scripts (`scanned >= 20`); without that it passes by
+  examining nothing, which is precisely the failure it was written against. It
+  walks `find` output instead of `grep -r --include`, because a watchdog
+  against non-portable grep that itself needs GNU grep is worth nothing, and
+  because at least one consumer keeps the payload under a path with spaces. And
+  the first draft flagged its own error message, which was fixed by rewording
+  the message rather than weakening the pattern.
+
+  Proved against a directory of deliberately bad files: each check named
+  exactly the offending file and left the innocent one alone, including its
+  comment mentioning both bad idioms.
+
+  **The larger finding.** `block-dangerous.sh` hands 58 patterns to
+  `grep -qEi` that use `\s`, `\S` and `\b` — among them the entire hard-deny
+  tier, `git\s+push\b.*(--force|-f)\b` and its neighbours. Where the GNU
+  extensions are absent those escapes degrade to bare letters, so `git\s+push`
+  reads as `git`, one-or-more `s`, `push`. Simulated by rewriting the escapes
+  the way a POSIX reading takes them: **seven of seven deny patterns went from
+  matching to not matching**. Not measured on BSD — no such host was available,
+  and that missing link is worth closing before anyone rewrites 58 security
+  patterns on the strength of it.
+
+  They are deliberately not rewritten here. `\b` is zero-width and has no POSIX
+  equivalent, so every replacement consumes a character — 58 edits of judgement
+  in the file the whole autonomy boundary rests on, against a bash suite that
+  proves 32 cases of it. The net has to be spanned before the jump. The count
+  is frozen at 60 so the debt cannot grow meanwhile; the ceiling is an
+  admission, not a target. Tracked in #281, with #280 as its prerequisite.
+
 - **The bash hook suite had never executed the deny tier it exists to guard
   (#122).** The issue was a false deny: `git commit -m "fix(db): drop table
   handling"` was blocked as if it were SQL. The rule was already scoped
