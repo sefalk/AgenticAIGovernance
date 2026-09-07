@@ -3051,6 +3051,178 @@ foreach ($pair in @(
 
 Write-Output ""
 
+# ── 6c-bis. Undeclared repo-root creations (issue #123, direction 3) ─────
+
+Write-Output "## undeclared repo-root creations (issue #123)"
+
+# Direction 3 of #123: diff the working tree against the DECLARED scope instead
+# of trusting the agent's self-report. The declared scope is the delegation
+# prompt, which the editor writes verbatim into the subagent log as a
+# `user_message` span.
+#
+# The rule is narrow because the wide one was measured and rejected. Over 815
+# real subagent logs, "wrote a file the prompt never names" fires on 52 of the
+# 334 runs that wrote anything (15.6%), nearly all legitimate -- so it would be
+# switched off (#108). "CREATED, at the repository root, never named" fires 6
+# times with no false positives, and one of the six is `run_wit3103_tests.py`,
+# the file the issue was opened about.
+$usScript = Join-Path $scriptDir 'undeclared-scratch.py'
+
+Assert-True "the undeclared-scratch reader ships with the hooks" `
+    (Test-Path $usScript) "no undeclared-scratch.py in hooks/scripts"
+
+$usRoot = Join-Path ([IO.Path]::GetTempPath()) "af-123-$(Get-Random)"
+$usRepo = Join-Path $usRoot 'repo'
+New-Item -ItemType Directory -Path (Join-Path $usRepo 'tests') -Force | Out-Null
+
+function New-ScratchLog {
+    # Shaped like a real log: a session_start filler, one user_message carrying
+    # the delegation prompt, then one tool_call per write. Written without a
+    # BOM because the editor writes none, and a BOM would make the reader skip
+    # the very first line.
+    param([string]$Dir, [string]$Prompt, [object[]]$Calls, [switch]$NoPrompt)
+    New-Item -ItemType Directory -Path $Dir -Force | Out-Null
+    $lines = @((@{ ts = 1000; type = 'session_start'; name = 'session_start' } | ConvertTo-Json -Compress))
+    if (-not $NoPrompt) {
+        $lines += (@{ ts = 1100; type = 'user_message'; attrs = @{ content = $Prompt } } |
+            ConvertTo-Json -Compress -Depth 5)
+    }
+    foreach ($call in $Calls) {
+        $lines += (@{
+                ts    = 2000
+                type  = 'tool_call'
+                name  = $call.Tool
+                attrs = @{ args = (@{ filePath = $call.Path } | ConvertTo-Json -Compress) }
+            } | ConvertTo-Json -Compress -Depth 5)
+    }
+    [IO.File]::WriteAllLines(
+        (Join-Path $Dir 'runSubagent-test-writer-toolu_us.jsonl'),
+        $lines,
+        (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Invoke-ScratchReader {
+    param([string]$Dir, [string]$Agent = 'test-writer')
+    $out = & $peerPy $usScript --session-dir $Dir --agent $Agent --repo-root $usRepo 2>$null
+    $code = $LASTEXITCODE
+    @{ Files = @($out | Where-Object { $_ -and "$_".Trim() } | ForEach-Object { "$_".Trim() }); Code = $code }
+}
+
+$usPrompt = 'Write failing tests for the alignment bug. You may create tests/test_alignment.py only.'
+
+# The incident itself.
+$usDirScratch = Join-Path $usRoot 'scratch'
+New-ScratchLog -Dir $usDirScratch -Prompt $usPrompt -Calls @(
+    @{ Tool = 'create_file'; Path = (Join-Path $usRepo 'run_wit3103_tests.py') })
+$usScratch = Invoke-ScratchReader -Dir $usDirScratch
+Assert-True "a scratch runner created at the repo root is reported" `
+    ($usScratch.Files -contains 'run_wit3103_tests.py') "got '$($usScratch.Files -join ",")'"
+Assert-True "a measurable run exits 0" `
+    ($usScratch.Code -eq 0) "got exit code $($usScratch.Code)"
+
+# A root file the task actually asked for is not the agent's invention.
+$usDirNamed = Join-Path $usRoot 'named'
+New-ScratchLog -Dir $usDirNamed -Prompt 'Create CHANGELOG.md in the repository root.' -Calls @(
+    @{ Tool = 'create_file'; Path = (Join-Path $usRepo 'CHANGELOG.md') })
+$usNamed = Invoke-ScratchReader -Dir $usDirNamed
+Assert-True "a root file the prompt asked for is not reported" `
+    ($usNamed.Files.Count -eq 0) "got '$($usNamed.Files -join ",")'"
+
+# EDITING an existing root file is how every legitimate case in the sample
+# behaved -- `.gitignore`, `pyproject.toml`, `tox.ini`. This clause is what
+# makes the rule immune to prompt truncation: the prompt is capped at ~5000
+# characters and 342 of 814 sampled prompts end in `[truncated]`, so a name
+# living in the severed tail reads as "never named".
+$usDirEdit = Join-Path $usRoot 'edit'
+New-ScratchLog -Dir $usDirEdit -Prompt $usPrompt -Calls @(
+    @{ Tool = 'replace_string_in_file'; Path = (Join-Path $usRepo 'pyproject.toml') })
+$usEdit = Invoke-ScratchReader -Dir $usDirEdit
+Assert-True "editing an existing root file is not reported however undeclared" `
+    ($usEdit.Files.Count -eq 0) "got '$($usEdit.Files -join ",")'"
+
+$usDirMulti = Join-Path $usRoot 'multi'
+New-ScratchLog -Dir $usDirMulti -Prompt $usPrompt -Calls @(
+    @{ Tool = 'multi_replace_string_in_file'; Path = (Join-Path $usRepo 'tox.ini') })
+$usMulti = Invoke-ScratchReader -Dir $usDirMulti
+Assert-True "a multi-file edit of a root file is not reported either" `
+    ($usMulti.Files.Count -eq 0) "got '$($usMulti.Files -join ",")'"
+
+# Subdirectories are where deliverables live. Reporting an undeclared file in
+# tests/ or docs/ is the 15.6% false positive rate that got the wide rule
+# rejected.
+$usDirSub = Join-Path $usRoot 'subdir'
+New-ScratchLog -Dir $usDirSub -Prompt $usPrompt -Calls @(
+    @{ Tool = 'create_file'; Path = (Join-Path $usRepo 'tests/test_invented_name.py') })
+$usSub = Invoke-ScratchReader -Dir $usDirSub
+Assert-True "an undeclared file created in a subdirectory is not reported" `
+    ($usSub.Files.Count -eq 0) "got '$($usSub.Files -join ",")'"
+
+# Scratch work belongs outside the repository, and that is the remediation the
+# block message offers -- so it must not be flagged in turn.
+$usDirOut = Join-Path $usRoot 'outside'
+New-ScratchLog -Dir $usDirOut -Prompt $usPrompt -Calls @(
+    @{ Tool = 'create_file'; Path = (Join-Path $usRoot 'probe_outside.py') })
+$usOut = Invoke-ScratchReader -Dir $usDirOut
+Assert-True "a file created outside the repository is not reported" `
+    ($usOut.Files.Count -eq 0) "got '$($usOut.Files -join ",")'"
+
+# No prompt means no declared scope. Reporting "nothing found" would be a lie
+# the caller cannot detect, so the reader must say it could not measure.
+$usDirNoPrompt = Join-Path $usRoot 'noprompt'
+New-ScratchLog -Dir $usDirNoPrompt -NoPrompt -Calls @(
+    @{ Tool = 'create_file'; Path = (Join-Path $usRepo 'run_wit3103_tests.py') })
+$usNoPrompt = Invoke-ScratchReader -Dir $usDirNoPrompt
+Assert-True "a log without a delegation prompt reports that it could not measure" `
+    ($usNoPrompt.Code -eq 1) "got exit code $($usNoPrompt.Code)"
+Assert-True "a log without a delegation prompt reports no files" `
+    ($usNoPrompt.Files.Count -eq 0) "got '$($usNoPrompt.Files -join ",")'"
+
+# No log at all is the same answer, not a pass.
+$usDirEmpty = Join-Path $usRoot 'empty'
+New-Item -ItemType Directory -Path $usDirEmpty -Force | Out-Null
+$usEmpty = Invoke-ScratchReader -Dir $usDirEmpty
+Assert-True "an agent with no log of its own reports that it could not measure" `
+    ($usEmpty.Code -eq 1) "got exit code $($usEmpty.Code)"
+
+Remove-Item -Recurse -Force $usRoot -ErrorAction SilentlyContinue
+
+# The wiring. A reader nothing calls protects nothing.
+$usCommonPs = Get-Content (Join-Path $scriptDir '_common.ps1') -Raw -ErrorAction SilentlyContinue
+$usCommonSh = Get-Content (Join-Path $scriptDir '_common.sh') -Raw -ErrorAction SilentlyContinue
+$usTwPs1 = Get-Content (Join-Path $scriptDir 'test-writer-stop.ps1') -Raw -ErrorAction SilentlyContinue
+$usTwSh = Get-Content (Join-Path $scriptDir 'test-writer-stop.sh') -Raw -ErrorAction SilentlyContinue
+
+Assert-True "_common.ps1 exposes the undeclared-scratch reader" `
+    ($usCommonPs -match 'function Get-AfUndeclaredScratch') "no Get-AfUndeclaredScratch wrapper"
+Assert-True "_common.sh exposes the undeclared-scratch reader" `
+    ($usCommonSh -match 'af_undeclared_scratch\(\)') "no af_undeclared_scratch wrapper"
+Assert-True "test-writer-stop.ps1 checks for undeclared root creations" `
+    ($usTwPs1 -match 'Get-AfUndeclaredScratch') "the Red gate still trusts the agent's self-report"
+Assert-True "test-writer-stop.sh checks for undeclared root creations" `
+    ($usTwSh -match 'af_undeclared_scratch') "the Red gate still trusts the agent's self-report"
+
+# Unlike the return reader (#285), this one BLOCKS. It may: it fires only on
+# positive evidence, every unmeasurable case yields an empty list, and the
+# remediation is to delete or move one file.
+Assert-True "test-writer-stop.ps1 blocks on an undeclared root creation" `
+    ($usTwPs1 -match '(?s)Get-AfUndeclaredScratch.{0,900}decision\s*=\s*"block"') `
+    "the finding is reported but nothing stops the agent"
+Assert-True "test-writer-stop.sh blocks on an undeclared root creation" `
+    ($usTwSh -match '(?s)af_undeclared_scratch.{0,900}\\"decision\\": \\"block\\"') `
+    "the finding is reported but nothing stops the agent"
+
+# Gate 0 runs before the Red gate on purpose: every gate below it returns early
+# when pytest is missing or collects nothing, and a scratch file in the root is
+# a mess whether or not the suite ran.
+Assert-True "the PowerShell scratch gate runs before the pytest early-return" `
+    ($usTwPs1.IndexOf('Get-AfUndeclaredScratch') -lt $usTwPs1.IndexOf('Get-Command pytest')) `
+    "a missing pytest lets an undeclared root file through"
+Assert-True "the bash scratch gate runs before the pytest early-return" `
+    ($usTwSh.IndexOf('af_undeclared_scratch') -lt $usTwSh.IndexOf('command -v pytest')) `
+    "a missing pytest lets an undeclared root file through"
+
+Write-Output ""
+
 # ── 6d. Artifact existence is a filesystem question (issue #87) ──────────
 
 Write-Output "## Artifact existence (issue #87)"
