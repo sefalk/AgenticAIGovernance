@@ -318,6 +318,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A hook can now read what its own agent just said, and can tell a whole
+  return from a beheaded one (#285, split out of #134).** Every subagent turn
+  writes an `agent_response` record about 6 ms before the Stop hook fires, so
+  the text is there — but nothing read it. #123 records the consequence: an
+  implementer modified seven files and "returned nothing at all", and every
+  gate passed, because no gate looked at the return.
+
+  `subagent-return.py` reads it and answers with a status, not a string, since
+  a bare string is exactly what cannot be judged. The editor caps the value at
+  5000 characters and appends `[truncated]`; measured across 300 real logs,
+  231 were complete and 68 truncated. Roughly a quarter of returns lose their
+  tail, and the tail is where the mandated `### Gate Summary` sits — one
+  sampled log ends literally `### Gate Summary\n[truncated]`. A whole return
+  and a beheaded one are both non-empty and both look fine.
+
+  Truncation is detected by trying to parse the value, not by testing for
+  length 5011 and not by looking for the marker. All three agreed on 299 of
+  300 sampled logs, but the framework owns none of them: re-tune the cap or
+  re-word the marker in an editor release and a length test starts calling
+  every return complete. A value that does not parse is structurally
+  incomplete whatever the cap is called.
+
+  `unavailable` is a third state rather than an empty string. "The agent said
+  nothing" and "the agent's words could not be recovered" are different facts,
+  and a gate handed the empty string for both would have to guess which one it
+  was holding — so `complete` and `truncated` never come back empty.
+
+  Wrapped as `af_subagent_return` and `Get-AfSubagentReturn`, whose failure
+  direction is inverted from `af_peer_edits`: that one stays silent when it
+  cannot measure, because subtracting nothing is the existing behaviour. This
+  one must say so, because a caller reading silence as "the agent returned
+  nothing" would fail the agent for the hook's own blind spot.
+
+  First consumer is the implementer's green gate, which now appends a note
+  when its own return is truncated or unreadable. It warns rather than blocks,
+  deliberately: `unavailable` also covers "no interpreter, no session dir", and
+  blocking on that would let a missing python shut down every implementer. A
+  watchdog that breaks legitimate work gets switched off (#108), which costs
+  more than the case it was meant to catch.
+
 - **The framework's delivery paths are a skill now, and each one ends in a
   verification (#236).** Delivery was documented in `docs/wiki/12-deployment.md`,
   which is not part of the payload — an agent working inside a consumer project
