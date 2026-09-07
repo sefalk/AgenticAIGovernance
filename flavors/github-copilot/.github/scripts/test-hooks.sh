@@ -1499,6 +1499,206 @@ for ret_pair in "implementer-stop.ps1:returnNote|\$ret\.Status" "implementer-sto
     fi
 done
 
+# --- Undeclared repo-root creations (issue #123, direction 3) -------------
+#
+# Direction 3 of #123: diff the working tree against the DECLARED scope instead
+# of trusting the agent's self-report. The declared scope is the delegation
+# prompt, which the editor writes verbatim into the subagent log as a
+# `user_message` span.
+#
+# The rule is narrow because the wide one was measured and rejected. Over 815
+# real subagent logs, "wrote a file the prompt never names" fires on 52 of the
+# 334 runs that wrote anything (15.6%), nearly all legitimate -- so it would be
+# switched off (#108). "CREATED, at the repository root, never named" fires 6
+# times with no false positives, and one of the six is `run_wit3103_tests.py`,
+# the file the issue was opened about.
+
+echo "## undeclared repo-root creations (issue #123)"
+
+if [ -f "$HOOK_DIR/undeclared-scratch.py" ]; then
+    assert_true "the undeclared-scratch reader ships with the hooks" 1
+else
+    assert_true "the undeclared-scratch reader ships with the hooks" 0 "no undeclared-scratch.py in hooks/scripts"
+fi
+
+# A resolvable interpreter is not a working one: on Windows `python3` is an App
+# Execution Alias that is on PATH, runs nothing and exits non-zero.
+us_py=""
+for us_c in "$GITHUB_DIR/../.venv/bin/python" "$GITHUB_DIR/../.venv/Scripts/python.exe" python3 python py; do
+    if "$us_c" -c 'pass' >/dev/null 2>&1; then us_py="$us_c"; break; fi
+done
+
+if [ -n "$us_py" ] && [ -f "$HOOK_DIR/undeclared-scratch.py" ]; then
+    us_root=$(mktemp -d 2>/dev/null || echo "/tmp/af-123-$$")
+    us_repo="$us_root/repo"
+    mkdir -p "$us_repo/tests"
+    us_name="runSubagent-test-writer-toolu_us.jsonl"
+    us_prompt='Write failing tests for the alignment bug. You may create tests/test_alignment.py only.'
+
+    # A path INSIDE the log has to be written the way the reader's interpreter
+    # will read it. MSYS rewrites POSIX paths to Windows ones when it hands
+    # them to a native binary as an ARGUMENT, but never inside a file it
+    # writes -- so `--repo-root /tmp/x` arrives as `C:\...\Temp\x` while a
+    # `/tmp/x/f.py` embedded in the fixture stays POSIX, resolves to `C:\tmp`,
+    # and lands outside the repository. `cygpath -m` gives a Windows path with
+    # forward slashes, which needs no JSON escaping.
+    us_native() {
+        if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
+    }
+    us_repo_n=$(us_native "$us_repo")
+    us_root_n=$(us_native "$us_root")
+
+    # Shaped like a real log: a session_start filler, one user_message carrying
+    # the delegation prompt, then one tool_call per write.
+    us_make() {
+        # $1 dir, $2 prompt (empty = omit the user_message), $3 tool, $4 path
+        mkdir -p "$1"
+        printf '%s\n' '{"ts":1000,"type":"session_start","name":"session_start"}' > "$1/$us_name"
+        if [ -n "$2" ]; then
+            printf '{"ts":1100,"type":"user_message","attrs":{"content":"%s"}}\n' "$2" >> "$1/$us_name"
+        fi
+        printf '{"ts":2000,"type":"tool_call","name":"%s","attrs":{"args":"{\\"filePath\\": \\"%s\\"}"}}\n' \
+            "$3" "$4" >> "$1/$us_name"
+    }
+    us_run() {
+        "$us_py" "$HOOK_DIR/undeclared-scratch.py" --session-dir "$1" --agent test-writer \
+            --repo-root "$us_repo" 2>/dev/null
+    }
+
+    # The incident itself.
+    us_make "$us_root/scratch" "$us_prompt" create_file "$us_repo_n/run_wit3103_tests.py"
+    us_out=$(us_run "$us_root/scratch")
+    us_code=$?
+    assert_contains "a scratch runner created at the repo root is reported" "$us_out" "run_wit3103_tests.py"
+    if [ "$us_code" -eq 0 ]; then
+        assert_true "a measurable run exits 0" 1
+    else
+        assert_true "a measurable run exits 0" 0 "got exit code $us_code"
+    fi
+
+    # A root file the task actually asked for is not the agent's invention.
+    us_make "$us_root/named" 'Create CHANGELOG.md in the repository root.' create_file "$us_repo_n/CHANGELOG.md"
+    if [ -z "$(us_run "$us_root/named")" ]; then
+        assert_true "a root file the prompt asked for is not reported" 1
+    else
+        assert_true "a root file the prompt asked for is not reported" 0 "got '$(us_run "$us_root/named")'"
+    fi
+
+    # EDITING an existing root file is how every legitimate case in the sample
+    # behaved -- `.gitignore`, `pyproject.toml`, `tox.ini`. This clause is what
+    # makes the rule immune to prompt truncation: the prompt is capped at ~5000
+    # characters and 342 of 814 sampled prompts end in `[truncated]`, so a name
+    # living in the severed tail reads as "never named".
+    us_make "$us_root/edit" "$us_prompt" replace_string_in_file "$us_repo_n/pyproject.toml"
+    if [ -z "$(us_run "$us_root/edit")" ]; then
+        assert_true "editing an existing root file is not reported however undeclared" 1
+    else
+        assert_true "editing an existing root file is not reported however undeclared" 0 "got a report"
+    fi
+
+    us_make "$us_root/multi" "$us_prompt" multi_replace_string_in_file "$us_repo_n/tox.ini"
+    if [ -z "$(us_run "$us_root/multi")" ]; then
+        assert_true "a multi-file edit of a root file is not reported either" 1
+    else
+        assert_true "a multi-file edit of a root file is not reported either" 0 "got a report"
+    fi
+
+    # Subdirectories are where deliverables live. Reporting an undeclared file
+    # in tests/ or docs/ is the 15.6% false positive rate that got the wide
+    # rule rejected.
+    us_make "$us_root/subdir" "$us_prompt" create_file "$us_repo_n/tests/test_invented_name.py"
+    if [ -z "$(us_run "$us_root/subdir")" ]; then
+        assert_true "an undeclared file created in a subdirectory is not reported" 1
+    else
+        assert_true "an undeclared file created in a subdirectory is not reported" 0 "got a report"
+    fi
+
+    # Scratch work belongs outside the repository, and that is the remediation
+    # the block message offers -- so it must not be flagged in turn.
+    us_make "$us_root/outside" "$us_prompt" create_file "$us_root_n/probe_outside.py"
+    if [ -z "$(us_run "$us_root/outside")" ]; then
+        assert_true "a file created outside the repository is not reported" 1
+    else
+        assert_true "a file created outside the repository is not reported" 0 "got a report"
+    fi
+
+    # No prompt means no declared scope. Reporting "nothing found" would be a
+    # lie the caller cannot detect, so the reader must say it could not measure.
+    us_make "$us_root/noprompt" "" create_file "$us_repo_n/run_wit3103_tests.py"
+    us_out=$(us_run "$us_root/noprompt")
+    us_code=$?
+    if [ "$us_code" -eq 1 ]; then
+        assert_true "a log without a delegation prompt reports that it could not measure" 1
+    else
+        assert_true "a log without a delegation prompt reports that it could not measure" 0 "got exit code $us_code"
+    fi
+    if [ -z "$us_out" ]; then
+        assert_true "a log without a delegation prompt reports no files" 1
+    else
+        assert_true "a log without a delegation prompt reports no files" 0 "got '$us_out'"
+    fi
+
+    # No log at all is the same answer, not a pass.
+    mkdir -p "$us_root/empty"
+    us_run "$us_root/empty" >/dev/null 2>&1
+    us_code=$?
+    if [ "$us_code" -eq 1 ]; then
+        assert_true "an agent with no log of its own reports that it could not measure" 1
+    else
+        assert_true "an agent with no log of its own reports that it could not measure" 0 "got exit code $us_code"
+    fi
+
+    rm -rf "$us_root"
+else
+    assert_true "the undeclared-scratch reader is exercisable" 0 "no working interpreter or no reader"
+fi
+
+# The wiring. A reader nothing calls protects nothing.
+for us_pair in "_common.ps1:function Get-AfUndeclaredScratch" "_common.sh:af_undeclared_scratch()" \
+    "test-writer-stop.ps1:Get-AfUndeclaredScratch" "test-writer-stop.sh:af_undeclared_scratch"; do
+    us_file="${us_pair%%:*}"
+    us_key="${us_pair#*:}"
+    if grep -qF "$us_key" "$HOOK_DIR/$us_file" 2>/dev/null; then
+        assert_true "$us_file wires the undeclared-scratch reader" 1
+    else
+        assert_true "$us_file wires the undeclared-scratch reader" 0 "no '$us_key'"
+    fi
+done
+
+# Unlike the return reader (#285), this one BLOCKS. It may: it fires only on
+# positive evidence, every unmeasurable case yields an empty list, and the
+# remediation is to delete or move one file.
+if grep -A 12 'Get-AfUndeclaredScratch' "$HOOK_DIR/test-writer-stop.ps1" 2>/dev/null | grep -q 'decision.*block'; then
+    assert_true "test-writer-stop.ps1 blocks on an undeclared root creation" 1
+else
+    assert_true "test-writer-stop.ps1 blocks on an undeclared root creation" 0 "the finding stops nothing"
+fi
+if grep -A 12 'af_undeclared_scratch' "$HOOK_DIR/test-writer-stop.sh" 2>/dev/null | grep -q 'decision.*block'; then
+    assert_true "test-writer-stop.sh blocks on an undeclared root creation" 1
+else
+    assert_true "test-writer-stop.sh blocks on an undeclared root creation" 0 "the finding stops nothing"
+fi
+
+# Gate 0 runs before the Red gate on purpose: every gate below it returns early
+# when pytest is missing or collects nothing, and a scratch file in the root is
+# a mess whether or not the suite ran.
+us_gate=$(grep -n 'Get-AfUndeclaredScratch' "$HOOK_DIR/test-writer-stop.ps1" | head -1 | cut -d: -f1)
+us_pytest=$(grep -n 'Get-Command pytest' "$HOOK_DIR/test-writer-stop.ps1" | head -1 | cut -d: -f1)
+if [ -n "$us_gate" ] && [ -n "$us_pytest" ] && [ "$us_gate" -lt "$us_pytest" ]; then
+    assert_true "the PowerShell scratch gate runs before the pytest early-return" 1
+else
+    assert_true "the PowerShell scratch gate runs before the pytest early-return" 0 \
+        "a missing pytest lets an undeclared root file through"
+fi
+us_gate=$(grep -n 'af_undeclared_scratch' "$HOOK_DIR/test-writer-stop.sh" | head -1 | cut -d: -f1)
+us_pytest=$(grep -n 'command -v pytest' "$HOOK_DIR/test-writer-stop.sh" | head -1 | cut -d: -f1)
+if [ -n "$us_gate" ] && [ -n "$us_pytest" ] && [ "$us_gate" -lt "$us_pytest" ]; then
+    assert_true "the bash scratch gate runs before the pytest early-return" 1
+else
+    assert_true "the bash scratch gate runs before the pytest early-return" 0 \
+        "a missing pytest lets an undeclared root file through"
+fi
+
 # --- Artifact existence is a filesystem question (issue #87) ---------------
 #
 # The post-flight checked for the workflow log and retro with git-aware search,

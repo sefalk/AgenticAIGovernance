@@ -539,6 +539,48 @@ af_subagent_return() {
     printf '%s\n' "$_sr_out"
 }
 
+# ── Undeclared files created at the repository root (issue #123) ───────
+#
+# Echoes the names of files this agent CREATED directly in the repository root
+# that its own delegation prompt never mentions, one per line. Empty output
+# means either "nothing to report" or "could not measure", and the caller must
+# treat both as no finding.
+#
+# The failure direction is af_peer_edits', not af_subagent_return's: the caller
+# blocks on positive output, so staying silent when the measurement is
+# impossible leaves today's behaviour in place. A missing interpreter must
+# never become an outage -- a watchdog that fails a legitimate workflow gets
+# switched off (issue #108).
+#
+# Usage: af_undeclared_scratch "$stdin_raw" test-writer
+af_undeclared_scratch() {
+    _us_stdin="${1:-}"
+    _us_agent="${2:-}"
+    [ -n "$_us_stdin" ] && [ -n "$_us_agent" ] || return 0
+
+    _us_sid=$(printf '%s' "$_us_stdin" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    _us_transcript=$(printf '%s' "$_us_stdin" | grep -o '"transcript_path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    [ -n "$_us_sid" ] && [ -n "$_us_transcript" ] || return 0
+
+    # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
+    _us_chat_dir=$(dirname "$(dirname "$_us_transcript")")
+    _us_session_dir="${_us_chat_dir}/debug-logs/${_us_sid}"
+    [ -d "$_us_session_dir" ] || return 0
+
+    _us_reader="${AF_MAIN_ROOT:-.}/.github/hooks/scripts/undeclared-scratch.py"
+    [ -f "$_us_reader" ] || return 0
+
+    _us_python=""
+    for _us_c in .venv/bin/python .venv/Scripts/python.exe; do
+        [ -x "$_us_c" ] && _us_python="$_us_c" && break
+    done
+    [ -n "$_us_python" ] || _us_python="${AF_PYTHON:-}"
+    [ -n "$_us_python" ] || return 0
+
+    "$_us_python" "$_us_reader" --session-dir "$_us_session_dir" \
+        --agent "$_us_agent" --repo-root "${AF_CODE_ROOT:-.}" 2>/dev/null || return 0
+}
+
 # Remove from a newline-separated list ($1) every line present in a second
 # list ($2). Used to drop a concurrent peer's files from a gate scope (#101).
 #

@@ -19,8 +19,20 @@ set -uo pipefail
 # marker" -- Gate 2 flagged every new test file, marked or not (issue #175).
 . "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 
-# Read stdin (hook input JSON — required by protocol)
-cat > /dev/null
+# Read stdin (hook input JSON — required by protocol, and Gate 0 needs it)
+stdin_raw=$(cat)
+
+# ---------- Gate 0: no undeclared files at the repository root (#123) ----------
+#
+# Runs before the Red gate on purpose. Every gate below returns early when
+# pytest is missing or collects nothing, and a scratch file left in the root is
+# a mess whether or not the suite ran.
+scratch=$(af_undeclared_scratch "$stdin_raw" test-writer | sed '/^[[:space:]]*$/d')
+if [ -n "$scratch" ]; then
+    scratch_list=$(printf '%s' "$scratch" | tr '\n' ',' | sed 's/,$//; s/,/, /g')
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Undeclared files at the repository root: ${scratch_list}. You created these, and the task you were given never mentions them. Throwaway runners and verification scripts do not belong in the repository -- delete them, or put them under the system temp directory. If one of them really is a requested deliverable, it belongs in the directory its kind lives in (tests/ for tests, docs/ for documents), not the root.\"}}"
+    exit 0
+fi
 
 if ! command -v pytest &>/dev/null; then
     echo '{"systemMessage": "test-writer:Stop — pytest not found, Red gate skipped"}'
