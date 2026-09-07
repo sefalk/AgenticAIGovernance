@@ -452,3 +452,51 @@ function Get-AfSubagentReturn {
     $text = if ($lines.Count -gt 1) { ($lines[1..($lines.Count - 1)] -join "`n") } else { '' }
     return @{ Status = $status; Text = $text }
 }
+
+# ── Undeclared files created at the repository root (issue #123) ───────
+#
+# Returns the names of files this agent CREATED directly in the repository root
+# that its own delegation prompt never mentions. An empty array means either
+# "nothing to report" or "could not measure", and the caller must treat both as
+# no finding.
+#
+# The failure direction is Get-AfPeerEdits', not Get-AfSubagentReturn's: the
+# caller blocks on a non-empty result, so returning empty when the measurement
+# is impossible leaves today's behaviour in place. A missing interpreter must
+# never become an outage -- a watchdog that fails a legitimate workflow gets
+# switched off (issue #108).
+function Get-AfUndeclaredScratch {
+    param(
+        [string]$StdinRaw,
+        [string]$Agent,
+        [string]$CodeRoot,
+        [string]$MainRoot
+    )
+
+    if (-not $StdinRaw -or -not $Agent) { return @() }
+
+    try { $payload = $StdinRaw | ConvertFrom-Json } catch { return @() }
+    $sid = $payload.session_id
+    $transcript = $payload.transcript_path
+    if (-not $sid -or -not $transcript) { return @() }
+
+    # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
+    $chatDir = Split-Path -Parent (Split-Path -Parent $transcript)
+    if (-not $chatDir) { return @() }
+    $sessionDir = Join-Path (Join-Path $chatDir 'debug-logs') $sid
+    if (-not (Test-Path $sessionDir)) { return @() }
+
+    $reader = Join-Path $MainRoot '.github/hooks/scripts/undeclared-scratch.py'
+    if (-not (Test-Path $reader)) { return @() }
+
+    $python = Join-Path $CodeRoot '.venv/Scripts/python.exe'
+    if (-not (Test-Path $python)) {
+        $python = if ($AfPython) { $AfPython } else { $null }
+    }
+    if (-not $python) { return @() }
+
+    $out = & $python $reader '--session-dir' $sessionDir '--agent' $Agent '--repo-root' $CodeRoot 2>$null
+    if ($LASTEXITCODE -ne 0) { return @() }
+
+    return @($out | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })
+}
