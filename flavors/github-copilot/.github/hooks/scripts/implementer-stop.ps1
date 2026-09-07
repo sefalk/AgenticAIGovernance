@@ -375,8 +375,24 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
     $testsStatus = if ($testGateSkipped) { "gate skipped ($testGateSkipped)" }
                    elseif ($fromLog) { 'accepted from log' }
                    else { 'all pass' }
+    # Issue #123 direction 5: an implementer modified seven files and "returned
+    # nothing at all", and every gate still passed -- because no gate read the
+    # return. This one does.
+    #
+    # It warns instead of blocking, on purpose. `unavailable` conflates "the
+    # agent said nothing" with "the reader could not run" (no interpreter, no
+    # session dir), and blocking on the second would let a missing python shut
+    # down every implementer. A watchdog that breaks legitimate work gets
+    # switched off (#108), which costs more than the case it was meant to catch.
+    $ret = Get-AfSubagentReturn -StdinRaw $stdinRaw -Agent 'implementer' -MainRoot $mainRoot
+    $returnNote = switch ($ret.Status) {
+        'truncated' { ', RETURN TRUNCATED -- the tail was cut by the 5000-char cap, which is where the Gate Summary sits; re-state it in your reply' }
+        'unavailable' { ', RETURN UNREADABLE -- no return text could be recovered; state your Gate Summary explicitly so the coordinator is not left guessing' }
+        default { '' }
+    }
+
     $output = @{
-        systemMessage = "implementer:Stop -- Green gate PASS: tests $testsStatus, provenance + python quality verified, linting: $lintStatus"
+        systemMessage = "implementer:Stop -- Green gate PASS: tests $testsStatus, provenance + python quality verified, linting: $lintStatus$returnNote"
     } | ConvertTo-Json -Compress
     Write-Output $output
     exit 0

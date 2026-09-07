@@ -301,7 +301,27 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
     else
         pass_detail="all tests pass"
     fi
-    echo "{\"systemMessage\": \"implementer:Stop \u2014 Green gate PASS: ${pass_detail}, provenance + python quality verified, linting: ${lint_status}\"}"
+    # Issue #123 direction 5: an implementer modified seven files and "returned
+    # nothing at all", and every gate still passed -- because no gate read the
+    # return. This one does.
+    #
+    # It warns instead of blocking, on purpose. `unavailable` conflates "the
+    # agent said nothing" with "the reader could not run" (no interpreter, no
+    # session dir), and blocking on the second would let a missing python shut
+    # down every implementer. A watchdog that breaks legitimate work gets
+    # switched off (#108), which costs more than the case it was meant to catch.
+    return_note=""
+    ret_status=$(af_subagent_return "$stdin_raw" implementer | head -1)
+    case "$ret_status" in
+        truncated)
+            return_note=", RETURN TRUNCATED \u2014 the tail was cut by the 5000-char cap, which is where the Gate Summary sits; re-state it in your reply"
+            ;;
+        unavailable)
+            return_note=", RETURN UNREADABLE \u2014 no return text could be recovered; state your Gate Summary explicitly so the coordinator is not left guessing"
+            ;;
+    esac
+
+    echo "{\"systemMessage\": \"implementer:Stop \u2014 Green gate PASS: ${pass_detail}, provenance + python quality verified, linting: ${lint_status}${return_note}\"}"
     exit 0
 else
     summary=$(echo "$output" | grep -v '^===' | tail -3 | af_json_escape)
