@@ -399,3 +399,56 @@ function Get-AfPeerEdits {
 
     return @($out | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })
 }
+
+# ── This agent's own final return text (issue #285) ────────────────────
+#
+# Returns @{ Status = 'complete'|'truncated'|'unavailable'; Text = <string> }.
+#
+# Note the inverted failure direction versus Get-AfPeerEdits above. That one
+# stays silent when it cannot measure, because subtracting nothing is today's
+# behaviour. This one must SAY it could not measure: a caller deciding on the
+# absence of text would read silence as "the agent returned nothing" and fail
+# the agent for the hook's own blind spot. Every failure path therefore returns
+# `unavailable`, which callers report as BLOCKED rather than as a verdict.
+function Get-AfSubagentReturn {
+    param(
+        [string]$StdinRaw,
+        [string]$Agent,
+        [string]$CodeRoot,
+        [string]$MainRoot
+    )
+
+    $blocked = @{ Status = 'unavailable'; Text = '' }
+    if (-not $StdinRaw -or -not $Agent) { return $blocked }
+
+    try { $payload = $StdinRaw | ConvertFrom-Json } catch { return $blocked }
+    $sid = $payload.session_id
+    $transcript = $payload.transcript_path
+    if (-not $sid -or -not $transcript) { return $blocked }
+
+    # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
+    $chatDir = Split-Path -Parent (Split-Path -Parent $transcript)
+    if (-not $chatDir) { return $blocked }
+    $sessionDir = Join-Path (Join-Path $chatDir 'debug-logs') $sid
+    if (-not (Test-Path $sessionDir)) { return $blocked }
+
+    $reader = Join-Path $MainRoot '.github/hooks/scripts/subagent-return.py'
+    if (-not (Test-Path $reader)) { return $blocked }
+
+    $python = Join-Path $CodeRoot '.venv/Scripts/python.exe'
+    if (-not (Test-Path $python)) {
+        $python = if ($AfPython) { $AfPython } else { $null }
+    }
+    if (-not $python) { return $blocked }
+
+    $out = & $python $reader '--session-dir' $sessionDir '--agent' $Agent 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $out) { return $blocked }
+
+    # The reader puts the status on line 1 and the text from line 2 on, so a
+    # return whose own text starts with 'complete' cannot shift the parse.
+    $lines = @($out)
+    $status = ([string]$lines[0]).Trim()
+    if ($status -notin @('complete', 'truncated', 'unavailable')) { return $blocked }
+    $text = if ($lines.Count -gt 1) { ($lines[1..($lines.Count - 1)] -join "`n") } else { '' }
+    return @{ Status = $status; Text = $text }
+}

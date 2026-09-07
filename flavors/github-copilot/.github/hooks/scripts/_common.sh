@@ -483,6 +483,62 @@ af_peer_edits() {
         --agent "$_pe_agent" --repo-root "${AF_CODE_ROOT:-.}" 2>/dev/null || return 0
 }
 
+# ── This agent's own final return text (issue #285) ────────────────────
+#
+# Echoes the status on line 1 -- `complete`, `truncated` or `unavailable` --
+# and the recovered text from line 2 on.
+#
+# Note the inverted failure direction versus af_peer_edits above. That one
+# stays silent when it cannot measure, because subtracting nothing is today's
+# behaviour. This one must SAY it could not measure: a caller deciding on the
+# absence of text would read silence as "the agent returned nothing" and fail
+# the agent for the hook's own blind spot. Every failure path therefore prints
+# `unavailable`, which callers report as BLOCKED rather than as a verdict.
+#
+# Usage: af_subagent_return "$stdin_raw" implementer
+af_subagent_return() {
+    _sr_stdin="${1:-}"
+    _sr_agent="${2:-}"
+    if [ -z "$_sr_stdin" ] || [ -z "$_sr_agent" ]; then
+        printf 'unavailable\n'
+        return 0
+    fi
+
+    _sr_sid=$(printf '%s' "$_sr_stdin" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    _sr_transcript=$(printf '%s' "$_sr_stdin" | grep -o '"transcript_path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    if [ -z "$_sr_sid" ] || [ -z "$_sr_transcript" ]; then
+        printf 'unavailable\n'
+        return 0
+    fi
+
+    # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
+    _sr_chat_dir=$(dirname "$(dirname "$_sr_transcript")")
+    _sr_session_dir="${_sr_chat_dir}/debug-logs/${_sr_sid}"
+    _sr_reader="${AF_MAIN_ROOT:-.}/.github/hooks/scripts/subagent-return.py"
+    if [ ! -d "$_sr_session_dir" ] || [ ! -f "$_sr_reader" ]; then
+        printf 'unavailable\n'
+        return 0
+    fi
+
+    _sr_python=""
+    for _sr_c in .venv/bin/python .venv/Scripts/python.exe; do
+        [ -x "$_sr_c" ] && _sr_python="$_sr_c" && break
+    done
+    [ -n "$_sr_python" ] || _sr_python="${AF_PYTHON:-}"
+    if [ -z "$_sr_python" ]; then
+        printf 'unavailable\n'
+        return 0
+    fi
+
+    _sr_out=$("$_sr_python" "$_sr_reader" --session-dir "$_sr_session_dir" \
+        --agent "$_sr_agent" 2>/dev/null)
+    if [ $? -ne 0 ] || [ -z "$_sr_out" ]; then
+        printf 'unavailable\n'
+        return 0
+    fi
+    printf '%s\n' "$_sr_out"
+}
+
 # Remove from a newline-separated list ($1) every line present in a second
 # list ($2). Used to drop a concurrent peer's files from a gate scope (#101).
 #
