@@ -2922,6 +2922,135 @@ foreach ($pair in @(
 
 Write-Output ""
 
+# ── 6c-2. The agent's own return text (issue #285) ───────────────────────
+
+Write-Output "## subagent return reader (issue #285)"
+
+# A Stop hook can read what its agent just said -- the record lands 6 ms before
+# the hook runs (#134). But the editor caps the value at 5000 characters and
+# appends `[truncated]`: measured over 300 real logs, 231 complete against 68
+# truncated. A whole return and a beheaded one are both non-empty strings, so a
+# caller handed a bare string cannot tell them apart, and the mandated
+# `### Gate Summary` sits in exactly the region the cap removes.
+$retScript = Join-Path $scriptDir 'subagent-return.py'
+
+Assert-True "the return reader ships with the hooks" `
+    (Test-Path $retScript) "no subagent-return.py in hooks/scripts"
+
+$retRoot = Join-Path ([IO.Path]::GetTempPath()) "af-285-$(Get-Random)"
+
+function New-ReturnLog {
+    # `attrs.response` is a JSON *string* holding a JSON array, exactly as the
+    # editor writes it -- the double encoding is the thing under test.
+    param([string]$Dir, [string]$Name, [string]$Response, [switch]$NoRecord)
+    New-Item -ItemType Directory -Path $Dir -Force | Out-Null
+    $lines = @((@{ ts = 1000; type = 'llm_request'; name = 'x' } | ConvertTo-Json -Compress))
+    if (-not $NoRecord) {
+        $lines += (@{ ts = 2000; type = 'agent_response'; attrs = @{ response = $Response } } |
+            ConvertTo-Json -Compress -Depth 6)
+    }
+    Set-Content -Path (Join-Path $Dir $Name) -Value ($lines -join "`n") -Encoding UTF8
+}
+
+function Invoke-ReturnReader {
+    param([string]$Dir, [string]$Agent = 'code-critic')
+    $out = & $peerPy $retScript --session-dir $Dir --agent $Agent 2>$null
+    $code = $LASTEXITCODE
+    $lines = @($out)
+    $status = if ($lines.Count -gt 0) { ([string]$lines[0]).Trim() } else { '' }
+    $text = if ($lines.Count -gt 1) { ($lines[1..($lines.Count - 1)] -join "`n") } else { '' }
+    @{ Status = $status; Text = $text; Code = $code }
+}
+
+$retName = 'runSubagent-code-critic-toolu_ret.jsonl'
+
+$dirComplete = Join-Path $retRoot 'complete'
+New-ReturnLog -Dir $dirComplete -Name $retName `
+    -Response '[{"role":"assistant","parts":[{"type":"text","content":"VERDICT APPROVED"}]}]'
+$rComplete = Invoke-ReturnReader -Dir $dirComplete
+Assert-True "a whole return reports complete" `
+    ($rComplete.Status -eq 'complete') "got status '$($rComplete.Status)'"
+Assert-True "a whole return carries its text" `
+    ($rComplete.Text -match 'VERDICT APPROVED') "got text '$($rComplete.Text)'"
+
+# Truncation is detected by the JSON-parse test, not by length 5011 and not by
+# the `[truncated]` marker. All three agreed on 299 of 300 sampled logs, but AF
+# owns none of them: re-tune the cap or re-word the marker and a length test
+# starts calling every return complete.
+$dirTrunc = Join-Path $retRoot 'truncated'
+New-ReturnLog -Dir $dirTrunc -Name $retName `
+    -Response '[{"role":"assistant","parts":[{"type":"text","content":"PARTIAL VERDICT[truncated]'
+$rTrunc = Invoke-ReturnReader -Dir $dirTrunc
+Assert-True "a beheaded return reports truncated rather than complete" `
+    ($rTrunc.Status -eq 'truncated') "got status '$($rTrunc.Status)'"
+Assert-True "a beheaded return still yields the text that survived" `
+    ($rTrunc.Text -match 'PARTIAL VERDICT') "got text '$($rTrunc.Text)'"
+
+# The #123 signature: seven files modified and "nothing at all" returned. The
+# real log's final record holds a tool_call and no text part. Reporting that as
+# empty text would make "the agent said nothing" and "its words could not be
+# recovered" the same fact.
+$dirTool = Join-Path $retRoot 'toolcall'
+New-ReturnLog -Dir $dirTool -Name $retName `
+    -Response '[{"role":"assistant","parts":[{"type":"tool_call","name":"read_file"}]}]'
+$rTool = Invoke-ReturnReader -Dir $dirTool
+Assert-True "a final record with only a tool call reports unavailable" `
+    ($rTool.Status -eq 'unavailable') "got status '$($rTool.Status)'"
+Assert-True "an unavailable return carries no text to mistake for a verdict" `
+    ([string]::IsNullOrEmpty($rTool.Text)) "got text '$($rTool.Text)'"
+
+$dirNoRec = Join-Path $retRoot 'norecord'
+New-ReturnLog -Dir $dirNoRec -Name $retName -Response 'x' -NoRecord
+$rNoRec = Invoke-ReturnReader -Dir $dirNoRec
+Assert-True "a log without an agent_response record reports unavailable" `
+    ($rNoRec.Status -eq 'unavailable') "got status '$($rNoRec.Status)'"
+
+$dirNoLog = Join-Path $retRoot 'nolog'
+New-Item -ItemType Directory -Path $dirNoLog -Force | Out-Null
+$rNoLog = Invoke-ReturnReader -Dir $dirNoLog
+Assert-True "no log for this agent reports unavailable" `
+    ($rNoLog.Status -eq 'unavailable') "got status '$($rNoLog.Status)'"
+
+# Exit 0 for `unavailable` separates "the reader ran and found nothing
+# readable" from "the reader did not run". A wrapper that had to infer the
+# first from a non-zero exit could not tell them apart either.
+Assert-True "an unavailable verdict is still a successful read" `
+    ($rNoLog.Code -eq 0) "exit $($rNoLog.Code)"
+
+Remove-Item $retRoot -Recurse -Force -ErrorAction SilentlyContinue
+
+# The wrapper's failure direction is inverted from Get-AfPeerEdits: that one
+# stays silent when it cannot measure, this one must say so.
+$retCommonPs = Get-Content (Join-Path $scriptDir '_common.ps1') -Raw -ErrorAction SilentlyContinue
+$retCommonSh = Get-Content (Join-Path $scriptDir '_common.sh') -Raw -ErrorAction SilentlyContinue
+Assert-True "_common.ps1 exposes the return reader" `
+    ($retCommonPs -match 'function Get-AfSubagentReturn') "no Get-AfSubagentReturn wrapper"
+Assert-True "_common.sh exposes the return reader" `
+    ($retCommonSh -match 'af_subagent_return\(\)') "no af_subagent_return wrapper"
+
+# The wiring. A reader nothing calls protects nothing -- #123 direction 5 is an
+# implementer that modified seven files and returned nothing, which passed
+# every gate because no gate looked.
+Assert-True "implementer-stop.ps1 reads its own return" `
+    ($implPs1 -match 'Get-AfSubagentReturn') "the green gate still never looks at what the agent said"
+Assert-True "implementer-stop.sh reads its own return" `
+    ($implSh -match 'af_subagent_return') "the green gate still never looks at what the agent said"
+
+# And it warns rather than blocks. `unavailable` means either "the agent said
+# nothing" or "the reader could not run", and the hook cannot tell which -- so
+# blocking on it would let a missing interpreter shut down every implementer.
+# A watchdog that breaks legitimate work gets switched off (#108).
+foreach ($pair in @(
+        @{ n = 'implementer-stop.ps1'; t = $implPs1; k = 'returnNote|\$ret\.Status' },
+        @{ n = 'implementer-stop.sh';  t = $implSh;  k = 'return_note|ret_status' })) {
+    $retLines = ($pair.t -split "`r?`n") | Where-Object { $_ -match $pair.k }
+    Assert-True "$($pair.n) warns on an unreadable return instead of blocking" `
+        (@($retLines).Count -gt 0 -and -not ($retLines -match 'decision.*block')) `
+        "an unmeasurable return became a blocking verdict: $retLines"
+}
+
+Write-Output ""
+
 # ── 6d. Artifact existence is a filesystem question (issue #87) ──────────
 
 Write-Output "## Artifact existence (issue #87)"

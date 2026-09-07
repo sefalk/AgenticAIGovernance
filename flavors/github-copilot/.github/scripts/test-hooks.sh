@@ -1331,6 +1331,174 @@ src/b.py
     assert_not_contains "a peer list padded with blank lines still drops the peer's file" "$strip_out2" "src/b.py"
 fi
 
+# --- The agent's own return text (issue #285) ------------------------------
+#
+# A Stop hook can read what its agent just said -- the record lands 6 ms before
+# the hook runs (#134). But the editor caps the value at 5000 characters and
+# appends `[truncated]`: measured over 300 real logs, 231 complete against 68
+# truncated. A whole return and a beheaded one are both non-empty strings, so a
+# caller handed a bare string cannot tell them apart, and the mandated
+# `### Gate Summary` sits in exactly the region the cap removes.
+
+echo "## subagent return reader (issue #285)"
+
+if [ -f "$HOOK_DIR/subagent-return.py" ]; then
+    assert_true "the return reader ships with the hooks" 1
+else
+    assert_true "the return reader ships with the hooks" 0 "no subagent-return.py in hooks/scripts"
+fi
+
+# A resolvable interpreter is not a working one: on Windows `python3` is an App
+# Execution Alias that is on PATH, runs nothing and exits non-zero. Probe each
+# candidate rather than trusting the lookup.
+ret_py=""
+for ret_c in "$GITHUB_DIR/../.venv/bin/python" "$GITHUB_DIR/../.venv/Scripts/python.exe" python3 python py; do
+    if "$ret_c" -c 'pass' >/dev/null 2>&1; then ret_py="$ret_c"; break; fi
+done
+
+if [ -n "$ret_py" ] && [ -f "$HOOK_DIR/subagent-return.py" ]; then
+    ret_root=$(mktemp -d 2>/dev/null || echo "/tmp/af-285-$$")
+    ret_name="runSubagent-code-critic-toolu_ret.jsonl"
+
+    # `attrs.response` is a JSON *string* holding a JSON array, exactly as the
+    # editor writes it -- the double encoding is the thing under test.
+    ret_status_of() {
+        "$ret_py" "$HOOK_DIR/subagent-return.py" --session-dir "$1" --agent code-critic 2>/dev/null | head -1
+    }
+    ret_text_of() {
+        "$ret_py" "$HOOK_DIR/subagent-return.py" --session-dir "$1" --agent code-critic 2>/dev/null | sed 1d
+    }
+
+    mkdir -p "$ret_root/complete"
+    printf '%s\n' '{"ts":2000,"type":"agent_response","attrs":{"response":"[{\"role\":\"assistant\",\"parts\":[{\"type\":\"text\",\"content\":\"VERDICT APPROVED\"}]}]"}}' \
+        > "$ret_root/complete/$ret_name"
+    ret_s=$(ret_status_of "$ret_root/complete")
+    if [ "$ret_s" = "complete" ]; then
+        assert_true "a whole return reports complete" 1
+    else
+        assert_true "a whole return reports complete" 0 "got status '$ret_s'"
+    fi
+    assert_contains "a whole return carries its text" "$(ret_text_of "$ret_root/complete")" "VERDICT APPROVED"
+
+    # Truncation is detected by the JSON-parse test, not by length 5011 and not
+    # by the `[truncated]` marker. All three agreed on 299 of 300 sampled logs,
+    # but AF owns none of them: re-tune the cap or re-word the marker and a
+    # length test starts calling every return complete.
+    mkdir -p "$ret_root/truncated"
+    printf '%s\n' '{"ts":2000,"type":"agent_response","attrs":{"response":"[{\"role\":\"assistant\",\"parts\":[{\"type\":\"text\",\"content\":\"PARTIAL VERDICT[truncated]"}}' \
+        > "$ret_root/truncated/$ret_name"
+    ret_s=$(ret_status_of "$ret_root/truncated")
+    if [ "$ret_s" = "truncated" ]; then
+        assert_true "a beheaded return reports truncated rather than complete" 1
+    else
+        assert_true "a beheaded return reports truncated rather than complete" 0 "got status '$ret_s'"
+    fi
+    assert_contains "a beheaded return still yields the text that survived" \
+        "$(ret_text_of "$ret_root/truncated")" "PARTIAL VERDICT"
+
+    # The #123 signature: seven files modified and "nothing at all" returned.
+    # The real log's final record holds a tool_call and no text part. Reporting
+    # that as empty text would make "the agent said nothing" and "its words
+    # could not be recovered" the same fact.
+    mkdir -p "$ret_root/toolcall"
+    printf '%s\n' '{"ts":2000,"type":"agent_response","attrs":{"response":"[{\"role\":\"assistant\",\"parts\":[{\"type\":\"tool_call\",\"name\":\"read_file\"}]}]"}}' \
+        > "$ret_root/toolcall/$ret_name"
+    ret_s=$(ret_status_of "$ret_root/toolcall")
+    if [ "$ret_s" = "unavailable" ]; then
+        assert_true "a final record with only a tool call reports unavailable" 1
+    else
+        assert_true "a final record with only a tool call reports unavailable" 0 "got status '$ret_s'"
+    fi
+    if [ -z "$(ret_text_of "$ret_root/toolcall")" ]; then
+        assert_true "an unavailable return carries no text to mistake for a verdict" 1
+    else
+        assert_true "an unavailable return carries no text to mistake for a verdict" 0 "text was emitted"
+    fi
+
+    mkdir -p "$ret_root/norecord"
+    printf '%s\n' '{"ts":1000,"type":"llm_request","name":"x"}' > "$ret_root/norecord/$ret_name"
+    ret_s=$(ret_status_of "$ret_root/norecord")
+    if [ "$ret_s" = "unavailable" ]; then
+        assert_true "a log without an agent_response record reports unavailable" 1
+    else
+        assert_true "a log without an agent_response record reports unavailable" 0 "got status '$ret_s'"
+    fi
+
+    mkdir -p "$ret_root/nolog"
+    ret_s=$(ret_status_of "$ret_root/nolog")
+    if [ "$ret_s" = "unavailable" ]; then
+        assert_true "no log for this agent reports unavailable" 1
+    else
+        assert_true "no log for this agent reports unavailable" 0 "got status '$ret_s'"
+    fi
+
+    # Exit 0 for `unavailable` separates "the reader ran and found nothing
+    # readable" from "the reader did not run". A wrapper that had to infer the
+    # first from a non-zero exit could not tell them apart either.
+    if "$ret_py" "$HOOK_DIR/subagent-return.py" --session-dir "$ret_root/nolog" --agent code-critic >/dev/null 2>&1; then
+        assert_true "an unavailable verdict is still a successful read" 1
+    else
+        assert_true "an unavailable verdict is still a successful read" 0 "reader exited non-zero"
+    fi
+
+    rm -rf "$ret_root"
+fi
+
+# The wrapper's failure direction is inverted from af_peer_edits: that one stays
+# silent when it cannot measure, this one must say so.
+if grep -q 'af_subagent_return()' "$HOOK_DIR/_common.sh" 2>/dev/null; then
+    assert_true "_common.sh exposes the return reader" 1
+else
+    assert_true "_common.sh exposes the return reader" 0 "no af_subagent_return wrapper"
+fi
+if grep -q 'function Get-AfSubagentReturn' "$HOOK_DIR/_common.ps1" 2>/dev/null; then
+    assert_true "_common.ps1 exposes the return reader" 1
+else
+    assert_true "_common.ps1 exposes the return reader" 0 "no Get-AfSubagentReturn wrapper"
+fi
+
+# A wrapper with nothing to read must still answer, and its answer must be a
+# status rather than silence.
+if [ -f "$HOOK_DIR/_common.sh" ]; then
+    ret_wrap=$(
+        bash -c '
+            . "$1" >/dev/null 2>&1 || true
+            af_subagent_return "" ""
+        ' _ "$HOOK_DIR/_common.sh" 2>/dev/null || true
+    )
+    assert_contains "the wrapper reports unavailable rather than staying silent" "$ret_wrap" "unavailable"
+fi
+
+# The wiring. A reader nothing calls protects nothing -- #123 direction 5 is an
+# implementer that modified seven files and returned nothing, which passed every
+# gate because no gate looked.
+if grep -q 'Get-AfSubagentReturn' "$HOOK_DIR/implementer-stop.ps1" 2>/dev/null; then
+    assert_true "implementer-stop.ps1 reads its own return" 1
+else
+    assert_true "implementer-stop.ps1 reads its own return" 0 "the green gate never looks at what the agent said"
+fi
+if grep -q 'af_subagent_return' "$HOOK_DIR/implementer-stop.sh" 2>/dev/null; then
+    assert_true "implementer-stop.sh reads its own return" 1
+else
+    assert_true "implementer-stop.sh reads its own return" 0 "the green gate never looks at what the agent said"
+fi
+
+# And it warns rather than blocks. `unavailable` means either "the agent said
+# nothing" or "the reader could not run", and the hook cannot tell which -- so
+# blocking on it would let a missing interpreter shut down every implementer.
+# A watchdog that breaks legitimate work gets switched off (#108).
+for ret_pair in "implementer-stop.ps1:returnNote|\$ret\.Status" "implementer-stop.sh:return_note|ret_status"; do
+    ret_file="${ret_pair%%:*}"
+    ret_key="${ret_pair#*:}"
+    ret_hit=$(grep -E "$ret_key" "$HOOK_DIR/$ret_file" 2>/dev/null || true)
+    if [ -n "$ret_hit" ] && ! printf '%s\n' "$ret_hit" | grep -qE 'decision.*block'; then
+        assert_true "$ret_file warns on an unreadable return instead of blocking" 1
+    else
+        assert_true "$ret_file warns on an unreadable return instead of blocking" 0 \
+            "an unmeasurable return became a blocking verdict, or the consumer is missing"
+    fi
+done
+
 # --- Artifact existence is a filesystem question (issue #87) ---------------
 #
 # The post-flight checked for the workflow log and retro with git-aware search,
