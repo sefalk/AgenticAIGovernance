@@ -318,6 +318,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A stop hook now diffs what the agent created against what the task asked
+  for, instead of trusting the agent's self-report (#123, direction 3).** The
+  incident that opened the issue was a test-writer that dropped
+  `run_wit3103_tests.py` into the repository root — a throwaway runner, never
+  requested, never mentioned in its return, and caught only because the
+  coordinator happened to run `git status` by hand.
+
+  The declared scope was available all along: the editor writes the delegation
+  prompt verbatim into the subagent log as a `user_message` span. That is the
+  coordinator's own words, machine-recorded, never round-tripped through a
+  model — the same channel and the same principle as `concurrent-agent-edits`
+  (#101) and `collect-agent-invocations` (#173). `undeclared-scratch.py` reads
+  it, harvests the files the agent created from its own `tool_call` records,
+  and reports the ones that sit directly in the repository root and appear
+  nowhere in the prompt. `test-writer-stop` blocks on a non-empty result.
+
+  The rule is narrow because the obvious wide one was measured and rejected.
+  Across 815 real subagent logs, 334 of which wrote files at all, "wrote a
+  file the prompt never names" fires on 52 runs — 15.6% — and nearly all of
+  them are legitimate: documenter plan and retro files whose names it derives,
+  new test files, `.vscode/tasks.json`. A gate with that false positive rate
+  gets switched off, and a hook nobody runs protects nothing (#108).
+  "*Created*, directly at the repository root, and never named" fires 6 times
+  with no false positives, and every one of the six is the pathology —
+  `run_wit3103_tests.py` itself, plus `.verify_assertions.py`,
+  `.verify_test_file.py`, `check_unit_values.py`, `test_syntax_check.py` and
+  `verify_mask_fix.py`.
+
+  Both clauses are load-bearing, and deliberately redundant. The *created*
+  clause carries the rule alone: all five legitimate root writes in the sample
+  (`.gitignore`, `azure-pipelines.yml`, `databricks.yml`, `pyproject.toml`,
+  `tox.ini`) arrived through `replace_string_in_file` against a file that
+  already existed. That matters more than it looks, because the delegation
+  prompt is capped the same way returns are — 342 of 814 sampled prompts (42%)
+  end in `[truncated]`, so a name living only in the severed tail reads as
+  "never named". Truncation can therefore produce false positives but never
+  false negatives, and the *created* clause is immune to it. The *unnamed*
+  clause keeps a genuinely requested new root file out of the report.
+
+  Unlike the return reader, this gate blocks. It may: it fires only on positive
+  evidence, every way of failing to measure — no session directory, no log, no
+  interpreter, a log with no prompt — yields an empty list and changes nothing,
+  and the remediation is to delete or move a single file. A file created in a
+  subdirectory is never reported however undeclared, because subdirectories are
+  where deliverables live and the measurement says so.
+
 - **A hook can now read what its own agent just said, and can tell a whole
   return from a beheaded one (#285, split out of #134).** Every subagent turn
   writes an `agent_response` record about 6 ms before the Stop hook fires, so
