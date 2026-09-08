@@ -85,10 +85,20 @@ fi
 
 # ---------- Gate 2: Provenance markers on new test files (H5) ----------
 
+# `git status` is global to the checkout, so a producer running alongside this
+# one puts its new test files in this scope. Clearing the block below means
+# writing `copilot:generated` -- "this agent produced the whole file" -- into a
+# file this agent never opened (issue #101). Same subtraction the implementer
+# and refactorer already make; the marker is the stronger claim of the two.
+peer_edits=$(af_peer_edits "$stdin_raw" test-writer)
+
 missing=""
 while IFS= read -r line; do
     # Extract filename from git status (untracked ?? or added A)
     file=$(echo "$line" | sed 's/^.. //' | tr -d '"')
+    if [ -n "$peer_edits" ] && printf '%s\n' "$peer_edits" | grep -qxF "$file"; then
+        continue
+    fi
     if [[ "$file" == *.py ]] && [ -f "$file" ]; then
         if ! af_has_provenance_marker "$file" generated; then
             missing="${missing}${file}, "
