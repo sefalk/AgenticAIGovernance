@@ -60,8 +60,8 @@ agent/{workflow-id}
 
 ### Branch Cleanup
 
-After merge, the human deletes the feature branch. Agents do not delete
-branches.
+The coordinator deletes a merged feature branch, local and remote. `-D` and
+protected branches stay hook-denied.
 
 ## Atomic Commit Strategy
 
