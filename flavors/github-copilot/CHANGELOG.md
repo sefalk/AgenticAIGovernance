@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The counter built to stop fabricated escalations was fabricating them
+  (#173).** `check-workflow-log.py --fix-counters` derives
+  `summary.escalations` so that no one has to trust a number a language model
+  authored. It decided an escalation had happened by asking whether the
+  `escalation:` section ran to more than one line. A section is never one line
+  long: the blank line that follows it belongs to it. So `escalation: null` —
+  the way a log states that *nothing* was escalated — counted as an escalation,
+  and the tool overwrote a correct `escalations: 0` with `1`.
+
+  Measured over the 63 workflow logs in a real project: eight logs carry an
+  `escalation:` section, **seven of them are `escalation: null`**, and only one
+  describes an actual escalation. Five logs had a correct `0` that the next
+  `--fix-counters` run would have turned into a false `1`; two already carry
+  the false `1` in committed history, two lines above the `escalation: null`
+  that contradicts it.
+
+  The two tools were also already disagreeing. `analyze-retry-economy.py` reads
+  parsed YAML and asks `if doc.get("escalation")`, where `null` is falsy — it
+  never counted these. The checker now asks whether the section carries nested
+  content, which is the same question a parser answers, so the line scanner and
+  the parser give one answer. The one genuine escalation block in the corpus is
+  still counted; the seven denials are not.
+
+  This is the #251 shape again, inverted: not a gate that approves what it
+  cannot classify, but a derivation that manufactures the evidence it exists to
+  demand. A fabricated counter is worse than an unchecked one, because it
+  arrives wearing the authority of having been derived.
+
+- **A stated escalation that nothing in the file supports is now a violation
+  (#173).** The recurrence watchdog for the above. When `summary.escalations`
+  is greater than zero while no step carries an `ESCALATE` verdict and no
+  `escalation:` block is populated, the number rests on nothing the log
+  contains, which is the shape a fabricated counter takes. It fires on exactly
+  the two already-corrupted logs in the 63-log corpus and on nothing else.
+
+  Repair now runs before judgement, so `--fix-counters` cannot be blocked by a
+  contradiction the same invocation has already removed. In audit mode — the
+  checker run without `--fix-counters`, over logs already committed — the rule
+  is what finds them.
+
 - **The always-on git instruction forbade what the framework already allows.**
   `git-workflow.instructions.md` said "After merge, the human deletes the
   feature branch. Agents do not delete branches." Three other places say the
