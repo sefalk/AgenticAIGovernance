@@ -193,6 +193,61 @@ escalation:
     # R: the override is off by default -- otherwise Q would prove nothing.
     $r = Invoke-Checker ($conforming -replace 'status: "COMPLETED"', 'status: "DRAFT"')
     $results['R_override_off_by_default'] = $r.Code -eq 1
+
+    # S: `escalation: null` is how a log states that nothing was escalated. It
+    #    must not be counted as one. Seven of the eight escalation sections in
+    #    the corpus are exactly this, and all seven were being counted.
+    #    The trailing blank line is not decoration -- it is what made the
+    #    section two lines long, and the old rule counted lines.
+    $denied = $conforming + "`r`n`r`nescalation: null`r`n`r`n"
+    $r = Invoke-Checker $denied @('--fix-counters')
+    $results['S_null_block_not_counted'] = $r.Output -notmatch 'summary.escalations'
+    $results['S_null_block_stays_zero']  = ([IO.File]::ReadAllText($r.Path)) -match '(?m)^  escalations: 0\s*$'
+
+    # T: a header with nothing under it is the same denial in another spelling.
+    $empty = $conforming + "`r`n`r`nescalation:`r`n`r`n"
+    $r = Invoke-Checker $empty @('--fix-counters')
+    $results['T_empty_block_not_counted'] = $r.Output -notmatch 'summary.escalations'
+
+    # U: a Stop hook appends comments below the section. A comment is not an
+    #    escalation -- one corpus log is misread on this alone.
+    $commented = $conforming + "`r`n`r`nescalation: null`r`n`r`n# Agent invocation counts appended by Stop hook`r`n"
+    $r = Invoke-Checker $commented @('--fix-counters')
+    $results['U_comment_not_content'] = $r.Output -notmatch 'summary.escalations'
+
+    # V: the watchdog. A stated escalation with no ESCALATE verdict and no
+    #    populated block rests on nothing in the file, which is the shape a
+    #    fabricated counter takes. Audit mode, so nothing repairs it first.
+    $bare = ($conforming -replace 'escalations: 0', 'escalations: 1') + "`r`n`r`nescalation: null`r`n`r`n"
+    $r = Invoke-Checker $bare
+    $results['V_watchdog_exit1'] = $r.Code -eq 1
+    $results['V_watchdog_names_line'] = $r.Output -match 'summary\.escalations is 1'
+
+    # W: it stays silent when a verdict backs the number -- otherwise V would
+    #    only prove the rule fires on everything.
+    $withVerdict = ($conforming -replace 'escalations: 0', 'escalations: 1') `
+        -replace 'verdict: "APPROVED"\r?\n  - step: 2', "verdict: `"ESCALATE`"`r`n  - step: 2"
+    $results['W_watchdog_silent_on_verdict'] = (Invoke-Checker $withVerdict).Code -eq 0
+
+    # X: and silent when a populated block backs it.
+    $withBlock = ($conforming -replace 'escalations: 0', 'escalations: 1') + @"
+
+escalation:
+  trigger: "needs a Databricks run"
+  resolution: "documented in the plan"
+"@
+    $results['X_watchdog_silent_on_block'] = (Invoke-Checker $withBlock).Code -eq 0
+
+    # Y: repair runs before judgement. The same log the watchdog rejects in
+    #    audit mode is repaired and passes when the fix is asked for -- a gate
+    #    must not block on a contradiction its own run has removed.
+    $r = Invoke-Checker $bare @('--fix-counters')
+    $results['Y_repair_before_check'] = ($r.Code -eq 0) -and ($r.Output -match 'summary.escalations: 1 -> 0')
+
+    # Z: the fixtures above must actually reproduce the corpus shape. A section
+    #    that is one line long never triggered the old rule either, so a case
+    #    built without the blank line would pass against the bug it targets.
+    $results['Z_fixture_has_blank_line'] = $denied -match "escalation: null`r`n`r`n"
 }
 finally {
     foreach ($f in $files) { Remove-Item $f -Force -ErrorAction SilentlyContinue }

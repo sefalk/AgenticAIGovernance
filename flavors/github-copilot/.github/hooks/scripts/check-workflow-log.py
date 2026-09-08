@@ -29,6 +29,13 @@ The retry definition here MUST match `analyze-retry-economy.py`: an agent
 appearing more than once in one `steps` list. Two tools disagreeing about what
 a retry is would be worse than neither existing.
 
+So must the escalation definition. The analyser reads parsed YAML and asks
+`if doc.get("escalation")`, where `escalation: null` is falsy and so is not an
+escalation. A line scanner has to reach the same answer without a parser, which
+means asking whether the section carries nested content -- not whether it
+carries more than one line, because the blank line after a denial makes every
+denial two lines long.
+
 Stdlib only, on purpose -- a gate that needs `pip install` stops being run.
 The structural rules are checked by a line scanner rather than a YAML parser,
 so there is exactly one implementation of each rule. PyYAML is used only to
@@ -69,6 +76,7 @@ VERDICT_ABSENT = ("", "NULL", "NONE", "~")
 KEY = re.compile(r"^(?P<indent>\s*)(?:-\s+)?(?P<key>[A-Za-z_][\w-]*)\s*:(?P<rest>.*)$")
 LIST_ITEM = re.compile(r"^(?P<indent>\s*)-\s")
 BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*\s*$")
+NESTED = re.compile(r"^\s+\S")
 
 
 def _value(rest: str) -> str:
@@ -131,6 +139,23 @@ def _keys(block: list[tuple[int, str]], name: str) -> list[tuple[int, str]]:
     return found
 
 
+def _populated(block: list[tuple[int, str]]) -> bool:
+    """Whether a section says anything beyond its own header.
+
+    `escalation: null` is how a log states that nothing was escalated, and a
+    section is never one line long -- the blank line that follows it belongs to
+    it. Counting lines therefore reads the denial as the event. Only nested
+    content is content; a comment appended by a Stop hook is not.
+    """
+    for _, line in block[1:]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if NESTED.match(line):
+            return True
+    return False
+
+
 def _step_agents(steps: list[tuple[int, str]]) -> list[str]:
     return [value for _, value in _keys(steps, "agent")]
 
@@ -150,7 +175,7 @@ def _derive(sections: dict[str, list[tuple[int, str]]]) -> tuple[int, int]:
     # verdict for -- a deferral to a human reads as prose, not as ESCALATE. The
     # two kinds are conflated here rather than one of them being lost, and the
     # analyser conflates them identically so the tools cannot disagree.
-    if len(sections.get("escalation", [])) > 1:
+    if _populated(sections.get("escalation", [])):
         escalations = max(escalations, 1)
     return retries, escalations
 
@@ -205,6 +230,23 @@ def _findings(text: str) -> tuple[list[str], list[str]]:
                 f"line {number}: verdict {value!r} is outside the MANIFEST closed set ({'/'.join(VERDICT_VALUES)})"
             )
 
+    # A count of escalations needs something that escalated. With no ESCALATE
+    # verdict and no populated `escalation:` block, the number rests on nothing
+    # in the file -- which is the shape a fabricated counter takes.
+    for number, value in _keys(sections.get("summary", []), "escalations"):
+        try:
+            stated = int(value.strip())
+        except ValueError:
+            continue
+        if stated <= 0:
+            continue
+        escalated = any(v.strip().upper().startswith("ESCALATE") for _, v in _keys(steps, "verdict"))
+        if not escalated and not _populated(sections.get("escalation", [])):
+            violations.append(
+                f"line {number}: summary.escalations is {stated} with no ESCALATE verdict "
+                "and no populated `escalation:` block -- nothing in the file escalated"
+            )
+
     return violations, unchecked
 
 
@@ -254,11 +296,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{TAG} CANNOT CHECK -- {path}: {exc}")
         return 2
 
-    violations, unchecked = _findings(text)
-
+    # Repair first, then judge what the file now says. Checking the stale text
+    # would report a contradiction this same run has already removed.
     if args.fix_counters:
         for note in _rewrite_counters(path, text):
             print(f"{TAG} derived {note}")
+        text = path.read_text(encoding="utf-8", errors="replace")
+
+    violations, unchecked = _findings(text)
 
     for note in unchecked:
         print(f"{TAG} NOT CHECKED -- {note}")
