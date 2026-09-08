@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The always-on git instruction forbade what the framework already allows.**
+  `git-workflow.instructions.md` said "After merge, the human deletes the
+  feature branch. Agents do not delete branches." Three other places say the
+  opposite: `af-env.conf` lists merged non-protected branch deletion under
+  `GIT_FEATURE`, the `block-dangerous` tier description calls safe merged-only
+  `git branch -d` allowed, and the git-workflow skill's autonomy table assigns
+  it to the coordinator. The instruction is the one that is always in context,
+  so it is the one that won — agents left merged branches behind and asked
+  permission for an operation git itself refuses to perform destructively.
+
+  The instruction now matches. `-D`, force deletion and protected branches stay
+  hook-denied, unchanged.
+
+- **Deleting the remote half of a merged feature branch was written down
+  nowhere.** The autonomy table covered `git branch -d` and stopped at the
+  local ref, leaving `git push origin --delete agent/{id}` to be inferred from
+  the push rules. It is now in the table. The commits survive in the branch it
+  merged into, which is what makes it reversible; pushes naming a protected
+  branch remain forbidden and that rule already covers the dangerous case.
+
 - **A denied command could be re-run through a different tool, and the hook
   approved it silently (#138).** The recorded occurrence: a subagent was denied
   a CLI call in the terminal, understood the denial, and then made the same
