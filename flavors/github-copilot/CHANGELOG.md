@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A silent agent and a broken reader reported the same thing (#175).** The
+  return reader's own docstring argued that "the agent said nothing" and "the
+  agent's words could not be recovered" must be different states, because a
+  caller holding one status for both would have to guess which it had. It then
+  returned `unavailable` for both, so the guess it set out to prevent was the
+  one it handed every caller — and `implementer-stop` documented exactly that
+  as its reason for warning rather than blocking. Measured over 851 real
+  subagent logs: 644 complete, 190 truncated, 17 unavailable, and that last
+  bucket splits into 8 records that parse cleanly with no text part, 8 damaged
+  values, and 1 with no record. Five of the 8 silent returns had already made
+  10 to 33 file-editing tool calls — an agent that changed the repository and
+  then said nothing about it. A record that was found and parsed and simply
+  holds no words is now `empty`, which no blind spot in the reader can
+  produce; `unavailable` keeps its original meaning. The suite gained the case
+  that would have caught the conflation from the other end: the PowerShell
+  wrapper validates the status against a fixed list, and a new state that the
+  list does not name dies there silently while every reader test stays green.
+
 - **The counter built to stop fabricated escalations was fabricating them
   (#173).** `check-workflow-log.py --fix-counters` derives
   `summary.escalations` so that no one has to trust a number a language model
