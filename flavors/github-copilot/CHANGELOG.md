@@ -53,6 +53,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wrapper validates the status against a fixed list, and a new state that the
   list does not name dies there silently while every reader test stays green.
 
+- **The watchdog for cross-agent scope creep had the same hole it was built to
+  find (#101).** Producer stop hooks scope their gates from `git diff` or
+  `git status`, which is global to the checkout, so a peer's in-flight edits
+  land in this agent's scope and the provenance gate makes it sign another
+  agent's file. The subtraction that fixes this was wired into the implementer
+  and the refactorer. It was not wired into the test-writer, whose provenance
+  gate reads `git status --porcelain "tests/"` and blocks on a missing
+  `copilot:generated` header — the stronger of the two markers, a claim that
+  this agent produced the entire file. Clearing that block on a peer's new test
+  file means signing it.
+
+  The suite did not see it because the wiring assertion iterated a literal list
+  of two hooks. A producer hook never added to the list was never checked, so
+  the watchdog reproduced the omission it exists to catch. Both twins now
+  derive the list: every `*-stop` hook that scopes itself from git must
+  subtract peer edits, and must do so before the provenance gate reads the file
+  list. A derived loop that matches nothing passes having asserted nothing, so
+  the count is asserted too.
+
+  The lint scope stays unfiltered, unchanged: a ruff violation is real whoever
+  produced it, and the peer's own Stop hook lints the peer's files.
+
 - **The counter built to stop fabricated escalations was fabricating them
   (#173).** `check-workflow-log.py --fix-counters` derives
   `summary.escalations` so that no one has to trust a number a language model
