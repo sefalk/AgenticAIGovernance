@@ -227,6 +227,7 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | No secrets in changed files | HARD | Grep for credential patterns, API keys | Standard+ |
 | New deps declared in spec file | HARD | If a new package was `import`ed, verify it appears in the project dep file (`af-env.conf` → `DEP_FILE` / `DEP_DEV_FILE`) | Standard+ |
 | Provenance markers on new/modified files | HARD | Verify markers present | Standard+ |
+| Measured result names an openable artifact | HARD | When reporting a number obtained from a run rather than read from the repo: name a run id, URL, table + query, or committed output file. No durable channel ⇒ BLOCKED | Standard+ |
 | Skills read declaration | SOFT | `Skills Read:` line in Gate Summary (critic flags if missing) | Standard+ |
 | Architecture boundaries respected | SOFT | code-critic reviews | Standard+ |
 | Complexity ≤ threshold | SOFT | code-critic verifies: Domain ≤ 10, Ports ≤ 5, Adapters ≤ 15, Utilities ≤ 8 | Deep |

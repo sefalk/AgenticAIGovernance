@@ -3343,6 +3343,18 @@ Assert-True "durability is stated as a time horizon, not a binary" `
     ($dbxSkill -match '(?i)time horizon' -and $dbxSkill -match '(?i)retention') `
     "retention is still treated as guaranteed"
 
+# The taxonomy defined the gate, but the exit protocol sends an agent to its own
+# Exit Gates table -- and no agent carried a row for it, so it could never fire.
+$implAgent = Get-Content (Join-Path $githubDir 'agents/implementer.agent.md') -Raw
+
+Assert-True "the producer that runs measurements carries the gate in its own table" `
+    ($implAgent -match '(?i)Measured result names an openable artifact') `
+    "the evidence-durability gate is defined in the taxonomy but no agent instantiates it"
+
+Assert-True "the gate says what counts as openable and when to report BLOCKED" `
+    ($implAgent -match '(?i)run id.*table \+ query.*committed output file' -and $implAgent -match 'No durable channel') `
+    "the gate names no acceptable artifact, so it cannot be evaluated"
+
 Assert-True "an absent durable channel is BLOCKED rather than reported anyway" `
     ($dbxSkill -match '(?i)do not fall back to the ephemeral channel and report the number') `
     "a tooling gap can still be downgraded to an unverifiable claim"
