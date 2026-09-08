@@ -1397,22 +1397,39 @@ if [ -n "$ret_py" ] && [ -f "$HOOK_DIR/subagent-return.py" ]; then
         "$(ret_text_of "$ret_root/truncated")" "PARTIAL VERDICT"
 
     # The #123 signature: seven files modified and "nothing at all" returned.
-    # The real log's final record holds a tool_call and no text part. Reporting
-    # that as empty text would make "the agent said nothing" and "its words
-    # could not be recovered" the same fact.
+    # The real log's final record holds a tool_call and no text part. It parses
+    # cleanly, so the words are absent rather than lost -- a fact about the
+    # agent, not the reader. It reported `unavailable` until #175, which put it
+    # in the same bucket as "the reader could not run".
     mkdir -p "$ret_root/toolcall"
     printf '%s\n' '{"ts":2000,"type":"agent_response","attrs":{"response":"[{\"role\":\"assistant\",\"parts\":[{\"type\":\"tool_call\",\"name\":\"read_file\"}]}]"}}' \
         > "$ret_root/toolcall/$ret_name"
     ret_s=$(ret_status_of "$ret_root/toolcall")
-    if [ "$ret_s" = "unavailable" ]; then
-        assert_true "a final record with only a tool call reports unavailable" 1
+    if [ "$ret_s" = "empty" ]; then
+        assert_true "a final record with only a tool call reports empty, not unavailable" 1
     else
-        assert_true "a final record with only a tool call reports unavailable" 0 "got status '$ret_s'"
+        assert_true "a final record with only a tool call reports empty, not unavailable" 0 "got status '$ret_s'"
     fi
     if [ -z "$(ret_text_of "$ret_root/toolcall")" ]; then
-        assert_true "an unavailable return carries no text to mistake for a verdict" 1
+        assert_true "an empty return carries no text to mistake for a verdict" 1
     else
-        assert_true "an unavailable return carries no text to mistake for a verdict" 0 "text was emitted"
+        assert_true "an empty return carries no text to mistake for a verdict" 0 "text was emitted"
+    fi
+
+    # The separation only pays if the other cause keeps its own status.
+    mkdir -p "$ret_root/damaged"
+    printf '%s\n' '{"ts":2000,"type":"agent_response","attrs":{"response":"[{\"role\":\"assistant\",\"parts\":[{\"typ"}}' \
+        > "$ret_root/damaged/$ret_name"
+    ret_d=$(ret_status_of "$ret_root/damaged")
+    if [ "$ret_d" = "unavailable" ]; then
+        assert_true "a damaged value with nothing salvageable stays unavailable" 1
+    else
+        assert_true "a damaged value with nothing salvageable stays unavailable" 0 "got status '$ret_d'"
+    fi
+    if [ "$ret_s" != "$ret_d" ]; then
+        assert_true "silence and unreadability are not the same status" 1
+    else
+        assert_true "silence and unreadability are not the same status" 0 "both report '$ret_s'"
     fi
 
     mkdir -p "$ret_root/norecord"

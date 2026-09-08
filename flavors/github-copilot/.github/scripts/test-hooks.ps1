@@ -2987,17 +2987,31 @@ Assert-True "a beheaded return still yields the text that survived" `
     ($rTrunc.Text -match 'PARTIAL VERDICT') "got text '$($rTrunc.Text)'"
 
 # The #123 signature: seven files modified and "nothing at all" returned. The
-# real log's final record holds a tool_call and no text part. Reporting that as
-# empty text would make "the agent said nothing" and "its words could not be
-# recovered" the same fact.
+# real log's final record holds a tool_call and no text part. This parses
+# cleanly, so the words are absent rather than lost -- a fact about the agent,
+# not about the reader. It reported `unavailable` until #175, which put it in
+# the same bucket as "the reader could not run" and forced every caller to
+# guess which one it held. Measured over 851 logs: 8 of these against 8 damaged
+# values and 1 missing record -- near enough a coin flip that no caller could.
 $dirTool = Join-Path $retRoot 'toolcall'
 New-ReturnLog -Dir $dirTool -Name $retName `
     -Response '[{"role":"assistant","parts":[{"type":"tool_call","name":"read_file"}]}]'
 $rTool = Invoke-ReturnReader -Dir $dirTool
-Assert-True "a final record with only a tool call reports unavailable" `
-    ($rTool.Status -eq 'unavailable') "got status '$($rTool.Status)'"
-Assert-True "an unavailable return carries no text to mistake for a verdict" `
+Assert-True "a final record with only a tool call reports empty, not unavailable" `
+    ($rTool.Status -eq 'empty') "got status '$($rTool.Status)'"
+Assert-True "an empty return carries no text to mistake for a verdict" `
     ([string]::IsNullOrEmpty($rTool.Text)) "got text '$($rTool.Text)'"
+
+# The separation only pays if the other cause keeps its own status. A damaged
+# value with nothing salvageable is the reader's blind spot, not the agent's
+# silence, and blocking on it would let a bad log fail a good agent.
+$dirDamaged = Join-Path $retRoot 'damaged'
+New-ReturnLog -Dir $dirDamaged -Name $retName -Response '[{"role":"assistant","parts":[{"typ'
+$rDamaged = Invoke-ReturnReader -Dir $dirDamaged
+Assert-True "a damaged value with nothing salvageable stays unavailable" `
+    ($rDamaged.Status -eq 'unavailable') "got status '$($rDamaged.Status)'"
+Assert-True "silence and unreadability are not the same status" `
+    ($rTool.Status -ne $rDamaged.Status) "both report '$($rTool.Status)'"
 
 $dirNoRec = Join-Path $retRoot 'norecord'
 New-ReturnLog -Dir $dirNoRec -Name $retName -Response 'x' -NoRecord
@@ -3027,6 +3041,26 @@ Assert-True "_common.ps1 exposes the return reader" `
     ($retCommonPs -match 'function Get-AfSubagentReturn') "no Get-AfSubagentReturn wrapper"
 Assert-True "_common.sh exposes the return reader" `
     ($retCommonSh -match 'af_subagent_return\(\)') "no af_subagent_return wrapper"
+
+# The PowerShell wrapper validates the status against a fixed set and maps
+# anything else to `unavailable`. That is the right shape and the exact place a
+# new state dies quietly: the reader would report `empty`, the allow-list would
+# not recognise it, and the caller would receive the very conflation #175
+# removed -- with every test above still green, because they exercise the
+# reader directly.
+Assert-True "the wrapper's allow-list admits the empty status" `
+    ($retCommonPs -match "'complete',\s*'truncated',\s*'empty',\s*'unavailable'") `
+    "an allow-list without 'empty' folds it back into 'unavailable'"
+
+# Distinct causes are only useful if they produce distinct advice. Both twins
+# must say something different for a silent return than for an unreadable one.
+foreach ($pair in @(
+        @{ n = 'implementer-stop.ps1'; t = $implPs1 },
+        @{ n = 'implementer-stop.sh';  t = $implSh })) {
+    Assert-True "$($pair.n) tells a silent return apart from an unreadable one" `
+        ($pair.t -match 'RETURN EMPTY' -and $pair.t -match 'RETURN UNREADABLE') `
+        "the two causes were split in the reader but collapse again in the message"
+}
 
 # The wiring. A reader nothing calls protects nothing -- #123 direction 5 is an
 # implementer that modified seven files and returned nothing, which passed
