@@ -305,16 +305,24 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
     # nothing at all", and every gate still passed -- because no gate read the
     # return. This one does.
     #
-    # It warns instead of blocking, on purpose. `unavailable` conflates "the
-    # agent said nothing" with "the reader could not run" (no interpreter, no
-    # session dir), and blocking on the second would let a missing python shut
-    # down every implementer. A watchdog that breaks legitimate work gets
-    # switched off (#108), which costs more than the case it was meant to catch.
+    # It warns instead of blocking, on purpose -- but the reason has changed.
+    # It used to be that `unavailable` conflated "the agent said nothing" with
+    # "the reader could not run", so blocking risked a missing python shutting
+    # down every implementer. #175 split that conflation: `empty` now means the
+    # log was found and the record parsed with no words in it, which no blind
+    # spot can produce. What still blocks a block is loop safety -- nothing
+    # here reads `stop_hook_active`, and an agent that returned nothing once is
+    # the least likely to return words on a forced retry. A watchdog that
+    # breaks legitimate work gets switched off (#108), which costs more than
+    # the case it was meant to catch.
     return_note=""
     ret_status=$(af_subagent_return "$stdin_raw" implementer | head -1)
     case "$ret_status" in
         truncated)
             return_note=", RETURN TRUNCATED \u2014 the tail was cut by the 5000-char cap, which is where the Gate Summary sits; re-state it in your reply"
+            ;;
+        empty)
+            return_note=", RETURN EMPTY \u2014 your log records this turn but no words in it; the coordinator has no verdict to route on, so state your Gate Summary and file list in your reply"
             ;;
         unavailable)
             return_note=", RETURN UNREADABLE \u2014 no return text could be recovered; state your Gate Summary explicitly so the coordinator is not left guessing"

@@ -485,8 +485,8 @@ af_peer_edits() {
 
 # ── This agent's own final return text (issue #285) ────────────────────
 #
-# Echoes the status on line 1 -- `complete`, `truncated` or `unavailable` --
-# and the recovered text from line 2 on.
+# Echoes the status on line 1 -- `complete`, `truncated`, `empty` or
+# `unavailable` -- and the recovered text from line 2 on.
 #
 # Note the inverted failure direction versus af_peer_edits above. That one
 # stays silent when it cannot measure, because subtracting nothing is today's
@@ -494,6 +494,10 @@ af_peer_edits() {
 # absence of text would read silence as "the agent returned nothing" and fail
 # the agent for the hook's own blind spot. Every failure path therefore prints
 # `unavailable`, which callers report as BLOCKED rather than as a verdict.
+#
+# `empty` is the opposite case and never a failure path: the reader found the
+# log, the record parsed, and there were no words in it (issue #175). It is
+# passed through from the reader, so no failure path here can produce it.
 #
 # Usage: af_subagent_return "$stdin_raw" implementer
 af_subagent_return() {
