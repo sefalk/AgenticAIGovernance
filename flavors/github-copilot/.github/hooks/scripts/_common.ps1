@@ -402,7 +402,7 @@ function Get-AfPeerEdits {
 
 # ── This agent's own final return text (issue #285) ────────────────────
 #
-# Returns @{ Status = 'complete'|'truncated'|'unavailable'; Text = <string> }.
+# Returns @{ Status = 'complete'|'truncated'|'empty'|'unavailable'; Text = <string> }.
 #
 # Note the inverted failure direction versus Get-AfPeerEdits above. That one
 # stays silent when it cannot measure, because subtracting nothing is today's
@@ -410,6 +410,9 @@ function Get-AfPeerEdits {
 # absence of text would read silence as "the agent returned nothing" and fail
 # the agent for the hook's own blind spot. Every failure path therefore returns
 # `unavailable`, which callers report as BLOCKED rather than as a verdict.
+#
+# `empty` is the opposite case and never a failure path: the reader found the
+# log, the record parsed, and there were no words in it (issue #175).
 function Get-AfSubagentReturn {
     param(
         [string]$StdinRaw,
@@ -448,7 +451,7 @@ function Get-AfSubagentReturn {
     # return whose own text starts with 'complete' cannot shift the parse.
     $lines = @($out)
     $status = ([string]$lines[0]).Trim()
-    if ($status -notin @('complete', 'truncated', 'unavailable')) { return $blocked }
+    if ($status -notin @('complete', 'truncated', 'empty', 'unavailable')) { return $blocked }
     $text = if ($lines.Count -gt 1) { ($lines[1..($lines.Count - 1)] -join "`n") } else { '' }
     return @{ Status = $status; Text = $text }
 }

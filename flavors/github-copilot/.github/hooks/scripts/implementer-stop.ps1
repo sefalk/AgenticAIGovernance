@@ -379,14 +379,20 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
     # nothing at all", and every gate still passed -- because no gate read the
     # return. This one does.
     #
-    # It warns instead of blocking, on purpose. `unavailable` conflates "the
-    # agent said nothing" with "the reader could not run" (no interpreter, no
-    # session dir), and blocking on the second would let a missing python shut
-    # down every implementer. A watchdog that breaks legitimate work gets
+    # It warns instead of blocking, on purpose -- but the reason has changed.
+    # It used to be that `unavailable` conflated "the agent said nothing" with
+    # "the reader could not run", so blocking risked a missing python shutting
+    # down every implementer. #175 split that conflation: `empty` now means the
+    # log was found and the record parsed with no words in it, which no blind
+    # spot can produce. What still blocks a block is loop safety -- nothing
+    # here reads `stop_hook_active` (see the stub near the top of this file),
+    # and an agent that returned nothing once is the least likely to return
+    # words on a forced retry. A watchdog that breaks legitimate work gets
     # switched off (#108), which costs more than the case it was meant to catch.
     $ret = Get-AfSubagentReturn -StdinRaw $stdinRaw -Agent 'implementer' -MainRoot $mainRoot
     $returnNote = switch ($ret.Status) {
         'truncated' { ', RETURN TRUNCATED -- the tail was cut by the 5000-char cap, which is where the Gate Summary sits; re-state it in your reply' }
+        'empty' { ', RETURN EMPTY -- your log records this turn but no words in it; the coordinator has no verdict to route on, so state your Gate Summary and file list in your reply' }
         'unavailable' { ', RETURN UNREADABLE -- no return text could be recovered; state your Gate Summary explicitly so the coordinator is not left guessing' }
         default { '' }
     }

@@ -28,10 +28,23 @@ signature is in the logs: a final record whose parts hold a `tool_call` and no
 text part. If that surfaced as an empty string, a gate would read "the agent
 said nothing" and "the agent's words could not be recovered" as the same fact
 and would have to guess which one it was holding. They are therefore different
-states, and `complete`/`truncated` never come back with empty text -- if no
-text could be recovered, the status is `unavailable` and the caller reports
-BLOCKED per the gate taxonomy, exactly as #251 and #138 require of a check that
-cannot classify its input.
+states, and `complete`/`truncated` never come back with empty text.
+
+WHY `empty` EXISTS (issue #175). The paragraph above declared those two facts
+different states and then this reader returned `unavailable` for both, so the
+guess it set out to prevent was the one it handed every caller. Measured over
+851 real subagent logs: 644 complete, 190 truncated, 17 unavailable -- and that
+last bucket is 8 records that parse cleanly with no text part, 8 damaged values
+with nothing salvageable, and 1 with no record at all. Five of the 8 silent
+returns had already made 10 to 33 file-editing tool calls. Blocking on
+`unavailable` would therefore have fired on a coin flip between a real defect
+and the hook's own blind spot, which is why `implementer-stop` only warned.
+
+`empty` cannot arise from a blind spot: the log was found, the record was
+there, and it parsed. Only the words are missing, so a caller may act on it.
+`unavailable` keeps its original meaning -- the reader could not measure -- and
+still maps to BLOCKED per the gate taxonomy, exactly as #251 and #138 require
+of a check that cannot classify its input.
 
 Identifying the caller's own log is the same heuristic as
 `concurrent-agent-edits.py` -- the most recently modified
@@ -46,11 +59,11 @@ Usage:
     subagent-return.py --session-dir <dir> --agent <name>
 
 Output:
-    Line 1   one of `complete` / `truncated` / `unavailable`
-    Line 2+  the recovered text (absent when the status is `unavailable`)
+    Line 1   one of `complete` / `truncated` / `empty` / `unavailable`
+    Line 2+  the recovered text (absent for `empty` and `unavailable`)
 
 Exit codes:
-    0  a status was determined (including `unavailable`)
+    0  a status was determined (including `empty` and `unavailable`)
     2  usage error -- arguments missing or unreadable
 
 Exit 0 for `unavailable` is deliberate: it separates "the reader ran and found
@@ -82,6 +95,7 @@ TEXT_PART = re.compile(r'"type"\s*:\s*"text"\s*,\s*"content"\s*:\s*"')
 
 COMPLETE = "complete"
 TRUNCATED = "truncated"
+EMPTY = "empty"
 UNAVAILABLE = "unavailable"
 
 
@@ -214,8 +228,10 @@ def classify(raw: str | None) -> tuple[str, str]:
         # No text recovered means the words are gone, not that none were said.
         return (TRUNCATED, recovered) if recovered else (UNAVAILABLE, "")
 
+    # Parsed means the record was whole. No text in a whole record is a fact
+    # about the agent, not about the reader -- that is the whole distinction.
     texts = "".join(texts_from(parsed))
-    return (COMPLETE, texts) if texts else (UNAVAILABLE, "")
+    return (COMPLETE, texts) if texts else (EMPTY, "")
 
 
 def main() -> int:
