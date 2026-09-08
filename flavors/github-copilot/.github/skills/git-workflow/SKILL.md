@@ -38,6 +38,7 @@ For worktree creation, cleanup, and troubleshooting see the separate
 | `git push --force` (any) | **Forbidden** | Destructive remote rewrite |
 | `git pull` / `git merge` / `cherry-pick` / `revert` (local) | Coordinator | Reversible topology change (reflog / `ORIG_HEAD`); protected-branch push still gated |
 | `git branch -d {merged, non-protected}` | Coordinator | git deletes only merged branches; ref recreatable |
+| `git push origin --delete agent/{id}` (merged) | Coordinator | Same ref, other side; the commits survive in the branch it merged into |
 | `git branch -D` (force) / delete protected | **Forbidden** | Deletes unmerged commits / protected branch |
 | `git reset --hard` | **Human** | Destructive state rewrite (loses uncommitted work) |
 | `git rebase` | **Human** | History rewrite risk |
@@ -52,7 +53,8 @@ implementer, refactorer, etc.) executes git commands — only the
 coordinator does. The hook is a three-tier classifier: feature-branch git
 ops (`commit`, staging specific files, creating and pushing `agent/*`
 branches), reversible topology changes (`pull`, `merge`, `cherry-pick`,
-`revert`), merged non-protected branch deletion (`git branch -d`), and
+`revert`), merged non-protected branch deletion (`git branch -d`, and the
+same branch on the remote), and
 read-only/test commands are **auto-approved** per the autonomy policy in
 `.github/af-env.conf`; force pushes, pushes naming a protected branch,
 `git reset --hard`, `git rebase`, force/protected branch deletion (`-D`),
