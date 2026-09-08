@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The evidence-durability gate was defined everywhere except where an agent
+  would look for it (#134).** MANIFEST § 7 states the principle, the gate
+  taxonomy defines what counts as a durable artifact, and the Databricks skill
+  classifies the channels. But the exit protocol tells an agent to read the
+  Exit Gates table *in its own file*, and no agent had a row for it. The rule
+  was reachable by a reader and unreachable by the agent it governs, so it
+  could never fire.
+
+  The implementer — the producer that runs measurements — now carries it as a
+  HARD gate: a number obtained from a run rather than read from the repo must
+  name a run id, URL, table + query, or committed output file, and reports
+  BLOCKED when no durable channel exists.
+
+  Measured over the 40 committed planning documents of a real project: twelve
+  claims are measurements over remote data, ten name an artifact, two do not.
+  One of the two predates the rule; the other is from the day before this
+  change and is labelled `(MEASURED)` in the text. Compliance is high and not
+  self-sustaining.
+
+  A detector cannot be built on the shape of the sentence. A first pass keying
+  off `N rows` flagged eight documents; hand-classification showed the bucket
+  was dominated by counts of rows in a committed source registry — facts git
+  already carries. Only the surrounding context separates those from a count
+  over a Delta table, which is why this ships as a gate the agent evaluates
+  rather than as a pattern match over prose.
+
 - **The counter built to stop fabricated escalations was fabricating them
   (#173).** `check-workflow-log.py --fix-counters` derives
   `summary.escalations` so that no one has to trust a number a language model
