@@ -2896,14 +2896,54 @@ Assert-True "no log of this agent's own call means nothing measurable" `
 Remove-Item $peerRoot -Recurse -Force -ErrorAction SilentlyContinue
 
 # The wiring. A reader nothing calls protects nothing.
-foreach ($pair in @(
-        @{ n = 'implementer-stop.ps1'; t = $implPs1; c = 'Get-AfPeerEdits' },
-        @{ n = 'refactorer-stop.ps1';  t = $refacPs1; c = 'Get-AfPeerEdits' },
-        @{ n = 'implementer-stop.sh';  t = $implSh;  c = 'af_peer_edits' },
-        @{ n = 'refactorer-stop.sh';   t = $refacSh; c = 'af_peer_edits' })) {
+#
+# Derived, not listed. The literal array this replaced named implementer and
+# refactorer only. test-writer -- a producer by coordinator.agent.md and by
+# this issue's own text -- scoped its provenance gate from `git status` and
+# subtracted nothing, and no assertion went red, because it was never added to
+# the array. The watchdog reproduced the omission it exists to catch.
+$gitScoped = @()
+foreach ($hookFile in Get-ChildItem $scriptDir -File | Where-Object { $_.Name -match '-stop\.(ps1|sh)$' }) {
+    $text = Get-Content $hookFile.FullName -Raw
+    if ($text -notmatch 'status --porcelain' -and $text -notmatch 'diff --name-only') { continue }
+    $gitScoped += @{
+        n = $hookFile.Name
+        t = $text
+        c = if ($hookFile.Name.EndsWith('.ps1')) { 'Get-AfPeerEdits' } else { 'af_peer_edits' }
+    }
+}
+
+# A derived loop over an empty set passes having asserted nothing, which is the
+# same silence it was written to break. Six is what is there today: the three
+# producers, twice.
+Assert-True "the scan finds the stop hooks that scope themselves from git" `
+    ($gitScoped.Count -ge 6) `
+    "only $($gitScoped.Count) git-scoped stop hooks found -- the predicate stopped matching"
+
+foreach ($pair in $gitScoped) {
     Assert-True "$($pair.n) subtracts what a concurrent peer edited" `
         ($pair.t -match [regex]::Escape($pair.c)) `
         "the hook still scopes its gates from shared git state alone"
+}
+
+# Calling the reader is not the same as calling it in time. A subtraction that
+# runs after the gate has already read the file list changes nothing.
+#
+# Indexed over code lines only: both hooks name their provenance helper in the
+# header comment, and a raw string index finds that mention first.
+foreach ($pair in $gitScoped) {
+    $marker = if ($pair.n.EndsWith('.ps1')) { 'Test-AfProvenanceMarker' } else { 'af_has_provenance_marker' }
+    $code = @(($pair.t -split "`r?`n") | Where-Object { $_ -notmatch '^\s*#' })
+    $peerAt = -1
+    $gateAt = -1
+    for ($i = 0; $i -lt $code.Count; $i++) {
+        if ($peerAt -lt 0 -and $code[$i] -match [regex]::Escape($pair.c)) { $peerAt = $i }
+        if ($gateAt -lt 0 -and $code[$i] -match [regex]::Escape($marker)) { $gateAt = $i }
+    }
+    if ($gateAt -lt 0) { continue }
+    Assert-True "$($pair.n) subtracts before the provenance gate reads the file list" `
+        ($peerAt -ge 0 -and $peerAt -lt $gateAt) `
+        "peer subtraction at code line $peerAt, provenance gate at code line $gateAt"
 }
 
 # The boundary #86 drew, restated. Lint is not an authorship question: a ruff

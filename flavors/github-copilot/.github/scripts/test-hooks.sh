@@ -1282,14 +1282,34 @@ else
 fi
 
 # A reader nothing calls protects nothing.
-for f in implementer refactorer; do
-    if grep -q 'af_peer_edits' "$HOOK_DIR/${f}-stop.sh" 2>/dev/null; then
-        assert_true "${f}-stop.sh subtracts what a concurrent peer edited" 1
+#
+# Derived, not listed. The literal `implementer refactorer` this replaced left
+# test-writer -- a producer by coordinator.agent.md and by this issue's own
+# text -- scoping its provenance gate from `git status` with nothing
+# subtracted, and no assertion went red, because it was never added to the
+# list. The watchdog reproduced the omission it exists to catch.
+git_scoped=0
+for hook in "$HOOK_DIR"/*-stop.sh; do
+    [ -f "$hook" ] || continue
+    grep -qE 'status --porcelain|diff --name-only' "$hook" || continue
+    git_scoped=$((git_scoped + 1))
+    name=$(basename "$hook")
+    if grep -q 'af_peer_edits' "$hook"; then
+        assert_true "${name} subtracts what a concurrent peer edited" 1
     else
-        assert_true "${f}-stop.sh subtracts what a concurrent peer edited" 0 \
+        assert_true "${name} subtracts what a concurrent peer edited" 0 \
             "the hook still scopes its gates from shared git state alone"
     fi
 done
+
+# A derived loop over an empty set passes having asserted nothing, which is the
+# same silence it was written to break.
+if [ "$git_scoped" -ge 3 ]; then
+    assert_true "the scan finds the stop hooks that scope themselves from git" 1
+else
+    assert_true "the scan finds the stop hooks that scope themselves from git" 0 \
+        "only ${git_scoped} git-scoped stop hooks found -- the predicate stopped matching"
+fi
 
 # The #86 boundary restated. The peer's own Stop hook lints the peer's files;
 # subtracting here would turn a correction into a bypass.
