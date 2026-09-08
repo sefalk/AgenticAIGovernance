@@ -121,6 +121,14 @@ $newTestFiles = & git -C $codeRoot status --porcelain "tests/" 2>$null |
     ForEach-Object { ($_ -replace '^.. ', '').Trim('"') } |
     Where-Object { $_ -match '\.py$' }
 
+# `git status` is global to the checkout, so a producer running alongside this
+# one puts its new test files in this scope. Clearing the block below means
+# writing `copilot:generated` -- "this agent produced the whole file" -- into a
+# file this agent never opened (issue #101). Same subtraction the implementer
+# and refactorer already make; the marker is the stronger claim of the two.
+$peerEdits = @(Get-AfPeerEdits -StdinRaw $stdinRaw -Agent 'test-writer' -CodeRoot $codeRoot -MainRoot $mainRoot)
+$newTestFiles = @($newTestFiles | Where-Object { $_ -and ($peerEdits -notcontains $_) })
+
 $missingMarkers = @()
 foreach ($f in $newTestFiles) {
     if (Test-Path (Join-Path $codeRoot $f)) {
