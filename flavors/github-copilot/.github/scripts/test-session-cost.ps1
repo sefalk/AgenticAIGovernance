@@ -632,6 +632,33 @@ print(mod.NANO_AIU_PER_CREDIT)
                                             $readmeText -match "collect-session-cost\.py@$codeVer")
     if ($docVer -ne $codeVer) { Write-Host "  (README documents v$docVer, collector emits v$codeVer)" }
 
+    # The version scalar can match while the documented taxonomy is a class
+    # short: the example block shows whichever classes one session happened to
+    # carry, so it cannot be the register. Derived from the collector rather
+    # than listed here, or this check becomes the third copy to fall behind.
+    $classProbe = @'
+import importlib.util, re, sys
+spec = importlib.util.spec_from_file_location("c", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+with open(sys.argv[1], encoding="utf-8") as handle:
+    literal = set(re.findall(r'"class": "(\w+)"', handle.read()))
+print(",".join(sorted(set(mod.PROMPT_ENTITY) | literal)))
+'@
+    $classFile = Join-Path ([IO.Path]::GetTempPath()) ("cost-classes-" + [Guid]::NewGuid().ToString('N') + '.py')
+    Set-Content -LiteralPath $classFile -Value $classProbe -Encoding UTF8
+    $codeClasses = @(((& $python $classFile $collector 2>&1) -join '').Trim() -split ',' | Where-Object { $_ })
+    Remove-Item $classFile -Force -ErrorAction SilentlyContinue
+    $docSentence = [regex]::Match($readmeText, 'classes` is a closed set:\*\*([\s\S]*?)\.').Groups[1].Value
+    $docClasses  = @([regex]::Matches($docSentence, '`([a-z_]+)`') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+    # Guards the extraction: a reworded bullet would otherwise compare two
+    # empty sets and pass.
+    $results['N_class_set_found'] = ($codeClasses.Count -ge 5 -and $docClasses.Count -ge 5)
+    $results['N_class_set_documented'] = (($codeClasses -join ',') -eq ($docClasses -join ','))
+    if (($codeClasses -join ',') -ne ($docClasses -join ',')) {
+        Write-Host "  (README documents [$($docClasses -join ', ')], collector emits [$($codeClasses -join ', ')])"
+    }
+
     # --- T: a request that reported no usage is not drift (issue #238) ------
     # A failed compaction carries no token counts and no billing attribute: it
     # consumed nothing, so there is nothing to account for. Reading that
