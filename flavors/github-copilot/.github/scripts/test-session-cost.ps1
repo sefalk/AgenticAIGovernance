@@ -682,7 +682,20 @@ print(mod.NANO_AIU_PER_CREDIT)
                                              $r.Output -match '(?m)^\s*requests:\s*2\s*$')
     # The loss is stated at the grain that lets a reader judge it: which field
     # moved, and how many records it cost out of how many.
-    $results['U_drift_named'] = ($r.Output -match 'drift:\s*\{\s*records:\s*1,\s*of:\s*3,\s*fields:\s*\[inputTokens\]\s*\}')
+    $results['U_drift_named'] = ($r.Output -match 'drift:\s*\{\s*records:\s*1,\s*of:\s*3,\s*fields:\s*\[inputTokens\],\s*logs:\s*\[main\.jsonl\]\s*\}')
+
+    # A session is many logs. Drift confined to one subagent is a different
+    # finding from drift in main.jsonl, and only the log name separates them.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -InputTokens 1000 -CachedTokens 400 -OutputTokens 50 -NanoAiu 1500000000)
+    ) -Child @(
+        (New-LlmRequest -OmitTokenFields -NanoAiu 1500000000)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['U_drift_names_its_log'] = ($r.Output -match 'logs:\s*\[runSubagent-implementer-toolu_test\.jsonl\]' -and
+                                         $r.Output -notmatch 'logs:\s*\[[^\]]*main\.jsonl')
 
     # Silence is the bug the key exists to prevent -- but a clean session must
     # not carry it either, or it stops meaning anything.

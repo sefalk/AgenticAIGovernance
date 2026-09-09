@@ -577,6 +577,7 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
     requests_seen = 0
     no_usage = 0
     drifted: dict[str, int] = {}
+    drifted_logs: set[str] = set()
 
     for path in log_files(session_dir):
         if not os.path.isfile(path):
@@ -605,6 +606,9 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
                     # One unreadable record is a hole in the total, not a
                     # reason to discard the records that read cleanly.
                     drifted[str(missing)] = drifted.get(str(missing), 0) + 1
+                    # A session is many logs; drift in one subagent's log is a
+                    # different finding from drift in main.jsonl (issue #238).
+                    drifted_logs.add(log)
                     continue
                 price(fact, cards)
                 facts.append(fact)
@@ -658,6 +662,7 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
             "records": sum(drifted.values()),
             "of": requests_seen,
             "fields": sorted(drifted),
+            "logs": sorted(drifted_logs),
         }
 
     if session_start is None:
@@ -753,7 +758,8 @@ def render(result: dict[str, Any], facts_path: str | None = None, entities_path:
     drift = result.get("drift")
     if drift:
         lines.append(
-            f"  drift: {{ records: {drift['records']}, of: {drift['of']}, fields: [{', '.join(drift['fields'])}] }}"
+            f"  drift: {{ records: {drift['records']}, of: {drift['of']}, "
+            f"fields: [{', '.join(drift['fields'])}], logs: [{', '.join(drift['logs'])}] }}"
         )
     lines.append(
         "  tokens: {{ input_uncached: {0}, cached: {1}, output: {2} }}".format(
