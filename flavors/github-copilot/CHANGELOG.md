@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A quarter of the shipped hooks was never executed by the suites that
+  vouch for them (#263).** Every hook was reached by the parse and CR gates,
+  which walk the whole set, so a hook could ship untested and still look
+  covered. Three bash hooks and three PowerShell ones had no behavioural case
+  at all — `coordinator-posttooluse` among them, the hook whose permanent
+  false positive #172 was filed about, and whose anchoring fix then sat
+  unmerged for eleven days while the tracker recorded it as implemented.
+  Nothing contradicted the tracker because nothing ran the hook.
+
+  Both suites now derive the expected set from the payload directory and fail
+  listing any hook that no behavioural case names — a heading or a whole-set
+  loop does not count. A hook added without a test fails on the PR that adds
+  it rather than on the incident that finds it. The six gaps are backfilled in
+  the same change, because the gate is red until they are.
+
 - **The cost collector's drift diagnostic could not say where the drift was
   (#238).** A session is many logs — `main.jsonl` plus one per subagent — and
   the collector aggregates all of them. `drift` named the field and the
