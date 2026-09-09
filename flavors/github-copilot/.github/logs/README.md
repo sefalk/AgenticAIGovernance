@@ -90,7 +90,10 @@ Reading it:
   `main_log_missing`, `log_unparseable`, `schema_drift`) and is never an error.
   `schema_drift` now means *every* request was unreadable. A record that drifts
   while others parse is subtracted, not fatal: the total stands and `drift`
-  names the field, the count and the base, so the reader can judge the hole.
+  names the field, the log it came from, the count and the base, so the reader
+  can judge the hole. A session is many logs — `main.jsonl` plus one per
+  subagent — so drift confined to a single subagent's log is a different
+  finding from drift in the main one, and `logs` is what tells them apart.
 - **`no_usage_requests` is not `unbilled_requests`.** Unbilled requests spent
   tokens that were not charged; a no-usage request reported no tokens and no
   billing at all — an aborted or failed call. Counting the second as the first
@@ -158,6 +161,12 @@ Reading it:
   measured from the dumps the editor wrote next to the log — not from the
   source files on disk, which is the difference between what shipped and what
   exists.
+- **`classes` is a closed set:** `tool`, `instruction_attached`,
+  `skill`, `agent`, `instruction`. The example above shows only the three a
+  particular session happened to carry; a session with no agent descriptions in
+  its prompt emits no `agent` row. The set is pinned against the collector's
+  own taxonomy by `test-session-cost.ps1`, because this document fell three
+  schema versions behind unnoticed once already (issue #227).
 - **`credits_attributable: false` is rendered in the block, not only here.** An
   entity's tokens are inside a request's `inputTokens`, and a request-level
   billing record cannot be split by which span of the prompt produced it. A
