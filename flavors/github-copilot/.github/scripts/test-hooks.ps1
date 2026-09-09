@@ -3642,6 +3642,129 @@ Write-Output ""
 # Resolution invariants are done; restore the declared policy for anything after.
 $env:AF_CONF_PATH = $script:savedPolicyPath
 
+# ── 8b. Hooks whose product is their text, not a verdict (issue #263) ────
+#
+# Assert-Deny judges a permission decision and the stop helpers judge a block.
+# The three hooks below answer neither question -- two inject session context
+# and one reports readiness -- and having no helper that fitted them is why
+# none of them was ever executed here. The parse and CR gates walked the files;
+# nothing ran them.
+
+Write-Output "## session-context.ps1"
+
+# Everything this hook produces is prose an agent then acts on, so a stale or
+# invented test summary is not a crash: it is a session that starts on a false
+# premise and never says so.
+$scStart = '{"session_id":"s1","source":"startup","transcript_path":"/none"}'
+$scPassLog = '{"domain": {"passed": 12, "total": 12, "exit_code": 0, "last_run": "2026-01-01T00:00:00"}}'
+# passed < total with exit_code 0 does not occur; the exit code is the verdict
+# and the counts are the detail, so a case has to let the two disagree.
+$scFailLog = '{"domain": {"passed": 9, "total": 12, "exit_code": 1, "last_run": "2026-01-01T00:00:00"}}'
+
+$scBare = Invoke-Hook -Script 'session-context.ps1' -JsonInput $scStart -Branch 'agent/263-x'
+Assert-Contains "session-context announces the event it answers" `
+    $scBare.Output '"hookEventName":"SessionStart"' `
+    "the client routes on the event name; without it the context is dropped"
+
+# Silence about untested code is the honest answer. A summary produced from an
+# absent log would be read as evidence that the suite had run.
+Assert-NotContains "session-context claims no test state when none was recorded" `
+    $scBare.Output 'Tests:' `
+    "an invented summary is worse than none, because it is acted on"
+
+$scPass = Invoke-Hook -Script 'session-context.ps1' -JsonInput $scStart -Branch 'agent/263-x' `
+    -Files @{ '.github/test-log.json' = $scPassLog }
+Assert-Contains "session-context folds the recorded test state into the context" `
+    $scPass.Output 'Tests: domain=12/12\(PASS,' `
+    "the counts and the verdict both come from the log, not from the prompt"
+
+$scFail = Invoke-Hook -Script 'session-context.ps1' -JsonInput $scStart -Branch 'agent/263-x' `
+    -Files @{ '.github/test-log.json' = $scFailLog }
+Assert-Contains "session-context reads the verdict off the exit code" `
+    $scFail.Output 'domain=9/12\(FAIL,' `
+    "a scope whose exit code is non-zero is a failing scope whatever the counts say"
+
+Write-Output ""
+
+Write-Output "## coordinator-postmerge.ps1"
+
+# The gate exists to tell the coordinator what is still checked out. Reporting
+# a clean slate while an agent worktree is live is the one failure that matters,
+# and it is invisible without a case that has one.
+$pmAgent = Invoke-Hook -Script 'coordinator-postmerge.ps1' -JsonInput '{}' -Branch 'agent/263-x'
+Assert-Contains "postmerge attributes its message to the coordinator gate" `
+    $pmAgent.Output 'coordinator:PostMerge' `
+    "the systemMessage is read next to other agents' output and has to be attributable"
+Assert-Contains "postmerge counts a checkout sitting on an agent branch" `
+    $pmAgent.Output 'Active agent worktrees \(1\)' `
+    "a summary that misses the live worktree is the failure the gate exists to prevent"
+Assert-Contains "postmerge names the branch it counted" `
+    $pmAgent.Output 'refs/heads/agent/263-x' `
+    "a count without the name cannot be acted on"
+
+$pmDev = Invoke-Hook -Script 'coordinator-postmerge.ps1' -JsonInput '{}' -Branch 'dev'
+Assert-Contains "postmerge reports nothing to clean up off an agent branch" `
+    $pmDev.Output 'No active agent/\* worktrees' `
+    "only agent/* checkouts are the gate's business"
+
+Write-Output ""
+
+Write-Output "## session-mcp-readiness.ps1"
+
+# The readiness line is the only place a misconfigured capability announces
+# itself before a workflow depends on it. Its whole content is a classification
+# -- READY, DEGRADED, BLOCKED -- derived from af-env.conf, and nothing had ever
+# checked that the classification follows the config.
+#
+# The first line of each fixture config is a comment on purpose: Set-Content
+# -Encoding UTF8 on PowerShell 5.1 writes a BOM, and `<BOM>ADO_CAPABILITY_MODE=`
+# does not match an '^ADO_' pattern. Parking the BOM on a comment keeps the case
+# about the hook rather than about the fixture writer.
+function New-ReadinessConf {
+    param([string]$Body)
+    return "# fixture policy`n$Body"
+}
+
+$mcpOff = Invoke-Hook -Script 'session-mcp-readiness.ps1' -JsonInput '{}' -Branch 'agent/263-x' `
+    -Files @{ '.github/af-env.conf' = (New-ReadinessConf 'ADO_CAPABILITY_MODE=off') }
+Assert-Contains "readiness reports READY when the capability is switched off" `
+    $mcpOff.Output 'ADO MCP readiness: READY \| mode=off' `
+    "off is a configuration, not a fault"
+Assert-Contains "readiness says why nothing is being checked" `
+    $mcpOff.Output 'ADO capability mode is off' `
+    "a silent READY is indistinguishable from a gate that never ran"
+
+$mcpBlocked = Invoke-Hook -Script 'session-mcp-readiness.ps1' -JsonInput '{}' -Branch 'agent/263-x' `
+    -Files @{ '.github/af-env.conf' = (New-ReadinessConf 'ADO_CAPABILITY_MODE=required') }
+Assert-Contains "readiness blocks when a required capability has no project" `
+    $mcpBlocked.Output 'ADO MCP readiness: BLOCKED' `
+    "required means the workflow cannot proceed without it, and the session is where that is cheapest to learn"
+Assert-Contains "readiness names the setting that is missing" `
+    $mcpBlocked.Output 'missing=ADO_PROJECT' `
+    "BLOCKED without the key is a dead end for whoever has to fix it"
+
+# Same missing key, different declared mode: optional degrades to a fallback
+# rather than stopping, and the difference is the point of the setting.
+$mcpOptional = Invoke-Hook -Script 'session-mcp-readiness.ps1' -JsonInput '{}' -Branch 'agent/263-x' `
+    -Files @{ '.github/af-env.conf' = (New-ReadinessConf 'ADO_CAPABILITY_MODE=optional') }
+Assert-NotContains "readiness does not block when the capability is optional" `
+    $mcpOptional.Output 'BLOCKED' `
+    "optional exists precisely so a missing project is not fatal"
+Assert-Contains "readiness names the fallback it will use instead" `
+    $mcpOptional.Output 'fallback traceability' `
+    "a degraded run that does not say what it degraded to cannot be reviewed"
+
+$mcpReady = Invoke-Hook -Script 'session-mcp-readiness.ps1' -JsonInput '{}' -Branch 'agent/263-x' `
+    -Files @{ '.github/af-env.conf' = (New-ReadinessConf "ADO_CAPABILITY_MODE=required`nADO_PROJECT=Contoso") }
+Assert-Contains "readiness reports the resolved project once it is configured" `
+    $mcpReady.Output 'defaults:project=Contoso' `
+    "the value the agents will actually use, echoed back before they use it"
+Assert-NotContains "readiness stops reporting a missing project once it is set" `
+    $mcpReady.Output 'missing=ADO_PROJECT' `
+    "a stale complaint trains the reader to ignore the line"
+
+Write-Output ""
+
 # ── 9. Parse gate ────────────────────────────────────────────────────────
 #
 # A hook that dies at parse time produces no output, and no output is
@@ -3699,6 +3822,51 @@ foreach ($f in $shellSources) {
     if ([System.IO.File]::ReadAllBytes($f.FullName) -contains 13) { $crFiles += $f.Name }
 }
 Assert-True "no shipped shell script carries a CR" ($crFiles.Count -eq 0) "CRLF in: $($crFiles -join ', ')"
+
+# --- Coverage inventory gate (issue #263) ----------------------------------
+#
+# The two gates above are the reason a hook can ship untested and still look
+# covered: they walk the whole set, so every file is touched and none is run.
+# Four bash hooks and three PowerShell ones sat that way, coordinator-posttooluse
+# among them -- the hook whose permanent false positive #172 was filed about,
+# whose fix then sat unmerged for eleven days while the tracker said it was
+# implemented. Nothing contradicted the tracker, because nothing executed it.
+#
+# The expected set is therefore derived from the payload directory rather than
+# from a list someone maintains: a hook added without a case fails on the PR
+# that adds it, instead of on the incident that finds it.
+#
+# Exercised means a line that names the hook and is neither a comment nor a
+# section header. The whole-set gates name no hook at all, so they cannot
+# satisfy this; and a `Write-Output "## foo.ps1"` heading must not either, or a
+# title would stand in for a test.
+
+Write-Output "## coverage inventory"
+
+$suitePath = Join-Path $githubDir 'scripts/test-hooks.ps1'
+$suiteBody = @(Get-Content $suitePath | Where-Object {
+    $_ -notmatch '^\s*#' -and $_ -notmatch '^\s*Write-(Output|Host)\s'
+})
+
+# The shared preamble is dot-sourced by every hook, so it is exercised by all
+# of them and named by none.
+$shippedHooks = @(Get-ChildItem -Path $scriptDir -Filter '*.ps1' -File |
+    Where-Object { $_.BaseName -ne '_common' })
+$uncoveredHooks = @($shippedHooks | Where-Object {
+    $name = $_.BaseName
+    -not ($suiteBody | Where-Object { $_ -like "*$name*" })
+} | ForEach-Object { $_.Name })
+
+# Guards the derivation. A filter that matched nothing, or a suite this failed
+# to read, would compare an empty set against an empty set and report full
+# coverage -- the same silent pass the gate exists to end.
+Assert-True "the hook inventory is derived from the payload" `
+    ($shippedHooks.Count -ge 10 -and $suiteBody.Count -ge 100) `
+    "found $($shippedHooks.Count) shipped hooks in $scriptDir and $($suiteBody.Count) readable suite lines"
+
+Assert-True "every shipped PowerShell hook is exercised by a behavioural case" `
+    ($uncoveredHooks.Count -eq 0) `
+    "never executed by any case, only walked by the parse and CR gates: $($uncoveredHooks -join ', ')"
 
 # --- Red phase validity (issue #123) ---------------------------------------
 #
