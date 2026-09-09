@@ -220,6 +220,7 @@
           <div class="legend-item"><div class="legend-line" style="border-color:var(--accent)"></div> invokes</div>
           <div class="legend-item"><div class="legend-line dashed" style="border-color:var(--orange)"></div> enforces</div>
           <div class="legend-item"><div class="legend-line dashed" style="border-color:var(--green)"></div> consumes</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--yellow)"></div> Token Tracking (static + live)</div>
         </div>
 
         <!-- Human + Governance + Entry -->
@@ -262,6 +263,7 @@
               <div class="icon">&#x1f3af;</div>
               <div class="label">Coordinator</div>
               <div class="sublabel">Orchestrates all workflows &middot; delegates to 10 workers</div>
+              <div class="conn-badge hook-count" title="7 hooks declared in its agent file (3 coordinator-specific + 4 re-declared globals)">7</div>
             </div>
           </div>
         </div>
@@ -275,39 +277,41 @@
               <div class="label">Planner</div>
               <div class="sublabel">Read-only &middot; Planning</div>
               <div class="conn-badge skill-count" title="3 skills">3</div>
+              <div class="conn-badge hook-count" title="1 hook">1</div>
             </div>
             <div class="node agent" tabindex="0" data-detail="agent-test-writer" data-id="test-writer">
               <div class="icon">&#x1f9ea;</div>
               <div class="label">Test-Writer</div>
               <div class="sublabel">&#x1f534; Red phase</div>
               <div class="conn-badge skill-count" title="4 skills">4</div>
-              <div class="conn-badge hook-count" title="2 hooks">2</div>
+              <div class="conn-badge hook-count" title="3 hooks">3</div>
             </div>
             <div class="node agent" tabindex="0" data-detail="agent-implementer" data-id="implementer">
               <div class="icon">&#x2699;&#xfe0f;</div>
               <div class="label">Implementer</div>
               <div class="sublabel">&#x1f7e2; Green phase</div>
               <div class="conn-badge skill-count" title="7 skills">7</div>
-              <div class="conn-badge hook-count" title="1 hook">1</div>
+              <div class="conn-badge hook-count" title="2 hooks">2</div>
             </div>
             <div class="node agent" tabindex="0" data-detail="agent-refactorer" data-id="refactorer">
               <div class="icon">&#x267b;&#xfe0f;</div>
               <div class="label">Refactorer</div>
               <div class="sublabel">&#x267b;&#xfe0f; Refactor phase</div>
               <div class="conn-badge skill-count" title="5 skills">5</div>
-              <div class="conn-badge hook-count" title="2 hooks">2</div>
+              <div class="conn-badge hook-count" title="3 hooks">3</div>
             </div>
             <div class="node agent" tabindex="0" data-detail="agent-documenter" data-id="documenter">
               <div class="icon">&#x1f4dd;</div>
               <div class="label">Documenter</div>
               <div class="sublabel">Workflow logs</div>
               <div class="conn-badge skill-count" title="1 skill">1</div>
-              <div class="conn-badge hook-count" title="1 hook">1</div>
+              <div class="conn-badge hook-count" title="2 hooks">2</div>
             </div>
             <div class="node agent" tabindex="0" data-detail="agent-researcher" data-id="researcher">
               <div class="icon">&#x1f52c;</div>
               <div class="label">Researcher</div>
               <div class="sublabel">External docs</div>
+              <div class="conn-badge hook-count" title="1 hook">1</div>
             </div>
           </div>
         </div>
@@ -396,6 +400,36 @@
               <div class="label">Artifact Gate</div>
               <div class="sublabel">documenter Stop</div>
             </div>
+            <div class="node hook" tabindex="0" data-detail="hook-session-mcp" data-id="hook-session-mcp">
+              <div class="icon">&#x1f6f0;&#xfe0f;</div>
+              <div class="label">ADO Readiness</div>
+              <div class="sublabel">SessionStart &middot; Global</div>
+            </div>
+            <div class="node hook" tabindex="0" data-detail="hook-coord-pre" data-id="hook-coord-pre">
+              <div class="icon">&#x1f6ab;</div>
+              <div class="label">Delegation Gate</div>
+              <div class="sublabel">coordinator PreToolUse</div>
+            </div>
+            <div class="node hook" tabindex="0" data-detail="hook-coord-post" data-id="hook-coord-post">
+              <div class="icon">&#x1f575;&#xfe0f;</div>
+              <div class="label">Write Detector</div>
+              <div class="sublabel">coordinator PostToolUse</div>
+            </div>
+            <div class="node hook" tabindex="0" data-detail="hook-coord-postmerge" data-id="hook-coord-postmerge">
+              <div class="icon">&#x1f9f9;</div>
+              <div class="label">Worktree Cleanup</div>
+              <div class="sublabel">coordinator Stop</div>
+            </div>
+            <div class="node hook" tabindex="0" data-detail="hook-planner-pre" data-id="hook-planner-pre">
+              <div class="icon">&#x1f4c1;</div>
+              <div class="label">Plan Confinement</div>
+              <div class="sublabel">planner PreToolUse</div>
+            </div>
+            <div class="node hook" tabindex="0" data-detail="hook-researcher-pre" data-id="hook-researcher-pre">
+              <div class="icon">&#x1f517;</div>
+              <div class="label">Credential Scan</div>
+              <div class="sublabel">researcher PreToolUse</div>
+            </div>
           </div>
         </div>
 
@@ -453,6 +487,33 @@
           </div>
         </div>
 
+        <!-- Token Tracking -->
+        <div class="zone" style="border-color: rgba(227,179,65,.3);">
+          <div class="zone-label" style="color:var(--yellow);">Token Tracking &mdash; Static Budget vs. Live Cost</div>
+          <div class="zone-grid">
+            <div class="node governance" tabindex="0" data-detail="tok-static-context" data-id="tok-static-context">
+              <div class="icon">&#x1f4d0;</div>
+              <div class="label">Context Budget Gate</div>
+              <div class="sublabel">STATIC &middot; git pre-commit</div>
+            </div>
+            <div class="node governance" tabindex="0" data-detail="tok-static-plan" data-id="tok-static-plan">
+              <div class="icon">&#x1f4d0;</div>
+              <div class="label">Plan Budget Gate</div>
+              <div class="sublabel">STATIC &middot; git pre-commit</div>
+            </div>
+            <div class="node hook" tabindex="0" data-detail="tok-live-cost" data-id="tok-live-cost">
+              <div class="icon">&#x1f4b3;</div>
+              <div class="label">Workflow Cost Logging</div>
+              <div class="sublabel">LIVE &middot; documenter Stop</div>
+            </div>
+            <div class="node hook" tabindex="0" data-detail="tok-live-analyze" data-id="tok-live-analyze">
+              <div class="icon">&#x1f4c8;</div>
+              <div class="label">Usage Analysis Tool</div>
+              <div class="sublabel">LIVE &middot; framework-dev, ad hoc</div>
+            </div>
+          </div>
+        </div>
+
         <!-- Relationship summary -->
         <div class="rel-section">
           <h3 style="margin-bottom:.4rem;">Key Relationships</h3>
@@ -485,6 +546,11 @@
           <div class="rel-row">
             <span style="color:var(--purple);">Instructions</span> <span class="rel-arrow" style="color:var(--purple);">&#x2192;</span>
             <span style="color:var(--text-muted);">auto-injected into context when <code>applyTo</code> pattern matches the active file</span>
+          </div>
+          <div class="rel-row">
+            <span class="tag" style="background:rgba(227,179,65,.1); color:var(--yellow); border-color:rgba(227,179,65,.2);">Token Tracking</span>
+            <span class="rel-arrow" style="color:var(--yellow);">&#x2194;</span>
+            <span style="color:var(--text-muted);"><strong>STATIC</strong> (Context/Plan Budget Gates, native git pre-commit, measures the AUTHORED payload on disk) is a different mechanism from <strong>LIVE</strong> (Workflow Cost Logging + Usage Analysis Tool, reads the real Copilot debug log) -- static catches drift before a commit lands, live reports what a session actually spent afterwards.</span>
           </div>
         </div>
       </div>
@@ -535,6 +601,9 @@
             <div class="flow-step agent-step" tabindex="0" data-detail="agent-documenter">documenter</div>
             <span class="flow-arrow">&rarr;</span>
             <div class="flow-step hook-step" tabindex="0" data-detail="hook-doc-stop">Artifact Gate &#x2713;</div>
+            <span class="flow-arrow">&rarr;</span>
+            <div class="flow-step" style="background:rgba(227,179,65,.12); border-color:rgba(227,179,65,.3); color:var(--yellow);" tabindex="0" data-detail="tok-live-cost">Cost Logging</div>
+            <span class="flow-label">LIVE, appended to the workflow log</span>
             <span class="flow-arrow">&rarr;</span>
             <div class="flow-step agent-step" tabindex="0" data-detail="agent-compliance">compliance &#x2713;</div>
             <span class="flow-label">post-flight</span>
@@ -661,20 +730,34 @@
         <table class="hook-matrix" style="margin-bottom:1rem;">
           <tr><th>Event</th><th>Script</th><th>Purpose</th><th>Action</th></tr>
           <tr data-detail="hook-session"><td>SessionStart</td><td>session-context</td><td>Inject git branch, commit, Python version</td><td>additionalContext</td></tr>
+          <tr data-detail="hook-session-mcp"><td>SessionStart</td><td>session-mcp-readiness</td><td>Verify Azure DevOps MCP readiness (READY / DEGRADED / BLOCKED)</td><td>additionalContext</td></tr>
           <tr data-detail="hook-block"><td>PreToolUse</td><td>block-dangerous</td><td>Classify terminal commands (auto-approve / prompt / hard-deny)</td><td>allow / ask / deny</td></tr>
-          <tr data-detail="hook-secrets"><td>PostToolUse</td><td>scan-secrets</td><td>Scan for hardcoded secrets</td><td>block if found</td></tr>
+          <tr data-detail="hook-secrets"><td>PostToolUse</td><td>scan-secrets</td><td>Scan for hardcoded secrets (re-declared in five agent files, see below)</td><td>block if found</td></tr>
           <tr data-detail="hook-tests"><td>Stop</td><td>stop-tests</td><td>Artifact existence check (retired from testing)</td><td>warn (advisory)</td></tr>
         </table>
 
         <h3>Agent-Scoped Hooks (in .agent.md frontmatter)</h3>
         <table class="hook-matrix">
           <tr><th>Agent</th><th>Event</th><th>Script</th><th>Gate</th><th>What It Enforces</th></tr>
+          <tr data-detail="hook-coord-pre"><td>coordinator</td><td>PreToolUse</td><td>coordinator-pretooluse</td><td><span class="badge hard">HARD</span></td><td>Blocks the coordinator from editing/creating files itself (delegation enforcement)</td></tr>
+          <tr data-detail="hook-coord-post"><td>coordinator</td><td>PostToolUse</td><td>coordinator-posttooluse</td><td><span class="badge soft">SOFT</span></td><td>Detects terminal commands that modified source files (detective control)</td></tr>
+          <tr data-detail="hook-coord-postmerge"><td>coordinator</td><td>Stop</td><td>coordinator-postmerge</td><td><span class="badge advisory">ADVISORY</span></td><td>Warns about stale/prunable agent/* worktrees before cleanup</td></tr>
+          <tr data-detail="hook-planner-pre"><td>planner</td><td>PreToolUse</td><td>planner-pretooluse</td><td><span class="badge hard">HARD</span></td><td>Allowlists writes to plans/ dir only -- planner is otherwise read-only</td></tr>
+          <tr data-detail="hook-researcher-pre"><td>researcher</td><td>PreToolUse</td><td>researcher-pretooluse</td><td><span class="badge soft">SOFT</span></td><td>Scans fetch URLs for embedded credentials</td></tr>
+          <tr data-detail="hook-secrets"><td>coordinator, test-writer, implementer, refactorer, documenter</td><td>PostToolUse</td><td>scan-secrets</td><td><span class="badge hard">HARD</span></td><td>The same global scan, re-declared with the same event in each of these agents' own files</td></tr>
           <tr data-detail="hook-tw-pre"><td>test-writer</td><td>PreToolUse</td><td>test-writer-pretooluse</td><td><span class="badge hard">HARD</span></td><td>Blocks editing production code (TDD isolation)</td></tr>
           <tr data-detail="hook-tw-stop"><td>test-writer</td><td>Stop</td><td>test-writer-stop</td><td><span class="badge hard">HARD</span></td><td>Tests must FAIL (Red gate) + provenance</td></tr>
           <tr data-detail="hook-impl-stop"><td>implementer</td><td>Stop</td><td>implementer-stop</td><td><span class="badge hard">HARD</span></td><td>All tests must PASS (Green gate)</td></tr>
           <tr data-detail="hook-ref-pre"><td>refactorer</td><td>PreToolUse</td><td>refactorer-pretooluse</td><td><span class="badge hard">HARD</span></td><td>Blocks creating new files</td></tr>
           <tr data-detail="hook-ref-stop"><td>refactorer</td><td>Stop</td><td>refactorer-stop</td><td><span class="badge hard">HARD</span></td><td>Tests green + no new .py files</td></tr>
           <tr data-detail="hook-doc-stop"><td>documenter</td><td>Stop</td><td>documenter-stop</td><td><span class="badge hard">HARD</span></td><td>Workflow log + retro snippet exist</td></tr>
+        </table>
+
+        <h3>Git Pre-Commit Guards <span style="font-size:.7em; color:var(--text-muted); font-weight:400;">(native git hooks -- NOT Copilot's agent-hooks.json, fire on every <code>git commit</code> regardless of which agent is active)</span></h3>
+        <table class="hook-matrix">
+          <tr><th>Guard</th><th>Script</th><th>Class</th><th>What It Enforces</th></tr>
+          <tr data-detail="tok-static-context"><td>Context Budget</td><td>check-context-budget-staged.py &#x2192; check-context-budget.py</td><td><span class="badge advisory">STATIC</span></td><td>Staged instruction/agent/skill payload stays under the af-env.conf token ceilings</td></tr>
+          <tr data-detail="tok-static-plan"><td>Plan Budget</td><td>check-plan-budget.py</td><td><span class="badge advisory">STATIC</span></td><td>Planning document size stays under its complexity-tier ceiling</td></tr>
         </table>
       </div>
 
@@ -730,15 +813,17 @@ const AGENTS = {
     name: 'Coordinator', icon: '\u{1f3af}', role: 'Autonomous TDD workflow orchestrator',
     phase: 'Orchestration', capabilities: 'Read + execute + agent invocation',
     tools: ['agent', 'search/*', 'read/*', 'todo', 'runTests', 'runInTerminal'],
-    skills: [], hooks: [],
-    notes: 'Primary entry point. Receives tasks from user, selects workflow, delegates to specialists. Cardinal Rules: (1) never creates files directly, (2) always checks branch before delegating writes.',
+    skills: [],
+    hooks: ['coordinator-pretooluse (PreToolUse: blocks the coordinator from editing/creating files itself)', 'coordinator-posttooluse (PostToolUse: detects terminal commands that modified source files)', 'coordinator-postmerge (Stop: warns about stale agent/* worktrees before cleanup)', 'block-dangerous, scan-secrets, session-context, stop-tests (the four global hooks, re-declared in its own file)'],
+    notes: 'Primary entry point. Receives tasks from user, selects workflow, delegates to specialists. Cardinal Rules: (1) never creates files directly, (2) always checks branch before delegating writes. Its own hooks make rule (1) mechanical: PreToolUse blocks the edit, PostToolUse catches writes smuggled through a terminal command.',
     makerChecker: null
   },
   planner: {
     name: 'Planner', icon: '\u{1f4cb}', role: 'Decompose tasks, define acceptance criteria',
     phase: 'Planning', capabilities: 'Read-only analysis',
     tools: ['search/*', 'read/*', 'todo'],
-    skills: ['task-decomposition', 'risk-management', 'design-patterns'], hooks: [],
+    skills: ['task-decomposition', 'risk-management', 'design-patterns'],
+    hooks: ['planner-pretooluse (PreToolUse: allowlists writes to plans/ only -- planner is otherwise read-only)'],
     notes: 'Creates plan files using templates/PLAN.md. Assigns complexity tier. For Quick Fix: produces investigation doc using templates/INVESTIGATION.md.',
     makerChecker: null
   },
@@ -747,7 +832,7 @@ const AGENTS = {
     phase: 'TDD Red', capabilities: 'Create/edit test files only',
     tools: ['search/*', 'read/*', 'editFiles', 'createFile', 'runTests', 'runInTerminal'],
     skills: ['unit-testing', 'property-testing', 'error-handling', 'human-escalation'],
-    hooks: ['test-writer-pretooluse (blocks production edits)', 'test-writer-stop (Red gate + provenance)'],
+    hooks: ['scan-secrets (PostToolUse: agent-scoped secret scan after each edit)', 'test-writer-pretooluse (blocks production edits)', 'test-writer-stop (Red gate + provenance)'],
     notes: 'Blocked from editing production code by PreToolUse hook. Tests must FAIL (not pass) for Red phase to succeed.',
     makerChecker: 'test-critic'
   },
@@ -764,7 +849,7 @@ const AGENTS = {
     phase: 'TDD Green', capabilities: 'Full edit + execution',
     tools: ['search/*', 'read/*', 'editFiles', 'createFile', 'runTests', 'runInTerminal', 'pylance*'],
     skills: ['hexagonal-architecture', 'pydantic', 'error-handling', 'design-patterns', 'static-analysis', 'dependency-management', 'human-escalation'],
-    hooks: ['implementer-stop (Green gate: all tests must pass)'],
+    hooks: ['scan-secrets (PostToolUse: agent-scoped secret scan after each edit)', 'implementer-stop (Green gate: all tests must pass)'],
     notes: 'Writes minimal code to make tests pass. Must meet coverage thresholds per module type.',
     makerChecker: 'code-critic'
   },
@@ -773,7 +858,7 @@ const AGENTS = {
     phase: 'TDD Refactor', capabilities: 'Edit existing files + test',
     tools: ['search/*', 'read/*', 'editFiles', 'runTests', 'runInTerminal', 'pylance*'],
     skills: ['refactoring', 'design-patterns', 'hexagonal-architecture', 'pydantic', 'human-escalation'],
-    hooks: ['refactorer-pretooluse (blocks new file creation)', 'refactorer-stop (tests green + no new files)'],
+    hooks: ['scan-secrets (PostToolUse: agent-scoped secret scan after each edit)', 'refactorer-pretooluse (blocks new file creation)', 'refactorer-stop (tests green + no new files)'],
     notes: 'Cannot create new files (enforced by hook). All tests must remain green after each change.',
     makerChecker: 'code-critic'
   },
@@ -799,7 +884,7 @@ const AGENTS = {
     phase: 'Documentation', capabilities: 'Limited write (logs, docs)',
     tools: ['search/*', 'read/*', 'editFiles', 'createFile'],
     skills: ['documentation'],
-    hooks: ['documenter-stop (workflow log + retro snippet must exist)'],
+    hooks: ['scan-secrets (PostToolUse: agent-scoped secret scan after each edit)', 'documenter-stop (workflow log + retro snippet must exist)'],
     notes: 'Creates YAML workflow log in .github/logs/ and, when the run had something to teach, a retro snippet in .github/retros/auto/. Updates plan file status to COMPLETED.',
     makerChecker: null
   },
@@ -807,7 +892,8 @@ const AGENTS = {
     name: 'Researcher', icon: '\u{1f52c}', role: 'Fetch & synthesize external docs',
     phase: 'Research (pre-flight)', capabilities: 'Read-only + web fetch',
     tools: ['search/*', 'read/*', 'fetchWebpage'],
-    skills: [], hooks: [],
+    skills: [],
+    hooks: ['researcher-pretooluse (PreToolUse: scans fetch URLs for embedded credentials)'],
     notes: 'Optional step at workflow start. Used for third-party APIs, libraries, external standards. Every claim must have a source URL.',
     makerChecker: null
   },
@@ -871,15 +957,33 @@ const HOOKS_DETAIL = {
   'hook-session': { name: 'Session Context', event: 'SessionStart', scope: 'Global', script: 'session-context.ps1/.sh',
     desc: 'Injects git branch, last commit hash, and Python version into every agent session as additionalContext. Agents start aware of their environment.',
     enforcement: 'Informational (injects context, does not block)' },
+  'hook-session-mcp': { name: 'ADO MCP Readiness', event: 'SessionStart', scope: 'Global', script: 'session-mcp-readiness.ps1/.sh',
+    desc: 'Checks Azure DevOps MCP server availability and the configured capability mode (off / optional / required). Injects a READY / DEGRADED / BLOCKED readiness summary so agents know upfront whether tracker (work item / wiki / pipeline) operations are safe to attempt this session.',
+    enforcement: 'Informational (injects context, does not block)' },
   'hook-block': { name: 'Safety Gate (block-dangerous)', event: 'PreToolUse', scope: 'Global', script: 'block-dangerous.ps1/.sh',
     desc: 'Three-tier terminal command classifier: auto-approves safe commands (read-only, tests, feature-branch git, cloud reads), prompts for durable changes, and hard-denies destructive ones (force push, protected-branch push, reset --hard, rebase, rm -rf, DROP TABLE). Configurable via AUTONOMY_LEVEL / AUTONOMY_CAT_* in af-env.conf.',
     enforcement: 'HARD -- allow / ask / deny (permissionDecision)' },
-  'hook-secrets': { name: 'Secret Scan', event: 'PostToolUse', scope: 'Global', script: 'scan-secrets.ps1/.sh',
-    desc: 'Scans edited files for hardcoded secrets, API keys, tokens using gitleaks (if available) or regex fallback patterns.',
+  'hook-secrets': { name: 'Secret Scan', event: 'PostToolUse', scope: 'Global, and re-declared in five agent files: coordinator, test-writer, implementer, refactorer, documenter', script: 'scan-secrets.ps1/.sh',
+    desc: 'Scans edited files for hardcoded secrets, API keys, tokens using gitleaks (if available) or regex fallback patterns. Registered globally as PostToolUse (catches anything, any agent), and re-declared with the same event in the frontmatter of the five agents that write content.',
     enforcement: 'HARD -- blocks if secrets found' },
   'hook-tests': { name: 'Test Gate (stop-tests)', event: 'Stop', scope: 'Global', script: 'stop-tests.ps1/.sh',
-    desc: 'Retired from test enforcement (moved to agent-scoped hooks). Now checks for workflow artifact existence (advisory).',
+    desc: 'Retired from test enforcement (moved to agent-scoped hooks -- a VS Code bug crashes subagent invocation when Stop hooks fire from .agent.md frontmatter, SubagentStop does not have that bug). Now checks for workflow artifact existence (advisory).',
     enforcement: 'ADVISORY -- warns but does not block' },
+  'hook-coord-pre': { name: 'Delegation Enforcement', event: 'PreToolUse', scope: 'coordinator', script: 'coordinator-pretooluse.ps1/.sh',
+    desc: 'Blocks the coordinator from editing or creating files directly -- the coordinator must delegate all file modifications to subagents, and this hook makes that rule mechanical instead of aspirational. Read-only and search tools are exempt.',
+    enforcement: 'HARD -- blocks file edit/create tool calls made by the coordinator itself' },
+  'hook-coord-post': { name: 'Terminal File-Write Detector', event: 'PostToolUse', scope: 'coordinator', script: 'coordinator-posttooluse.ps1/.sh',
+    desc: 'Fires after terminal commands the coordinator runs. Checks git status for modified source files -- a detective control complementing the preventative PreToolUse delegation gate, catching writes routed through a shell command instead of an edit tool.',
+    enforcement: 'SOFT -- warns when a terminal command modified source files' },
+  'hook-coord-postmerge': { name: 'Worktree Cleanup Gate', event: 'Stop', scope: 'coordinator', script: 'coordinator-postmerge.ps1/.sh',
+    desc: 'Fires when the coordinator session ends. Lists active agent/* git worktrees and warns about stale (prunable) entries so finished workflows do not leave orphaned worktrees behind.',
+    enforcement: 'ADVISORY -- warns but does not block session end' },
+  'hook-planner-pre': { name: 'Plan Directory Confinement', event: 'PreToolUse', scope: 'planner', script: 'planner-pretooluse.ps1/.sh',
+    desc: 'Allowlists writes to the plans/ directory only -- the planner is otherwise a read-only agent. Since issue #130 the planner persists its own plan document directly instead of relaying it through the coordinator and documenter (removing ~2 of 3 redundant emissions), so this hook is what keeps that new write capability from widening into a general edit surface.',
+    enforcement: 'HARD -- blocks any write tool call outside a plans/ path' },
+  'hook-researcher-pre': { name: 'Credential-URL Scan', event: 'PreToolUse', scope: 'researcher', script: 'researcher-pretooluse.ps1/.sh',
+    desc: 'Inspects fetchWebpage URLs for embedded credentials (e.g. https://user:pass@host) before the researcher fetches them.',
+    enforcement: 'SOFT -- warns when a fetch URL contains embedded credentials' },
   'hook-tw-stop': { name: 'Red Phase Gate', event: 'SubagentStop', scope: 'test-writer', script: 'test-writer-stop.ps1/.sh',
     desc: 'Gate 1: Runs pytest -- tests must FAIL (exit code 1). If all pass (exit code 0), blocks with "Red phase violation". Gate 2: Checks copilot:generated provenance marker in first 5 lines of new test files.',
     enforcement: 'HARD -- blocks if tests pass OR provenance missing' },
@@ -1054,7 +1158,37 @@ function showDetail(key) {
       <div class="detail-card"><div class="field">Active</div><div class="value">16 skills assigned to agents</div></div>
       <div class="detail-card"><div class="field">Available</div><div class="value">22 additional skills in _available/ (not yet assigned)</div></div>
       <div class="detail-card"><div class="field">Mechanism</div><div class="value">Each skill is a SKILL.md read by agents at task time. Agents are listed in the Agent Skill Matrix (INDEX.md).</div></div>
-      <div class="detail-card"><div class="field">Activation</div><div class="value">Move from skills/_available/{name}/ to skills/{name}/, add to agent's Skills section, update INDEX.md.</div></div>`
+      <div class="detail-card"><div class="field">Activation</div><div class="value">Move from skills/_available/{name}/ to skills/{name}/, add to agent's Skills section, update INDEX.md.</div></div>`,
+
+    'tok-static-context': `
+      <h2>\u{1f4d0} Context Budget Gate <span style="color:var(--yellow); font-size:.7em;">STATIC</span></h2>
+      <div class="detail-card"><div class="field">What it measures</div><div class="value">The AUTHORED payload size on disk -- instructions, agent files, and skills that get loaded into context -- estimated in tokens (characters &divide; 4, calibrated against tiktoken to within &plusmn;7% per file).</div></div>
+      <div class="detail-card"><div class="field">Mechanism</div><div class="value"><code>.github/scripts/check-context-budget.py</code> measures; <code>.github/hooks/scripts/check-context-budget-staged.py</code> is a native git <strong>pre-commit</strong> hook (NOT a Copilot agent-hooks.json hook) that runs it against the STAGED payload and blocks the commit if a ceiling is exceeded.</div></div>
+      <div class="detail-card"><div class="field">Ceilings (af-env.conf)</div><div class="value"><code>AF_CONTEXT_BUDGET_TOKENS</code> (AF always-on), <code>AF_AGENT_CONTEXT_BUDGET_TOKENS</code> (agent file + always-on), <code>AF_PROJECT_CONTEXT_BUDGET_TOKENS</code> / <code>AF_PROJECT_CONDITIONAL_BUDGET_TOKENS</code> (the consuming project's own share, seeded at deploy, reported <code>UNBUDGETED</code> if unset -- never gated in that case).</div></div>
+      <div class="detail-card"><div class="field">Why static</div><div class="value">It never touches a live session -- it is a DRIFT gate on what agents will be forced to read next time, run once at commit time, before any workflow executes. Override: <code>ALLOW_CONTEXT_BUDGET=1</code>.</div></div>
+      <div class="detail-card"><div class="field">Known blind spot</div><div class="value">A project that gitignores <code>.github/</code> can never stage a budget input -- the guard then reads from disk and reports <code>NOT GATED</code> / <code>PARTIALLY GATED</code> (advisory, not blocking) instead of silently passing.</div></div>`,
+
+    'tok-static-plan': `
+      <h2>\u{1f4d0} Plan Budget Gate <span style="color:var(--yellow); font-size:.7em;">STATIC</span></h2>
+      <div class="detail-card"><div class="field">What it measures</div><div class="value">The SIZE of the planning document the planner writes, budgeted by complexity tier.</div></div>
+      <div class="detail-card"><div class="field">Mechanism</div><div class="value"><code>.github/hooks/scripts/check-plan-budget.py</code>, wired as a native git pre-commit guard alongside the context budget gate. Same characters &divide; 4 estimate.</div></div>
+      <div class="detail-card"><div class="field">Ceilings</div><div class="value"><code>PLAN_BUDGET_TRIVIAL_TOKENS</code> / <code>_STANDARD_</code> / <code>_DEEP_</code> = 0 / 3,000 / 12,000. Override: <code>ALLOW_PLAN_BUDGET=1</code>.</div></div>
+      <div class="detail-card"><div class="field">Why static</div><div class="value">Same class as the context budget gate -- authored-artifact size, checked once at commit time, independent of what any live session actually spent.</div></div>`,
+
+    'tok-live-cost': `
+      <h2>\u{1f4b3} Workflow Cost Logging <span style="color:var(--yellow); font-size:.7em;">LIVE</span></h2>
+      <div class="detail-card"><div class="field">What it measures</div><div class="value">The REAL token usage and billed AI credits a workflow actually consumed, harvested from VS Code's Copilot debug log (per-request <code>llm_request</code> events carrying <code>copilotUsageNanoAiu</code> plus input/cached/output token counts).</div></div>
+      <div class="detail-card"><div class="field">Mechanism</div><div class="value"><code>.github/scripts/collect-session-cost.py</code>, invoked from <code>documenter-stop.ps1/.sh</code> AFTER the artifact gate. Appends a <code>cost:</code> block verbatim (no LLM in the loop) to the workflow's <code>.github/logs/{workflow-id}.yaml</code>.</div></div>
+      <div class="detail-card"><div class="field">Session discovery</div><div class="value">Hook stdin carries <code>session_id</code> + <code>transcript_path</code> for the PARENT session even from inside a subagent, so the debug-log directory is derivable with no extra plumbing.</div></div>
+      <div class="detail-card"><div class="field">Emitted fields</div><div class="value">availability + reason, coverage (full / partial / truncated), <code>requests</code> (billed only) + <code>unbilled_requests</code>, <code>tokens</code> (input_uncached / cached / output), <code>credits</code>, <code>by_model</code>, environment (VS Code + Copilot Chat versions).</div></div>
+      <div class="detail-card"><div class="field">Why live</div><div class="value">It reads what actually happened in THIS session after the fact -- never a static estimate. Local-only: workflow logs never enter git (retros are a separate, project-decided exception).</div></div>`,
+
+    'tok-live-analyze': `
+      <h2>\u{1f4c8} Usage Analysis Tool <span style="color:var(--yellow); font-size:.7em;">LIVE, ad hoc</span></h2>
+      <div class="detail-card"><div class="field">What it measures</div><div class="value">Historical Copilot token usage and credit cost across ALL local chat sessions (not scoped to one workflow) -- coverage, per-model breakdown, compaction overhead.</div></div>
+      <div class="detail-card"><div class="field">Mechanism</div><div class="value"><code>.github/scripts/analyze-copilot-usage.py</code> (framework-dev tool, deliberately NOT in <code>.af-manifest</code> -- never deployed to a target project). Reads the local session stores; flags: <code>--storage</code>, <code>--models-json</code>, <code>--by-session</code>, <code>--json</code>.</div></div>
+      <div class="detail-card"><div class="field">Relationship to Workflow Cost Logging</div><div class="value">Deliberately a SEPARATE script, not a shared module -- different store/shape/caller (human ad hoc vs. documenter per-workflow). One frozen historical baseline tool, one live per-workflow collector.</div></div>
+      <div class="detail-card"><div class="field">Why live</div><div class="value">Same class as workflow cost logging -- reads real session data, just aggregated across sessions instead of scoped to one workflow.</div></div>`,
   };
 
   if (STATIC[key]) { panel.innerHTML = STATIC[key]; }
