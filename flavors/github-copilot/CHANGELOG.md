@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The cost collector's drift diagnostic could not say where the drift was
+  (#238).** A session is many logs — `main.jsonl` plus one per subagent — and
+  the collector aggregates all of them. `drift` named the field and the
+  affected-versus-total counts but not the log, so drift confined to a single
+  subagent read exactly like drift in the main log. It now carries `logs`.
+
+  A negative control that attributes every drift to `main.jsonl` fails one
+  assertion by name, which is what separates "the field is present" from "the
+  field discriminates".
+
+- **The documented entity class set could fall behind the collector without
+  anything noticing (#227).** The version scalar has been pinned since the
+  README fell three schema versions behind; the class taxonomy had no such
+  pin, and the documented example was two classes short — `agent` and
+  `instruction`, which a session only emits when its prompt carries them.
+  An example is a snapshot, not a register, so the register is now written
+  out and compared.
+
+  `test-session-cost.ps1` derives the taxonomy from the collector —
+  `PROMPT_ENTITY` keys plus the literal `"class"` values — and compares it
+  against the documented set, rather than carrying a third hand-kept copy.
+  A guard assertion fails when the extraction stops matching, so a reworded
+  bullet cannot silently compare two empty sets.
+
 - **The evidence-durability gate was defined everywhere except where an agent
   would look for it (#134).** MANIFEST § 7 states the principle, the gate
   taxonomy defines what counts as a durable artifact, and the Databricks skill
