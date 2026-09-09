@@ -625,6 +625,160 @@ case "$readiness_out" in
         assert_true "readiness hook emits its session payload" 0 "got: ${readiness_out:-<no output>}" ;;
 esac
 
+# --- Hooks whose product is their text, not a verdict (issue #263) ---------
+#
+# run_case judges deny/allow/ask/silent, and stop_case judges block/pass. The
+# three hooks below answer neither question: two inject session context and one
+# reports attribution. Having no helper that fits them is why none of them was
+# ever executed here -- the parse and CR gates touched the files, nothing ran
+# them. So the helper comes first.
+
+# hook_output HOOK BRANCH JSON [FILESPEC...] -- the hook's own words.
+#
+# Unlike stop_output this takes the stdin payload and the branch from the
+# caller, and gives the fixture a commit before checking the branch out:
+# `git rev-parse --abbrev-ref HEAD` on an unborn branch fails *and* prints, so
+# a fixture without a commit reports the fallback next to the value it was
+# meant to replace, and a branch assertion would be asserting on that.
+# FILESPEC = relative/path=content (content goes through printf %b), seeded
+# after init so a path under .git survives.
+hook_output() {
+    local hook="$1" branch="$2" json="$3"; shift 3
+    local fixture out _conf spec path content
+    new_fixture; fixture=$FIXTURE_DIR
+    mkdir -p "$fixture/.github/hooks/scripts"
+    cp "${HOOK_SRC:-$HOOK_DIR}/$hook" "$fixture/.github/hooks/scripts/"
+    cp "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
+    _conf=$(af_policy_conf); [ -f "$_conf" ] && cp "$_conf" "$fixture/.github/af-env.conf"
+    out=$(
+        cd "${fixture:?empty fixture path (#248)}" || exit 1
+        use_fixture_conf
+        git init -q .
+        git -c user.email=fixture@local -c user.name=fixture \
+            commit -q --allow-empty -m fixture
+        git checkout -q -b "$branch"
+        for spec in "$@"; do
+            path="${spec%%=*}"
+            content="${spec#*=}"
+            mkdir -p "$(dirname "$path")"
+            printf '%b' "$content" > "$path"
+        done
+        printf '%s' "$json" | bash ".github/hooks/scripts/$hook"
+    ) 2>/dev/null
+    rm -rf "$fixture"
+    printf '%s' "$out"
+}
+
+# --- session-context.sh ----------------------------------------------------
+#
+# Everything this hook produces is prose an agent then acts on, so a wrong
+# branch or a stale test summary is not a crash -- it is a session that starts
+# on a false premise and never says so.
+
+echo "## session-context.sh"
+
+SC_START='{"session_id":"s1","source":"startup","transcript_path":"/none"}'
+TEST_LOG_PASS='{"domain": {"passed": 12, "total": 12, "exit_code": 0, "last_run": "2026-01-01T00:00:00"}}'
+# passed < total with exit_code 0 does not occur; exit_code is the verdict and
+# the counts are the detail, so the two have to be able to disagree in a case.
+TEST_LOG_FAIL='{"domain": {"passed": 9, "total": 12, "exit_code": 1, "last_run": "2026-01-01T00:00:00"}}'
+
+sc_out=$(hook_output session-context.sh agent/72-x "$SC_START")
+
+assert_contains "session-context announces the event it answers" \
+    "$sc_out" '"hookEventName":"SessionStart"'
+assert_contains "session-context reports the branch the session started on" \
+    "$sc_out" 'Branch: agent/72-x'
+assert_true "session-context makes exactly one statement" \
+    "$([ "$(af_json_statements "$sc_out")" = "1" ] && echo 1 || echo 0)" \
+    "$(af_statement_fault "$(af_json_statements "$sc_out")"): $sc_out"
+
+# Silence about untested code is the honest answer; a summary invented from an
+# absent log would be read as evidence the suite had run.
+assert_not_contains "session-context claims no test state when none was recorded" \
+    "$sc_out" 'Tests:'
+
+sc_pass=$(hook_output session-context.sh agent/72-x "$SC_START" \
+    ".github/test-log.json=$TEST_LOG_PASS")
+assert_contains "session-context folds the recorded test state into the context" \
+    "$sc_pass" 'Tests: domain=12/12(PASS,'
+
+sc_fail=$(hook_output session-context.sh agent/72-x "$SC_START" \
+    ".github/test-log.json=$TEST_LOG_FAIL")
+assert_contains "session-context reads the verdict off the exit code" \
+    "$sc_fail" 'domain=9/12(FAIL,'
+
+# --- coordinator-postmerge.sh ----------------------------------------------
+#
+# The gate exists to tell the coordinator what is still checked out. Reporting
+# a clean slate while an agent worktree is live is the one failure that matters,
+# and it is invisible without a case that has one.
+
+echo "## coordinator-postmerge.sh"
+
+pm_agent=$(hook_output coordinator-postmerge.sh agent/72-x '{}')
+assert_contains "postmerge attributes its message to the coordinator gate" \
+    "$pm_agent" 'coordinator:PostMerge'
+assert_contains "postmerge counts a checkout sitting on an agent/* branch" \
+    "$pm_agent" 'Active agent worktrees (1)'
+assert_contains "postmerge names the branch it counted" \
+    "$pm_agent" 'refs/heads/agent/72-x'
+assert_true "postmerge makes exactly one statement" \
+    "$([ "$(af_json_statements "$pm_agent")" = "1" ] && echo 1 || echo 0)" \
+    "$(af_statement_fault "$(af_json_statements "$pm_agent")"): $pm_agent"
+
+pm_dev=$(hook_output coordinator-postmerge.sh dev '{}')
+assert_contains "postmerge reports nothing to clean up off an agent branch" \
+    "$pm_dev" 'No active agent/* worktrees'
+
+# --- coordinator-posttooluse.sh (issue #172) -------------------------------
+#
+# This is the hook #263 was filed about: it emitted DELEGATION VIOLATION as a
+# permanent false positive, the anchoring fix sat unmerged on a branch for
+# eleven days, and nothing went red -- because no case here had ever run it.
+#
+# The claim it makes is causal: did *this* terminal call change the file?
+# Presence cannot answer that. The baseline PreToolUse leaves behind is the
+# only evidence available, so what is tested is what the hook does with it,
+# without it, and when it already accounts for the change. git collapses a
+# wholly untracked directory into one porcelain entry, so the cases separate
+# baseline from delta by directory rather than by file name.
+
+echo "## coordinator-posttooluse.sh"
+
+post_src=$(grep -E '^SRC_DIR=' "$(af_policy_conf)" 2>/dev/null | head -1 | cut -d= -f2- | tr -d ' ')
+post_src="${post_src:-src}"
+PT_TERMINAL='{"tool_name":"run_in_terminal","tool_input":{"command":"git status --porcelain"}}'
+PT_OTHER='{"tool_name":"create_file","tool_input":{"filePath":"alpha.py"}}'
+PT_BASELINE='.git/af-delegation.snapshot=?? tests/\n'
+
+pt_nobase=$(hook_output coordinator-posttooluse.sh agent/172-x "$PT_TERMINAL" \
+    'tests/alpha.py=x = 1')
+assert_true "posttooluse stays silent when no baseline was recorded" \
+    "$([ "$pt_nobase" = '{}' ] && echo 1 || echo 0)" \
+    "no baseline is no evidence of causality, and a guard that accuses without evidence is the defect; got: ${pt_nobase:-<no output>}"
+
+pt_covered=$(hook_output coordinator-posttooluse.sh agent/172-x "$PT_TERMINAL" \
+    'tests/alpha.py=x = 1' "$PT_BASELINE")
+assert_true "posttooluse stays silent when the baseline already holds the change" \
+    "$([ "$pt_covered" = '{}' ] && echo 1 || echo 0)" \
+    "this is the #172 false positive verbatim: the change predates the call; got: ${pt_covered:-<no output>}"
+
+pt_delta=$(hook_output coordinator-posttooluse.sh agent/172-x "$PT_TERMINAL" \
+    'tests/alpha.py=x = 1' "$post_src/beta.py=y = 2" "$PT_BASELINE")
+assert_contains "posttooluse reports what appeared during the call" \
+    "$pt_delta" "$post_src/" "the entry absent from the baseline is the attributable one"
+assert_not_contains "posttooluse does not report what the baseline already held" \
+    "$pt_delta" 'tests/' "reporting it is exactly the false positive #172 filed"
+assert_not_contains "posttooluse does not advise discarding uncommitted work" \
+    "$pt_delta" 'git checkout' "destructive remediation for a warning that can still be wrong (#172)"
+
+pt_other=$(hook_output coordinator-posttooluse.sh agent/172-x "$PT_OTHER" \
+    'tests/alpha.py=x = 1' "$post_src/beta.py=y = 2" "$PT_BASELINE")
+assert_true "posttooluse ignores non-terminal tools" \
+    "$([ "$pt_other" = '{}' ] && echo 1 || echo 0)" \
+    "the hook is scoped to terminal calls; got: ${pt_other:-<no output>}"
+
 # --- documenter-stop.sh — one agent, two lifecycles (issue #72) ------------
 #
 # The documenter is chartered to persist plan files mid-workflow AND to
@@ -2808,6 +2962,62 @@ if [ -z "$crlf_files" ]; then
     assert_true "no shipped shell script carries a CR" 1
 else
     assert_true "no shipped shell script carries a CR" 0 "CRLF in:$crlf_files"
+fi
+
+# --- Coverage inventory gate (issue #263) ----------------------------------
+#
+# The two gates above are the reason a hook can ship untested and look covered:
+# they walk the whole set, so every file is touched and nothing is run. Four
+# hooks sat that way, `coordinator-posttooluse.sh` among them -- the hook whose
+# permanent false positive #172 was filed about, whose fix sat unmerged for
+# eleven days while the tracker said otherwise, and which no case ever executed.
+#
+# So the expected set is derived from the payload directory rather than from a
+# list someone maintains: a hook added without a case fails on the PR that adds
+# it, instead of on the incident that finds it.
+#
+# What counts as exercised is a line that names the hook and is neither a
+# comment nor a section header -- the whole-set gates name no hook at all, so
+# they cannot satisfy this, and `echo "## foo.sh"` must not either or a heading
+# would stand in for a test.
+
+echo "## coverage inventory"
+
+suite_body=$(grep -vE '^[[:space:]]*#' "$SCRIPT_DIR/test-hooks.sh" \
+    | grep -vE '^[[:space:]]*(echo|printf)[[:space:]]')
+
+shipped_hooks=0
+uncovered_hooks=""
+for f in "$HOOK_DIR"/*.sh; do
+    [ -f "$f" ] || continue
+    base=$(basename "$f" .sh)
+    # The shared preamble is sourced by every hook, so it is exercised by all
+    # of them and named by none.
+    [ "$base" = "_common" ] && continue
+    shipped_hooks=$((shipped_hooks + 1))
+    # Read from a here-string, not a pipe. Under `set -o pipefail` a piped
+    # `grep -q` reports the opposite of what it found: it exits on the first
+    # match, the writer upstream dies of SIGPIPE, and the pipeline status is
+    # that death rather than the match. The first run of this gate called all
+    # sixteen hooks untested for that reason, block-dangerous with its 61
+    # references among them.
+    if ! grep -qF -- "$base" <<<"$suite_body"; then
+        uncovered_hooks="$uncovered_hooks $base.sh"
+    fi
+done
+
+# Guards the derivation. A glob that matched nothing, or a suite this failed to
+# read, would compare an empty set against an empty set and report full
+# coverage -- the same silent pass the gate exists to end.
+assert_true "the hook inventory is derived from the payload" \
+    "$([ "$shipped_hooks" -ge 10 ] && [ -n "$suite_body" ] && echo 1 || echo 0)" \
+    "found $shipped_hooks shipped hooks in $HOOK_DIR and $(printf '%s\n' "$suite_body" | wc -l) readable suite lines"
+
+if [ -z "$uncovered_hooks" ]; then
+    assert_true "every shipped bash hook is exercised by a behavioural case" 1
+else
+    assert_true "every shipped bash hook is exercised by a behavioural case" 0 \
+        "never executed by any case, only walked by the parse and CR gates:$uncovered_hooks"
 fi
 
 echo ""
