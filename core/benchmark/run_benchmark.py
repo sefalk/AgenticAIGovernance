@@ -1,8 +1,9 @@
-import os
-import shutil
-import subprocess
 import argparse
+import os
 import re
+import shutil
+import stat
+import subprocess
 from pathlib import Path
 
 # AAIG Benchmark Test Runner (Orchestrator Mode)
@@ -33,9 +34,6 @@ def parse_prompt_from_scenario(filepath):
             prompt_text = prompt_text[1:-1].strip()
         return prompt_text
     return "No explicit prompt found in scenario markdown."
-
-
-import stat
 
 
 def on_rm_error(func, path, exc_info):

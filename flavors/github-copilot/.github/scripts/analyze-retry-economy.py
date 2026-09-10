@@ -108,7 +108,7 @@ class Economy:
         agents = [str(s.get("agent", "?")).strip() for s in steps]
         verdicts = [_normalise(s.get("verdict")) for s in steps]
 
-        for agent, verdict, raw in zip(agents, verdicts, (s.get("verdict") for s in steps)):
+        for agent, verdict, raw in zip(agents, verdicts, (s.get("verdict") for s in steps), strict=True):
             self.steps[agent] += 1
             self.workflows_seen[agent].add(workflow)
             if verdict and verdict not in CANONICAL:
@@ -119,7 +119,7 @@ class Economy:
         retries = escalations = 0
         runs: dict[str, int] = {}
         last_index: dict[str, int] = {}
-        for index, (agent, verdict) in enumerate(zip(agents, verdicts)):
+        for index, (agent, verdict) in enumerate(zip(agents, verdicts, strict=True)):
             if verdict == "ESCALATE":
                 escalations += 1
                 self.escalations[agent] += 1
