@@ -763,11 +763,9 @@ def render(result: dict[str, Any], facts_path: str | None = None, entities_path:
             f"fields: [{', '.join(drift['fields'])}], logs: [{', '.join(drift['logs'])}] }}"
         )
     lines.append(
-        "  tokens: {{ input_uncached: {0}, cached: {1}, output: {2} }}".format(
-            _scalar(totals.input_uncached if totals else None),
-            _scalar(totals.cached if totals else None),
-            _scalar(totals.output if totals else None),
-        )
+        f"  tokens: {{ input_uncached: {_scalar(totals.input_uncached if totals else None)}, "
+        f"cached: {_scalar(totals.cached if totals else None)}, "
+        f"output: {_scalar(totals.output if totals else None)} }}"
     )
     lines.append(f"  credits: {_scalar(totals.credits if totals else None)}")
     lines.append(f"  rate_card: {_scalar(result.get('rate_card'))}")
