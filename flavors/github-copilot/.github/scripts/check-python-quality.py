@@ -386,7 +386,8 @@ def _check_ignore_hygiene(
         if m:
             if not IGNORE_CODE_RE.search(line):
                 sink.append(
-                    f"{file_label}:{idx}: type ignore must include explicit rule code, e.g. type: ignore[reportGeneralTypeIssues]"
+                    f"{file_label}:{idx}: type ignore must include explicit rule code, "
+                    "e.g. type: ignore[reportGeneralTypeIssues]"
                 )
             tail = m.group("suffix")
             parts = tail.split("#", 1)
@@ -408,7 +409,8 @@ def _check_ignore_hygiene(
             parts = tail.split("#", 1)
             if len(parts) < 2 or len(parts[1].strip()) < 8:
                 sink.append(
-                    f"{file_label}:{idx}: noqa requires justification comment (min 8 chars after # noqa: CODE  # reason)"
+                    f"{file_label}:{idx}: noqa requires justification comment "
+                    "(min 8 chars after # noqa: CODE  # reason)"
                 )
     return issues, advisories
 
@@ -488,7 +490,10 @@ def main() -> int:
         "--checks",
         choices=("all", "ignore-hygiene"),
         default="all",
-        help="Which checks to run. Callers pass ignore-hygiene for test files, where type hints and docstrings do not apply.",
+        help=(
+            "Which checks to run. Callers pass ignore-hygiene for test files, "
+            "where type hints and docstrings do not apply."
+        ),
     )
     parser.add_argument(
         "--diff-base",
