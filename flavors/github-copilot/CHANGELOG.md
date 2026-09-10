@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The only detector for duplicated hook code was a comment the copier had
+  to remember to write (#291).** Four readers of the subagent debug logs —
+  `collect-agent-invocations.py`, `concurrent-agent-edits.py`,
+  `subagent-return.py` and `undeclared-scratch.py` — had each grown a private
+  copy of the same filename regex and the same helpers, on the reasoning that
+  a hyphenated filename cannot be imported. Three carried a note saying so;
+  the fourth did not, so grepping for the note found three copies and missed
+  one. The issue itself recorded three.
+
+  `_agentlog.py` now owns that code and has an importable name: a hook reaches
+  it with a plain `import _agentlog`, because Python puts the script's own
+  directory on `sys.path[0]`. The four readers import instead of copy, which
+  removes 150 lines.
+
+  The mechanism is the gate, not the module. `test-hooks.ps1` parses every
+  Python hook with `ast` and fails if any file other than `_agentlog.py`
+  defines a name it owns — keyed on the definition, so a fifth copy fails on
+  the PR that writes it whether or not its author knew they were copying. A
+  second assertion ratchets the general duplicate count at the measured
+  post-extraction figure of 10, which is a ceiling rather than a demand for
+  zero: `scan` legitimately exists twice with different return shapes.
+
 - **A quarter of the shipped hooks was never executed by the suites that
   vouch for them (#263).** Every hook was reached by the parse and CR gates,
   which walk the whole set, so a hook could ship untested and still look
