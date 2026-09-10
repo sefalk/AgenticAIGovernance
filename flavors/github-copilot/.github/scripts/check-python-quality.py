@@ -300,9 +300,7 @@ def _has_full_annotations(func: ast.AST) -> bool:
         if arg.annotation is None:
             return False
 
-    if func.returns is None:
-        return False
-    return True
+    return func.returns is not None
 
 
 def _requires_param_section(func: ast.AST) -> bool:
@@ -317,13 +315,12 @@ def _requires_param_section(func: ast.AST) -> bool:
 
 def _requires_return_section(func: ast.AST) -> bool:
     ret = func.returns
-    if ret is None:
-        return False
-    if isinstance(ret, ast.Constant) and ret.value is None:
-        return False
-    if isinstance(ret, ast.Name) and ret.id == "None":
-        return False
-    return True
+    none_shapes = (
+        ret is None,
+        isinstance(ret, ast.Constant) and ret.value is None,
+        isinstance(ret, ast.Name) and ret.id == "None",
+    )
+    return not any(none_shapes)
 
 
 def _check_docstring_quality(func: ast.AST, symbol: str) -> list[str]:
@@ -336,13 +333,11 @@ def _check_docstring_quality(func: ast.AST, symbol: str) -> list[str]:
     if len(stripped) < 20:
         issues.append(f"{symbol}: docstring too short (min 20 chars)")
 
-    if _requires_param_section(func):
-        if ("Parameters" not in doc) and ("Args:" not in doc):
-            issues.append(f"{symbol}: docstring missing parameter section (Parameters/Args)")
+    if _requires_param_section(func) and ("Parameters" not in doc) and ("Args:" not in doc):
+        issues.append(f"{symbol}: docstring missing parameter section (Parameters/Args)")
 
-    if _requires_return_section(func):
-        if ("Returns" not in doc) and ("Return:" not in doc):
-            issues.append(f"{symbol}: docstring missing return section (Returns)")
+    if _requires_return_section(func) and ("Returns" not in doc) and ("Return:" not in doc):
+        issues.append(f"{symbol}: docstring missing return section (Returns)")
 
     return issues
 
