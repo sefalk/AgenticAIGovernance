@@ -1,8 +1,8 @@
+import argparse
 import os
+import re
 import shutil
 import subprocess
-import argparse
-import re
 from pathlib import Path
 
 # AAIG Benchmark Test Runner (Orchestrator Mode)

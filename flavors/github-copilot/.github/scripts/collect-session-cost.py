@@ -46,7 +46,8 @@ import json
 import os
 import re
 import sys
-from typing import Any, Callable, Iterator
+from collections.abc import Callable, Iterator
+from typing import Any
 
 SCHEMA_VERSION = 6
 COLLECTOR_VERSION = 6

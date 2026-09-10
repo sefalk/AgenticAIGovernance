@@ -13,7 +13,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 IGNORE_RE = re.compile(r"#\s*type:\s*ignore(?P<suffix>.*)$")
 IGNORE_CODE_RE = re.compile(r"#\s*type:\s*ignore\[[^\]]+\]")
 PYRIGHT_IGNORE_RE = re.compile(r"#\s*pyright:\s*ignore(?P<suffix>.*)$", re.IGNORECASE)
