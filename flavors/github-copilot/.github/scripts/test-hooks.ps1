@@ -170,8 +170,18 @@ function Invoke-HookInFixture {
     if (Test-Path $commonSrc) { Copy-Item $commonSrc $fixtureHooks }
     # Helper scripts a hook shells out to. Without them the hook takes its
     # degrade-silently path, and a case asserting what the helper produced
-    # would be asserting on an absent file rather than on the hook.
-    foreach ($helper in @('collect-agent-invocations.py', 'concurrent-agent-edits.py')) {
+    # would be asserting on an absent file rather than on the hook. The list is
+    # deliberate and not a wildcard: copying every `*.py` also brings the
+    # schema checkers, which turns "the fixture is missing a helper" into a
+    # different hook running that the case never asked for.
+    $helpers = @('collect-agent-invocations.py', 'concurrent-agent-edits.py')
+    # Shared modules those helpers import, matched by the underscore prefix that
+    # marks a module rather than a hook. Derived, because the maintained list
+    # went stale the moment `_agentlog.py` was extracted (#291) and the symptom
+    # was four failures inside the collector, none naming the missing file.
+    $helpers += @(Get-ChildItem -Path (Split-Path $HookPath) -Filter '_*.py' -File |
+        ForEach-Object { $_.Name })
+    foreach ($helper in $helpers) {
         $helperSrc = Join-Path (Split-Path $HookPath) $helper
         if (Test-Path $helperSrc) { Copy-Item $helperSrc $fixtureHooks }
     }
@@ -3867,6 +3877,116 @@ Assert-True "the hook inventory is derived from the payload" `
 Assert-True "every shipped PowerShell hook is exercised by a behavioural case" `
     ($uncoveredHooks.Count -eq 0) `
     "never executed by any case, only walked by the parse and CR gates: $($uncoveredHooks -join ', ')"
+
+# --- Duplicate definition gate (issue #291) --------------------------------
+#
+# Four readers of the subagent logs had each grown a private copy of the same
+# regex and the same three functions. Three of them said so in a comment; the
+# fourth did not, which is why the copies were found only by accident -- the
+# only detector was a note the copier had to remember to write. `_agentlog.py`
+# now owns that code, and this gate is what stops a fifth copy: it keys on the
+# definition, not on a confession.
+#
+# Two assertions, because the two failures are different. A name `_agentlog.py`
+# owns, redefined anywhere else, is a copy of shared code and is always wrong.
+# A name defined twice elsewhere may be a genuine collision -- `scan` exists in
+# two readers with different return shapes -- so that one is a ratchet at the
+# measured post-extraction figure rather than a demand for zero. The ceiling
+# goes down when duplication is removed and never up.
+#
+# AST, not a regex over the source: the first attempt at this measurement
+# matched docstring lines such as `Usage:` at column 0 and reported two
+# definitions that do not exist.
+
+Write-Output "## duplicate definition inventory"
+
+$dupProgram = @'
+import ast
+import os
+import sys
+
+directory = sys.argv[1]
+owner = "_agentlog.py"
+
+
+def top_level_names(path):
+    with open(path, "r", encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), filename=path)
+    names = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Name):
+                names.add(node.target.id)
+    # Every hook has one; it carries no shared meaning.
+    names.discard("main")
+    return names
+
+
+defined = {}
+for name in sorted(os.listdir(directory)):
+    if name.endswith(".py"):
+        defined[name] = top_level_names(os.path.join(directory, name))
+
+owned = defined.get(owner, set())
+recopied = sorted(
+    "{0}:{1}".format(script, name)
+    for script, names in defined.items()
+    if script != owner
+    for name in sorted(names & owned)
+)
+
+elsewhere = {}
+for script, names in defined.items():
+    if script == owner:
+        continue
+    for name in names:
+        elsewhere.setdefault(name, []).append(script)
+duplicates = sorted(name for name, scripts in elsewhere.items() if len(scripts) > 1)
+
+print("FILES={0}".format(len(defined)))
+print("OWNED={0}".format(len(owned)))
+print("RECOPIED={0}".format(",".join(recopied)))
+print("DUPLICATES={0}".format(len(duplicates)))
+print("NAMES={0}".format(",".join(duplicates)))
+'@
+
+$dupReport = @{}
+# Written to a file rather than passed to `python -c`: PowerShell's native
+# argument encoder strips the embedded double quotes, and the scanner arrived
+# at the interpreter as `name.endswith(.py)` -- a SyntaxError, which the gate
+# would have read as an empty report.
+$dupScript = Join-Path ([System.IO.Path]::GetTempPath()) "af-duplicate-scan-$PID.py"
+Set-Content -LiteralPath $dupScript -Value $dupProgram -Encoding ASCII
+try {
+    foreach ($line in @(& $peerPy $dupScript $scriptDir 2>&1)) {
+        if ("$line" -match '^([A-Z]+)=(.*)$') { $dupReport[$Matches[1]] = $Matches[2] }
+    }
+} finally {
+    Remove-Item -LiteralPath $dupScript -ErrorAction SilentlyContinue
+}
+
+# Guards the derivation, the way the coverage gate above does. A directory this
+# failed to read, or an `_agentlog.py` that had been emptied, would find nothing
+# to compare and pass on silence.
+Assert-True "the duplicate inventory is derived from the payload" `
+    ($dupReport.ContainsKey('FILES') -and [int]$dupReport['FILES'] -ge 10 -and [int]$dupReport['OWNED'] -ge 6) `
+    "scanned $($dupReport['FILES']) scripts in $scriptDir, _agentlog.py defines $($dupReport['OWNED']) shared names"
+
+Assert-True "no hook redefines a name _agentlog.py owns" `
+    ($dupReport['RECOPIED'] -eq '') `
+    "import it from _agentlog instead of copying: $($dupReport['RECOPIED'])"
+
+# 10 is the measurement taken the day #291 landed, not a target. Lower it when
+# a duplicate goes away; never raise it to make a build green.
+Assert-True "duplicate definitions across the Python hooks do not grow" `
+    ([int]$dupReport['DUPLICATES'] -le 10) `
+    "$($dupReport['DUPLICATES']) duplicated top-level names, ceiling 10: $($dupReport['NAMES'])"
 
 # --- Red phase validity (issue #123) ---------------------------------------
 #
