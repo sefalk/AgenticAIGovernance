@@ -78,14 +78,9 @@ import os
 import re
 import sys
 
-# Same shape as `concurrent-agent-edits.py` and `subagent-return.py`: the agent
-# name itself contains hyphens, so the split is on the LAST one. Duplicated
-# rather than imported -- these filenames carry hyphens and are not importable
-# as modules.
-SUBAGENT = re.compile(r"^runSubagent-(?P<agent>.+)-(?P<call>[^-]+)\.jsonl$")
+from _agentlog import TOOL_CALL_HINT, find_own_log, harvest_paths
 
-# Cheap prefilters so a large log is not JSON-parsed line by line.
-TOOL_CALL_HINT = b'"tool_call"'
+# Cheap prefilter so a large log is not JSON-parsed line by line.
 USER_MESSAGE_HINT = b'"user_message"'
 
 # Creation only. `replace_string_in_file` and friends are deliberately absent:
@@ -110,9 +105,6 @@ CREATE_TOOLS = frozenset(
 CREATE_VERB = re.compile(r"create|write", re.IGNORECASE)
 CREATE_NOUN = re.compile(r"file|notebook|dir", re.IGNORECASE)
 
-# Where write payloads keep their paths, mirroring `concurrent-agent-edits.py`.
-PATH_KEYS = frozenset({"filePath", "path", "dirPath", "notebookUri", "uri"})
-
 
 def is_create_tool(name: object) -> bool:
     if not isinstance(name, str) or not name:
@@ -120,60 +112,6 @@ def is_create_tool(name: object) -> bool:
     if name in CREATE_TOOLS:
         return True
     return bool(CREATE_VERB.search(name) and CREATE_NOUN.search(name))
-
-
-def agent_from(filename: str) -> str:
-    match = SUBAGENT.match(filename)
-    if match:
-        return match.group("agent")
-    return filename[len("runSubagent-") : -len(".jsonl")]
-
-
-def find_own_log(session_dir: str, agent: str) -> str | None:
-    """The caller's own log: the most recently modified one for this agent.
-
-    A Stop hook runs as its own invocation finishes, so that log is the one
-    still being written. Two invocations of the same agent in parallel would
-    defeat the heuristic; the consequence is reading a sibling's prompt and
-    file list together, which stays self-consistent.
-    """
-    try:
-        names = os.listdir(session_dir)
-    except OSError:
-        return None
-    newest: str | None = None
-    newest_mtime = -1.0
-    for name in names:
-        if not name.startswith("runSubagent-") or not name.endswith(".jsonl"):
-            continue
-        if agent_from(name) != agent:
-            continue
-        full = os.path.join(session_dir, name)
-        try:
-            mtime = os.path.getmtime(full)
-        except OSError:
-            continue
-        if mtime > newest_mtime:
-            newest_mtime = mtime
-            newest = full
-    return newest
-
-
-def harvest_paths(value: object, into: set[str]) -> None:
-    """Collect every path string anywhere inside a tool call's args.
-
-    Recursive rather than shape-specific: a tool added later may nest its path
-    somewhere new. Only ever called for tools that passed `is_create_tool`.
-    """
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if key in PATH_KEYS and isinstance(item, str) and item:
-                into.add(item)
-            else:
-                harvest_paths(item, into)
-    elif isinstance(value, list):
-        for item in value:
-            harvest_paths(item, into)
 
 
 def scan(path: str) -> tuple[str | None, set[str]]:

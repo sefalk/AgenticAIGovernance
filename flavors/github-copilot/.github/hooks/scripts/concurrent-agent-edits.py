@@ -66,17 +66,13 @@ import os
 import re
 import sys
 
-# Same shape as `collect-agent-invocations.py`: the agent name itself contains
-# hyphens, so the split is on the LAST one. Duplicated rather than imported --
-# the filename carries a hyphen and is not importable as a module.
-SUBAGENT = re.compile(r"^runSubagent-(?P<agent>.+)-(?P<call>[^-]+)\.jsonl$")
+from _agentlog import TOOL_CALL_HINT, agent_from, harvest_paths
 
 # Cheap prefilter so a 20 MB log is not JSON-parsed line by line. The optional
 # whitespace is not decoration: the editor writes compact JSON, but a log
 # rewritten by any pretty-printer would carry `"ts": 123`, and an anchored
 # pattern silently found no timestamps at all.
 TS = re.compile(rb'"ts":\s*(\d+)')
-TOOL_CALL_HINT = b'"tool_call"'
 
 # Allowlist, not a denylist. `read_file` and `grep_search` also carry a
 # `filePath`, and harvesting those would subtract files nobody wrote.
@@ -112,11 +108,6 @@ EDIT_TOOLS = frozenset(
 EDIT_VERB = re.compile(r"create|write|edit|insert|apply|replace")
 EDIT_NOUN = re.compile(r"file|notebook|dir")
 
-# Where write payloads keep their paths, mirroring `Get-AfWritePaths`.
-# `multi_replace_string_in_file` keeps none at the top level -- its paths sit
-# in `replacements[].filePath`, which the recursive walk reaches.
-PATH_KEYS = frozenset({"filePath", "path", "dirPath", "notebookUri", "uri"})
-
 
 def is_edit_tool(name: object) -> bool:
     if not isinstance(name, str) or not name:
@@ -124,32 +115,6 @@ def is_edit_tool(name: object) -> bool:
     if name in EDIT_TOOLS:
         return True
     return bool(EDIT_VERB.search(name) and EDIT_NOUN.search(name))
-
-
-def agent_from(filename: str) -> str:
-    match = SUBAGENT.match(filename)
-    if match:
-        return match.group("agent")
-    return filename[len("runSubagent-") : -len(".jsonl")]
-
-
-def harvest_paths(value: object, into: set[str]) -> None:
-    """Collect every path string anywhere inside a tool call's args.
-
-    Recursive rather than shape-specific: `replace_string_in_file` puts the
-    path at the top level, `multi_replace_string_in_file` nests one per entry
-    of `replacements`, and a tool added later may nest it somewhere else again.
-    Only ever called for tools that passed `is_edit_tool`.
-    """
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if key in PATH_KEYS and isinstance(item, str) and item:
-                into.add(item)
-            else:
-                harvest_paths(item, into)
-    elif isinstance(value, list):
-        for item in value:
-            harvest_paths(item, into)
 
 
 def scan(path: str) -> tuple[int | None, int | None, set[str]]:

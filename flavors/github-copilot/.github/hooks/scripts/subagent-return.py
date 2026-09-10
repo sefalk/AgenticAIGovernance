@@ -75,14 +75,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 
-# The agent name itself contains hyphens, so the split is on the LAST one.
-# Duplicated from `concurrent-agent-edits.py` rather than imported -- the
-# filename carries a hyphen and is not importable as a module.
-SUBAGENT = re.compile(r"^runSubagent-(?P<agent>.+)-(?P<call>[^-]+)\.jsonl$")
+from _agentlog import find_own_log
 
 # Cheap prefilter so a large log is not JSON-parsed line by line.
 RESPONSE_HINT = b'"agent_response"'
@@ -97,36 +93,6 @@ COMPLETE = "complete"
 TRUNCATED = "truncated"
 EMPTY = "empty"
 UNAVAILABLE = "unavailable"
-
-
-def agent_from(filename: str) -> str:
-    match = SUBAGENT.match(filename)
-    if match:
-        return match.group("agent")
-    return filename[len("runSubagent-") : -len(".jsonl")]
-
-
-def find_own_log(session_dir: str, agent: str) -> str | None:
-    """The most recently modified log belonging to `agent`, or None."""
-    try:
-        names = [n for n in os.listdir(session_dir) if n.startswith("runSubagent-") and n.endswith(".jsonl")]
-    except OSError:
-        return None
-
-    newest: str | None = None
-    newest_mtime = -1.0
-    for name in names:
-        if agent_from(name) != agent:
-            continue
-        full = os.path.join(session_dir, name)
-        try:
-            mtime = os.path.getmtime(full)
-        except OSError:
-            continue
-        if mtime > newest_mtime:
-            newest_mtime = mtime
-            newest = full
-    return newest
 
 
 def last_response(path: str) -> str | None:

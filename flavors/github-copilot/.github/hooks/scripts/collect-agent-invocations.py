@@ -45,23 +45,10 @@ import os
 import re
 import sys
 
-# `runSubagent-ado-pr-manager-toolu_011DEuS1yqmhJkPQa1qmtY3U.jsonl`
-# The agent name itself contains hyphens, so the split is on the LAST one:
-# the trailing segment is the tool-call id (observed 2026-08-21: `toolu_` plus
-# alphanumerics, no hyphen). A future id format carrying hyphens would move the
-# boundary, which is why a non-matching name falls back to the whole stem
-# rather than being dropped -- an unparsed name must not become a silent zero.
-SUBAGENT = re.compile(r"^runSubagent-(?P<agent>.+)-(?P<call>[^-]+)\.jsonl$")
+from _agentlog import agent_from
 
 KEY = re.compile(r"^(?P<indent>\s*)(?:-\s+)?(?P<key>[A-Za-z_][\w-]*)\s*:(?P<rest>.*)$")
 BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*\s*$")
-
-
-def agent_from(filename: str) -> str:
-    match = SUBAGENT.match(filename)
-    if match:
-        return match.group("agent")
-    return filename[len("runSubagent-") : -len(".jsonl")]
 
 
 def observed(session_dir: str) -> dict[str, int]:
