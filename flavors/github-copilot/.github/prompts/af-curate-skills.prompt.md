@@ -192,8 +192,9 @@ Regenerate `skills/INDEX.md`:
 1. List all active skills (from `skills/*/SKILL.md` frontmatter)
 2. List all available skills (from `skills/_available/*/SKILL.md` frontmatter)
 
-Update `copilot-instructions.md` Available Skills table to match the new
-active skill set.
+Do not copy the catalogue into `copilot-instructions.md`. `skills/INDEX.md` is
+the only record; agents already receive each skill's name and description from
+the skill files themselves.
 
 ## Step 8: Write State Files
 
@@ -304,10 +305,9 @@ re-discovery, no user confirmation.
    stale bare curated bullets. Never write curated skills as bare `## Skills`
    bullets.
 5. Regenerate `skills/INDEX.md` from current active/available skill folders.
-6. Update `copilot-instructions.md` Available Skills table.
-7. Print summary: "Reapplied curated skills: {N} activated, {M} deactivated,
+6. Print summary: "Reapplied curated skills: {N} activated, {M} deactivated,
    {K} agent files updated."
-8. Run the **Step 9** consistency check. A reapply exists to restore agreement
+7. Run the **Step 9** consistency check. A reapply exists to restore agreement
    between the records; ending with them still in disagreement means it failed.
 
 ---
@@ -326,6 +326,6 @@ Restore skills to pre-curation state using the sentinel snapshot.
 4. For each agent in `previous_state.agent_skill_assignments`: restore the saved
    assignment into the agent's managed region per the **Managed region write
    protocol** (Step 7). A pre-curation empty assignment leaves the region empty.
-5. Regenerate `skills/INDEX.md` and update `copilot-instructions.md`.
+5. Regenerate `skills/INDEX.md`.
 6. Write updated `skills/curated-assignments.json` reflecting the restored state.
 7. Print summary: "Rolled back to pre-curation state: {details}."
