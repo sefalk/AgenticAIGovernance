@@ -37,6 +37,15 @@ The retry definition here MUST match `analyze-retry-economy.py`: an agent
 appearing more than once in one `steps` list. Two tools disagreeing about what
 a retry is would be worse than neither existing.
 
+`af_version` is the COUNTERS argument applied to a field that is not a number.
+It is a transcription of `.github/.af-version`, which the hook can read itself,
+and across 68 logs 23 carried no value while 7 carried something that was not a
+version -- `n/a`, `not measured`, and in one case the instruction "read from
+.github/.af-version" written into the field verbatim (issue #309).
+`documenter-stop` now stamps it; the rule here constrains the value to a
+semantic version or an explicit absence, so a producer that stops working
+becomes visible instead of silently reverting to prose.
+
 So must the escalation definition. The analyser reads parsed YAML and asks
 `if doc.get("escalation")`, where `escalation: null` is falsy and so is not an
 escalation. A line scanner has to reach the same answer without a parser, which
@@ -87,6 +96,7 @@ LIST_ITEM = re.compile(r"^(?P<indent>\s*)-\s")
 BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*\s*$")
 NESTED = re.compile(r"^\s+\S")
 ZONE = re.compile(r"(?P<zone>Z|[+-]\d{2}:?\d{2})$")
+SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
 
 def _zone(value: str) -> str:
@@ -281,6 +291,23 @@ def _findings(text: str) -> tuple[list[str], list[str]]:
             f"line {stamps[1][1]}: {detail} -- the two timestamps are expressed against "
             "different references, so any consumer subtracting them is wrong; both must be UTC (`Z`)"
         )
+
+    # `af_version` is stamped by documenter-stop from `.github/.af-version`, so a
+    # value that is not a version means it was written by hand -- which is how the
+    # field came to hold `n/a` and the instruction itself (issue #309). A missing
+    # key is left alone: this check runs before the stamp, and the stamp supplies
+    # one either way.
+    version = _keys(sections.get("af_version", []), "af_version")
+    if version:
+        number, value = version[0]
+        stated = value.strip()
+        if stated.upper() not in ABSENT and not SEMVER.match(stated):
+            shown = stated if len(stated) <= 60 else stated[:57] + "..."
+            violations.append(
+                f"line {number}: af_version {shown!r} is not a version -- the field is stamped by "
+                "your Stop hook from `.github/.af-version`, so do not write it; remove the line, "
+                "and put anything you want to say about the version in `af_version_note:`"
+            )
 
     return violations, unchecked
 
