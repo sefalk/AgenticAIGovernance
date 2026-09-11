@@ -83,7 +83,8 @@ workflow_id: "<workflow-id>"
 trigger: "<user request>"
 status: "COMPLETED"  # COMPLETED | FAILED | ESCALATED
 git_branch: "agent/<workflow-id>"
-af_version: "<version from .github/.af-version, e.g. 1.18.22>"
+# af_version: stamped by your Stop hook -- do not write it.
+af_version_note: "<optional -- a caveat qualifying the stamped version, or omit>"
 
 steps:
   - step: 1
@@ -178,6 +179,21 @@ oldest commit dates the start. Never estimate them — a documenter once wrote a
 `completed:` six hours in the future in the same output that declared zero
 fabricated data, and every gate downstream accepted it, because they check that
 the field is present and an invented value is present (issue #91).
+
+**Do not write `af_version:`.** Your Stop hook reads `.github/.af-version` and
+stamps it, or stamps `null` when there is no version file to read. It was the
+last header field transcribed by hand, out of a file with three lines you had
+to pick one of, and across 68 logs 23 carried no value at all while 7 carried
+something that was not a version — `n/a`, `not measured`, and in one case the
+instruction *"read from `.github/.af-version`"* written into the field verbatim
+(issue #309).
+
+**`af_version_note:` is yours, and it is the only part of this that is.** When
+you have something to say *about* the version — that a root-cause analysis in
+this workflow ran against a framework source far ahead of this deployment, so
+fixes present there must not be assumed present here — that belongs in the
+note, not in the version. It is free text, it is optional, and nothing parses
+it.
 
 **Do not write a `cost:` block.** Your Stop hook measures the session and
 appends it after your artifact gate passes. Never estimate or transcribe those
