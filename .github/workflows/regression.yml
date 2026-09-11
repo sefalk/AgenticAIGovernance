@@ -416,6 +416,16 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-local-check-marker.py
 
+      # The always-on payload is read on every chat request in every project,
+      # so a record copied into it is paid for forever. #126 shipped a skills
+      # table under a line declaring another file canonical, and four prompts
+      # instructed agents to write it -- deleting the copy would not have kept
+      # it gone. The property is asserted rather than the instance, because
+      # the next duplicate will be a different record.
+      - name: Test the always-on restatement guard
+        shell: powershell
+        run: python .github\scripts\test-always-on-restatement.py
+
       # check-issue-drift.py is a reporting tool, not a gate: it never fails a
       # build and never changes issue state. Its suite runs here for the same
       # reason as the one above -- CI's own machinery is otherwise a shipped
