@@ -32,6 +32,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`ruff.toml` declared a lint selection nothing measured (#182).** The root
+  config selects `E, F, W, I, UP, B, SIM` for the whole repository, but CI ran
+  `ruff format --check` only. The selection was therefore a statement of
+  intent: 16 findings had accumulated across five framework scripts without
+  anything noticing, including a mid-file `import stat` and two `zip()` calls
+  whose length invariant was real but unasserted.
+
+  All 16 are resolved in the code rather than suppressed — no `noqa` was
+  added. The mechanical import fixes, the two behaviour-affecting decisions
+  (`strict=True`, the hoisted import) and the readability rewrites landed as
+  separate commits so each judgement call can be reviewed on its own; one
+  ruff `--fix` suggestion was rejected outright, because collapsing a
+  `.format()` call into a single 203-character f-string traded one finding
+  for another.
+
+  The gate is the point. `regression.yml` now runs `ruff check` next to the
+  format step and over the same `git ls-files '*.py'` list, so a new file is
+  linted the moment it is tracked and the two steps cannot drift apart. The
+  empty-list guard is shared with the format step for the same reason: a glob
+  that matches nothing fails loudly instead of passing silently.
+
 - **The only detector for duplicated hook code was a comment the copier had
   to remember to write (#291).** Four readers of the subagent debug logs —
   `collect-agent-invocations.py`, `concurrent-agent-edits.py`,

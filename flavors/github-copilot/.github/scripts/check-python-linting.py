@@ -186,10 +186,7 @@ def _read_project_overrides(config_path: Path) -> tuple[list[str], dict[str, lis
     """
     notices: list[str] = []
     data = _load_toml(config_path)
-    if config_path.name == "pyproject.toml":
-        root = data.get("tool", {}).get("ruff", {})
-    else:
-        root = data
+    root = data.get("tool", {}).get("ruff", {}) if config_path.name == "pyproject.toml" else data
 
     # ruff moved these keys under [lint] in 0.2; top level is deprecated but
     # still honoured. Prefer [lint] and flag the ambiguous both-present case

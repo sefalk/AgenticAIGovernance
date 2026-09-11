@@ -464,6 +464,21 @@ jobs:
           Write-Host "Checking $($files.Count) tracked Python files."
           ruff format --check --no-respect-gitignore @files
 
+      # Formatting was enforced; the lint selection in ruff.toml was not, so
+      # `select = [E, F, W, I, UP, B, SIM]` was a statement of intent that
+      # nothing measured -- #182. Same file list as the step above on purpose:
+      # a second glob would drift away from the first one silently.
+      - name: Lint the framework's own Python
+        shell: powershell
+        run: |
+          $files = git ls-files '*.py'
+          if (-not $files) {
+            Write-Error 'No tracked Python found -- the glob is wrong, not the repository.'
+            exit 1
+          }
+          Write-Host "Linting $($files.Count) tracked Python files."
+          ruff check --no-respect-gitignore @files
+
       # test-hooks-integration.ps1 is excluded on purpose. It does not test the
       # payload: it reads VS Code's own hook log under %APPDATA%\Code\logs to
       # confirm that hooks actually fired during a real agent session on a
