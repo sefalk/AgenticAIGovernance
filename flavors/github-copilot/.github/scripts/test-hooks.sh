@@ -1248,6 +1248,15 @@ assert_true "the log carries each timestamp exactly once" \
     "$([ "$started_count" -eq 1 ] && [ "$completed_count" -eq 1 ] && echo 1 || echo 0)" \
     "started=$started_count completed=$completed_count in: $stamped"
 
+# One source is not yet one representation. `started:` came from git's `%cI`,
+# which carries the committer's local offset, while `completed:` was UTC --
+# both valid ISO 8601, and subtracting them gave a workflow that finished
+# before it began (issue #240).
+utc_stamps=$(printf '%s\n' "$stamped" | grep -c '^\(started\|completed\): "[^"]*Z"')
+assert_true "both timestamps are UTC, so subtracting them is meaningful" \
+    "$([ "$utc_stamps" -eq 2 ] && echo 1 || echo 0)" \
+    "UTC-suffixed stamps=$utc_stamps in: $stamped"
+
 bare=$(stamp_log "$PLAN_DONE" "$LOG_BARE")
 b_started=$(printf '%s\n' "$bare" | grep -c '^started: "')
 b_completed=$(printf '%s\n' "$bare" | grep -c '^completed: "')

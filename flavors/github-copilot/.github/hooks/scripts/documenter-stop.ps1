@@ -232,6 +232,11 @@ catch {
 # already uses for --workflow-start. Anything the documenter left behind is
 # replaced rather than joined -- two `completed:` keys is a YAML file whose
 # meaning depends on which one the parser reaches last.
+#
+# Both are UTC. `%ct` is asked for rather than `%cI` because `%cI` carries the
+# committer's local offset, so the two fields arrived in different
+# representations and a reader subtracting them got a negative duration
+# (issue #240).
 
 $stampNote = ''
 try {
@@ -240,8 +245,11 @@ try {
     $completedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     $startedAt = $completedAt
     $base = if ($BASE_BRANCH) { $BASE_BRANCH } else { 'dev' }
-    $isoStamps = & git log --format=%cI "$base..HEAD" 2>$null
-    if ($isoStamps) { $startedAt = @($isoStamps)[-1] }
+    $epochs = & git log --format=%ct "$base..HEAD" 2>$null
+    if ($epochs) {
+        $oldest = @($epochs)[-1]
+        $startedAt = [DateTimeOffset]::FromUnixTimeSeconds([int64]$oldest).UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ')
+    }
 
     # Top-level keys only: a `started:` indented inside a step belongs to that
     # step and is none of this hook's business.

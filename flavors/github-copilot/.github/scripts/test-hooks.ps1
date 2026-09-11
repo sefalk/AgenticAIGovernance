@@ -2423,6 +2423,15 @@ Assert-True "completed: is the moment the documenter finished, not a later one" 
 Assert-Contains "started: is stamped too, so the pair comes from one source" `
     $stamped '(?m)^started:\s*"[^"]+"'
 
+# One source is not yet one representation. `started:` came from git's `%cI`,
+# which carries the committer's local offset, while `completed:` was UTC --
+# both valid ISO 8601, and subtracting them gave a workflow that finished
+# before it began (issue #240).
+$startedValue = ([regex]::Match($stamped, '(?m)^started:\s*"([^"]+)"')).Groups[1].Value
+Assert-True "both timestamps are UTC, so subtracting them is meaningful" `
+    ($startedValue -match 'Z$' -and $completedValue -match 'Z$') `
+    "got: started '$startedValue', completed '$completedValue'" -Subject $stamped
+
 # Replacing has to mean replacing. Appending a measured value beside the
 # invented one leaves a duplicate YAML key, and a parser takes whichever it
 # reaches last.

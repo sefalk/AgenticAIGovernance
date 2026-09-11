@@ -15,6 +15,14 @@ VOCABULARY is a choice the documenter makes and can correct, so it is
 reported as a violation: `status` must be one of the schema's values and a step
 `verdict` must be in the MANIFEST closed set or explicitly absent.
 
+REPRESENTATION is nobody's choice: `started:` and `completed:` are stamped by
+two producers inside `documenter-stop`, and they drifted apart (issue #240).
+One carried the committer's local offset and the other was UTC, each valid ISO
+8601 on its own, so the pair was only wrong when read together -- a consumer
+subtracting them saw a workflow that finished 66 minutes before it began. The
+rule compares the two designators against each other rather than demanding
+`Z`, so a consistently stamped historical log is not retroactively rejected.
+
 COUNTERS are not a choice. `summary.retries` and `summary.escalations` are
 mechanically derivable from `steps`, which is exactly what
 `scripts/analyze-retry-economy.py` does when it reads a corpus. Asking a
@@ -70,13 +78,21 @@ STATUS_VALUES = ("COMPLETED", "FAILED", "ESCALATED")
 # MANIFEST § 13, Inter-Agent Contracts -> Verdict Format.
 VERDICT_VALUES = ("APPROVED", "REJECTED", "ESCALATE", "RESOLVED", "COMPROMISE")
 
-# A step that was not reviewed says so. These are absence, not vocabulary.
-VERDICT_ABSENT = ("", "NULL", "NONE", "~")
+# How a log says a field has no value. A step that was not reviewed says so,
+# and so does a workflow whose `completed:` was never stamped.
+ABSENT = ("", "NULL", "NONE", "~")
 
 KEY = re.compile(r"^(?P<indent>\s*)(?:-\s+)?(?P<key>[A-Za-z_][\w-]*)\s*:(?P<rest>.*)$")
 LIST_ITEM = re.compile(r"^(?P<indent>\s*)-\s")
 BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*\s*$")
 NESTED = re.compile(r"^\s+\S")
+ZONE = re.compile(r"(?P<zone>Z|[+-]\d{2}:?\d{2})$")
+
+
+def _zone(value: str) -> str:
+    """The timezone designator a timestamp ends with, or `none` if it carries none."""
+    match = ZONE.search(value.strip())
+    return match.group("zone") if match else "none"
 
 
 def _value(rest: str) -> str:
@@ -221,7 +237,7 @@ def _findings(text: str) -> tuple[list[str], list[str]]:
 
     for number, value in _keys(steps, "verdict"):
         upper = value.strip().upper()
-        if upper in VERDICT_ABSENT:
+        if upper in ABSENT:
             continue
         # `APPROVED (Attempt 2)` is the verdict with a note; `APPROVED-WITH-ISSUES`
         # is a different word. analyze-retry-economy.py draws the line here too.
@@ -246,6 +262,25 @@ def _findings(text: str) -> tuple[list[str], list[str]]:
                 f"line {number}: summary.escalations is {stated} with no ESCALATE verdict "
                 "and no populated `escalation:` block -- nothing in the file escalated"
             )
+
+    # `started:` and `completed:` are stamped by two producers in documenter-stop.
+    # One carried the committer's local offset while the other was UTC, so both
+    # were individually valid and a reader subtracting them got a workflow that
+    # finished 66 minutes before it began (issue #240). Comparing the two rather
+    # than demanding `Z` keeps a consistently-stamped historical log passing.
+    stamps: list[tuple[str, int, str]] = []
+    for name in ("started", "completed"):
+        found = _keys(sections.get(name, []), name)
+        if found:
+            number, value = found[0]
+            if value.strip().upper() not in ABSENT:
+                stamps.append((name, number, value))
+    if len(stamps) == 2 and len({_zone(value) for _, _, value in stamps}) > 1:
+        detail = " vs ".join(f"{name} {value!r}" for name, _, value in stamps)
+        violations.append(
+            f"line {stamps[1][1]}: {detail} -- the two timestamps are expressed against "
+            "different references, so any consumer subtracting them is wrong; both must be UTC (`Z`)"
+        )
 
     return violations, unchecked
 
