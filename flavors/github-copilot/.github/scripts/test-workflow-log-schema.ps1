@@ -248,6 +248,46 @@ escalation:
     #    that is one line long never triggered the old rule either, so a case
     #    built without the blank line would pass against the bug it targets.
     $results['Z_fixture_has_blank_line'] = $denied -match "escalation: null`r`n`r`n"
+
+    # AA-AF: `started:` and `completed:` are written by two producers, so they
+    #    can drift into different representations while each stays valid ISO
+    #    8601 -- the #240 shape, where subtracting them gives -66 minutes. The
+    #    rule compares the two rather than demanding `Z`, so a consistently
+    #    stamped historical log keeps passing.
+    function New-Stamped([string]$started, [string]$completed) {
+        $stamps = "started: `"$started`""
+        if ($completed) { $stamps += "`r`ncompleted: `"$completed`"" }
+        return ($conforming -replace 'git_branch: "agent/clean"', ('git_branch: "agent/clean"' + "`r`n" + $stamps))
+    }
+
+    $mixed = New-Stamped '2026-08-27T09:57:10+02:00' '2026-08-27T08:51:31Z'
+    $r = Invoke-Checker $mixed
+    $results['AA_mixed_rejected']    = $r.Code -eq 1
+    $results['AA_names_both_stamps'] = ($r.Output -match '\+02:00') -and ($r.Output -match 'completed')
+
+    $r = Invoke-Checker (New-Stamped '2026-08-27T07:57:10Z' '2026-08-27T08:51:31Z')
+    $results['AB_both_utc_ok'] = $r.Code -eq 0
+
+    # A historical log stamped consistently in one offset is wrong by today's
+    # convention but not broken for its readers. It is not rewritten, so it
+    # must not be rejected either.
+    $r = Invoke-Checker (New-Stamped '2026-08-27T09:57:10+02:00' '2026-08-27T10:51:31+02:00')
+    $results['AC_same_offset_ok'] = $r.Code -eq 0
+
+    # `null` is absence, not a representation. Four corpus logs end this way.
+    $r = Invoke-Checker (New-Stamped '2026-08-27T07:57:10Z' 'null')
+    $results['AD_absent_completed_ok'] = $r.Code -eq 0
+
+    $r = Invoke-Checker (New-Stamped '2026-08-27T09:57:10+02:00' '')
+    $results['AE_started_alone_ok'] = $r.Code -eq 0
+
+    # Same class, different reference: a workflow spanning a DST change reads
+    # as consistent to a rule that only looks for `Z`.
+    $r = Invoke-Checker (New-Stamped '2026-08-27T09:57:10+02:00' '2026-08-27T09:51:31+01:00')
+    $results['AF_differing_offsets_rejected'] = $r.Code -eq 1
+
+    # The fixture must carry what the cases claim, or AB-AE pass vacuously.
+    $results['AG_fixture_carries_stamps'] = ($mixed -match '(?m)^started: ') -and ($mixed -match '(?m)^completed: ')
 }
 finally {
     foreach ($f in $files) { Remove-Item $f -Force -ErrorAction SilentlyContinue }
