@@ -200,6 +200,11 @@ fi
 # already uses for --workflow-start. Anything the documenter left behind is
 # replaced rather than joined — two `completed:` keys is a YAML file whose
 # meaning depends on which one the parser reaches last.
+#
+# Both are UTC. `%ct` is asked for rather than `%cI` because `%cI` carries the
+# committer's local offset, so the two fields arrived in different
+# representations and a reader subtracting them got a negative duration
+# (issue #240).
 
 stamp_note=""
 log_path=".github/logs/${workflow_id}.yaml"
@@ -207,7 +212,13 @@ log_path=".github/logs/${workflow_id}.yaml"
 
 if [ -f "$log_path" ]; then
     completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    started_at=$(git log --format=%cI "${BASE_BRANCH}..HEAD" 2>/dev/null | tail -1)
+    started_epoch=$(git log --format=%ct "${BASE_BRANCH}..HEAD" 2>/dev/null | tail -1)
+    started_at=""
+    if [ -n "$started_epoch" ]; then
+        # GNU date takes @epoch, BSD/macOS date takes -r epoch.
+        started_at=$(date -u -d "@${started_epoch}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+            || date -u -r "${started_epoch}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
+    fi
     [ -n "$started_at" ] || started_at="$completed_at"
 
     stamp_tmp=$(mktemp)
