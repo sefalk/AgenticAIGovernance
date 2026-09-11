@@ -288,6 +288,49 @@ escalation:
 
     # The fixture must carry what the cases claim, or AB-AE pass vacuously.
     $results['AG_fixture_carries_stamps'] = ($mixed -match '(?m)^started: ') -and ($mixed -match '(?m)^completed: ')
+
+    # AH-AN: `af_version` is stamped from `.github/.af-version`, so a value that
+    #    is not a version means it was written by hand -- which is how the field
+    #    came to hold `n/a`, `not measured` and, in one log, the instruction
+    #    itself (#309).
+    function New-Version([string]$block) {
+        return ($conforming -replace 'git_branch: "agent/clean"', ('git_branch: "agent/clean"' + "`r`n" + $block))
+    }
+
+    $r = Invoke-Checker (New-Version 'af_version: "1.23.19"')
+    $results['AH_semver_ok'] = $r.Code -eq 0
+
+    $r = Invoke-Checker (New-Version 'af_version: "n/a"')
+    $results['AI_prose_rejected']     = $r.Code -eq 1
+    $results['AI_says_remove_it']     = ($r.Output -match 'af_version') -and ($r.Output -match 'remove the line')
+
+    # The version genuinely could not be read. A recorded absence is analysable
+    # where a missing key is not, so it is accepted rather than demanded away.
+    $r = Invoke-Checker (New-Version 'af_version: null')
+    $results['AJ_explicit_null_ok'] = $r.Code -eq 0
+
+    # This rule runs before the stamp does, so a log that has not been stamped
+    # yet must not be blocked for a field the hook is about to supply.
+    $r = Invoke-Checker $conforming
+    $results['AK_absent_ok'] = $r.Code -eq 0
+
+    # The `3117-3120` shape: the correct version, then the caveat that had
+    # nowhere else to go. A prefix match would accept it, and the field still
+    # cannot be read as a version.
+    $long = 'af_version: "1.21.43 (deployed 2026-07-31T14:48:01, per .github/.af-version). NOTE: the root-cause analysis in Finding 1 ran against SOURCE 1.21.149, 106 versions ahead of this deployment."'
+    $r = Invoke-Checker (New-Version $long)
+    $results['AL_version_plus_prose_rejected'] = $r.Code -eq 1
+    $results['AL_long_value_truncated']        = $r.Output -match '\.\.\.'
+
+    # That caveat has a field of its own now, and nothing parses it -- including
+    # this rule, which must not mistake the note for the version it qualifies.
+    $withNote = New-Version ('af_version: "1.21.43"' + "`r`n" + 'af_version_note: "analysis ran against source 1.21.149; n/a for this deployment"')
+    $r = Invoke-Checker $withNote
+    $results['AM_note_is_free_text_ok'] = $r.Code -eq 0
+
+    # The fixtures must carry what the cases claim, or AH/AK/AM pass vacuously.
+    $results['AN_base_fixture_has_no_version'] = -not ($conforming -match '(?m)^af_version:')
+    $results['AN_note_fixture_has_both']       = ($withNote -match '(?m)^af_version: ') -and ($withNote -match '(?m)^af_version_note: ')
 }
 finally {
     foreach ($f in $files) { Remove-Item $f -Force -ErrorAction SilentlyContinue }

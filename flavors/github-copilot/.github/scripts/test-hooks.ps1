@@ -2439,6 +2439,62 @@ Assert-True "the log carries each timestamp exactly once" `
     (([regex]::Matches($stamped, '(?m)^completed:')).Count -eq 1 -and ([regex]::Matches($stamped, '(?m)^started:')).Count -eq 1) `
     "got: $stamped" -Subject $stamped
 
+# ── documenter-stop.ps1 stamps af_version too (issue #309) ──────────────
+#
+# The same argument, applied to a field that is not a number. `af_version` was
+# the last header value a model transcribed by hand, out of a file with three
+# lines it had to pick one of. Across 68 logs, 23 carried no value and 7
+# carried something that was not a version -- `n/a`, `not measured`, and in one
+# case the instruction "read from .github/.af-version" written in verbatim.
+
+Write-Output ""
+Write-Output "## documenter-stop.ps1 af_version"
+
+$LOG_BAD_VERSION = "workflow_id: `"72-x`"`naf_version: `"read from .github/.af-version`"`naf_version_note: `"analysis ran against source 1.99.0`"`nstatus: `"COMPLETED`"`n"
+
+function Get-VersionStampedLog {
+    param([hashtable]$Extra = @{})
+    $files = @{
+        'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+        '.github/logs/72-x.yaml'         = $LOG_BAD_VERSION
+        '.github/retros/auto/72-x.md'    = $RETRO_MD
+    }
+    foreach ($k in $Extra.Keys) { $files[$k] = $Extra[$k] }
+    (Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -ReadBack '.github/logs/72-x.yaml' -Files $files).ReadBack
+}
+
+$versioned = Get-VersionStampedLog @{ '.github/.af-version' = "version: 1.23.19`ndeployed: 2026-08-31T10:03:59`nsource: C:\elsewhere`n" }
+
+Assert-Contains "the versioned log comes back before the hook is judged by it" `
+    $versioned 'workflow_id:' "the read-back returned nothing"
+
+Assert-NotContains "the instruction the documenter wrote into the field does not survive" `
+    $versioned 'read from'
+
+Assert-Contains "af_version is the version line of .af-version" `
+    $versioned '(?m)^af_version: "1\.23\.19"\s*$'
+
+# The file has three lines and one of them is the version. A hook that took the
+# whole file, or the wrong line, would still satisfy the assertion above on a
+# one-line fixture -- so the lines it must not have taken are named.
+Assert-NotContains "the source: line is not dragged in with it" `
+    $versioned 'elsewhere'
+
+Assert-True "af_version appears exactly once" `
+    (([regex]::Matches($versioned, '(?m)^af_version:')).Count -eq 1) `
+    "got: $versioned" -Subject $versioned
+
+# The note is the documenter's own field and the only part of this it still
+# writes. Stamping the version must not reach it.
+Assert-Contains "af_version_note survives the stamp" `
+    $versioned 'af_version_note: "analysis ran against source 1\.99\.0"'
+
+# No version file means no deployment to name. An explicit null is analysable;
+# a plausible guess is not.
+$unversioned = Get-VersionStampedLog
+Assert-Contains "no .af-version stamps an explicit null rather than a guess" `
+    $unversioned '(?m)^af_version: null\s*$'
+
 # ── documenter-stop.ps1 — which agents actually ran (issue #173) ─────────
 #
 # A workflow log carried a complete `agent: arbiter` step -- action, verdict,
