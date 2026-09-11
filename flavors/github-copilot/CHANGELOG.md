@@ -32,6 +32,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The attestation gate rejected a pull request that had attested, and told
+  its author to add the line they had already written (#313).** The body of
+  #312 carried `local-check: ` + the suite name in backticks — ordinary
+  markdown for a filename. The gate matched a literal substring, so the
+  backtick between `: ` and the name was enough to fail the run, and the error
+  message was the same one an author who had attested to nothing would see.
+  The cost was a full Windows CI run plus a close/reopen cycle, because
+  `on: pull_request` does not fire on body edits.
+
+  Two things were wrong, and only one of them was the regex. The marker was
+  written out twice — once in the per-feature gate, once in the promotion
+  check — so the two had no way to stay agreed on what an attestation looks
+  like. Matching now lives in `.github/scripts/match-local-check.ps1`, which
+  both steps invoke; the drift guard in `test-promotion-gate.py` was changed
+  from "both steps quote the same string" to "both steps call the same code",
+  because quoting the same string is exactly what they were doing while one of
+  them read it more narrowly than authors write it.
+
+  The matcher reports an unreadable attestation separately from a missing one,
+  so a body with a `local-check:` line the gate cannot parse now names
+  formatting as the cause instead of repeating the generic instruction.
+  Backticks are tolerated at the one position that broke rather than stripped
+  from the body at large: HTML comments have to be removed first, or the
+  commented-out marker in the pull request template would satisfy a check
+  about work nobody did (#234), and a normalisation with no boundary is how
+  that protection gets undone by someone who did not know it was load-bearing.
+  That property is asserted against the real template file, not a copy of its
+  text.
+
 - **43 % of workflow logs could not be attributed to a framework version
   (#309).** `af_version` was the last header field a model transcribed by hand,
   and the file it transcribes from has three lines it had to pick one of.

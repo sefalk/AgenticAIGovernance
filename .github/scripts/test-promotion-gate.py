@@ -208,6 +208,10 @@ def build_prelude(case: Case) -> str:
         "$env:REPO = 'sefalk/AgenticAIGovernance'\n"
         "$env:BASE_SHA = 'base000'\n"
         "$env:HEAD_SHA = 'head000'\n"
+        # The step resolves the shared marker matcher from the workspace root.
+        # Actions always sets this; a harness that did not would exercise the
+        # gate's error handling instead of the gate.
+        f"$env:GITHUB_WORKSPACE = {ps_single(str(REPO))}\n"
         f"$STUB_LOG = {ps_array(log_lines)}\n"
         f"$STUB_FILES = {ps_hashtable(case.files)}\n"
         f"$STUB_BODIES = {ps_body_table(case.bodies)}\n"
@@ -263,6 +267,11 @@ def check_gates_agree(steps: list[dict]) -> int:
     failures = 0
     checks = [
         ("hook marker", MARKER, [attestation, promotion]),
+        # Both gates must reach the same code, not merely quote the same
+        # string. Agreeing on a literal is what they did before #313, and it
+        # let one of them match the literal more narrowly than authors write
+        # it while the other was free to diverge later.
+        ("shared marker matcher", "match-local-check.ps1", [attestation, promotion]),
         ("hook path prefix", "flavors/github-copilot/.github/hooks/", [attestation, promotion]),
         ("env prefix .vscode/", "'.vscode/'", [env_gate, promotion]),
         ("env prefix .githooks/", "'.githooks/'", [env_gate, promotion]),
@@ -325,7 +334,7 @@ def main() -> int:
     print()
     consistency_failures = check_gates_agree(steps)
 
-    total = len(CASES) + 10
+    total = len(CASES) + 11
     failures += consistency_failures
     print()
     print(f"=== {total - failures}/{total} passed ===")

@@ -87,18 +87,26 @@ jobs:
             exit 1
           }
 
-          # HTML comments are stripped first. The pull request template carries
-          # the marker line commented out, and a template nobody edited must
-          # not satisfy a check about work somebody did.
-          $body = [regex]::Replace([string]$body, '(?s)<!--.*?-->', '')
+          # Matching lives in match-local-check.ps1, invoked by this gate and
+          # by the promotion check below. It strips HTML comments before it
+          # matches, so the template's commented-out marker still fails (#234),
+          # and it reports an unreadable attestation separately from a missing
+          # one (#313).
+          $matcher = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/match-local-check.ps1'
+          & $matcher -Body ([string]$body) | Out-Null
+          $verdict = $LASTEXITCODE
 
-          if ($body -like "*$marker*") {
+          if ($verdict -eq 0) {
             Write-Host "Attestation present. Recorded, not verified."
             exit 0
           }
 
           Write-Host "Changed under the hooks directory:"
           $hookFiles | ForEach-Object { Write-Host "  $_" }
+          if ($verdict -eq 2) {
+            Write-Host "::error::This pull request changes files under flavors/github-copilot/.github/hooks/. The body has a 'local-check:' line, but not one this gate can read -- most often because the line names the suite in bold, as a link, or inside a fenced code block. Backticks around the filename are fine. Write it as: $marker"
+            exit 1
+          }
           Write-Host "::error::This pull request changes files under flavors/github-copilot/.github/hooks/. test-hooks-integration.ps1 covers them and CI cannot run it. Run it locally, then add this line to the pull request body and re-run this job: $marker"
           exit 1
 
@@ -229,6 +237,10 @@ jobs:
           $hookPrefix = 'flavors/github-copilot/.github/hooks/'
           $envPrefixes = @('.vscode/', '.githooks/', '.github/')
           $hookMarker = 'local-check: test-hooks-integration.ps1'
+          # The same matcher the per-feature attestation gate uses. Shared so
+          # that the two checks cannot drift into separate notions of what an
+          # attestation looks like, which is how #313 happened.
+          $matcher = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/match-local-check.ps1'
 
           foreach ($ref in @($env:BASE_SHA, $env:HEAD_SHA)) {
             git cat-file -e "$ref^{commit}" 2>$null
@@ -308,8 +320,11 @@ jobs:
             $body = Get-PrBody $number
             $checked++
 
-            if ($hookFiles.Count -gt 0 -and -not ($body -like "*$hookMarker*")) {
-              $violations += "#$number changed $($hookFiles.Count) file(s) under $hookPrefix without the line '$hookMarker' in its body."
+            if ($hookFiles.Count -gt 0) {
+              & $matcher -Body $body | Out-Null
+              if ($LASTEXITCODE -ne 0) {
+                $violations += "#$number changed $($hookFiles.Count) file(s) under $hookPrefix without the line '$hookMarker' in its body."
+              }
             }
 
             if ($envFiles.Count -gt 0) {
@@ -389,6 +404,17 @@ jobs:
       - name: Test the promotion declaration gate
         shell: powershell
         run: python .github\scripts\test-promotion-gate.py
+
+      # The attestation gate rejected a correctly attested pull request for a
+      # year's worth of markdown habit before #313 caught it, and it told the
+      # author to add the line they had already written. Both failure modes
+      # are cheap to re-introduce -- the marker's shape is a regex, and the
+      # difference between "absent" and "unreadable" is one exit code -- so
+      # the accepted shapes are pinned here rather than rediscovered on a
+      # release.
+      - name: Test the local-check attestation marker
+        shell: powershell
+        run: python .github\scripts\test-local-check-marker.py
 
       # check-issue-drift.py is a reporting tool, not a gate: it never fails a
       # build and never changes issue state. Its suite runs here for the same
