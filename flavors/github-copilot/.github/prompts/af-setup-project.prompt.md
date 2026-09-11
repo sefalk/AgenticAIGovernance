@@ -233,13 +233,13 @@ Execute all writes in one batch:
 4. Copy activated skills from `_available/` to `skills/`
 5. Remove deactivated skills from `skills/`
 6. Update agent `.agent.md` files with skill references in `## Skills` sections
-7. Regenerate `skills/INDEX.md`
-8. Update `copilot-instructions.md` Available Skills table
-9. Write `skills/curated-assignments.json`
-10. Write `.af-skills-curated` sentinel
+7. Regenerate `skills/INDEX.md` — the only catalogue; never copy it into
+   `copilot-instructions.md`, which is paid for on every request
+8. Write `skills/curated-assignments.json`
+9. Write `.af-skills-curated` sentinel
 
 ### Final:
-11. Print completion message:
+10. Print completion message:
     ```
     ✅ Setup complete!
     - AF deployed and configured
