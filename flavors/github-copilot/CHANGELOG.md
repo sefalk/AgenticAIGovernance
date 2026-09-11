@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A workflow log could finish 66 minutes before it began (#240).**
+  `documenter-stop` stamps both timestamps, but from two sources: `completed:`
+  came from the clock in UTC, while `started:` came from `git log --format=%cI`,
+  which emits the *committer's local offset*. Each field was valid ISO 8601 on
+  its own, so nothing complained, and any consumer subtracting them read a
+  negative duration. Four logs in the 67-file corpus are affected, two of them
+  across midnight.
+
+  The producers now ask git for `%ct` (epoch seconds) and format it as UTC, in
+  both the PowerShell and the shell hook, so the pair comes from one source
+  *and* one representation.
+
+  A fixed producer is not a guarantee, so `check-workflow-log.py` now compares
+  the two stamps' timezone designators and rejects a log whose fields disagree.
+  It compares them against each other rather than demanding `Z`: a historical
+  log stamped consistently in one offset is not rewritten and keeps passing,
+  while `+02:00` against `+01:00` — the same class, a different reference
+  across a DST boundary — is still caught. An absent `completed:` is absence,
+  not a representation, and is left alone. Measured against the corpus: 4
+  rejected, the four known instances; the other 54 two-stamp logs unaffected.
+
 - **`ruff.toml` declared a lint selection nothing measured (#182).** The root
   config selects `E, F, W, I, UP, B, SIM` for the whole repository, but CI ran
   `ruff format --check` only. The selection was therefore a statement of

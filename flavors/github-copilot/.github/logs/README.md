@@ -10,7 +10,11 @@ See the [documenter agent](../agents/documenter.agent.md) for the full YAML sche
 
 - **Filename:** `<workflow-id>.yaml`
 - **Format:** YAML with 2-space indentation
-- **Timestamps:** ISO 8601 with timezone (e.g., `2025-01-15T14:30:00Z`)
+- **Timestamps:** ISO 8601 in UTC, `Z` suffix (e.g., `2025-01-15T14:30:00Z`).
+  A local offset is valid ISO 8601 and still wrong here: `started:` and
+  `completed:` are stamped by two producers, and once they disagree a consumer
+  subtracting them reports a workflow that finished before it began (#240).
+  `check-workflow-log.py` rejects a log whose two stamps disagree.
 - **Retention:** 30 days locally, archive if long-term audit needed
 - **Coverage:** `AF_WORKFLOW_LOG_COVERAGE` (`af-env.conf`) decides which
   workflows write one. At the default `all`, every workflow does — Review Only
