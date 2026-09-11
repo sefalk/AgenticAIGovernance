@@ -15,6 +15,13 @@ See the [documenter agent](../agents/documenter.agent.md) for the full YAML sche
   `completed:` are stamped by two producers, and once they disagree a consumer
   subtracting them reports a workflow that finished before it began (#240).
   `check-workflow-log.py` rejects a log whose two stamps disagree.
+- **`af_version`:** a semantic version or an explicit `null`, stamped by
+  `documenter-stop` from `.github/.af-version` — never written by hand. It was
+  the last header field a model transcribed, and 23 of 68 logs carried no value
+  while 7 carried something that was not a version, which left the corpus
+  unattributable to a framework release (#309). No version file means `null`: a
+  source checkout is not a deployment. Anything you want to say *about* the
+  version goes in the free-text `af_version_note:`, which nothing parses.
 - **Retention:** 30 days locally, archive if long-term audit needed
 - **Coverage:** `AF_WORKFLOW_LOG_COVERAGE` (`af-env.conf`) decides which
   workflows write one. At the default `all`, every workflow does — Review Only

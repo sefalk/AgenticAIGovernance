@@ -219,7 +219,7 @@ catch {
     $schemaNote = ''
 }
 
-# ---------- Timestamps (ADVISORY -- never blocks, never fails the hook) ----------
+# ---------- Stamped header fields (ADVISORY -- never blocks, never fails the hook) ----------
 #
 # Stamped here rather than written by the documenter so the values never pass
 # through a language model. Measured: a documenter wrote a `completed:` six and
@@ -237,6 +237,15 @@ catch {
 # committer's local offset, so the two fields arrived in different
 # representations and a reader subtracting them got a negative duration
 # (issue #240).
+#
+# `af_version:` joined them for the same reason (issue #309). It was the last
+# header field a model transcribed by hand, out of a file with three lines it
+# had to pick one of, and across 68 logs 23 carried no value and 7 carried
+# something that was not a version -- `n/a`, `not measured`, and in one case the
+# instruction "read from .github/.af-version" written into the field verbatim.
+# No readable version file stamps `null`: a source checkout is not a deployment
+# and has no version to claim, and a recorded absence is analysable where a
+# missing key is not.
 
 $stampNote = ''
 try {
@@ -251,10 +260,19 @@ try {
         $startedAt = [DateTimeOffset]::FromUnixTimeSeconds([int64]$oldest).UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ')
     }
 
+    $afVersion = 'null'
+    if (Test-Path '.github/.af-version') {
+        foreach ($versionLine in (Get-Content '.github/.af-version')) {
+            $m = [regex]::Match($versionLine, '^\s*version:\s*(\d+\.\d+\.\d+)\s*$')
+            if ($m.Success) { $afVersion = '"' + $m.Groups[1].Value + '"'; break }
+        }
+    }
+
     # Top-level keys only: a `started:` indented inside a step belongs to that
-    # step and is none of this hook's business.
-    $kept = @(Get-Content $logPath | Where-Object { $_ -notmatch '^(started|completed):' })
-    $stampLines = @("started: `"$startedAt`"", "completed: `"$completedAt`"")
+    # step and is none of this hook's business. `af_version_note:` is the
+    # documenter's own field and is deliberately not matched here.
+    $kept = @(Get-Content $logPath | Where-Object { $_ -notmatch '^(started|completed|af_version):' })
+    $stampLines = @("started: `"$startedAt`"", "completed: `"$completedAt`"", "af_version: $afVersion")
 
     $anchor = -1
     for ($i = 0; $i -lt $kept.Count; $i++) {
@@ -269,7 +287,7 @@ try {
     }
 
     Set-Content -Path $logPath -Value $kept -Encoding UTF8
-    $stampNote = ' + timestamps measured'
+    $stampNote = ' + header fields stamped'
 }
 catch {
     $stampNote = ''

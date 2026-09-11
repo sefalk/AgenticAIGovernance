@@ -1202,11 +1202,11 @@ LOG_INVENTED='workflow_id: "72-x"\nstarted: "2099-01-01T09:00:00Z"\ncompleted: "
 LOG_BARE='workflow_id: "72-x"\nstatus: "COMPLETED"\n'
 RETRO_MD='# Retro 72-x\n\n- lesson\n'
 
-# stamp_log PLAN LOG -- runs documenter-stop.sh over a seeded fixture and
-# echoes the workflow log as the hook left it. A hook that writes into the
-# repository cannot be judged by its verdict alone.
+# stamp_log PLAN LOG [AF_VERSION_FILE] -- runs documenter-stop.sh over a seeded
+# fixture and echoes the workflow log as the hook left it. A hook that writes
+# into the repository cannot be judged by its verdict alone.
 stamp_log() {
-    local plan="$1" log="$2" fixture out
+    local plan="$1" log="$2" version="${3-}" fixture out
     new_fixture; fixture=$FIXTURE_DIR
     mkdir -p "$fixture/.github/hooks/scripts" "$fixture/.github/logs" \
              "$fixture/.github/retros/auto" "$fixture/docs/plans"
@@ -1216,6 +1216,7 @@ stamp_log() {
     printf '%b' "$plan" > "$fixture/docs/plans/fix-2026-08-07-x.md"
     printf '%b' "$log" > "$fixture/.github/logs/72-x.yaml"
     printf '%b' "$RETRO_MD" > "$fixture/.github/retros/auto/72-x.md"
+    if [ -n "$version" ]; then printf '%b' "$version" > "$fixture/.github/.af-version"; fi
     (
         cd "${fixture:?empty fixture path (#248)}" || exit 1
         use_fixture_conf
@@ -1299,6 +1300,58 @@ case "$doc_agent" in
         assert_true "the documenter is told the timestamps are not its to write" 1 ;;
     *)  assert_true "the documenter is told the timestamps are not its to write" 0 \
             "no instruction found that hands the timestamps to the Stop hook" ;;
+esac
+
+# --- documenter-stop.sh stamps af_version too (issue #309) -----------------
+#
+# The same argument applied to a field that is not a number. `af_version` is a
+# transcription of a file with three lines the model had to pick one of, and
+# across 68 logs 23 carried no value while 7 carried something that was not a
+# version -- `n/a`, `not measured`, and in one case the instruction itself.
+
+echo ""
+echo "## documenter-stop.sh af_version"
+
+LOG_BAD_VERSION='workflow_id: "72-x"\naf_version: "read from .github/.af-version"\naf_version_note: "analysis ran against source 1.99.0"\nstatus: "COMPLETED"\n'
+AF_VERSION_FILE='version: 1.23.19\ndeployed: 2026-08-31T10:03:59\nsource: /elsewhere\n'
+
+versioned=$(stamp_log "$PLAN_DONE" "$LOG_BAD_VERSION" "$AF_VERSION_FILE")
+
+assert_true "the versioned log comes back before the hook is judged by it" \
+    "$([ -n "$versioned" ] && echo 1 || echo 0)" "the read-back returned nothing"
+
+assert_not_contains "the instruction the documenter wrote into the field does not survive" \
+    "$versioned" "read from"
+
+assert_contains "af_version is the version line of .af-version" \
+    "$versioned" 'af_version: "1.23.19"' "got: $versioned"
+
+# The file has three lines and one of them is the version. Naming the lines the
+# hook must not have taken stops a whole-file copy from passing.
+assert_not_contains "the source: line is not dragged in with it" \
+    "$versioned" "elsewhere"
+
+af_count=$(printf '%s\n' "$versioned" | grep -c '^af_version:')
+assert_true "af_version appears exactly once" \
+    "$([ "$af_count" -eq 1 ] && echo 1 || echo 0)" \
+    "af_version lines=$af_count in: $versioned"
+
+# The note is the documenter's own field and the only part of this it still
+# writes. Stamping the version must not reach it.
+assert_contains "af_version_note survives the stamp" \
+    "$versioned" 'af_version_note: "analysis ran against source 1.99.0"' "got: $versioned"
+
+# No version file means no deployment to name. An explicit null is analysable;
+# a plausible guess is not.
+unversioned=$(stamp_log "$PLAN_DONE" "$LOG_BAD_VERSION")
+assert_contains "no .af-version stamps an explicit null rather than a guess" \
+    "$unversioned" "af_version: null" "got: $unversioned"
+
+case "$doc_agent" in
+    *'Do not write `af_version:`'*)
+        assert_true "the documenter is told the version is not its to write" 1 ;;
+    *)  assert_true "the documenter is told the version is not its to write" 0 \
+            "no instruction found that hands af_version to the Stop hook" ;;
 esac
 
 # --- Provenance marker placement (issue #81) -------------------------------

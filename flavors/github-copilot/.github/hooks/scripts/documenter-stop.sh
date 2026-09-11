@@ -187,7 +187,7 @@ if [ -f "$schema_checker" ]; then
     fi
 fi
 
-# ---------- Timestamps (ADVISORY — never blocks, never fails the hook) ----------
+# ---------- Stamped header fields (ADVISORY — never blocks, never fails the hook) ----------
 #
 # Stamped here rather than written by the documenter so the values never pass
 # through a language model. Measured: a documenter wrote a `completed:` six and
@@ -205,6 +205,15 @@ fi
 # committer's local offset, so the two fields arrived in different
 # representations and a reader subtracting them got a negative duration
 # (issue #240).
+#
+# `af_version:` joined them for the same reason (issue #309). It was the last
+# header field a model transcribed by hand, out of a file with three lines it
+# had to pick one of, and across 68 logs 23 carried no value and 7 carried
+# something that was not a version — `n/a`, `not measured`, and in one case the
+# instruction "read from .github/.af-version" written into the field verbatim.
+# No readable version file stamps `null`: a source checkout is not a deployment
+# and has no version to claim, and a recorded absence is analysable where a
+# missing key is not.
 
 stamp_note=""
 log_path=".github/logs/${workflow_id}.yaml"
@@ -221,17 +230,25 @@ if [ -f "$log_path" ]; then
     fi
     [ -n "$started_at" ] || started_at="$completed_at"
 
+    af_version="null"
+    if [ -f ".github/.af-version" ]; then
+        version_value=$(sed -n 's/^[[:space:]]*version:[[:space:]]*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)[[:space:]]*$/\1/p' \
+            ".github/.af-version" 2>/dev/null | head -1)
+        [ -n "$version_value" ] && af_version="\"${version_value}\""
+    fi
+
     stamp_tmp=$(mktemp)
     # Top-level keys only: a `started:` indented inside a step belongs to that
-    # step and is none of this hook's business.
-    if awk -v s="started: \"${started_at}\"" -v c="completed: \"${completed_at}\"" '
-        /^(started|completed):/ { next }
+    # step and is none of this hook's business. `af_version_note:` is the
+    # documenter's own field and is deliberately not matched here.
+    if awk -v s="started: \"${started_at}\"" -v c="completed: \"${completed_at}\"" -v v="af_version: ${af_version}" '
+        /^(started|completed|af_version):/ { next }
         { print }
-        /^workflow_id:/ && !ins { print s; print c; ins = 1 }
-        END { if (!ins) { print s; print c } }
+        /^workflow_id:/ && !ins { print s; print c; print v; ins = 1 }
+        END { if (!ins) { print s; print c; print v } }
     ' "$log_path" > "$stamp_tmp" 2>/dev/null && [ -s "$stamp_tmp" ]; then
         mv "$stamp_tmp" "$log_path"
-        stamp_note=" + timestamps measured"
+        stamp_note=" + header fields stamped"
     else
         rm -f "$stamp_tmp"
     fi
