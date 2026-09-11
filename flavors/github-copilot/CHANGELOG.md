@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The project template no longer restates records that are generated
+  elsewhere (#126).** `copilot-instructions.md` loads on every chat request in
+  every project scaffolded from it, and it carried a 23-row skills table
+  directly under a line declaring `skills/INDEX.md` canonical. It was the third
+  copy — agents already receive each skill's name and description in the
+  `<skills>` block VS Code assembles from the skill files, which cannot drift.
+  The copy could, and had: it listed 23 of 30 activated skills, so the
+  non-canonical duplicate was also wrong.
+
+  Two smaller restatements went with it. The six MANIFEST principles are now a
+  link to `MANIFEST.md`. The git section is now a pointer to
+  `git-workflow.instructions.md` — and that one was not merely redundant but
+  contradictory: the template taught `[agent:{agent-name}] {action summary}`
+  while the always-on `git-workflow.instructions.md` mandates
+  `[agent:{agent-name}] {phase}: {description}`, and the
+  `coordinator-pretooluse` hook rejects the template's version. Both files load
+  on every request, so an agent was handed a rule and its contradiction at once.
+
+  Measured: 5,641 → 3,706 bytes, roughly 484 tokens off every request.
+
+  Deleting the table would not have kept it gone. **Four** prompts instructed an
+  agent to write it, including `af-setup-project` — which scaffolds every new
+  project — so the instructions were removed alongside the artifact. A new CI
+  gate, `test-always-on-restatement.py`, asserts the property rather than the
+  instance: no always-on file carries a skills catalogue, a format
+  specification has exactly one always-on home, and no prompt instructs writing
+  a catalogue into an always-on file. It takes its definition of "always-on"
+  from `check-context-budget.py` rather than introducing a second one.
+
+  `copilot-instructions.md` is `[customizable]`, so this does not reach existing
+  projects on update. Applying the trim there is a local edit; the token saving
+  is the same.
+
 - **`af-deploy-mcp` runs on mcp 2.x, and the `<2` pin is gone (#274).** The
   emergency bound from #270 kept a working install but froze the package
   against a line that stops receiving fixes, and it put a `<2` constraint into
