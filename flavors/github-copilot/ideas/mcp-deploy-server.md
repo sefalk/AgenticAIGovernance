@@ -159,7 +159,7 @@ Implemented in [`../mcp-deploy/`](../mcp-deploy/):
   manifest parse, tier resolution, 3-way classification, **and the guarded write
   path** (`apply` with backups, `update_hashes`, `write_resolved`,
   `conflict_diff`, `prune_backups`). Covers `.github/` and `[vscode]` files.
-- `af_deploy_mcp/server.py` — `FastMCP` server: read tools (`status`,
+- `af_deploy_mcp/server.py` — `MCPServer` server: read tools (`status`,
   `dry_run`, `conflict_diff`) + write tools (`apply`,
   `write_resolved`, `update_hashes`, `prune_backups`, each guarded by
   `confirm`) + `af://source/{path}` + workflow prompts (`deploy`,
