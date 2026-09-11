@@ -32,11 +32,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from . import deploy_core, prompts
 
-mcp = FastMCP("af")
+mcp = MCPServer("af")
 
 
 def _source_root() -> Path:

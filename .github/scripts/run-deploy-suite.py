@@ -60,7 +60,7 @@ ALLOWED_SKIPS: dict[str, str] = {
 }
 
 # A floor under tests actually executed. Raise it when the suite grows.
-MIN_PASSED = 108
+MIN_PASSED = 109
 
 SKIP_LINE = re.compile(r"^SKIPPED \[\d+\] (.+)$", re.MULTILINE)
 PASS_COUNT = re.compile(r"(\d+) passed")

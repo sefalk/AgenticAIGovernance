@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`af-deploy-mcp` runs on mcp 2.x, and the `<2` pin is gone (#274).** The
+  emergency bound from #270 kept a working install but froze the package
+  against a line that stops receiving fixes, and it put a `<2` constraint into
+  every environment that installs it — including ones that had already moved.
+
+  The migration is two lines: `mcp.server.fastmcp.FastMCP` became
+  `mcp.server.mcpserver.MCPServer`, and `FastMCP` appeared exactly twice. The
+  upstream note said "other APIs changed" without enumerating them, so the
+  extent was measured rather than assumed: in a throwaway environment on
+  mcp 2.2.0 the suite returned `109 passed, 13 skipped`, identical to the
+  mcp 1.28.1 baseline down to the skip positions. `MCPServer` carries `tool`,
+  `resource`, `prompt` and `run` with compatible signatures, and the four call
+  shapes `server.py` uses all survived.
+
+  The rename was found by a collection error naming a module, so the suite now
+  asserts the surface it depends on. That includes the identity property the
+  whole test file rests on and nothing asserted — the decorators return the
+  original function, which is what lets the eleven wrapper tests call the
+  functions directly. A release that returned a wrapper instead would have
+  left them testing something else.
+
 ### Fixed
 
 - **`ruff.toml` declared a lint selection nothing measured (#182).** The root
