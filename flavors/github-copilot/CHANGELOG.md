@@ -32,6 +32,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **43 % of workflow logs could not be attributed to a framework version
+  (#309).** `af_version` was the last header field a model transcribed by hand,
+  and the file it transcribes from has three lines it had to pick one of.
+  Measured over 68 logs: 23 carried no value at all and 7 carried something
+  that was not a version — `n/a`, `not measured`, and in one case the
+  instruction *"read from `.github/.af-version`"* written into the data field
+  verbatim. Three of the seven were produced after the defect was reported, so
+  this was still generating instances. Only 37 of 68 (54 %) were usable, which
+  is why "did this defect begin after some release?" was unanswerable over the
+  corpus.
+
+  `documenter-stop` now stamps it, in both the PowerShell and the shell hook,
+  parsing `version:` out of `.github/.af-version`. No readable version file
+  stamps an explicit `null` — a source checkout is not a deployment and has no
+  version to claim, and a recorded absence is analysable where a missing key is
+  not. This is the same move already made for `started:`, `completed:`,
+  `summary.retries` and the `cost:` block: the fix for a value a model can get
+  wrong is to stop asking for it.
+
+  `check-workflow-log.py` constrains the field to a semantic version or an
+  explicit absence, so a producer that stops working becomes visible instead of
+  silently reverting to prose. The rule runs before the stamp does, so a
+  missing key is left alone and the violation message tells the documenter to
+  *remove* the line rather than correct it.
+
+  One log had used the field for something real: it recorded the correct
+  version and then appended a caveat that a root-cause analysis in that
+  workflow had run against a framework source 106 versions ahead of the
+  deployment, so fixes present there must not be assumed present locally. That
+  is a true and specific thing to say with nowhere to say it, so the schema
+  gains an optional free-text `af_version_note:`. It is deliberately a separate
+  field rather than a `findings` entry: the caveat qualifies the version, and
+  findings are about the work.
+
 - **A workflow log could finish 66 minutes before it began (#240).**
   `documenter-stop` stamps both timestamps, but from two sources: `completed:`
   came from the clock in UTC, while `started:` came from `git log --format=%cI`,
