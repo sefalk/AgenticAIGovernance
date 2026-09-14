@@ -93,6 +93,7 @@ The script checks:
 - `name` matches directory name, is lowercase-hyphenated, ≤64 chars
 - `description` is non-empty, ≤1024 chars, no XML tags
 - `INDEX.md` lists all active and available skills (no orphans/phantoms)
+- `INDEX.md` contains no table header that introduces no rows (#112)
 
 **Manual fallback** (if script unavailable):
 

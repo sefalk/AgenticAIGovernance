@@ -464,6 +464,18 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-ado-work-item-states.py
 
+      # `validate-skills.py` checked that INDEX.md listed the right skills and
+      # never what it looked like, so a duplicated table header shipped inside
+      # the payload and was copied into every new project (#112). Worse,
+      # nothing ran that validator in CI at all -- it was reachable only by
+      # invoking `/af-validate-framework` by hand. This runs it against the
+      # shipped payload, feeds its new layout check a known-bad index so an
+      # emptied check cannot pass as a clean one, and asserts the same
+      # property over the payload's other records.
+      - name: Test the skill index layout
+        shell: powershell
+        run: python .github\scripts\test-skill-index-layout.py
+
       # 122 tests over the code that decides whether a consumer project's file
       # is overwritten, preserved, or flagged -- and until #270 nothing ran
       # them. The first CI-shaped run found a test that had been failing

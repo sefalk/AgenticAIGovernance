@@ -191,6 +191,13 @@ For each agent in the assignment map:
 Regenerate `skills/INDEX.md`:
 1. List all active skills (from `skills/*/SKILL.md` frontmatter)
 2. List all available skills (from `skills/_available/*/SKILL.md` frontmatter)
+3. Write each section as a heading, then one table, then its rows. A table
+   header belongs to the rows under it -- an index that opens with a header
+   introducing nothing renders as an empty table and shipped that way for
+   months (#112), because the index was only ever checked for *which* skills
+   it named.
+4. Verify with `python .github/scripts/validate-skills.py`, which checks the
+   listing and the layout.
 
 Do not copy the catalogue into `copilot-instructions.md`. `skills/INDEX.md` is
 the only record; agents already receive each skill's name and description from
