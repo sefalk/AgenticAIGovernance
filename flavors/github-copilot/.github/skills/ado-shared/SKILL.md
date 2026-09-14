@@ -210,7 +210,9 @@ aligned from the start (this prevents reactive, mis-attributed, or WIT-less work
    reuse an unrelated open item — infra/dependency bumps, tooling fixes, and
    analysis tasks each get their own item. If the task spans several concerns,
    split them.
-2. Ensure the item is set to **Active** at work start.
+2. Ensure the item is set to **Active** at work start. This is a second call,
+   not a field on the create call — `skills/ado-workitem/SKILL.md` § State on
+   Create.
 3. Use its id in the branch slug: `agent/{work-item-id}-{workflow-id}`.
 4. **No branch without a resolved work item.** If resolution is impossible
    (capability required but unavailable), halt and escalate (Fail-Safe).

@@ -96,6 +96,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`skills/INDEX.md` shipped with an empty table, and the ADO rule to set a
+  work item `Active` was unfollowable as written (#112).** The index carried a
+  duplicated table header above the first heading, which rendered as an empty
+  table and was copied into every project deployed from the payload.
+  `validate-skills.py` had been checking the index all along — but only for
+  *which* skills it named, never for what it looked like, and listing and
+  layout are different properties. It also never ran in CI: it was reachable
+  only by invoking `/af-validate-framework` by hand, so the payload was never
+  checked on the pull request that changed it. Both gaps are closed: the
+  validator gained a layout check, and `test-skill-index-layout.py` runs it in
+  CI, plants a known-bad index so an emptied check cannot pass as a clean one,
+  and asserts the same property over the payload's other records. Templates
+  are excluded, because a template's empty table is a blank form waiting to be
+  filled in — the one place the shape is right. The second defect was prose:
+  Azure DevOps rejects a working state on the create call, so "set the item
+  Active at work start" cost a retry every time an agent believed it. The
+  `ado-workitem` skill now documents the two-step, resolving both state names
+  from the type rather than hardcoding them — hardcoding is what made items
+  unclosable in #267. The API cannot be exercised from CI, so that half is a
+  prose contract, which is precisely why `test-ado-work-item-states.py` now
+  guards it: prose is what quietly disappears.
+
 - **The attestation gate rejected a pull request that had attested, and told
   its author to add the line they had already written (#313).** The body of
   #312 carried `local-check: ` + the suite name in backticks — ordinary

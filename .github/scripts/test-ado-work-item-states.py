@@ -127,6 +127,29 @@ def main() -> int:
         "closing authority" in guard and "`Completed`-category state" in guard,
     )
 
+    # ── Entering the working state is two calls, not one (#112) ─────────
+    # The framework says "set the item Active at work start" and Azure DevOps
+    # rejects a working state on the create call, so the instruction was
+    # unfollowable as written and cost a retry every time someone believed it.
+    # The note is prose, because the API cannot be exercised from CI -- which
+    # is exactly why it needs a guard: prose is what quietly disappears.
+    create_state = section(workitem, "## State on Create")
+    check("workitem skill documents the state on create", bool(create_state))
+    check(
+        "create-state note says the transition is two calls",
+        "two calls" in create_state,
+        "the two-step is the whole point of the note",
+    )
+    check(
+        "create-state note names both calls",
+        "action=create" in create_state and "action=update" in create_state,
+    )
+    check(
+        "create-state note resolves the names instead of hardcoding them",
+        "get_type" in create_state,
+        "naming a state is the #267 failure mode",
+    )
+
     # ── The measurement that justifies the rule stays in the document ───
     task_row = row(guard, "Task")
     story_row = row(guard, "User Story")

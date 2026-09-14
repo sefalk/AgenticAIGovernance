@@ -36,6 +36,24 @@ and items may appear on an unexpected board/team:
   prompts. On update, do not overwrite an existing area/iteration unless the
   human explicitly requests a move.
 
+## State on Create
+
+A work item is created in its type's **initial** state and cannot be created
+in the working state. Naming the working state on the create call is rejected,
+so "set the item Active at work start" (`skills/ado-shared/SKILL.md`, Step 0a)
+is two calls, not one:
+
+1. `wit_work_item_write` `action=create` — omit `System.State` and let the
+   type's initial state stand.
+2. `wit_work_item_write` `action=update` — set `System.State` to the working
+   state, optionally with `System.Reason`.
+
+Resolve both state names from the type via `get_type` rather than hardcoding
+them; a process template is free to disagree about what they are called, which
+is the same trap that made items unclosable in #267. Measured on an Agile
+project (#112): create lands in `New`, the update to `Active` carries
+`System.Reason: "Work started"`.
+
 ## Update Strategy
 
 - Append or targeted rewrite only.
