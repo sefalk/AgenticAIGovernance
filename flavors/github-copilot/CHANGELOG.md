@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The shared hook case table now covers deferrals too; the coverage gap is
+  52 → 47 (#280, second batch).** Four dialect-neutral deferrals and the
+  non-terminal-tool case moved out of `test-hooks.ps1` and into
+  `block-dangerous.cases.tsv`. The table had excluded `silent` outright,
+  because the two harnesses disagree about what silence means. Measured, the
+  disagreement is narrower than that: it is only about *empty* output, where
+  PowerShell says `silent` and bash has no match. Both agree whenever the hook
+  emits exactly `{}` — which is what it emits for all five, measured on the
+  bash hook before the cases were moved. The restriction in the table's header
+  is therefore now stated as the condition it actually is, rather than as a
+  blanket exclusion of a verdict. `Copy-Item` stayed inline: running a
+  PowerShell cmdlet through the bash hook would assert nothing about bash.
+  This batch also corrects a claim made when the first one landed. The
+  remaining cases were reported as partly blocked on missing bash fixtures for
+  policy overrides and ask reasons. They are not — the bash harness has both.
+  Those cases are ordinary missing coverage, not exceptions needing a recorded
+  reason, which makes the remaining 47 a larger piece of real work than the
+  earlier note implied.
+
 - **The two hook suites now share a case table instead of twin strings
   (#280).** `block-dangerous` was proved 97 cases to 37: 64 cases existed in
   `test-hooks.ps1` and nowhere else, so 64 rules were verified in PowerShell
