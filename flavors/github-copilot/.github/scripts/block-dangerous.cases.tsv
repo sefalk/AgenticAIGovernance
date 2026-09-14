@@ -14,13 +14,14 @@
 # verdict means the same thing in both harnesses. PowerShell resolves the
 # hook's output by parsing it; bash matches on substrings. Measured, they agree
 # on 'deny', 'allow' and 'ask' for any syntactically valid single JSON
-# statement. They do NOT agree elsewhere: PowerShell reads empty or whitespace
-# output as 'silent' and a non-zero exit as 'error', while bash requires
-# exactly '{}' for 'silent' and routes faults down a separate path. So
-# 'silent' and 'notdeny' cases stay inline in their own suite until that
-# difference is closed, and PowerShell-only syntax (Remove-Item, the call
-# operator, `powershell -Command`) stays inline because it is not a shared
-# command at all.
+# statement, and on 'silent' whenever the hook emits exactly '{}'. They do NOT
+# agree when it emits nothing at all: PowerShell reads empty or whitespace
+# output as 'silent' while bash has no match for it, and a non-zero exit is
+# 'error' in PowerShell against a separate fault path in bash. So a 'silent'
+# case belongs here only once the hook's '{}' output has been measured on both
+# sides, and 'notdeny' stays inline until that difference is closed.
+# PowerShell-only syntax (Remove-Item, the call operator, `powershell
+# -Command`) stays inline because it is not a shared command at all.
 #
 # The twin-coverage ratchet in test-hooks.sh counts these rows for both
 # dialects. Adding a row here closes the gap by one; deleting one reopens it.
@@ -38,3 +39,8 @@ deletion is still ours to ask about	agent/fixture	ask	{"tool_name":"runInTermina
 tagging is still ours to ask about	agent/fixture	ask	{"tool_name":"runInTerminal","tool_input":{"command":"git tag v1.4.0"}}
 a cloud resource change is still ours to ask about	agent/fixture	ask	{"tool_name":"runInTerminal","tool_input":{"command":"az group create --name rg-x"}}
 checkout of a path is still ours to ask about	agent/fixture	ask	{"tool_name":"runInTerminal","tool_input":{"command":"git checkout -- src/foo.py"}}
+a formatter run defers to the native assessment	agent/fixture	silent	{"tool_name":"runInTerminal","tool_input":{"command":"ruff format ."}}
+creating a directory defers to the native assessment	agent/fixture	silent	{"tool_name":"runInTerminal","tool_input":{"command":"mkdir build"}}
+package installs defer to the native assessment	agent/fixture	silent	{"tool_name":"runInTerminal","tool_input":{"command":"pip install requests"}}
+conda environment changes defer to the native assessment	agent/fixture	silent	{"tool_name":"runInTerminal","tool_input":{"command":"conda install numpy"}}
+non-terminal tool ignored	agent/fixture	silent	{"tool_name":"read_file","tool_input":{"endLine":40,"filePath":"src/main.py","startLine":1}}

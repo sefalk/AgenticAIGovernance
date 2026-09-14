@@ -2132,8 +2132,8 @@ fi
 # A table that failed to load is not zero failures, it is zero questions asked.
 # Without this the suite would still print 'All tests passed'.
 assert_true "the shared block-dangerous case table was read" \
-    "$([ "$shared_rows" -ge 12 ] && echo 1 || echo 0)" \
-    "rows parsed: $shared_rows from $SHARED_CASES (floor 12 -- raise it as the table grows, never lower it)"
+    "$([ "$shared_rows" -ge 17 ] && echo 1 || echo 0)" \
+    "rows parsed: $shared_rows from $SHARED_CASES (floor 17 -- raise it as the table grows, never lower it)"
 
 # These rules existed in block-dangerous.sh and nothing executed them. The
 # bash suite grew issue by issue -- scan units for #62, tasks for #74 -- so the
@@ -2342,7 +2342,7 @@ run_case "DROP TABLE passed positionally is still denied" \
 
 # --- The two dialects are one policy, and the gap must not widen (#122) ----
 #
-# block-dangerous is covered 97 cases to 49. The bash suite grew issue by
+# block-dangerous is covered 97 cases to 54. The bash suite grew issue by
 # issue while the PowerShell one grew by tier, which is how the base deny tier
 # came to be executed in one twin only -- the nine cases above exist because of
 # that. Closing the remainder is separate work (#280). What must not happen
@@ -2376,12 +2376,12 @@ assert_true "the twin-coverage parser still recognises both dialects" \
 # Read separately from the loop above, so a table the awk cannot see is named
 # as such instead of surfacing as an unexplained jump in the gap.
 assert_true "the twin-coverage parser reads the shared case table" \
-    "$([ "${twin_tsv:-0}" -ge 12 ] && echo 1 || echo 0)" \
-    "rows seen by awk: $twin_tsv (floor 12 -- a zero here means the table moved, not that it emptied)"
+    "$([ "${twin_tsv:-0}" -ge 17 ] && echo 1 || echo 0)" \
+    "rows seen by awk: $twin_tsv (floor 17 -- a zero here means the table moved, not that it emptied)"
 
 assert_true "the block-dangerous coverage gap between dialects does not widen" \
-    "$([ "${twin_gap:-999}" -le 52 ] && echo 1 || echo 0)" \
-    "cases only in test-hooks.ps1: $twin_gap (ceiling 52 -- lower it as you close the gap, never raise it)"
+    "$([ "${twin_gap:-999}" -le 47 ] && echo 1 || echo 0)" \
+    "cases only in test-hooks.ps1: $twin_gap (ceiling 47 -- lower it as you close the gap, never raise it)"
 
 # A task is a second way to execute a command line. The gate used to match
 # `createAndRunTask`, a name VS Code never sends, and `run_task` was not

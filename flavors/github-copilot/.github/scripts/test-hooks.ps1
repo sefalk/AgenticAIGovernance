@@ -984,23 +984,10 @@ Assert-True "two different ask rules give two different reasons" `
 #
 # Silence here is deferral, not approval: Assert-Silent asserts '{}', which
 # hands the decision to the user's approval settings -- it never asserts allow.
-
-Assert-Silent "package installs defer to the native assessment" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"pip install requests"}}'
-
-Assert-Silent "conda environment changes defer to the native assessment" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"conda install numpy"}}'
-
-# The operation issue #86 was about: mechanical, repo-local, reversible by git.
-Assert-Silent "a formatter run defers to the native assessment" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"ruff format ."}}'
-
-Assert-Silent "creating a directory defers to the native assessment" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"mkdir build"}}'
+#
+# The four dialect-neutral deferrals below now run from
+# block-dangerous.cases.tsv, against both hooks. Copy-Item stays here: it is a
+# PowerShell cmdlet, so a bash run of it would assert nothing about bash.
 
 Assert-Silent "copying a file defers to the native assessment" `
     "block-dangerous.ps1" `
@@ -1139,8 +1126,8 @@ foreach ($line in (Get-Content -LiteralPath $sharedCasesPath)) {
 # A table that failed to load is not zero failures, it is zero questions asked.
 # Without this the suite would still print 'All tests passed'.
 Assert-True "the shared block-dangerous case table was read" `
-    ($sharedCases.Count -ge 12) `
-    "rows parsed: $($sharedCases.Count) from $sharedCasesPath (floor 12 -- raise it as the table grows, never lower it)"
+    ($sharedCases.Count -ge 17) `
+    "rows parsed: $($sharedCases.Count) from $sharedCasesPath (floor 17 -- raise it as the table grows, never lower it)"
 
 foreach ($case in $sharedCases) {
     Assert-Decision -TestName $case[0] -Expected $case[2] -Script 'block-dangerous.ps1' `
@@ -1154,10 +1141,6 @@ foreach ($case in $sharedCases) {
 Assert-Allow "pip show via call operator is safe" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"& \".venv/Scripts/python.exe\" -m pip show ruff"}}'
-
-Assert-Silent "non-terminal tool ignored" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"read_file","tool_input":{"endLine":40,"filePath":"src/main.py","startLine":1}}'
 
 # ── createAndRunTask shape: hard-deny tier (mirrored from runInTerminal) ───
 # The dangerous commands must also be denied when wrapped in createAndRunTask.
