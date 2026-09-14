@@ -2092,6 +2092,49 @@ fi
 #
 # --- DENY tier, the twin of test-hooks.ps1's first block -------------------
 #
+# ── Shared cases: one table, two dialects ────────────────────────────────
+# The cases in this section are not this suite's. They live in
+# block-dangerous.cases.tsv and run here against block-dangerous.sh and in
+# test-hooks.ps1 against block-dangerous.ps1, so the two hooks are compared
+# rather than the two test files. Written out twice instead, the suites would
+# hold the same string without testing the same thing, and a hook that drifted
+# in one dialect would stay green in the other.
+#
+# TSV rather than JSON: there is no jq under git-bash, and a JSON table would
+# make this suite depend on an interpreter to read its own test data.
+
+echo "## block-dangerous shared case table"
+
+SHARED_CASES="$SCRIPT_DIR/block-dangerous.cases.tsv"
+shared_rows=0
+if [ ! -f "$SHARED_CASES" ]; then
+    echo "FAIL  the shared block-dangerous case table is present -- missing: $SHARED_CASES"
+    fail=$((fail + 1))
+else
+    # Redirection, not a pipe: a pipe would run the loop in a subshell and
+    # every pass and fail it counted would be discarded at the closing done.
+    while IFS=$'\t' read -r sc_name sc_branch sc_expect sc_json; do
+        # The table is stored with LF endings, but a checkout may hand it back
+        # with CRLF, and the stray \r would land inside the JSON payload.
+        sc_name=${sc_name%$'\r'}
+        sc_json=${sc_json%$'\r'}
+        case "$sc_name" in ''|'#'*) continue ;; esac
+        if [ -z "$sc_branch" ] || [ -z "$sc_expect" ] || [ -z "$sc_json" ]; then
+            echo "FAIL  shared case table row is malformed -- $sc_name"
+            fail=$((fail + 1))
+            continue
+        fi
+        shared_rows=$((shared_rows + 1))
+        run_case "$sc_name" block-dangerous.sh "$sc_branch" "$sc_json" "$sc_expect"
+    done < "$SHARED_CASES"
+fi
+
+# A table that failed to load is not zero failures, it is zero questions asked.
+# Without this the suite would still print 'All tests passed'.
+assert_true "the shared block-dangerous case table was read" \
+    "$([ "$shared_rows" -ge 12 ] && echo 1 || echo 0)" \
+    "rows parsed: $shared_rows from $SHARED_CASES (floor 12 -- raise it as the table grows, never lower it)"
+
 # These rules existed in block-dangerous.sh and nothing executed them. The
 # bash suite grew issue by issue -- scan units for #62, tasks for #74 -- so the
 # base deny tier, the part the whole gate rests on, was only ever proved in the
@@ -2299,32 +2342,46 @@ run_case "DROP TABLE passed positionally is still denied" \
 
 # --- The two dialects are one policy, and the gap must not widen (#122) ----
 #
-# block-dangerous is covered 92 cases to 32. The bash suite grew issue by
+# block-dangerous is covered 97 cases to 49. The bash suite grew issue by
 # issue while the PowerShell one grew by tier, which is how the base deny tier
 # came to be executed in one twin only -- the nine cases above exist because of
-# that. Closing the remainder is separate work. What must not happen meanwhile
-# is the gap widening, because a case added on one side only is a rule proved
-# in one dialect and merely assumed in the other.
+# that. Closing the remainder is separate work (#280). What must not happen
+# meanwhile is the gap widening, because a case added on one side only is a
+# rule proved in one dialect and merely assumed in the other.
+#
+# Rows of block-dangerous.cases.tsv count for BOTH dialects, because each row
+# is executed once per dialect against that dialect's own hook. Counting them
+# for neither -- which is what happens if this parser is left alone while cases
+# are migrated -- would drop them out of both totals and shrink the gap without
+# a single case having been added. The table is the one place where the gap
+# closes honestly.
 #
 # The counts are asserted as well as the gap. A parser that quietly stopped
 # recognising cases would report a gap of zero and read as success -- which is
 # the failure mode this very suite was caught committing in #202.
 twin_counts=$(awk '
+FILENAME ~ /\.tsv$/ { if ($0 ~ /^[ \t]*#/ || $0 ~ /^[ \t]*$/) next; split($0, f, "\t"); if (f[1] == "") next; ps[f[1]]=1; sh[f[1]]=1; nps++; nsh++; ntsv++; next }
 FILENAME ~ /\.ps1$/ && /^Assert-[A-Za-z]+[ \t]+"/ { n=$0; sub(/^Assert-[A-Za-z]+[ \t]+"/,"",n); sub(/".*$/,"",n); p=n; next }
 FILENAME ~ /\.ps1$/ && p != "" { if ($0 ~ /block-dangerous\.ps1/) { ps[p]=1; nps++ } p=""; next }
 FILENAME ~ /\.sh$/ && /^run_case[ \t]+"/ { n=$0; sub(/^run_case[ \t]+"/,"",n); sub(/".*$/,"",n); s=n; next }
 FILENAME ~ /\.sh$/ && s != "" { if ($0 ~ /block-dangerous\.sh/) { sh[s]=1; nsh++ } s=""; next }
-END { for (k in ps) if (!(k in sh)) g++; printf "%d %d %d", nps+0, nsh+0, g+0 }
-' "$SCRIPT_DIR/test-hooks.ps1" "$SCRIPT_DIR/test-hooks.sh")
-read twin_ps twin_sh twin_gap <<< "$twin_counts"
+END { for (k in ps) if (!(k in sh)) g++; printf "%d %d %d %d", nps+0, nsh+0, g+0, ntsv+0 }
+' "$SCRIPT_DIR/block-dangerous.cases.tsv" "$SCRIPT_DIR/test-hooks.ps1" "$SCRIPT_DIR/test-hooks.sh")
+read twin_ps twin_sh twin_gap twin_tsv <<< "$twin_counts"
 
 assert_true "the twin-coverage parser still recognises both dialects" \
     "$([ "${twin_ps:-0}" -ge 80 ] && [ "${twin_sh:-0}" -ge 30 ] && echo 1 || echo 0)" \
     "ps1=$twin_ps sh=$twin_sh -- a count below the floor means the parser broke, not that coverage improved"
 
+# Read separately from the loop above, so a table the awk cannot see is named
+# as such instead of surfacing as an unexplained jump in the gap.
+assert_true "the twin-coverage parser reads the shared case table" \
+    "$([ "${twin_tsv:-0}" -ge 12 ] && echo 1 || echo 0)" \
+    "rows seen by awk: $twin_tsv (floor 12 -- a zero here means the table moved, not that it emptied)"
+
 assert_true "the block-dangerous coverage gap between dialects does not widen" \
-    "$([ "${twin_gap:-999}" -le 64 ] && echo 1 || echo 0)" \
-    "cases only in test-hooks.ps1: $twin_gap (ceiling 64 -- lower it as you close the gap, never raise it)"
+    "$([ "${twin_gap:-999}" -le 52 ] && echo 1 || echo 0)" \
+    "cases only in test-hooks.ps1: $twin_gap (ceiling 52 -- lower it as you close the gap, never raise it)"
 
 # A task is a second way to execute a command line. The gate used to match
 # `createAndRunTask`, a name VS Code never sends, and `run_task` was not

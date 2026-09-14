@@ -1007,26 +1007,15 @@ Assert-Silent "copying a file defers to the native assessment" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"Copy-Item a.txt b.txt"}}'
 
 # What we keep, and why we keep it. Deletion is the one durable change whose
-# consequence git cannot undo, so it stays ours regardless of who asks better.
-Assert-Ask "deletion is still ours to ask about" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"rm ./scratch.tmp"}}'
-
-Assert-Ask "tagging is still ours to ask about" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git tag v1.4.0"}}'
-
-Assert-Ask "a cloud resource change is still ours to ask about" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"az group create --name rg-x"}}'
-
-# The path form of checkout discards uncommitted work, and the allow tier
-# deliberately does not cover it. It must not fall through to silence: on this
-# machine 'git checkout' is a prefix in chat.tools.terminal.autoApprove, so
-# deferring would auto-approve the destructive form with no prompt at all.
-Assert-Ask "checkout of a path is still ours to ask about" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git checkout -- src/foo.py"}}'
+# consequence git cannot undo, so it stays ours regardless of who asks better;
+# tagging and cloud resource creation are retained for the same reason. The
+# path form of checkout matters most: it discards uncommitted work, the allow
+# tier deliberately does not cover it, and on this machine 'git checkout' is a
+# prefix in chat.tools.terminal.autoApprove -- so deferring would auto-approve
+# the destructive form with no prompt at all.
+#
+# These four now run from block-dangerous.cases.tsv, which holds the bash hook
+# to them as well. See the shared-table loop further down.
 
 # A deferred rule must not consume the command: the retained rule next to it
 # still has to fire.
@@ -1125,46 +1114,46 @@ Assert-True "a config path that does not exist is reported as absent" `
 Assert-True "a config path that exists is the config in force" `
     ($probePresent -match 'found=True') "got: $probePresent"
 
-# ── ALLOW: safe under balanced defaults ──────────────────────────────────
-Assert-Allow "git status is safe" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git status"}}'
+# ── Shared cases: one table, two dialects ────────────────────────────────
+# These cases are not PowerShell's. They live in block-dangerous.cases.tsv and
+# run here against block-dangerous.ps1 and in test-hooks.sh against
+# block-dangerous.sh. Written out twice instead, the two suites would hold the
+# same string without testing the same thing, and a hook that drifted in one
+# dialect would still be green in the other -- the defect class #313 was about.
+#
+# TSV rather than JSON because this harness's counterpart runs under git-bash,
+# where there is no jq; a JSON table would make the shell suite depend on an
+# interpreter to read its own test data.
+$sharedCasesPath = Join-Path $PSScriptRoot 'block-dangerous.cases.tsv'
+$sharedCases = @()
+foreach ($line in (Get-Content -LiteralPath $sharedCasesPath)) {
+    $row = $line.Trim()
+    if ($row -eq '' -or $row.StartsWith('#')) { continue }
+    $fields = $row -split "`t"
+    if ($fields.Count -ne 4) {
+        throw "block-dangerous.cases.tsv: expected 4 tab-separated fields, got $($fields.Count) in: $row"
+    }
+    $sharedCases += , $fields
+}
 
-Assert-Allow "git diff is safe" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git diff --stat"}}'
+# A table that failed to load is not zero failures, it is zero questions asked.
+# Without this the suite would still print 'All tests passed'.
+Assert-True "the shared block-dangerous case table was read" `
+    ($sharedCases.Count -ge 12) `
+    "rows parsed: $($sharedCases.Count) from $sharedCasesPath (floor 12 -- raise it as the table grows, never lower it)"
 
-Assert-Allow "git add specific file is safe" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git add src/main.py"}}'
+foreach ($case in $sharedCases) {
+    Assert-Decision -TestName $case[0] -Expected $case[2] -Script 'block-dangerous.ps1' `
+        -Json $case[3] -Branch $case[1]
+}
 
-Assert-Allow "git commit is safe" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"fix: typo\""}}'
-
-Assert-Allow "git merge auto-allowed at balanced default" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git merge feature"}}'
-
-# Improvement: git config read (no value) is read-only
-Assert-Allow "git config read is safe" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git config --global user.email"}}'
-
-# Improvement: pip show via call-operator + quoted python path is read-only
+# ── ALLOW: safe under balanced defaults (PowerShell-specific) ────────────
+# Improvement: pip show via call-operator + quoted python path is read-only.
+# Stays here rather than in the shared table: the call operator is PowerShell
+# syntax, so there is no equivalent command for the bash hook to judge.
 Assert-Allow "pip show via call operator is safe" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"& \".venv/Scripts/python.exe\" -m pip show ruff"}}'
-
-# Improvement: ASK scan ignores quoted literals (no false databricks-export ask)
-Assert-Allow "commit message mentioning databricks export does not false-ask" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"populate databricks.yml from prod job export\""}}'
-
-# Improvement: separators inside quotes do not split the command
-Assert-Allow "separators inside quotes do not split" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"fix: a; b | c\""}}'
 
 Assert-Silent "non-terminal tool ignored" `
     "block-dangerous.ps1" `
