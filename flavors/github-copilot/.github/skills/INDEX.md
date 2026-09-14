@@ -3,8 +3,6 @@
 > Auto-generated index of all AF skills. Use `/af-find-skill <topic>` to search.
 > Regenerate with `/af-validate-framework` (step 7 — skill directory structure).
 
-| # | Skill | Description | Referenced by |
-|---|-------|-------------|---------------|
 ## Active Skills (referenced by ≥1 agent)
 
 | # | Skill | Description | Referenced by |
