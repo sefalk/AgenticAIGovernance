@@ -1,0 +1,40 @@
+# Shared block-dangerous cases, read by BOTH test-hooks.ps1 and test-hooks.sh.
+#
+# Why a table and not twin hand-written cases: two suites holding the same
+# string do not test the same thing, they only look like they do. A case here
+# is executed once per dialect against the dialect's own hook, so the two
+# implementations are compared rather than the two test files.
+#
+# Format, tab-separated, four fields:
+#   name <TAB> branch <TAB> expect <TAB> json
+# Lines starting with '#' and blank lines are ignored. The json field is last
+# because it is the only one that may contain spaces; it may not contain tabs.
+#
+# What may live here: only cases whose command is dialect-neutral and whose
+# verdict means the same thing in both harnesses. PowerShell resolves the
+# hook's output by parsing it; bash matches on substrings. Measured, they agree
+# on 'deny', 'allow' and 'ask' for any syntactically valid single JSON
+# statement. They do NOT agree elsewhere: PowerShell reads empty or whitespace
+# output as 'silent' and a non-zero exit as 'error', while bash requires
+# exactly '{}' for 'silent' and routes faults down a separate path. So
+# 'silent' and 'notdeny' cases stay inline in their own suite until that
+# difference is closed, and PowerShell-only syntax (Remove-Item, the call
+# operator, `powershell -Command`) stays inline because it is not a shared
+# command at all.
+#
+# The twin-coverage ratchet in test-hooks.sh counts these rows for both
+# dialects. Adding a row here closes the gap by one; deleting one reopens it.
+#
+# name	branch	expect	json
+git status is safe	agent/fixture	allow	{"tool_name":"runInTerminal","tool_input":{"command":"git status"}}
+git diff is safe	agent/fixture	allow	{"tool_name":"runInTerminal","tool_input":{"command":"git diff --stat"}}
+git add specific file is safe	agent/fixture	allow	{"tool_name":"runInTerminal","tool_input":{"command":"git add src/main.py"}}
+git commit is safe	agent/fixture	allow	{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"fix: typo\""}}
+git merge auto-allowed at balanced default	agent/fixture	allow	{"tool_name":"runInTerminal","tool_input":{"command":"git merge feature"}}
+git config read is safe	agent/fixture	allow	{"tool_name":"runInTerminal","tool_input":{"command":"git config --global user.email"}}
+commit message mentioning databricks export does not false-ask	agent/fixture	allow	{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"populate databricks.yml from prod job export\""}}
+separators inside quotes do not split	agent/fixture	allow	{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"fix: a; b | c\""}}
+deletion is still ours to ask about	agent/fixture	ask	{"tool_name":"runInTerminal","tool_input":{"command":"rm ./scratch.tmp"}}
+tagging is still ours to ask about	agent/fixture	ask	{"tool_name":"runInTerminal","tool_input":{"command":"git tag v1.4.0"}}
+a cloud resource change is still ours to ask about	agent/fixture	ask	{"tool_name":"runInTerminal","tool_input":{"command":"az group create --name rg-x"}}
+checkout of a path is still ours to ask about	agent/fixture	ask	{"tool_name":"runInTerminal","tool_input":{"command":"git checkout -- src/foo.py"}}
