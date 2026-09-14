@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The two hook suites now share a case table instead of twin strings
+  (#280).** `block-dangerous` was proved 97 cases to 37: 64 cases existed in
+  `test-hooks.ps1` and nowhere else, so 64 rules were verified in PowerShell
+  and merely assumed in bash. The obvious fix — hand-writing 64 twins — would
+  have produced two files containing the same string, which is not the same as
+  two suites testing the same thing; that is the defect class #313 was about.
+
+  Instead there is now `block-dangerous.cases.tsv`, read by both suites. Each
+  row is executed once per dialect against that dialect's own hook, so a hook
+  that drifts in one dialect fails a suite rather than hiding behind its twin.
+  The first batch migrates 12 cases: eight `allow` and four `ask`.
+
+  TSV and not JSON, contrary to the shape first sketched on the issue: there is
+  no `jq` under git-bash (measured), so a JSON table would have made the shell
+  suite depend on a Python interpreter to read its own test data.
+
+  What may enter the table is restricted by measurement, not by taste. The two
+  harnesses resolve a verdict differently — PowerShell parses the hook's output,
+  bash matches substrings — and they agree on `deny`, `allow` and `ask` for any
+  valid single JSON statement. They disagree on empty, whitespace, unparsable
+  and non-zero-exit output, so `silent` and `notdeny` cases stay inline until
+  that difference is closed, as does PowerShell-only syntax such as the call
+  operator. The restriction is written into the table's own header.
+
+  The twin-coverage ratchet was updated in the same commit, because it had to
+  be: it counts `Assert-*` and `run_case` lines, so migrated cases would have
+  dropped out of **both** totals and shrunk the gap without a single case being
+  added. Table rows now count for both dialects, the ceiling drops 64 → 52 by
+  exactly the number migrated, and a third assertion fails if the parser cannot
+  see the table at all.
+
 - **The project template no longer restates records that are generated
   elsewhere (#126).** `copilot-instructions.md` loads on every chat request in
   every project scaffolded from it, and it carried a 23-row skills table
