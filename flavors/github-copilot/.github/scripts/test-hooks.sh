@@ -2342,12 +2342,17 @@ run_case "DROP TABLE passed positionally is still denied" \
 
 # --- The two dialects are one policy, and the gap must not widen (#122) ----
 #
-# block-dangerous is covered 97 cases to 54. The bash suite grew issue by
+# block-dangerous is covered 98 cases to 83. The bash suite grew issue by
 # issue while the PowerShell one grew by tier, which is how the base deny tier
 # came to be executed in one twin only -- the nine cases above exist because of
 # that. Closing the remainder is separate work (#280). What must not happen
 # meanwhile is the gap widening, because a case added on one side only is a
 # rule proved in one dialect and merely assumed in the other.
+#
+# Names are read whether they are single- or double-quoted. Reading only the
+# double-quoted form made a case invisible to the ratchet rather than visible
+# and uncovered, so the gap could be understated by writing the name the other
+# way -- which is how one case sat outside these counts until #280 moved it.
 #
 # Rows of block-dangerous.cases.tsv count for BOTH dialects, because each row
 # is executed once per dialect against that dialect's own hook. Counting them
@@ -2359,29 +2364,36 @@ run_case "DROP TABLE passed positionally is still denied" \
 # The counts are asserted as well as the gap. A parser that quietly stopped
 # recognising cases would report a gap of zero and read as success -- which is
 # the failure mode this very suite was caught committing in #202.
-twin_counts=$(awk '
+twin_counts=$(awk -v SQ="'" '
+function unquote(n,   q, i) {
+    q = substr(n, 1, 1)
+    if (q != "\"" && q != SQ) return ""
+    n = substr(n, 2)
+    i = index(n, q)
+    return (i < 2) ? "" : substr(n, 1, i - 1)
+}
 FILENAME ~ /\.tsv$/ { if ($0 ~ /^[ \t]*#/ || $0 ~ /^[ \t]*$/) next; split($0, f, "\t"); if (f[1] == "") next; ps[f[1]]=1; sh[f[1]]=1; nps++; nsh++; ntsv++; next }
-FILENAME ~ /\.ps1$/ && /^Assert-[A-Za-z]+[ \t]+"/ { n=$0; sub(/^Assert-[A-Za-z]+[ \t]+"/,"",n); sub(/".*$/,"",n); p=n; next }
+FILENAME ~ /\.ps1$/ && /^Assert-[A-Za-z]+[ \t]+/ { n=$0; sub(/^Assert-[A-Za-z]+[ \t]+/,"",n); n=unquote(n); if (n != "") { p=n; next } }
 FILENAME ~ /\.ps1$/ && p != "" { if ($0 ~ /block-dangerous\.ps1/) { ps[p]=1; nps++ } p=""; next }
-FILENAME ~ /\.sh$/ && /^run_case[ \t]+"/ { n=$0; sub(/^run_case[ \t]+"/,"",n); sub(/".*$/,"",n); s=n; next }
+FILENAME ~ /\.sh$/ && /^run_case[ \t]+/ { n=$0; sub(/^run_case[ \t]+/,"",n); n=unquote(n); if (n != "") { s=n; next } }
 FILENAME ~ /\.sh$/ && s != "" { if ($0 ~ /block-dangerous\.sh/) { sh[s]=1; nsh++ } s=""; next }
 END { for (k in ps) if (!(k in sh)) g++; printf "%d %d %d %d", nps+0, nsh+0, g+0, ntsv+0 }
 ' "$SCRIPT_DIR/block-dangerous.cases.tsv" "$SCRIPT_DIR/test-hooks.ps1" "$SCRIPT_DIR/test-hooks.sh")
 read twin_ps twin_sh twin_gap twin_tsv <<< "$twin_counts"
 
 assert_true "the twin-coverage parser still recognises both dialects" \
-    "$([ "${twin_ps:-0}" -ge 80 ] && [ "${twin_sh:-0}" -ge 30 ] && echo 1 || echo 0)" \
+    "$([ "${twin_ps:-0}" -ge 95 ] && [ "${twin_sh:-0}" -ge 80 ] && echo 1 || echo 0)" \
     "ps1=$twin_ps sh=$twin_sh -- a count below the floor means the parser broke, not that coverage improved"
 
 # Read separately from the loop above, so a table the awk cannot see is named
 # as such instead of surfacing as an unexplained jump in the gap.
 assert_true "the twin-coverage parser reads the shared case table" \
-    "$([ "${twin_tsv:-0}" -ge 17 ] && echo 1 || echo 0)" \
-    "rows seen by awk: $twin_tsv (floor 17 -- a zero here means the table moved, not that it emptied)"
+    "$([ "${twin_tsv:-0}" -ge 47 ] && echo 1 || echo 0)" \
+    "rows seen by awk: $twin_tsv (floor 47 -- a zero here means the table moved, not that it emptied)"
 
 assert_true "the block-dangerous coverage gap between dialects does not widen" \
-    "$([ "${twin_gap:-999}" -le 47 ] && echo 1 || echo 0)" \
-    "cases only in test-hooks.ps1: $twin_gap (ceiling 47 -- lower it as you close the gap, never raise it)"
+    "$([ "${twin_gap:-999}" -le 19 ] && echo 1 || echo 0)" \
+    "cases only in test-hooks.ps1: $twin_gap (ceiling 19 -- lower it as you close the gap, never raise it)"
 
 # A task is a second way to execute a command line. The gate used to match
 # `createAndRunTask`, a name VS Code never sends, and `run_task` was not
@@ -2390,11 +2402,9 @@ assert_true "the block-dangerous coverage gap between dialects does not widen" \
 
 echo "## block-dangerous.sh task launches"
 
-# The tool name VS Code actually sends for task creation.
-run_case "create_and_run_task: force push is denied (real tool name)" \
-    block-dangerous.sh agent/x \
-    '{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"push","type":"shell","command":"git","args":["push","--force","origin","main"]},"workspaceFolder":"/repo"}}' \
-    deny
+# Task creation now runs from block-dangerous.cases.tsv, under both the real
+# tool name and the legacy one. Only execution stays here: run_task needs a
+# tasks.json fixture, which the table has no field for.
 
 # Under Git Bash the hook's Python is a Windows interpreter, which cannot
 # resolve a /tmp-style path. Handing it the native spelling keeps the fixture
