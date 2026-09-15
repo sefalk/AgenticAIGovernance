@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The whole task-launch family is now shared; the coverage gap is 47 → 19
+  (#280, third batch).** All 30 `create_and_run_task` cases moved out of
+  `test-hooks.ps1` and into `block-dangerous.cases.tsv`, so the tiers that
+  matter most about tasks — an OS-specific scope overriding `command`,
+  `options.shell` carrying its own arguments, shell metacharacters surviving
+  in a single command string, substitution variables, and `runOn: folderOpen`
+  — are now proved in both dialects instead of one. Measured before the move:
+  both hooks reach the same verdict on all 30. Measured as well, because 27 of
+  the 30 name the tool `createAndRunTask`, which VS Code never sends: both
+  hooks treat that legacy spelling exactly like the real `create_and_run_task`,
+  27 payloads compared per dialect with no difference, so the legacy rows are a
+  regression guard rather than a second code path. Only `run_task` stays
+  inline, because resolving a task id needs a `tasks.json` fixture and the
+  table has no field for one.
+
 - **The shared hook case table now covers deferrals too; the coverage gap is
   52 → 47 (#280, second batch).** Four dialect-neutral deferrals and the
   non-terminal-tool case moved out of `test-hooks.ps1` and into
@@ -114,6 +129,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   left them testing something else.
 
 ### Fixed
+
+- **The twin-coverage ratchet could not see a case whose name was written in
+  single quotes (#280).** Its parser matched only the double-quoted form, so
+  such a case was invisible to the count rather than visible and uncovered —
+  the gap could be understated by writing a name the other way, and one case
+  had been sitting outside the counts. The parser now reads either quoting
+  style in both dialects. Its floors rose from 80/30 to 95/80 at the same
+  time: at 98 and 83 actual, a parser that silently lost half its cases would
+  still have cleared the old floors, which is the failure the floors exist to
+  catch.
 
 - **`skills/INDEX.md` shipped with an empty table, and the ADO rule to set a
   work item `Active` was unfollowable as written (#112).** The index carried a
