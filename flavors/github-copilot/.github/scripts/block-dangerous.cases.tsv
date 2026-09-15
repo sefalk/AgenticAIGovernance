@@ -90,3 +90,18 @@ createAndRunTask: workspace-folder path variable allows	agent/fixture	allow	{"to
 create_and_run_task: force push is denied (real tool name)	agent/fixture	deny	{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"push","type":"shell","command":"git","args":["push","--force","origin","main"]},"workspaceFolder":"/repo"}}
 create_and_run_task: bare binary is denied (real tool name)	agent/fixture	deny	{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"lint","type":"shell","command":"ruff","args":["check","src/"]},"workspaceFolder":"/repo"}}
 create_and_run_task: reviewed script allows (real tool name)	agent/fixture	allow	{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"test","type":"shell","command":".github/scripts/run-tests.ps1","args":["-Scope","domain"]},"workspaceFolder":"/repo"}}
+
+# Cases below were held inline in the PowerShell suite until #280 measured
+# the bash hook against them: all nine reach the identical verdict. Four use
+# PowerShell cmdlets (Remove-Item, Copy-Item) or PowerShell syntax (the call
+# operator, Start-Process). That never mattered -- the hook classifies the
+# command line as text and does not have to be able to run it.
+powershell -Command payload is scanned	agent/fixture	deny	{"tool_name":"runInTerminal","tool_input":{"command":"powershell -Command \"Remove-Item ./build -Recurse -Force\""}}
+Start-Process -ArgumentList payload is scanned	agent/fixture	deny	{"tool_name":"runInTerminal","tool_input":{"command":"Start-Process powershell -ArgumentList \"Remove-Item ./build -Recurse -Force\""}}
+single-file delete asks by default (FS_WRITE opt-in)	agent/fixture	ask	{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}
+recursive (no force) delete asks	agent/fixture	ask	{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./build -Recurse"}}
+copying a file defers to the native assessment	agent/fixture	silent	{"tool_name":"runInTerminal","tool_input":{"command":"Copy-Item a.txt b.txt"}}
+a deferred rule does not silence a retained one in the same command	agent/fixture	ask	{"tool_name":"runInTerminal","tool_input":{"command":"mkdir build; Remove-Item ./scratch.tmp"}}
+a command containing quotes still produces parsable JSON	agent/fixture	ask	{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item \"C:\\tmp\\a b\\file.txt\""}}
+a task command with backslashes and quotes still produces parsable JSON	agent/fixture	deny	{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"x","type":"shell","command":"C:\\evil\\run \"it\".ps1"},"workspaceFolder":"/repo"}}
+pip show via call operator is safe	agent/fixture	allow	{"tool_name":"runInTerminal","tool_input":{"command":"& \".venv/Scripts/python.exe\" -m pip show ruff"}}

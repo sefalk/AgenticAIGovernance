@@ -2342,7 +2342,7 @@ run_case "DROP TABLE passed positionally is still denied" \
 
 # --- The two dialects are one policy, and the gap must not widen (#122) ----
 #
-# block-dangerous is covered 98 cases to 83. The bash suite grew issue by
+# block-dangerous is covered 98 cases to 92. The bash suite grew issue by
 # issue while the PowerShell one grew by tier, which is how the base deny tier
 # came to be executed in one twin only -- the nine cases above exist because of
 # that. Closing the remainder is separate work (#280). What must not happen
@@ -2382,18 +2382,18 @@ END { for (k in ps) if (!(k in sh)) g++; printf "%d %d %d %d", nps+0, nsh+0, g+0
 read twin_ps twin_sh twin_gap twin_tsv <<< "$twin_counts"
 
 assert_true "the twin-coverage parser still recognises both dialects" \
-    "$([ "${twin_ps:-0}" -ge 95 ] && [ "${twin_sh:-0}" -ge 80 ] && echo 1 || echo 0)" \
+    "$([ "${twin_ps:-0}" -ge 95 ] && [ "${twin_sh:-0}" -ge 90 ] && echo 1 || echo 0)" \
     "ps1=$twin_ps sh=$twin_sh -- a count below the floor means the parser broke, not that coverage improved"
 
 # Read separately from the loop above, so a table the awk cannot see is named
 # as such instead of surfacing as an unexplained jump in the gap.
 assert_true "the twin-coverage parser reads the shared case table" \
-    "$([ "${twin_tsv:-0}" -ge 47 ] && echo 1 || echo 0)" \
-    "rows seen by awk: $twin_tsv (floor 47 -- a zero here means the table moved, not that it emptied)"
+    "$([ "${twin_tsv:-0}" -ge 56 ] && echo 1 || echo 0)" \
+    "rows seen by awk: $twin_tsv (floor 56 -- a zero here means the table moved, not that it emptied)"
 
 assert_true "the block-dangerous coverage gap between dialects does not widen" \
-    "$([ "${twin_gap:-999}" -le 19 ] && echo 1 || echo 0)" \
-    "cases only in test-hooks.ps1: $twin_gap (ceiling 19 -- lower it as you close the gap, never raise it)"
+    "$([ "${twin_gap:-999}" -le 10 ] && echo 1 || echo 0)" \
+    "cases only in test-hooks.ps1: $twin_gap (ceiling 10 -- lower it as you close the gap, never raise it)"
 
 # A task is a second way to execute a command line. The gate used to match
 # `createAndRunTask`, a name VS Code never sends, and `run_task` was not

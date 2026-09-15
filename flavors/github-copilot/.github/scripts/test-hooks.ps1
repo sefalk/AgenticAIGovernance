@@ -873,17 +873,9 @@ Assert-Deny "bash -c payload is scanned" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"bash -c \"rm -rf /tmp/data\""}}'
 
-Assert-Deny "powershell -Command payload is scanned" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"powershell -Command \"Remove-Item ./build -Recurse -Force\""}}'
-
 Assert-Deny "Invoke-Expression payload is scanned" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"Invoke-Expression \"rm -rf /tmp/data\""}}'
-
-Assert-Deny "Start-Process -ArgumentList payload is scanned" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"Start-Process powershell -ArgumentList \"Remove-Item ./build -Recurse -Force\""}}'
 
 # Quotes stop protecting data the moment the shell interpolates inside them.
 Assert-Deny "subexpression inside a commit message is still executed" `
@@ -937,14 +929,8 @@ Assert-Deny "DROP TABLE passed positionally is still denied" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"sqlite3 app.db \"DROP TABLE users\""}}'
 
 # ── ASK: durable change, confirm (balanced defaults) ─────────────────────
-Assert-Ask "single-file delete asks by default (FS_WRITE opt-in)" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}'
-
-Assert-Ask "recursive (no force) delete asks" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./build -Recurse"}}'
-
+# The two delete-ask cases now run from block-dangerous.cases.tsv, which
+# holds the bash hook to them too.
 # ── ASK reasons are specific and echo the command (issue #78) ────────────
 # One sentence shared by eleven rules told the human neither what fired nor
 # what it fired on, while the deny tier next door has always been specific.
@@ -985,13 +971,11 @@ Assert-True "two different ask rules give two different reasons" `
 # Silence here is deferral, not approval: Assert-Silent asserts '{}', which
 # hands the decision to the user's approval settings -- it never asserts allow.
 #
-# The four dialect-neutral deferrals below now run from
-# block-dangerous.cases.tsv, against both hooks. Copy-Item stays here: it is a
-# PowerShell cmdlet, so a bash run of it would assert nothing about bash.
-
-Assert-Silent "copying a file defers to the native assessment" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"Copy-Item a.txt b.txt"}}'
+# The deferrals below now run from block-dangerous.cases.tsv, against both
+# hooks -- Copy-Item included. It was held back here on the reasoning that a
+# cmdlet could say nothing about bash; measured (#280), the bash hook defers
+# on the identical string. The hook classifies a command line, so being able
+# to run the command was never what decided whether a case could be shared.
 
 # What we keep, and why we keep it. Deletion is the one durable change whose
 # consequence git cannot undo, so it stays ours regardless of who asks better;
@@ -1006,10 +990,6 @@ Assert-Silent "copying a file defers to the native assessment" `
 
 # A deferred rule must not consume the command: the retained rule next to it
 # still has to fire.
-Assert-Ask "a deferred rule does not silence a retained one in the same command" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"mkdir build; Remove-Item ./scratch.tmp"}}'
-
 # The two harnesses must retain the same rules. A rule kept in one and handed
 # back in the other is a confirmation that appears on one platform only.
 $bdPs1Text = Get-Content (Join-Path $scriptDir 'block-dangerous.ps1') -Raw
@@ -1023,16 +1003,8 @@ Assert-True "both harnesses retain the same number of ask rules" `
     "ps1 has $psAskCount ask rules, sh has $shAskCount"
 
 # A reason carrying the command line carries the command's quotes with it.
-Assert-Ask "a command containing quotes still produces parsable JSON" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item \"C:\\tmp\\a b\\file.txt\""}}'
-
 # The task branch quotes the offending task command back into its deny reason,
 # and a task command is a path -- on Windows a backslash path.
-Assert-Deny "a task command with backslashes and quotes still produces parsable JSON" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"x","type":"shell","command":"C:\\evil\\run \"it\".ps1"},"workspaceFolder":"/repo"}}'
-
 # ── The policy is stated, not inherited (issue #108) ─────────────────────
 #
 # The cases above say "by default" and mean the declared default policy set at
@@ -1126,8 +1098,8 @@ foreach ($line in (Get-Content -LiteralPath $sharedCasesPath)) {
 # A table that failed to load is not zero failures, it is zero questions asked.
 # Without this the suite would still print 'All tests passed'.
 Assert-True "the shared block-dangerous case table was read" `
-    ($sharedCases.Count -ge 47) `
-    "rows parsed: $($sharedCases.Count) from $sharedCasesPath (floor 47 -- raise it as the table grows, never lower it)"
+    ($sharedCases.Count -ge 56) `
+    "rows parsed: $($sharedCases.Count) from $sharedCasesPath (floor 56 -- raise it as the table grows, never lower it)"
 
 foreach ($case in $sharedCases) {
     Assert-Decision -TestName $case[0] -Expected $case[2] -Script 'block-dangerous.ps1' `
@@ -1135,13 +1107,10 @@ foreach ($case in $sharedCases) {
 }
 
 # ── ALLOW: safe under balanced defaults (PowerShell-specific) ────────────
-# Improvement: pip show via call-operator + quoted python path is read-only.
-# Stays here rather than in the shared table: the call operator is PowerShell
-# syntax, so there is no equivalent command for the bash hook to judge.
-Assert-Allow "pip show via call operator is safe" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"& \".venv/Scripts/python.exe\" -m pip show ruff"}}'
-
+# pip show via call-operator + quoted python path is read-only. It now runs
+# from block-dangerous.cases.tsv: the call operator is PowerShell syntax, but
+# the hook reads the line as text, and measured (#280) the bash hook allows
+# the same string.
 # ── task launches: the create_and_run_task shape ──────────────────
 # These 30 cases now run from block-dangerous.cases.tsv, against both hooks.
 # Measured before the move (#280): both hooks reach the same verdict on all 30,
