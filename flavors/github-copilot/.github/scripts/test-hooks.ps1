@@ -2990,6 +2990,50 @@ foreach ($pair in @(
 
 Write-Output ""
 
+# ── 6b-ter. Stop-hook loop guard (issue #298) ────────────────────────────
+
+Write-Output "## stop-hook loop guard (issue #298)"
+
+# implementer-stop.ps1:42 described a loop guard in a comment for a year and no
+# code implemented it, while 31 blocking sites across four stop hooks ran
+# unguarded. A hook that blocks on a condition the forced retry does not clear
+# blocks that retry on the same condition.
+Assert-True "_common.ps1 exposes the stop-hook loop guard" `
+    ($retCommonPs -match 'function Invoke-AfStopLoopGuard') "no Invoke-AfStopLoopGuard wrapper"
+Assert-True "_common.sh exposes the stop-hook loop guard" `
+    ($retCommonSh -match 'af_stop_loop_guard\(\)') "no af_stop_loop_guard wrapper"
+
+# Position is the property, not presence: a block emitted above the call is
+# unguarded however correct the helper is. The floor is the other half -- a loop
+# is also "fixed" by deleting the gates, and that has to fail too.
+$blockSite = 'decision\\?"?\s*[:=]\s*\\?"block'
+foreach ($g in @(
+        @{ n = 'implementer-stop.ps1'; floor = 12 }, @{ n = 'implementer-stop.sh'; floor = 12 },
+        @{ n = 'refactorer-stop.ps1';  floor = 13 }, @{ n = 'refactorer-stop.sh';  floor = 13 },
+        @{ n = 'test-writer-stop.ps1'; floor = 4 },  @{ n = 'test-writer-stop.sh'; floor = 4 },
+        @{ n = 'documenter-stop.ps1';  floor = 2 },  @{ n = 'documenter-stop.sh';  floor = 2 })) {
+    $gCall = if ($g.n -like '*.ps1') { 'Invoke-AfStopLoopGuard' } else { 'af_stop_loop_guard' }
+    $gLines = @(Get-Content (Join-Path $scriptDir $g.n) -ErrorAction SilentlyContinue)
+    $callAt = -1; $blockAt = -1; $blockCount = 0
+    for ($i = 0; $i -lt $gLines.Count; $i++) {
+        if ($gLines[$i] -match '^\s*#') { continue }
+        if ($callAt -lt 0 -and $gLines[$i] -match $gCall) { $callAt = $i }
+        if ($gLines[$i] -match $blockSite) {
+            if ($blockAt -lt 0) { $blockAt = $i }
+            $blockCount++
+        }
+    }
+    Assert-True "$($g.n) calls the loop guard" ($callAt -ge 0) `
+        "every blocking site in it is unguarded"
+    Assert-True "$($g.n) reaches the loop guard before it can block" `
+        ($callAt -ge 0 -and $blockAt -ge 0 -and $callAt -lt $blockAt) `
+        "guard at line $($callAt + 1), first block at line $($blockAt + 1)"
+    Assert-True "$($g.n) still carries its gates" ($blockCount -ge $g.floor) `
+        "$blockCount blocking sites, floor is $($g.floor) -- a loop must not be fixed by removing gates"
+}
+
+Write-Output ""
+
 # ── 6c-bis. Undeclared repo-root creations (issue #123, direction 3) ─────
 
 Write-Output "## undeclared repo-root creations (issue #123)"
