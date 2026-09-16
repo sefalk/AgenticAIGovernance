@@ -147,6 +147,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stop hooks blocked with no loop guard, and the only mention of one was a
+  comment describing code that did not exist (#298).** `stop_hook_active`
+  appeared exactly four times in the payload, all of them in prose; no line
+  ever read the value, while 31 blocking sites across the four stop hooks and
+  their bash twins ran unguarded. A hook that blocks demands a retry, the
+  editor re-invokes it on that retry with `stop_hook_active: true`, and the
+  same unchanged tree earns the same block — the gate refuses the attempt it
+  asked for. The guard now lives once per dialect, in `_common.ps1` and
+  `_common.sh`, and every stop hook calls it directly after reading stdin. It
+  returns control rather than blocking, and says which gates it skipped: a
+  silent pass cannot be told apart from a gate that ran and found nothing. An
+  absent or unreadable field does **not** guard — only a single explicit `true`
+  does, because a loop is a cost while an unenforced gate is a defect. The
+  watchdog is positional, not textual: the suites assert that the guard call
+  precedes the first blocking site in each of the eight hooks, so a new gate
+  added above it fails rather than shipping unguarded, and a per-hook floor on
+  the number of blocking sites means a loop cannot be "fixed" by deleting the
+  gates instead.
+
 - **The twin-coverage ratchet could not see a case whose name was written in
   single quotes (#280).** Its parser matched only the double-quoted form, so
   such a case was invisible to the count rather than visible and uncovered —
