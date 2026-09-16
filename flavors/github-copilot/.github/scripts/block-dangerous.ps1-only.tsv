@@ -1,0 +1,49 @@
+# Cases that run in the PowerShell suite only, and why (#280).
+#
+# Read by test-hooks.sh alongside block-dangerous.cases.tsv. A case named here
+# counts as accounted for: it is not covered in both dialects, but it is not
+# forgotten either. The ratchet then has two numbers instead of one -- cases
+# with no counterpart, and cases with no counterpart and no reason.
+#
+# Format, tab-separated, three fields:
+#   name <TAB> kind <TAB> reason
+# The name must match the case name in test-hooks.ps1 exactly. Lines starting
+# with '#' and blank lines are ignored.
+#
+# Recognised kinds -- an excuse has to fit a shape someone can argue with:
+#   policy       the case runs under a declared policy (Set-Policy), and the
+#                shared table has no field for one, so a row could only ever
+#                assert the default
+#   reason-text  the case asserts the wording of the hook's reason, and the
+#                shared table records a verdict with no expected-reason field
+#   harness      the assertion is not "one payload, one verdict" at all
+#
+# Saying why not has to cost something, or it becomes the cheaper option.
+# Five guards in test-hooks.sh keep this file honest:
+#   1. the name must exist as a real case in test-hooks.ps1, so the gap cannot
+#      be closed by excusing cases nobody wrote;
+#   2. the kind must be one of the three above;
+#   3. the reason must actually say something, so "n/a" cannot stand in;
+#   4. a reason for a case the shared table already covers is stale and fails,
+#      so a migration cannot leave its excuse behind;
+#   5. the number of rows here has its own ceiling, so adding one is a visible,
+#      deliberate edit and never a way to quiet a failing ratchet.
+#
+# Notably absent is a "PowerShell-only syntax" kind. Every case that once
+# claimed it -- Remove-Item, Copy-Item, Start-Process, the call operator --
+# was measured against the bash hook in #280, and it reached the identical
+# verdict on all nine. The hook classifies a command line as text; being able
+# to run the command was never what decided whether a case could be shared.
+# If you are about to add a row here because the command is PowerShell, that
+# measurement says you are about to add it to the wrong file.
+
+a delete is approved under a declared FS_WRITE=auto	policy	Runs under Set-Policy AUTONOMY_CAT_FS_WRITE=auto; the shared table has no field for a declared policy, so a row could only assert the default ask.
+a declared FS_WRITE=auto still cannot lift a hard-deny	policy	The point is that an opt-in does not reach the deny tier, which only a declared policy can express; the shared table has no field for a declared policy.
+the same delete asks again once the opt-in is withdrawn	policy	Asserts the effect of withdrawing an opt-in, so it depends on two policy states in order; a row carries neither.
+a Databricks job submit is approved under a declared DATABRICKS=auto	policy	Runs under Set-Policy AUTONOMY_CAT_DATABRICKS=auto; the shared table has no field for a declared policy.
+a declared DATABRICKS=deny denies what the shipped config never denies	policy	Asserts a verdict the shipped configuration never produces, so the declared policy is the case; the shared table has no field for a declared policy.
+delete ask names the deleting command	reason-text	Assert-AskReason matches the hook's reason against a regex; the table records a verdict and has no reason field.
+delete ask echoes the command it is asking about	reason-text	Assert-AskReason matches the hook's reason against a regex; the table records a verdict and has no reason field.
+tag ask explains that others may rely on the marker	reason-text	Assert-AskReason matches the hook's reason against a regex; the table records a verdict and has no reason field.
+cloud ask explains that the effect leaves the repository	reason-text	Assert-AskReason matches the hook's reason against a regex; the table records a verdict and has no reason field.
+two different ask rules give two different reasons	harness	Compares two hook outputs with each other instead of judging one payload; the table's shape is one payload, one verdict.

@@ -2342,7 +2342,7 @@ run_case "DROP TABLE passed positionally is still denied" \
 
 # --- The two dialects are one policy, and the gap must not widen (#122) ----
 #
-# block-dangerous is covered 98 cases to 83. The bash suite grew issue by
+# block-dangerous is covered 98 cases to 92. The bash suite grew issue by
 # issue while the PowerShell one grew by tier, which is how the base deny tier
 # came to be executed in one twin only -- the nine cases above exist because of
 # that. Closing the remainder is separate work (#280). What must not happen
@@ -2372,28 +2372,68 @@ function unquote(n,   q, i) {
     i = index(n, q)
     return (i < 2) ? "" : substr(n, 1, i - 1)
 }
-FILENAME ~ /\.tsv$/ { if ($0 ~ /^[ \t]*#/ || $0 ~ /^[ \t]*$/) next; split($0, f, "\t"); if (f[1] == "") next; ps[f[1]]=1; sh[f[1]]=1; nps++; nsh++; ntsv++; next }
+FILENAME ~ /cases\.tsv$/ { if ($0 ~ /^[ \t]*#/ || $0 ~ /^[ \t]*$/) next; split($0, f, "\t"); if (f[1] == "") next; ps[f[1]]=1; sh[f[1]]=1; tsvname[f[1]]=1; nps++; nsh++; ntsv++; next }
+FILENAME ~ /ps1-only\.tsv$/ { if ($0 ~ /^[ \t]*#/ || $0 ~ /^[ \t]*$/) next; split($0, f, "\t"); if (f[1] == "") next; why[f[1]]=1; nwhy++; if (f[2] != "policy" && f[2] != "reason-text" && f[2] != "harness") weak++; else if (length(f[3]) < 30) weak++; next }
 FILENAME ~ /\.ps1$/ && /^Assert-[A-Za-z]+[ \t]+/ { n=$0; sub(/^Assert-[A-Za-z]+[ \t]+/,"",n); n=unquote(n); if (n != "") { p=n; next } }
-FILENAME ~ /\.ps1$/ && p != "" { if ($0 ~ /block-dangerous\.ps1/) { ps[p]=1; nps++ } p=""; next }
+FILENAME ~ /\.ps1$/ && p != "" { if ($0 ~ /block-dangerous\.ps1/) { ps[p]=1; psfile[p]=1; nps++ } p=""; next }
 FILENAME ~ /\.sh$/ && /^run_case[ \t]+/ { n=$0; sub(/^run_case[ \t]+/,"",n); n=unquote(n); if (n != "") { s=n; next } }
 FILENAME ~ /\.sh$/ && s != "" { if ($0 ~ /block-dangerous\.sh/) { sh[s]=1; nsh++ } s=""; next }
-END { for (k in ps) if (!(k in sh)) g++; printf "%d %d %d %d", nps+0, nsh+0, g+0, ntsv+0 }
-' "$SCRIPT_DIR/block-dangerous.cases.tsv" "$SCRIPT_DIR/test-hooks.ps1" "$SCRIPT_DIR/test-hooks.sh")
-read twin_ps twin_sh twin_gap twin_tsv <<< "$twin_counts"
+END {
+    for (k in ps) if (!(k in sh)) { g++; if (!(k in why)) u++ }
+    for (k in why) { if (!(k in psfile)) orph++; if (k in tsvname) stale++ }
+    printf "%d %d %d %d %d %d %d %d %d", nps+0, nsh+0, g+0, u+0, ntsv+0, nwhy+0, orph+0, stale+0, weak+0
+}
+' "$SCRIPT_DIR/block-dangerous.cases.tsv" "$SCRIPT_DIR/block-dangerous.ps1-only.tsv" \
+    "$SCRIPT_DIR/test-hooks.ps1" "$SCRIPT_DIR/test-hooks.sh")
+read twin_ps twin_sh twin_gap twin_unacc twin_tsv twin_why twin_orph twin_stale twin_weak <<< "$twin_counts"
 
 assert_true "the twin-coverage parser still recognises both dialects" \
-    "$([ "${twin_ps:-0}" -ge 95 ] && [ "${twin_sh:-0}" -ge 80 ] && echo 1 || echo 0)" \
+    "$([ "${twin_ps:-0}" -ge 95 ] && [ "${twin_sh:-0}" -ge 90 ] && echo 1 || echo 0)" \
     "ps1=$twin_ps sh=$twin_sh -- a count below the floor means the parser broke, not that coverage improved"
 
 # Read separately from the loop above, so a table the awk cannot see is named
 # as such instead of surfacing as an unexplained jump in the gap.
 assert_true "the twin-coverage parser reads the shared case table" \
-    "$([ "${twin_tsv:-0}" -ge 47 ] && echo 1 || echo 0)" \
-    "rows seen by awk: $twin_tsv (floor 47 -- a zero here means the table moved, not that it emptied)"
+    "$([ "${twin_tsv:-0}" -ge 56 ] && echo 1 || echo 0)" \
+    "rows seen by awk: $twin_tsv (floor 56 -- a zero here means the table moved, not that it emptied)"
 
 assert_true "the block-dangerous coverage gap between dialects does not widen" \
-    "$([ "${twin_gap:-999}" -le 19 ] && echo 1 || echo 0)" \
-    "cases only in test-hooks.ps1: $twin_gap (ceiling 19 -- lower it as you close the gap, never raise it)"
+    "$([ "${twin_gap:-999}" -le 10 ] && echo 1 || echo 0)" \
+    "cases only in test-hooks.ps1: $twin_gap (ceiling 10 -- lower it as you close the gap, never raise it)"
+
+# --- A case that cannot be shared is recorded, not forgotten (#280) --------
+#
+# "Every case runs in both dialects or says why not" is worth something only if
+# saying why not costs something. block-dangerous.ps1-only.tsv carries the
+# reasons; the five assertions below are what stop it becoming the cheaper
+# option. The gap above stays as it was -- cases with no counterpart -- and the
+# number that must reach zero is the one below it: cases with no counterpart
+# and no reason either.
+
+assert_true "every uncovered case either has a counterpart or says why not" \
+    "$([ "${twin_unacc:-999}" -le 0 ] && echo 1 || echo 0)" \
+    "uncovered and unexplained: $twin_unacc (ceiling 0 -- share the case or record the reason)"
+
+# A reason is capped, so writing one is a deliberate edit in a visible diff and
+# never a way to quiet a failing ratchet.
+assert_true "recorded reasons stay rare" \
+    "$([ "${twin_why:-999}" -le 10 ] && echo 1 || echo 0)" \
+    "rows in block-dangerous.ps1-only.tsv: $twin_why (ceiling 10 -- lower it as cases migrate, raise it only on purpose)"
+
+# Without this, the gap could be closed by excusing cases nobody ever wrote.
+assert_true "every recorded reason names a case that exists" \
+    "$([ "${twin_orph:-999}" -le 0 ] && echo 1 || echo 0)" \
+    "reasons naming no PowerShell case: $twin_orph (a typo in the name reads as an excuse)"
+
+# And a migration must not leave its excuse behind to rot.
+assert_true "no reason is recorded for a case the shared table already covers" \
+    "$([ "${twin_stale:-999}" -le 0 ] && echo 1 || echo 0)" \
+    "stale reasons: $twin_stale (the case moved to the table -- delete its row here)"
+
+# "n/a" is not a reason, and neither is a kind nobody recognises.
+assert_true "every recorded reason states a recognised kind and says something" \
+    "$([ "${twin_weak:-999}" -le 0 ] && echo 1 || echo 0)" \
+    "rows with an unknown kind or a reason under 30 characters: $twin_weak"
 
 # A task is a second way to execute a command line. The gate used to match
 # `createAndRunTask`, a name VS Code never sends, and `run_task` was not

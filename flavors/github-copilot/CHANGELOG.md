@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The last nine block-dangerous cases that could be shared now run from
+  `block-dangerous.cases.tsv`, and the coverage gap is 19 → 10 (#280, fourth
+  batch). Four were held back on the reasoning that `Remove-Item`, `Copy-Item`,
+  `Start-Process` and the call operator are PowerShell, so a bash run of them
+  would say nothing about bash. Measured, the bash hook reaches the identical
+  verdict on all nine: the hook classifies a command line as text and never has
+  to be able to run it.
+- A case that cannot be shared is now recorded rather than only counted.
+  `block-dangerous.ps1-only.tsv` gives each of the remaining ten a kind and a
+  reason, so the ratchet has two numbers: cases with no counterpart, and cases
+  with no counterpart and no reason — the second is now zero and capped there.
+  Saying why not has to cost something, so five guards apply: the name must
+  match a real case in `test-hooks.ps1`, the kind must be one of three
+  recognised ones, the reason must actually say something, a reason left behind
+  for a case the table already covers fails as stale, and the number of reasons
+  carries its own ceiling. There is deliberately no "PowerShell syntax" kind:
+  every case that once claimed it was measured and shared instead (#280).
 - **The whole task-launch family is now shared; the coverage gap is 47 → 19
   (#280, third batch).** All 30 `create_and_run_task` cases moved out of
   `test-hooks.ps1` and into `block-dangerous.cases.tsv`, so the tiers that
