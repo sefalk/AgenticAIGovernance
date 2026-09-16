@@ -503,3 +503,53 @@ function Get-AfUndeclaredScratch {
 
     return @($out | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })
 }
+
+# ---------------------------------------------------------------------------
+# Stop-hook loop guard (issue #298)
+#
+# A blocking stop hook forces the agent to try again, and the editor re-invokes
+# the hook on that attempt with `stop_hook_active: true` in the input. Nothing
+# read that field: implementer-stop.ps1 carried a comment describing this guard
+# while 31 blocking sites across four stop hooks ran without one, so a gate the
+# retry cannot clear blocks the very retry it demanded.
+#
+# Read the field the way af_tool_name_from_json reads its own: by string
+# surgery, not by parsing. Here the argument is stronger than there, because the
+# value is a JSON boolean literal -- `true` or `false`, never a string -- so no
+# escape, quote or nesting can appear inside it. Parsing properly would mean an
+# interpreter, and making Python a hard dependency of every stop hook is the
+# defect #168 is already open about.
+function Test-AfStopHookActive {
+    param([string]$StdinRaw)
+    if (-not $StdinRaw) { return $false }
+    $hits = [regex]::Matches($StdinRaw, '"stop_hook_active"\s*:\s*(true|false)')
+    # Two occurrences mean a nested object carries the key as well, and this
+    # cannot say which one the editor meant. Report unreadable rather than
+    # guess -- the rule af_tool_name_from_json already follows.
+    if ($hits.Count -ne 1) { return $false }
+    return ($hits[0].Groups[1].Value -eq 'true')
+}
+
+# Returns control to the agent when a stop hook is already active, otherwise
+# returns normally so the caller's gates run. Same contract as af_require_python
+# on the bash side: the happy path is a plain return, the unhappy path emits the
+# verdict and exits.
+#
+# Two decisions worth stating, because neither is obvious:
+#
+#   * It speaks. A silent pass is indistinguishable from a gate that ran and
+#     found nothing, and the only thing worse than a skipped gate is a skipped
+#     gate nobody can see.
+#   * An unreadable or absent field does NOT guard. The gates run exactly as
+#     they do today. A loop is a cost; an unenforced gate is a defect, and the
+#     rule here is to fail rather than pass on an unanswered question. Only a
+#     single, explicit `true` turns the gates off.
+function Invoke-AfStopLoopGuard {
+    param([string]$StdinRaw, [string]$Agent, [string]$Gates)
+    if (-not (Test-AfStopHookActive $StdinRaw)) { return }
+    $output = @{
+        systemMessage = "${Agent}:Stop -- gates NOT run: the input carries stop_hook_active true, so this is a re-invocation after a block and blocking again would loop. Skipped: $Gates. The verdict from the previous invocation stands -- act on it."
+    } | ConvertTo-Json -Compress
+    Write-Output $output
+    exit 0
+}

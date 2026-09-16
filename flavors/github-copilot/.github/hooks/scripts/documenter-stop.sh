@@ -28,6 +28,10 @@ set -uo pipefail
 # (measured 2026-08-03), so no session has to be guessed.
 stdin_raw=$(cat)
 
+# The artifact gates below block, and re-running them on an unchanged tree
+# reaches the same verdict (issue #298).
+af_stop_loop_guard "$stdin_raw" documenter 'workflow artifacts, retro'
+
 # Derive workflow-id from current branch
 branch=$(git branch --show-current 2>/dev/null || echo "")
 if [[ ! "$branch" =~ ^agent/(.+)$ ]]; then

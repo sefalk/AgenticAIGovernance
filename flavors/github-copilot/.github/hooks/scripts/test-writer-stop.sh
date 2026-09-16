@@ -22,6 +22,9 @@ set -uo pipefail
 # Read stdin (hook input JSON — required by protocol, and Gate 0 needs it)
 stdin_raw=$(cat)
 
+# Before Gate 0, because Gate 0 blocks too (issue #298).
+af_stop_loop_guard "$stdin_raw" test-writer 'undeclared root files, red phase, provenance, no production code'
+
 # ---------- Gate 0: no undeclared files at the repository root (#123) ----------
 #
 # Runs before the Red gate on purpose. Every gate below returns early when

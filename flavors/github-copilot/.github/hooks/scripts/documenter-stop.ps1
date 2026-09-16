@@ -28,6 +28,11 @@ $ErrorActionPreference = 'SilentlyContinue'
 # (measured 2026-08-03), so no session has to be guessed.
 $stdinRaw = [Console]::In.ReadToEnd()
 
+# The artifact gates below block, and re-running them on an unchanged tree
+# reaches the same verdict (issue #298).
+Invoke-AfStopLoopGuard -StdinRaw $stdinRaw -Agent 'documenter' `
+    -Gates 'workflow artifacts, retro'
+
 # Derive workflow-id from current branch
 $branch = & git branch --show-current 2>$null
 if (-not $branch -or $branch -notmatch '^agent/(.+)$') {

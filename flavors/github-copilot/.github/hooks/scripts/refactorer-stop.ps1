@@ -30,6 +30,11 @@ $BASE_BRANCH = Get-AfConfig -Key 'BASE_BRANCH' -Default ''
 # Read stdin (hook input JSON -- required by protocol)
 $stdinRaw = [Console]::In.ReadToEnd()
 
+# Thirteen blocking sites below, none of which a forced retry can clear on its
+# own. The guard runs before the first of them (issue #298).
+Invoke-AfStopLoopGuard -StdinRaw $stdinRaw -Agent 'refactorer' `
+    -Gates 'tests, behaviour preservation, provenance, python quality, ignore hygiene, linting'
+
 # ---------- Gate 1: All tests must pass ----------
 # A missing test runner disables THIS gate only. Gates 2-5 need neither pytest
 # nor a tests/ directory, and exiting here used to take them down too (#12).

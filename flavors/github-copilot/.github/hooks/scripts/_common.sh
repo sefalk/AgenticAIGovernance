@@ -601,3 +601,55 @@ af_strip_lines() {
     fi
     printf '%s\n' "$_sl_list" | grep -vxF "$_sl_drop" || true
 }
+
+# af_stop_hook_active RAW
+#
+# Returns 0 when the hook input carries exactly one `stop_hook_active` set to
+# `true`, 1 in every other case -- absent, false, unreadable.
+#
+# Read by string surgery, like af_tool_name_from_json, and for a stronger
+# reason than there: the value is a JSON boolean literal, `true` or `false`,
+# never a string, so no escape, quote or nesting can appear inside it. Parsing
+# properly would mean an interpreter, and making Python a hard dependency of
+# every stop hook is the defect #168 is already open about.
+#
+# Two occurrences mean a nested object carries the key as well, and this cannot
+# say which one the editor meant -- unreadable, not guessed at.
+af_stop_hook_active() {
+    _sha_hits=$(printf '%s' "${1:-}" | grep -o '"stop_hook_active"[[:space:]]*:[[:space:]]*\(true\|false\)' || true)
+    [ "$(printf '%s\n' "$_sha_hits" | grep -c .)" -eq 1 ] || return 1
+    case "$_sha_hits" in
+        *true) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# af_stop_loop_guard RAW AGENT GATES
+#
+# Returns control to the agent when a stop hook is already active, otherwise
+# returns normally so the caller's gates run. Same contract as
+# af_require_python: the happy path is a plain return, the unhappy path emits
+# the verdict and exits.
+#
+# A blocking stop hook forces the agent to try again, and the editor re-invokes
+# the hook on that attempt with `stop_hook_active: true`. Nothing read that
+# field: implementer-stop.ps1 carried a comment describing this guard while 31
+# blocking sites across four stop hooks ran without one, so a gate the retry
+# cannot clear blocks the very retry it demanded.
+#
+# Two decisions worth stating, because neither is obvious:
+#
+#   * It speaks. A silent pass is indistinguishable from a gate that ran and
+#     found nothing, and the only thing worse than a skipped gate is a skipped
+#     gate nobody can see.
+#   * An unreadable or absent field does NOT guard. The gates run exactly as
+#     they do today. A loop is a cost; an unenforced gate is a defect, and the
+#     rule here is to fail rather than pass on an unanswered question. Only a
+#     single, explicit `true` turns the gates off.
+#
+# AGENT and GATES must be plain literals, for af_deny_no_python's reason.
+af_stop_loop_guard() {
+    af_stop_hook_active "${1:-}" || return 0
+    printf '{"systemMessage":"%s:Stop -- gates NOT run: the input carries stop_hook_active true, so this is a re-invocation after a block and blocking again would loop. Skipped: %s. The verdict from the previous invocation stands -- act on it."}\n' "$2" "$3"
+    exit 0
+}

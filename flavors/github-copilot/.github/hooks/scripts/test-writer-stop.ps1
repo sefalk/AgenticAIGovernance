@@ -24,6 +24,10 @@ $mainRoot = $AfMainRoot
 # Read stdin (hook input JSON -- required by protocol, and Gate 0 needs it)
 $stdinRaw = [Console]::In.ReadToEnd()
 
+# Before Gate 0, because Gate 0 blocks too (issue #298).
+Invoke-AfStopLoopGuard -StdinRaw $stdinRaw -Agent 'test-writer' `
+    -Gates 'undeclared root files, red phase, provenance, no production code'
+
 # ---------- Gate 0: no undeclared files at the repository root (#123) ----------
 #
 # Runs before the Red gate on purpose. Every gate below returns early when

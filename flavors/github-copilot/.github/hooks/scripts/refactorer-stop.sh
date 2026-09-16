@@ -28,6 +28,10 @@ BASE_BRANCH=$(af_conf_get BASE_BRANCH '')
 # logs, which is how the gates below tell their own edits from a peer's (#101).
 stdin_raw=$(cat)
 
+# Thirteen blocking sites below, none of which a forced retry can clear on its
+# own. The guard runs before the first of them (issue #298).
+af_stop_loop_guard "$stdin_raw" refactorer 'tests, behaviour preservation, provenance, python quality, ignore hygiene, linting'
+
 # ---------- Gate 1: All tests must pass ----------
 # A missing test runner disables THIS gate only. Gates 2-5 need neither pytest
 # nor a tests/ directory, and exiting here used to take them down too (#12).
