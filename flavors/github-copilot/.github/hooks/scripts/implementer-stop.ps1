@@ -58,6 +58,13 @@ if (-not (Get-Command pytest -ErrorAction SilentlyContinue)) {
 # ---------- Test Log Freshness Check ----------
 # Accept last run if ALL tests passed AND no code changed since (committed or uncommitted).
 # No time limit — change detection is the criterion, not elapsed time.
+#
+# `partial` must be explicitly false, not merely absent. A narrowed run used to
+# be filed under the scope key it was narrowed from, so a handful of green
+# tests could close this gate on behalf of the whole suite (#303). Logs written
+# before that fix carry no `partial` field at all, and those are precisely the
+# entries that cannot be trusted -- so a missing field falls through to running
+# the suite, which costs one full run once and never reports a false green.
 $testLogPath = Join-Path $mainRoot '.github/test-log.json'
 $fromLog = $false
 if (-not $testGateSkipped -and (Test-Path $testLogPath)) {
@@ -65,7 +72,7 @@ if (-not $testGateSkipped -and (Test-Path $testLogPath)) {
         $log = Get-Content $testLogPath -Raw | ConvertFrom-Json
         $allEntry = $null
         if ($log.PSObject.Properties.Name -contains 'all') { $allEntry = $log.all }
-        if ($allEntry -and $allEntry.exit_code -eq 0 -and $allEntry.last_run) {
+        if ($allEntry -and $allEntry.exit_code -eq 0 -and $allEntry.last_run -and $allEntry.partial -eq $false) {
             $commitsSince = git -C $codeRoot log --oneline --after="$($allEntry.last_run)" -- "$SRC_DIR/" 'tests/' 2>$null
             $uncommitted = git -C $codeRoot diff --name-only HEAD -- "$SRC_DIR/" 'tests/' 2>$null
             if (-not $commitsSince -and -not $uncommitted) {

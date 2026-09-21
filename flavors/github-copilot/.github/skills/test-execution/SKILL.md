@@ -162,6 +162,15 @@ holds the moment the entry was claimed. Neither case is a result: re-run the
 scope. Before this marker existed, an interrupted run left the *previous*
 entry in place, and a stale green was indistinguishable from a fresh one.
 
+**A scope entry is only evidence for that scope when `"partial": false`.** A
+run narrowed by `-File`/`--file` or `-Filter`/`--filter` covers less than the
+scope it was narrowed from, so it is never written under a scope key at all —
+it goes to the single `partial` entry, which names what it ran in `target` and
+the `-k` expression in `selector`. Treat `partial` as a record of what was
+executed, never as a scope result. Require `partial: false` explicitly rather
+than reading a missing field as complete: every log written before this field
+existed also lacks it, and those are the entries that cannot be trusted.
+
 ## Direct Invocation (terminal-capable agents only)
 
 ```bash
