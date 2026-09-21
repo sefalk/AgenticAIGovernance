@@ -90,8 +90,13 @@ function New-SpacedFixture([string]$tag) {
 function New-FakePytestWorkspace([string]$tag) {
     $ws = New-SpacedFixture $tag
     New-Item -ItemType Directory -Path (Join-Path $ws '.github/scripts') -Force | Out-Null
-    foreach ($d in @('tests', 'tests/domain', 'tests/contracts')) {
+    foreach ($d in @('tests', 'tests/domain', 'tests/adapters', 'tests/contracts')) {
         New-Item -ItemType Directory -Path (Join-Path $ws $d) -Force | Out-Null
+    }
+    # The runner rejects a -File argument that does not exist, so the targets
+    # the scope cases select have to be real files.
+    foreach ($f in @('tests/domain/test_d.py', 'tests/adapters/test_a.py')) {
+        Set-Content -Path (Join-Path $ws $f) -Value '' -Encoding ascii
     }
     Copy-Item $runTestsPs1 (Join-Path $ws '.github/scripts/run-tests.ps1')
     Invoke-Py @('-m', 'venv', '--without-pip', (Join-Path $ws '.venv')) *> $null
@@ -123,7 +128,12 @@ if _s:
             dst.write(_t)
     except OSError:
         pass
-print('3 passed in 0.42s')
+# A narrowed run has to be distinguishable from the whole scope, otherwise a
+# case asserting "the partial result did not land here" cannot observe anything.
+if '-k' in sys.argv[1:]:
+    print('1 passed in 0.11s')
+else:
+    print('3 passed in 0.42s')
 '@
     return $ws
 }
@@ -626,6 +636,210 @@ print('3 passed in 0.42s')
             ($afterS.contracts.total -eq 3) -and ($afterS.contracts.runtime_seconds -eq 0.42)
         $details['N_sh_summary_counters_are_parsed'] =
             "passed=$($afterS.contracts.passed) total=$($afterS.contracts.total) runtime=$($afterS.contracts.runtime_seconds)"
+    }
+
+    # ---------------------------------------------------------------------
+    # P (#303): a run that executed only part of a scope must not be recorded
+    #           under that scope's key. The observed loss: `-File` mapped back
+    #           to a scope key, so an 11-test file run advertised the adapters
+    #           scope as green while it actually held 289 failures. Measured on
+    #           the shipped script, `-Scope all -Filter x` does the same to the
+    #           `all` key -- the one entry implementer-stop.ps1 accepts in place
+    #           of running the suite.
+    # ---------------------------------------------------------------------
+    $wsP = New-FakePytestWorkspace 'partial'
+    $pKeys = @('P1_narrowed_run_does_not_overwrite_the_scope_key',
+               'P2_narrowed_run_is_still_recorded_as_partial',
+               'P3_file_run_does_not_write_a_scope_key',
+               'P4_partial_entry_is_labelled_and_names_its_target',
+               'P5_full_run_is_labelled_not_partial',
+               'P6_scope_key_only_written_without_narrowing_args')
+    if (-not $wsP) {
+        foreach ($k in $pKeys) { $results[$k] = $false; $details[$k] = 'fake-pytest fixture could not be created' }
+    } else {
+        $runnerP = Join-Path $wsP '.github/scripts/run-tests.ps1'
+        $logP    = Join-Path $wsP '.github/test-log.json'
+        $argvP   = Join-Path $wsP 'argv.json'
+
+        # Runs the shipped runner with the log cleared first, so the keys left
+        # behind are exactly the ones this invocation wrote. Returns the argv
+        # pytest actually received alongside them -- the two have to be judged
+        # together, which is the whole point of P6.
+        #
+        # A HASHTABLE, not an array: splatting an array passes its elements
+        # positionally, so @('-File', '...') binds '-File' to -Scope and dies
+        # on the ValidateSet. Only hashtable splatting binds by name.
+        function Invoke-RunnerP([hashtable]$runArgs) {
+            Remove-Item $logP -Force -ErrorAction SilentlyContinue
+            $env:AF_FAKE_PYTEST_ARGV = $argvP
+            Push-Location $wsP
+            try { & $runnerP @runArgs *> $null } finally { Pop-Location }
+            Remove-Item Env:\AF_FAKE_PYTEST_ARGV -ErrorAction SilentlyContinue
+            $argv = [string[]]@()
+            # Cast, don't wrap: in PowerShell 5.1 ConvertFrom-Json emits a JSON
+            # array as a single object, so @(...) yields one element that is
+            # itself the array. Case G already relies on the [string[]] cast.
+            if (Test-Path $argvP) { try { $argv = [string[]](Get-Content $argvP -Raw | ConvertFrom-Json) } catch { $argv = [string[]]@() } }
+            $log = $null
+            if (Test-Path $logP) { try { $log = Get-Content $logP -Raw | ConvertFrom-Json } catch { $log = $null } }
+            $keys = if ($log) { @($log.PSObject.Properties.Name) } else { @() }
+            return [pscustomobject]@{ Argv = $argv; Keys = $keys; Log = $log }
+        }
+
+        $scopeKeys = @('all', 'domain', 'adapters', 'properties', 'contracts')
+
+        # P1/P2: the narrowed `all` run. The full entry is produced by a real
+        # full run first, so the case cannot pass against a hand-written
+        # fixture the runner would never produce. The fake pytest reports 3 for
+        # a whole scope and 1 under `-k`, which is what makes "the partial
+        # result landed on the scope key" observable at all.
+        Remove-Item $logP -Force -ErrorAction SilentlyContinue
+        Push-Location $wsP
+        try {
+            & $runnerP -Scope all *> $null
+            & $runnerP -Scope all -Filter 'test_one' *> $null
+        } finally { Pop-Location }
+        $logAfter = $null
+        if (Test-Path $logP) { try { $logAfter = Get-Content $logP -Raw | ConvertFrom-Json } catch { $logAfter = $null } }
+        $afterKeys = if ($logAfter) { @($logAfter.PSObject.Properties.Name) } else { @() }
+        $allEntry = if ($logAfter) { $logAfter.all } else { $null }
+
+        $results['P1_narrowed_run_does_not_overwrite_the_scope_key'] =
+            ($null -ne $allEntry) -and ($allEntry.total -eq 3) -and ($allEntry.partial -eq $false)
+        $details['P1_narrowed_run_does_not_overwrite_the_scope_key'] =
+            "all.total=$($allEntry.total) all.partial=$($allEntry.partial) keys=[$($afterKeys -join ', ')]"
+
+        # P2: the narrowed run is not discarded either -- dropping it would
+        #     also satisfy P1 while losing the record of what was run.
+        $narrowEntry = $null
+        foreach ($n in @($afterKeys | Where-Object { $scopeKeys -notcontains $_ })) {
+            if ($logAfter.$n.partial -eq $true) { $narrowEntry = $logAfter.$n; break }
+        }
+        $results['P2_narrowed_run_is_still_recorded_as_partial'] =
+            ($null -ne $narrowEntry) -and ($narrowEntry.total -eq 1) -and ($narrowEntry.selector -eq 'test_one')
+        $details['P2_narrowed_run_is_still_recorded_as_partial'] =
+            "total=$($narrowEntry.total) selector=$($narrowEntry.selector) target=$($narrowEntry.target)"
+
+        # P3: the defect as filed -- a single file recorded as its whole scope.
+        $rFile = Invoke-RunnerP @{ File = 'tests/domain/test_d.py' }
+        $results['P3_file_run_does_not_write_a_scope_key'] =
+            (@($rFile.Keys | Where-Object { $scopeKeys -contains $_ }).Count -eq 0)
+        $details['P3_file_run_does_not_write_a_scope_key'] = "keys=[$($rFile.Keys -join ', ')]"
+
+        # P4: the record still exists and says what it was. A fix that simply
+        #     dropped the run would also pass P3, and would lose the evidence.
+        $partialEntry = $null
+        if ($rFile.Log) {
+            $pName = @($rFile.Keys | Where-Object { $scopeKeys -notcontains $_ }) | Select-Object -First 1
+            if ($pName) { $partialEntry = $rFile.Log.$pName }
+        }
+        $results['P4_partial_entry_is_labelled_and_names_its_target'] =
+            ($null -ne $partialEntry) -and ($partialEntry.partial -eq $true) -and
+            ($partialEntry.target -match 'test_d\.py')
+        $details['P4_partial_entry_is_labelled_and_names_its_target'] =
+            "partial=$($partialEntry.partial) target=$($partialEntry.target)"
+
+        # P5: absence is not evidence. A consumer must be able to require an
+        #     explicit `partial: false` rather than infer completeness from a
+        #     missing field, which every pre-fix log also lacks.
+        $rFull = Invoke-RunnerP @{ Scope = 'domain' }
+        $domEntry = if ($rFull.Log) { $rFull.Log.domain } else { $null }
+        $results['P5_full_run_is_labelled_not_partial'] =
+            ($null -ne $domEntry) -and ($domEntry.partial -eq $false)
+        $details['P5_full_run_is_labelled_not_partial'] = "domain.partial=$($domEntry.partial)"
+
+        # P6: the class, not the instances. `-File` was the reported case and
+        #     `-Filter` was found alongside it; the guard has to cover the flag
+        #     nobody has added yet. A scope key is only honest when pytest was
+        #     pointed at exactly that scope's directory AND received no argument
+        #     that narrows the selection further. Both halves are needed: the
+        #     `-Filter` vector narrows via a flag, the `-File` vector narrows via
+        #     the target path itself, and a check on either half alone misses
+        #     one of them. Anything not on the allowlist counts as narrowing, so
+        #     a new runner flag fails here until someone decides which side of
+        #     the line it belongs on -- the allowlist lives in the test on
+        #     purpose, because widening it must be the conscious act.
+        $benignArg = '^(--tb=\S+|-q|--no-header|-x|--cov(=\S+)?|--cov-report=\S+|--cov-branch)$'
+        $scopeDir = @{
+            all = 'tests'; domain = 'tests/domain'; adapters = 'tests/adapters'
+            properties = 'tests/properties'; contracts = 'tests/contracts'
+        }
+        $matrix = @(
+            @{ Scope = 'all' },
+            @{ Scope = 'all'; Filter = 'test_one' },
+            @{ Scope = 'domain' },
+            @{ Scope = 'domain'; FailFast = $true },
+            @{ Scope = 'adapters'; Filter = 'test_two' },
+            @{ File = 'tests/adapters/test_a.py' },
+            @{ File = 'tests/domain/test_d.py'; Filter = 'test_three' }
+        )
+        $violations = @()
+        foreach ($m in $matrix) {
+            $r = Invoke-RunnerP $m
+            $wroteScope = @($r.Keys | Where-Object { $scopeKeys -contains $_ })
+            if ($wroteScope.Count -eq 0) { continue }
+            $label = (($m.Keys | Sort-Object | ForEach-Object { "$_=$($m[$_])" }) -join ' ')
+            # The fake pytest dumps sys.argv[1:], which under `python -m pytest`
+            # already excludes `-m` and `pytest`: index 0 is the target path and
+            # everything after it is a flag. Skipping more than one element would
+            # hide the very flags this check exists to inspect.
+            $target = if ($r.Argv.Count -gt 0) { ($r.Argv[0] -replace '\\', '/') } else { '' }
+            $tail = @($r.Argv | Select-Object -Skip 1)
+            $narrowing = @($tail | Where-Object { $_ -notmatch $benignArg })
+            if ($narrowing.Count -gt 0) {
+                $violations += ("{0} -> key [{1}] with narrowing arg(s) [{2}]" -f `
+                    $label, ($wroteScope -join ','), ($narrowing -join ' '))
+            }
+            foreach ($k in $wroteScope) {
+                $expected = $scopeDir[$k]
+                if ($target -notmatch ("/{0}$" -f [regex]::Escape($expected))) {
+                    $violations += ("{0} -> key [{1}] but pytest ran '{2}', not '{3}'" -f `
+                        $label, $k, $target, $expected)
+                }
+            }
+        }
+        $results['P6_scope_key_only_written_without_narrowing_args'] = ($violations.Count -eq 0)
+        $details['P6_scope_key_only_written_without_narrowing_args'] = ($violations -join ' ; ')
+    }
+
+    # ---------------------------------------------------------------------
+    # Q (#303): the bash twin. The two runners have already drifted here once
+    #           -- run-tests.sh owns a `file` key that run-tests.ps1 never
+    #           writes -- so the property is asserted against the shipped
+    #           script rather than assumed from the PowerShell side.
+    # ---------------------------------------------------------------------
+    if (-not $bashExe) {
+        $results['Q_sh_narrowed_run_does_not_write_the_scope_key'] = $false
+        $details['Q_sh_narrowed_run_does_not_write_the_scope_key'] = 'no bash interpreter found'
+    } else {
+        $wsQ = New-SpacedFixture 'shpartial'
+        New-Item -ItemType Directory -Path (Join-Path $wsQ '.github/scripts') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $wsQ 'tests/domain') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $wsQ '.venv/bin') -Force | Out-Null
+        Copy-Item $runTestsSh (Join-Path $wsQ '.github/scripts/run-tests.sh')
+        $shimQ = Join-Path $wsQ '.venv/bin/python'
+        # Single-quoted here-string: the shim's own "$@" must survive verbatim.
+        $shimBodyQ = @'
+#!/bin/sh
+for a in "$@"; do
+  if [ "$a" = "-k" ]; then echo '1 passed in 0.11s'; exit 0; fi
+done
+echo '3 passed in 0.42s'
+'@
+        [IO.File]::WriteAllText($shimQ, ($shimBodyQ -replace "`r", ''))
+        & $bashExe -c "chmod +x '$(($shimQ -replace '\\', '/'))'" 2>&1 | Out-Null
+
+        $runnerQ = ((Join-Path $wsQ '.github/scripts/run-tests.sh') -replace '\\', '/')
+        $logQ    = Join-Path $wsQ '.github/test-log.json'
+        & $bashExe -c "'$runnerQ' --scope all" 2>&1 | Out-Null
+        & $bashExe -c "'$runnerQ' --scope all --filter test_one" 2>&1 | Out-Null
+        $logQObj = $null
+        if (Test-Path $logQ) { try { $logQObj = Get-Content $logQ -Raw | ConvertFrom-Json } catch { $logQObj = $null } }
+        $allQ = if ($logQObj) { $logQObj.all } else { $null }
+        $results['Q_sh_narrowed_run_does_not_write_the_scope_key'] =
+            ($null -ne $allQ) -and ($allQ.partial -eq $false) -and ($allQ.total -eq 3)
+        $details['Q_sh_narrowed_run_does_not_write_the_scope_key'] =
+            "all.partial=$($allQ.partial) all.total=$($allQ.total) keys=[$(@($logQObj.PSObject.Properties.Name) -join ', ')]"
     }
 
     # ---------------------------------------------------------------------
