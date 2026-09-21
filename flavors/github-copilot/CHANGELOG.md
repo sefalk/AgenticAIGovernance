@@ -147,6 +147,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A narrowed test run was filed under the scope key it was narrowed from, so
+  a partial run could close a gate on behalf of the whole suite (#303).**
+  `run-tests.ps1 -File tests/adapters/x.py` wrote the `adapters` entry: eleven
+  green tests in three seconds were indistinguishable from the real scope,
+  which at the time had 289 failures in 954 seconds. Measured while fixing it,
+  `-Filter` is the worse half of the same bug and was not in the report —
+  `-Scope all -Filter x` writes the `all` key, and `all` is the one key the
+  implementer and refactorer stop hooks trust to skip a run entirely. Both
+  runners now treat a run as partial when anything narrows the selection
+  (`-File`/`--file`, `-Filter`/`--filter`, or both), and a partial run never
+  writes a scope key. It is recorded instead under a single `partial` slot
+  carrying `target` and `selector`, so the run is still visible without the log
+  growing one key per file — the issue suggested a `file:<path>` key, but the
+  bash writer merges through a fixed key list that cannot hold dynamic names,
+  and a bounded log was worth more than per-target history in a regenerable
+  cache. In `run-tests.sh` this replaces the old `file` key, which was itself
+  an unlabelled partial record. Every entry now carries `partial` explicitly,
+  including `false` on a full run, because the four stop hooks now *require*
+  `partial == false` rather than inferring completeness from a missing field:
+  every pre-fix log also lacks it, and those are exactly the entries that
+  cannot be trusted, so they fall through to one honest full run. Pinned by
+  seven cases in `test-run-tests.ps1`, one of which is the class rather than
+  the instances — it runs a matrix of invocations and fails if a scope key is
+  written when pytest was pointed anywhere other than that scope's directory or
+  received any argument outside an explicit allowlist, so the next narrowing
+  flag fails the gate until someone consciously classifies it.
+
 - **Stop hooks blocked with no loop guard, and the only mention of one was a
   comment describing code that did not exist (#298).** `stop_hook_active`
   appeared exactly four times in the payload, all of them in prose; no line
