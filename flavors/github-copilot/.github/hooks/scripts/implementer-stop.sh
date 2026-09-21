@@ -46,6 +46,13 @@ fi
 # ---------- Test Log Freshness Check ----------
 # Accept last run if ALL tests passed AND no code changed since (committed or uncommitted).
 # No time limit — change detection is the criterion, not elapsed time.
+#
+# `partial` must be explicitly false, not merely absent. A narrowed run used to
+# be filed under the scope key it was narrowed from, so a handful of green
+# tests could close this gate on behalf of the whole suite (#303). Logs written
+# before that fix carry no `partial` field at all, and those are precisely the
+# entries that cannot be trusted -- so a missing field falls through to running
+# the suite, which costs one full run once and never reports a false green.
 TEST_LOG=".github/test-log.json"
 from_log=false
 if [[ -z "$test_gate_skipped" ]] && [[ -f "$TEST_LOG" ]]; then
@@ -53,7 +60,8 @@ if [[ -z "$test_gate_skipped" ]] && [[ -f "$TEST_LOG" ]]; then
     _all_block=$(echo "$_flat" | sed -n 's/.*"all" *: *\({[^}]*}\).*/\1/p')
     if [[ -n "$_all_block" ]]; then
         _ec=$(echo "$_all_block" | sed -n 's/.*"exit_code" *: *\([0-9][0-9]*\).*/\1/p')
-        if [[ "$_ec" == "0" ]]; then
+        _partial=$(echo "$_all_block" | sed -n 's/.*"partial" *: *\(true\|false\).*/\1/p')
+        if [[ "$_ec" == "0" ]] && [[ "$_partial" == "false" ]]; then
             _lr=$(echo "$_all_block" | sed -n 's/.*"last_run" *: *"\([^"]*\)".*/\1/p')
             if [[ -n "$_lr" ]]; then
                 commits_since=$(git log --oneline --after="$_lr" -- "${SRC_DIR}/" 'tests/' 2>/dev/null)
