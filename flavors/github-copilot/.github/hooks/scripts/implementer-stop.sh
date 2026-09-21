@@ -28,6 +28,11 @@ BASE_BRANCH=$(af_conf_get BASE_BRANCH '')
 # logs, which is how the gate below tells its own edits from a peer's (#101).
 stdin_raw=$(cat)
 
+# Every gate below is a blocking one, so all of them sit behind the loop guard:
+# this hook has twelve blocking sites and a second invocation would reach the
+# same verdict on the same unchanged tree (issue #298).
+af_stop_loop_guard "$stdin_raw" implementer 'tests, provenance, python quality, ignore hygiene, linting'
+
 # A missing test runner disables the TEST gate only. Provenance, quality,
 # linting and ignore hygiene need neither pytest nor a tests/ directory, and
 # exiting here used to take them down with it (issue #12).
@@ -310,11 +315,11 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
     # "the reader could not run", so blocking risked a missing python shutting
     # down every implementer. #175 split that conflation: `empty` now means the
     # log was found and the record parsed with no words in it, which no blind
-    # spot can produce. What still blocks a block is loop safety -- nothing
-    # here reads `stop_hook_active`, and an agent that returned nothing once is
-    # the least likely to return words on a forced retry. A watchdog that
-    # breaks legitimate work gets switched off (#108), which costs more than
-    # the case it was meant to catch.
+    # spot can produce. Loop safety used to be the second reason and no longer
+    # is -- #298 put a guard in front of this hook. What is left is #108: an
+    # agent that returned nothing once is the least likely to return words on a
+    # forced retry, and that retry now runs with EVERY gate skipped, so blocking
+    # buys a wasted round trip and a weaker second pass.
     return_note=""
     ret_status=$(af_subagent_return "$stdin_raw" implementer | head -1)
     case "$ret_status" in

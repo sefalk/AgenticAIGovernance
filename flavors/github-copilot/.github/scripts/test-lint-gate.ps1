@@ -398,14 +398,16 @@ function Get-PathWithoutPytest {
 }
 
 # Runs a stop hook inside $repo and returns the parsed JSON output.
+# -StdinJson carries the hook input. It defaults to the empty object every
+# scenario below used to hardcode; the loop-guard cases need a second shape.
 function Invoke-StopHook {
-    param([string]$Repo, [string]$Hook, [string]$PathOverride)
+    param([string]$Repo, [string]$Hook, [string]$PathOverride, [string]$StdinJson = '{}')
     $hookPath = Join-Path $Repo ".github/hooks/scripts/$Hook"
     $savedPath = $env:PATH
     if ($PathOverride) { $env:PATH = $PathOverride }
     Push-Location $Repo
     try {
-        $out = '{}' | powershell -NoProfile -ExecutionPolicy Bypass -File $hookPath 2>&1
+        $out = $StdinJson | powershell -NoProfile -ExecutionPolicy Bypass -File $hookPath 2>&1
     } finally {
         Pop-Location
         $env:PATH = $savedPath
@@ -681,6 +683,49 @@ try {
         ($r.Text -match 'run-lint\.ps1 -Fix') -and
         ($r.Text -match 'run-lint\.sh --fix')
     $details['format_drift_blocks_and_names_file'] = $r.Text
+
+    # --- Issue #298: the stop-hook loop guard ---
+    # A blocking stop hook forces the agent to try again, and the editor
+    # re-invokes the hook on that attempt with `stop_hook_active: true`. With no
+    # guard the same unchanged violation blocks again, so the retry the gate
+    # demanded is the retry it refuses.
+    #
+    # 24 and 25 run the SAME repository in the SAME state twice. That is the
+    # point: the only difference between them is the hook input.
+
+    # 24. Control. Without this, 25 could pass because nothing blocked at all.
+    $repo = New-GateRepo; $repos += $repo
+    $DIRTY_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
+    $results['loop_guard_control_first_call_blocks'] = ($r.Json.hookSpecificOutput.decision -eq 'block')
+    $details['loop_guard_control_first_call_blocks'] = $r.Text
+
+    # 25. Second invocation, same violation: hand control back, and say which
+    #     gates were skipped -- a silent pass hides a gate that did not run.
+    $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1' -StdinJson '{"stop_hook_active": true}'
+    $results['loop_guard_second_call_returns_control'] =
+        ($r.Json.hookSpecificOutput.decision -ne 'block') -and ($r.Text -match 'stop_hook_active')
+    $details['loop_guard_second_call_returns_control'] = $r.Text
+
+    # 26. The twin. The guard lives in _common.ps1 precisely so this is not a
+    #     property of one hook.
+    $repo = New-GateRepo; $repos += $repo
+    $DIRTY_TEST | Set-Content (Join-Path $repo 'tests/test_app.py')
+    git -C $repo add -- ':(literal)tests/test_app.py' | Out-Null
+    $r = Invoke-StopHook -Repo $repo -Hook 'refactorer-stop.ps1'
+    $results['loop_guard_control_refactorer_blocks'] = ($r.Json.hookSpecificOutput.decision -eq 'block')
+    $details['loop_guard_control_refactorer_blocks'] = $r.Text
+    $r = Invoke-StopHook -Repo $repo -Hook 'refactorer-stop.ps1' -StdinJson '{"stop_hook_active": true}'
+    $results['loop_guard_second_call_returns_control_refactorer'] =
+        ($r.Json.hookSpecificOutput.decision -ne 'block') -and ($r.Text -match 'stop_hook_active')
+    $details['loop_guard_second_call_returns_control_refactorer'] = $r.Text
+
+    # 27. `false` is not `true`. A guard that fires on the field's presence
+    #     rather than its value disables every gate on every first call.
+    $r = Invoke-StopHook -Repo $repo -Hook 'refactorer-stop.ps1' -StdinJson '{"stop_hook_active": false}'
+    $results['loop_guard_ignores_false'] = ($r.Json.hookSpecificOutput.decision -eq 'block')
+    $details['loop_guard_ignores_false'] = $r.Text
 } finally {
     $env:PATH = $origPath
     foreach ($r in $repos) {

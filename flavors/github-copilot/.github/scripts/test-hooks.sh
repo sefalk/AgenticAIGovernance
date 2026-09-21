@@ -1752,6 +1752,65 @@ for ret_pair in "implementer-stop.ps1:returnNote|\$ret\.Status" "implementer-sto
     fi
 done
 
+# --- Stop-hook loop guard (issue #298) ------------------------------------
+#
+# implementer-stop.ps1:42 described a loop guard in a comment for a year and no
+# code implemented it, while 31 blocking sites across four stop hooks ran
+# unguarded. A hook that blocks on a condition the forced retry does not clear
+# blocks that retry on the same condition.
+
+echo "## stop-hook loop guard (issue #298)"
+
+if grep -q 'af_stop_loop_guard()' "$HOOK_DIR/_common.sh" 2>/dev/null; then
+    assert_true "_common.sh exposes the stop-hook loop guard" 1
+else
+    assert_true "_common.sh exposes the stop-hook loop guard" 0 "no af_stop_loop_guard wrapper"
+fi
+if grep -q 'function Invoke-AfStopLoopGuard' "$HOOK_DIR/_common.ps1" 2>/dev/null; then
+    assert_true "_common.ps1 exposes the stop-hook loop guard" 1
+else
+    assert_true "_common.ps1 exposes the stop-hook loop guard" 0 "no Invoke-AfStopLoopGuard wrapper"
+fi
+
+# Position is the property, not presence: a block emitted above the call is
+# unguarded however correct the helper is. The floor is the other half -- a loop
+# is also "fixed" by deleting the gates, and that has to fail too.
+for guard_spec in \
+    "implementer-stop.ps1:12" "implementer-stop.sh:12" \
+    "refactorer-stop.ps1:13" "refactorer-stop.sh:13" \
+    "test-writer-stop.ps1:4" "test-writer-stop.sh:4" \
+    "documenter-stop.ps1:2" "documenter-stop.sh:2"; do
+    guard_file="${guard_spec%%:*}"
+    guard_floor="${guard_spec#*:}"
+    case "$guard_file" in
+        *.ps1) guard_call='Invoke-AfStopLoopGuard' ;;
+        *) guard_call='af_stop_loop_guard' ;;
+    esac
+    guard_path="$HOOK_DIR/$guard_file"
+    guard_body=$(grep -vE '^[[:space:]]*#' "$guard_path" 2>/dev/null || true)
+    guard_at=$(printf '%s\n' "$guard_body" | grep -n "$guard_call" | head -1 | cut -d: -f1)
+    guard_blocks=$(printf '%s\n' "$guard_body" | grep -nE 'decision\\?"?[[:space:]]*[:=][[:space:]]*\\?"block' || true)
+    guard_block_at=$(printf '%s\n' "$guard_blocks" | head -1 | cut -d: -f1)
+    guard_block_n=$(printf '%s\n' "$guard_blocks" | grep -c . || true)
+    if [ -n "$guard_at" ]; then
+        assert_true "$guard_file calls the loop guard" 1
+    else
+        assert_true "$guard_file calls the loop guard" 0 "every blocking site in it is unguarded"
+    fi
+    if [ -n "$guard_at" ] && [ -n "$guard_block_at" ] && [ "$guard_at" -lt "$guard_block_at" ]; then
+        assert_true "$guard_file reaches the loop guard before it can block" 1
+    else
+        assert_true "$guard_file reaches the loop guard before it can block" 0 \
+            "guard at ${guard_at:-none}, first block at ${guard_block_at:-none} (comment lines excluded)"
+    fi
+    if [ "${guard_block_n:-0}" -ge "$guard_floor" ]; then
+        assert_true "$guard_file still carries its gates" 1
+    else
+        assert_true "$guard_file still carries its gates" 0 \
+            "$guard_block_n blocking sites, floor is $guard_floor -- a loop must not be fixed by removing gates"
+    fi
+done
+
 # --- Undeclared repo-root creations (issue #123, direction 3) -------------
 #
 # Direction 3 of #123: diff the working tree against the DECLARED scope instead

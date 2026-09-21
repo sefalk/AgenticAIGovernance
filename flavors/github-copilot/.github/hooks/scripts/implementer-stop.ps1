@@ -39,9 +39,11 @@ function Test-LintPath {
 # logs, which is how the gate below tells its own edits from a peer's (#101).
 $stdinRaw = [Console]::In.ReadToEnd()
 
-# Check if stop hook is already active (prevent infinite loop)
-# The input JSON contains stop_hook_active but we read it as raw;
-# a simple env-based guard is more reliable for scripts.
+# Every gate below is a blocking one, so all of them sit behind the loop guard:
+# this hook has twelve blocking sites and a second invocation would reach the
+# same verdict on the same unchanged tree (issue #298).
+Invoke-AfStopLoopGuard -StdinRaw $stdinRaw -Agent 'implementer' `
+    -Gates 'tests, provenance, python quality, ignore hygiene, linting'
 
 # A missing test runner disables the TEST gate only. Provenance, quality,
 # linting and ignore hygiene need neither pytest nor a tests/ directory, and
@@ -384,11 +386,11 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
     # "the reader could not run", so blocking risked a missing python shutting
     # down every implementer. #175 split that conflation: `empty` now means the
     # log was found and the record parsed with no words in it, which no blind
-    # spot can produce. What still blocks a block is loop safety -- nothing
-    # here reads `stop_hook_active` (see the stub near the top of this file),
-    # and an agent that returned nothing once is the least likely to return
-    # words on a forced retry. A watchdog that breaks legitimate work gets
-    # switched off (#108), which costs more than the case it was meant to catch.
+    # spot can produce. Loop safety used to be the second reason and no longer
+    # is -- #298 put a guard in front of this hook. What is left is #108: an
+    # agent that returned nothing once is the least likely to return words on a
+    # forced retry, and that retry now runs with EVERY gate skipped, so blocking
+    # buys a wasted round trip and a weaker second pass.
     $ret = Get-AfSubagentReturn -StdinRaw $stdinRaw -Agent 'implementer' -MainRoot $mainRoot
     $returnNote = switch ($ret.Status) {
         'truncated' { ', RETURN TRUNCATED -- the tail was cut by the 5000-char cap, which is where the Gate Summary sits; re-state it in your reply' }
