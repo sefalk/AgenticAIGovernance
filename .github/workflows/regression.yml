@@ -39,6 +39,16 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      # First, not later: the declaration gates below invoke
+      # .github/scripts/match-local-check.ps1 out of the workspace. They ran
+      # ahead of the checkout while their matching was inline PowerShell, and
+      # extracting it to a script made that placement a CommandNotFoundException
+      # on every hook pull request (#327).
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       # test-hooks-integration.ps1 is excluded from the sweep below because a
       # hosted runner cannot run it. That left the hooks -- the most
       # safety-critical part of the payload -- covered by nothing once the
@@ -203,11 +213,6 @@ jobs:
           }
           Write-Host "::error::This pull request changes files that govern this repository's own development environment. Add a line to the pull request body saying why, then re-run this job: env-change: <reason>"
           exit 1
-
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       # The two gates above are exempt on a dev -> main promotion, which would
       # otherwise leave the release the one pull request that declares nothing.
@@ -495,6 +500,10 @@ jobs:
       - name: Check that every suite runs in CI
         shell: powershell
         run: python .github\scripts\test-ci-suite-coverage.py
+
+      - name: Check that no step reads the checkout before it runs
+        shell: powershell
+        run: python .github\scripts\test-workflow-checkout-order.py
 
       # #124 made `ruff format` blocking for consumers while the framework's
       # own Python went unformatted (#167). The file list comes from git rather
