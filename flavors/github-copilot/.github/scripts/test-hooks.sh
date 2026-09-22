@@ -584,7 +584,15 @@ run_case "reading a file is not the gate's business" \
 echo "## scan-secrets.sh"
 secret_dir=$(mktemp -d)
 printf 'password = "SuperSecret123!"\n' > "$secret_dir/secret.py"
-secret_json="{\"tool_name\":\"multi_replace_string_in_file\",\"tool_input\":{\"explanation\":\"e\",\"replacements\":[{\"filePath\":\"$secret_dir/secret.py\",\"oldString\":\"a\",\"newString\":\"b\"}]}}"
+# The path travels INSIDE the payload, and since #287 the reader is Python.
+# MSYS rewrites POSIX paths to Windows ones when it hands them to a native
+# binary as an ARGUMENT, never inside data -- so an embedded `/tmp/x` reaches
+# a Windows interpreter unresolvable and the gate finds no file to scan. A
+# real payload never has this shape: VS Code is native and writes native
+# paths. `cygpath -m` gives forward slashes, which need no JSON escaping.
+# Same reason as `us_native` further down.
+secret_path=$(if command -v cygpath >/dev/null 2>&1; then cygpath -m "$secret_dir/secret.py"; else printf '%s' "$secret_dir/secret.py"; fi)
+secret_json="{\"tool_name\":\"multi_replace_string_in_file\",\"tool_input\":{\"explanation\":\"e\",\"replacements\":[{\"filePath\":\"$secret_path\",\"oldString\":\"a\",\"newString\":\"b\"}]}}"
 secret_rc=0
 printf '%s' "$secret_json" | bash "$HOOK_DIR/scan-secrets.sh" > /dev/null 2>&1 || secret_rc=$?
 assert_true "secret in a batched edit fails the gate" "$([ "$secret_rc" -eq 1 ] && echo 1 || echo 0)" "expected exit 1, got $secret_rc"
@@ -1449,8 +1457,9 @@ PROBE
 fi
 
 # A detector nobody calls is the failure mode of issue #69. These bind the
-# gates to it.
-for site in implementer-stop.sh test-writer-stop.sh scan-secrets.sh; do
+# gates to it. scan-secrets is checked through its Python core instead of its
+# wrapper: the gate moved there in #287.
+for site in implementer-stop.sh test-writer-stop.sh; do
     text=$(cat "$HOOK_DIR/$site" 2>/dev/null || true)
     case "$text" in *af_has_provenance_marker*) assert_true "$site asks the shared detector" 1 ;;
         *) assert_true "$site asks the shared detector" 0 "no call to af_has_provenance_marker" ;; esac
@@ -1460,6 +1469,10 @@ for site in implementer-stop.sh test-writer-stop.sh scan-secrets.sh; do
         assert_true "$site no longer bounds the search to a fixed window" 1
     fi
 done
+
+core_text=$(cat "$HOOK_DIR/scan-secrets.py" 2>/dev/null || true)
+case "$core_text" in *has_provenance_marker*) assert_true "scan-secrets.py asks the shared detector" 1 ;;
+    *) assert_true "scan-secrets.py asks the shared detector" 0 "no call to has_provenance_marker" ;; esac
 
 # --- Provenance gate scope (issue #86) -------------------------------------
 #

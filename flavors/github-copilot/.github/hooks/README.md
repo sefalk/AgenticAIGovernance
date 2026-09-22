@@ -228,6 +228,34 @@ the whole `hooks/` tree, so a regression fails the suite. For the rare line
 where a finding is genuinely correct, append `af-resolution-ok` in a comment
 on that line and say why.
 
+### Gate logic goes in Python, not in the shell
+
+A hook ships in two dialects because VS Code may invoke either one. That does
+not mean the *gate* exists twice. **New gate logic goes into a `.py` core next
+to the wrappers; the `.ps1` and `.sh` files are reduced to interpreter
+resolution and stdin marshalling.**
+
+This is not a style preference. Measured on 2026-09-22, the two `scan-secrets`
+twins disagreed on three of four payloads, in both directions, in a gate whose
+entire job is to catch secrets: the Bash side had neither the connection-string
+rule nor the `apikey` alias, and the PowerShell side filtered by an extension
+allowlist that excluded `.conf`. Nothing was broken — the two implementations
+had simply been edited at different times. Writing the logic once removes the
+thing that drifts.
+
+`scan-secrets.{py,ps1,sh}` is the reference shape. A wrapper resolves
+`$AfPython` / `$AF_PYTHON`, hands stdin to the core, and returns its exit code;
+when no interpreter is available it says so instead of silently passing.
+
+**The rule is enforced, not merely documented.**
+`.github/scripts/check-dialect-wrappers.py` fails a build when a `.ps1`/`.sh`
+pair carries logic instead of delegating (`DW001`), when a wrapper never names
+its core (`DW002`), or when a **new** twin pair ships with no Python core at
+all (`DW003`). `DW003` is the ratchet: the list of pairs that predate the rule
+may only shrink, and `scripts/test-dialect-wrappers.ps1` holds the ceiling that
+makes that binding. For a genuine exception, put `af-dialect-ok` plus a reason
+in a comment in **both** wrappers.
+
 ## Running the Suites
 
 `scripts/test-hooks.ps1` covers the PowerShell hooks, `scripts/test-hooks.sh`

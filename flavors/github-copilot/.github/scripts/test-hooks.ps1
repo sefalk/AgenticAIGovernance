@@ -2548,14 +2548,19 @@ Assert-True "a generated-marker still satisfies a generated-marker gate" `
 
 # The detector is only worth anything if the gates ask it. Without these, the
 # behaviour above is a helper nobody calls -- the failure mode of issue #69.
+# scan-secrets is listed by its Python core, not by its two wrappers: the gate
+# moved there in #287 and the wrappers no longer decide anything.
 $provenanceCallSites = @(
-    'implementer-stop.ps1', 'test-writer-stop.ps1', 'scan-secrets.ps1',
-    'implementer-stop.sh', 'test-writer-stop.sh', 'scan-secrets.sh'
+    'implementer-stop.ps1', 'test-writer-stop.ps1',
+    'implementer-stop.sh', 'test-writer-stop.sh',
+    'scan-secrets.py'
 )
 foreach ($site in $provenanceCallSites) {
     $sitePath = Join-Path $scriptDir $site
     $siteText = if (Test-Path $sitePath) { Get-Content $sitePath -Raw } else { '' }
-    $helper = if ($site.EndsWith('.ps1')) { 'Test-AfProvenanceMarker' } else { 'af_has_provenance_marker' }
+    $helper = if ($site.EndsWith('.ps1')) { 'Test-AfProvenanceMarker' }
+        elseif ($site.EndsWith('.py')) { 'has_provenance_marker' }
+        else { 'af_has_provenance_marker' }
 
     Assert-True "$site asks the shared detector" `
         ($siteText -match [regex]::Escape($helper)) `
