@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The secret-scanning gate is one Python implementation behind two thin
+  wrappers instead of two maintained implementations (#287). The twins had
+  drifted apart in both directions: measured on 2026-09-22 they disagreed on
+  three of four payloads — the Bash side was missing the connection-string
+  rule and the `apikey` alias, the PowerShell side filtered by an extension
+  allowlist that skipped `.conf`. The core takes the union and replaces the
+  allowlist with binary detection, so it is deliberately stricter than either
+  twin was: more files are scanned, and a connection string or a bare `apikey`
+  is now caught on both platforms. `scan-secrets.ps1` and `scan-secrets.sh`
+  are reduced to interpreter resolution and stdin marshalling. When no
+  interpreter is found both now emit a visible `WARN` instead of the Bash
+  side's previous silent pass — the gate still does not block in that state,
+  which is a separate decision and left to a follow-up.
+- `check-dialect-wrappers.py` makes the rule enforceable rather than advisory:
+  it fails when a `.ps1`/`.sh` pair carries logic instead of delegating
+  (`DW001`), when a wrapper never names its core (`DW002`), or when a **new**
+  twin pair ships with no Python core (`DW003`). The fifteen pairs that
+  predate the rule are listed as a baseline that may only shrink, and the
+  ceiling lives in `test-dialect-wrappers.ps1`, so growing it requires editing
+  a test where a reviewer will see it. Wired into `run-all-tests.ps1` by
+  auto-discovery, hence into CI.
+- The provenance-marker detector gained a Python dialect, `_provenance.py`.
+  The guard from #69 requires every gate to ask the shared detector instead of
+  carrying its own `copilot:` regex; moving a gate into Python needed
+  something on that side for the guard to point at, so the check now binds
+  `scan-secrets.py` rather than its two wrappers.
+- A cross-platform trap the migration surfaced, recorded because it will
+  recur: a path that travels **inside** a payload has to be written the way
+  the reader's interpreter will read it. MSYS rewrites POSIX paths to Windows
+  ones only when handing them to a native binary as an *argument*, never
+  inside data — so a `/tmp/...` path embedded in a bash-authored fixture
+  reached the new Python core unresolvable and the gate found nothing to
+  scan. Real payloads never have this shape; VS Code is native and writes
+  native paths.
 - The last nine block-dangerous cases that could be shared now run from
   `block-dangerous.cases.tsv`, and the coverage gap is 19 → 10 (#280, fourth
   batch). Four were held back on the reasoning that `Remove-Item`, `Copy-Item`,
