@@ -258,6 +258,21 @@ build for one (#322).
 
 ### Fixed
 
+- **A regression suite spent 708 of its 788 seconds running another suite that
+  had already run in the same sweep (#334).** `test-deploy-flags.ps1` asserts
+  that the notebook check is part of the preflight set. To read that one string
+  it invoked `deploy.ps1 -Preflight`, whose first check executes
+  `test-hooks.ps1` in full. The assertion is about what preflight *consists of*,
+  not about what its checks conclude -- during the measurement the preflight
+  actually failed and the assertion still passed, correctly, because it only
+  looks for the name. `deploy.ps1` now takes `-ListPreflightChecks`, which
+  prints the names of the checks the selected profile would run and exits
+  without running any of them and without needing a target. The suite went from
+  **788s to 21s** and gained coverage on the way: the `full` profile's extra
+  check is now asserted too, and two exclusion assertions fail if listing ever
+  starts executing again -- without them the list could quietly go back to
+  running everything and every other assertion would still pass, just slowly.
+
 - **The per-suite test timeout had two values, so the same suite passed in CI
   and reported `FAILED` locally (#333).** `run-all-tests.ps1` defaulted to 600
   seconds; `regression.yml` invoked it with 1200. Nothing declared the
