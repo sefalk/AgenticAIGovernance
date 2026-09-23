@@ -110,6 +110,14 @@ function New-Payload([string]$FilePath) {
     return (@{ tool_name = 'replace_string_in_file'; tool_input = @{ filePath = $FilePath; oldString = 'a'; newString = 'b' } } | ConvertTo-Json -Compress)
 }
 
+# Detection is a block decision on stdout at exit 0, not an exit code. A
+# non-zero exit makes the harness discard stdout, so asserting on it would
+# again test the side channel instead of the gate (#339).
+function Test-Blocked([string]$Target, [string]$Payload) {
+    $r = Invoke-HookOut $Target $Payload
+    return ($r.Exit -eq 0 -and $r.Out -match '"decision"\s*:\s*"block"')
+}
+
 $script:bashExe = $null
 foreach ($b in @('C:\Program Files\Git\bin\bash.exe', '/bin/bash')) {
     if (Test-Path $b) { $script:bashExe = $b; break }
@@ -262,15 +270,15 @@ exec "$AF_PYTHON" "$(dirname -- "${BASH_SOURCE[0]}")/demo-gate.py"
     foreach ($k in $files.Keys) { Write-Text $paths[$k] $files[$k] }
 
     if (Test-Path $core) {
-        $results['B1_connection_string_is_detected'] = ((Invoke-Hook 'py' $core (New-Payload $paths['conn'])) -eq 1)
-        $results['B2_apikey_without_underscore_is_detected'] = ((Invoke-Hook 'py' $core (New-Payload $paths['apikey'])) -eq 1)
+        $results['B1_connection_string_is_detected'] = (Test-Blocked $core (New-Payload $paths['conn']))
+        $results['B2_apikey_without_underscore_is_detected'] = (Test-Blocked $core (New-Payload $paths['apikey']))
 
         # The PowerShell twin filtered by an extension allowlist that did not
         # contain .conf, so a key in a config file walked straight through it.
-        $results['B3_secret_in_a_config_extension_is_detected'] = ((Invoke-Hook 'py' $core (New-Payload $paths['aws'])) -eq 1)
+        $results['B3_secret_in_a_config_extension_is_detected'] = (Test-Blocked $core (New-Payload $paths['aws']))
 
-        $results['B4_generic_password_is_detected'] = ((Invoke-Hook 'py' $core (New-Payload $paths['pw'])) -eq 1)
-        $results['B5_private_key_is_detected'] = ((Invoke-Hook 'py' $core (New-Payload $paths['privkey'])) -eq 1)
+        $results['B4_generic_password_is_detected'] = (Test-Blocked $core (New-Payload $paths['pw']))
+        $results['B5_private_key_is_detected'] = (Test-Blocked $core (New-Payload $paths['privkey']))
         $results['B6_clean_file_passes'] = ((Invoke-Hook 'py' $core (New-Payload $paths['clean'])) -eq 0)
 
         $results['B7_non_write_tool_is_ignored'] = ((Invoke-Hook 'py' $core '{"tool_name":"read_file","tool_input":{"filePath":"src/main.py"}}') -eq 0)
@@ -279,7 +287,7 @@ exec "$AF_PYTHON" "$(dirname -- "${BASH_SOURCE[0]}")/demo-gate.py"
             tool_name  = 'multi_replace_string_in_file'
             tool_input = @{ explanation = 'batch'; replacements = @(@{ filePath = $paths['pw']; oldString = 'a'; newString = 'b' }) }
         } | ConvertTo-Json -Depth 5 -Compress
-        $results['B8_batched_edit_is_scanned'] = ((Invoke-Hook 'py' $core $batch) -eq 1)
+        $results['B8_batched_edit_is_scanned'] = (Test-Blocked $core $batch)
 
         $r = Invoke-HookOut $core (New-Payload $paths['unmarked'])
         $results['B9_unmarked_python_file_gets_a_provenance_warning'] = ($r.Exit -eq 0 -and $r.Out -match 'provenance-check')
@@ -288,7 +296,7 @@ exec "$AF_PYTHON" "$(dirname -- "${BASH_SOURCE[0]}")/demo-gate.py"
         # Only one verdict can be emitted, and a secret outranks a missing
         # marker. pw.py carries a secret and no marker.
         $r = Invoke-HookOut $core (New-Payload $paths['pw'])
-        $results['B10_secret_outranks_the_provenance_warning'] = ($r.Exit -eq 1 -and $r.Out -match 'secret-scan' -and $r.Out -notmatch 'provenance-check')
+        $results['B10_secret_outranks_the_provenance_warning'] = ($r.Exit -eq 0 -and $r.Out -match '"decision"\s*:\s*"block"' -and $r.Out -match 'secret-scan' -and $r.Out -notmatch 'provenance-check')
         $details['B10_secret_outranks_the_provenance_warning'] = "exit=$($r.Exit) out=$($r.Out.Trim())"
 
         $results['B11_missing_file_does_not_crash'] = ((Invoke-Hook 'py' $core (New-Payload (Join-Path $caseDir 'nope.py'))) -eq 0)

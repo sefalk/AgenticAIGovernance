@@ -450,6 +450,32 @@ function Assert-ExitCode {
     }
 }
 
+# A PostToolUse verdict is binding only in the shape the harness reads: exit 0
+# so stdout is processed, top-level `decision`, and a reason naming the file.
+# A non-zero exit is the weaker answer, not the stronger one -- it makes the
+# decision unreadable (#339).
+function Assert-Blocked {
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Names)
+    try {
+        $result = Invoke-Hook -Script $Script -JsonInput $Json
+        $parsed = $null
+        try { $parsed = $result.Output | ConvertFrom-Json -ErrorAction Stop } catch { $parsed = $null }
+        $decision = if ($parsed) { [string]$parsed.decision } else { '' }
+        $reason = if ($parsed) { [string]$parsed.reason } else { '' }
+        $ok = ($result.ExitCode -eq 0) -and ($decision -eq 'block') -and ($reason -match [regex]::Escape($Names))
+        if ($ok) {
+            $script:passed++
+            if ($Verbose) { Write-Output "  PASS  $TestName" }
+        } else {
+            $script:failed++
+            $script:errors += "FAIL  $TestName -- expected exit 0 with decision 'block' naming '$Names', got exit $($result.ExitCode) decision '$decision' reason '$reason' (output: $($result.Output))"
+        }
+    } catch {
+        $script:failed++
+        $script:errors += "ERROR $TestName -- $($_.Exception.Message)"
+    }
+}
+
 function Assert-True {
     param([string]$TestName, [bool]$Condition, [string]$Detail, $Subject)
     # A condition is only evidence if something produced it. Callers whose
@@ -1632,8 +1658,8 @@ Set-Content -Path $secretFile -Value 'password = "SuperSecret123!"'
 $cleanFile = Join-Path $tempDir "clean.py"
 
 $secretJson = @{ tool_name = "replace_string_in_file"; tool_input = @{ filePath = $secretFile; oldString = 'a'; newString = 'b' } } | ConvertTo-Json -Compress
-Assert-ExitCode "secret pattern detected (exit 1)" `
-    "scan-secrets.ps1" $secretJson 1
+Assert-Blocked "secret pattern blocks the call" `
+    "scan-secrets.ps1" $secretJson 'secret.py'
 
 # A secret written through a batched edit is the same secret. The scan has to
 # reach into replacements[] or the cheapest way past it is to write in bulk.
@@ -1644,8 +1670,8 @@ $secretBatch = @{
         replacements = @(@{ filePath = $secretFile; oldString = 'a'; newString = 'b' })
     }
 } | ConvertTo-Json -Depth 5 -Compress
-Assert-ExitCode "secret detected in a batched edit (exit 1)" `
-    "scan-secrets.ps1" $secretBatch 1
+Assert-Blocked "secret in a batched edit blocks the call" `
+    "scan-secrets.ps1" $secretBatch 'secret.py'
 
 $cleanJson = @{ tool_name = "replace_string_in_file"; tool_input = @{ filePath = $cleanFile; oldString = 'a'; newString = 'b' } } | ConvertTo-Json -Compress
 Assert-ExitCode "clean file passes (exit 0)" `

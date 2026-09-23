@@ -576,11 +576,12 @@ run_case "a write tool naming no path is denied" \
 run_case "reading a file is not the gate's business" \
     planner-pretooluse.sh agent/fixture "$READ_FILE" silent
 
-# scan-secrets reports by exit code, which run_case treats as a crash, so the
-# two paths that matter are asserted directly. Both were dead: the hook never
-# matched a real write tool, and the fallback pattern used `\s` inside a
-# bracket expression, where a backslash is a literal -- so the generic secret
-# rule excluded the letter s instead of whitespace and never fired.
+# scan-secrets answers in a top-level `decision`, which run_case cannot read
+# -- it resolves the PreToolUse shape -- so the two paths that matter are
+# asserted directly. Both were dead: the hook never matched a real write tool,
+# and the fallback pattern used `\s` inside a bracket expression, where a
+# backslash is a literal -- so the generic secret rule excluded the letter s
+# instead of whitespace and never fired.
 echo "## scan-secrets.sh"
 secret_dir=$(mktemp -d)
 printf 'password = "SuperSecret123!"\n' > "$secret_dir/secret.py"
@@ -594,8 +595,17 @@ printf 'password = "SuperSecret123!"\n' > "$secret_dir/secret.py"
 secret_path=$(if command -v cygpath >/dev/null 2>&1; then cygpath -m "$secret_dir/secret.py"; else printf '%s' "$secret_dir/secret.py"; fi)
 secret_json="{\"tool_name\":\"multi_replace_string_in_file\",\"tool_input\":{\"explanation\":\"e\",\"replacements\":[{\"filePath\":\"$secret_path\",\"oldString\":\"a\",\"newString\":\"b\"}]}}"
 secret_rc=0
-printf '%s' "$secret_json" | bash "$HOOK_DIR/scan-secrets.sh" > /dev/null 2>&1 || secret_rc=$?
-assert_true "secret in a batched edit fails the gate" "$([ "$secret_rc" -eq 1 ] && echo 1 || echo 0)" "expected exit 1, got $secret_rc"
+secret_out=$(printf '%s' "$secret_json" | bash "$HOOK_DIR/scan-secrets.sh" 2>/dev/null) || secret_rc=$?
+# Exit 0 is the strong answer here, not the weak one: a non-zero exit makes
+# the harness discard stdout, and the block decision with it (#339).
+secret_ok=0
+if [ "$secret_rc" -eq 0 ] &&
+   printf '%s' "$secret_out" | grep -q '"decision":"block"' &&
+   printf '%s' "$secret_out" | grep -q 'secret\.py'; then
+    secret_ok=1
+fi
+assert_true "secret in a batched edit blocks the call" "$secret_ok" \
+    "expected exit 0 with a block decision naming secret.py, got exit $secret_rc: $secret_out"
 
 read_rc=0
 read_out=$(printf '%s' "$READ_FILE" | bash "$HOOK_DIR/scan-secrets.sh" 2>/dev/null) || read_rc=$?

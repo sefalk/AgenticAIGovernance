@@ -41,6 +41,11 @@
       "deploy.ps1",
       ".github/af-env.conf"
     ],
+    "test-hook-decision-contract.ps1": [
+      ".github/hooks/README.md",
+      ".github/hooks/scripts/scan-secrets.py",
+      ".github/hooks/scripts/scan-secrets.ps1"
+    ],
     "test-dialect-wrappers.ps1": [
       ".github/scripts/check-dialect-wrappers.py",
       ".github/hooks/scripts/**"

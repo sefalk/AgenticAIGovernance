@@ -9,6 +9,7 @@
     "test-curation-consistency.ps1": 30,
     "test-deploy-flags.ps1": 60,
     "test-dialect-wrappers.ps1": 170,
+    "test-hook-decision-contract.ps1": 30,
     "test-hooks-integration.ps1": 30,
     "test-hooks.ps1": 1400,
     "test-large-file-guard.ps1": 40,

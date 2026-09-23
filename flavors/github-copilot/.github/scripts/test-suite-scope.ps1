@@ -128,6 +128,15 @@ Add-Result 'S11_editing_a_suite_selects_that_suite' `
     (($selfChange -match 'SELECT\s+test-retry-economy\.ps1') -and ($selfChange -notmatch 'FALLBACK') -and ($selfChange -notmatch 'SELECT\s+test-hooks\.ps1')) `
     'self change'
 
+# Matching is by suffix, so the blanket `README.md` ignore swallows every
+# README in the tree -- including hooks/README.md, which #339 made an input of
+# a suite rather than prose. A path a suite explicitly asks for is not an
+# ignorable path, whatever the ignore list says.
+$mappedReadme = Invoke-Selection -Paths @('flavors/github-copilot/.github/hooks/README.md')
+Add-Result 'S12_an_explicit_mapping_beats_the_ignore_list' `
+    ($mappedReadme -match 'SELECT\s+test-hook-decision-contract\.ps1') `
+    'mapped README'
+
 # ── Report ────────────────────────────────────────────────────────────────
 
 $passed = 0
