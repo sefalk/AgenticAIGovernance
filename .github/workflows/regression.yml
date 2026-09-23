@@ -421,6 +421,15 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-local-check-marker.py
 
+      # The per-suite timeout is declared in run-all-tests.ps1 and nowhere
+      # else. It used to be declared here as well, at a different value, which
+      # is how a 691-second suite passed in CI and reported FAILED on a laptop
+      # against the same tree (#333). Re-introducing the drift costs one flag,
+      # so the agreement is asserted rather than remembered.
+      - name: Test the per-suite timeout single source
+        shell: powershell
+        run: python .github\scripts\test-suite-timeout.py
+
       # The always-on payload is read on every chat request in every project,
       # so a record copied into it is paid for forever. #126 shipped a skills
       # table under a line declaring another file canonical, and four prompts
@@ -547,8 +556,7 @@ jobs:
         run: |
           .\flavors\github-copilot\.github\scripts\run-all-tests.ps1 `
             -FailOnSkip `
-            -Exclude test-hooks-integration.ps1 `
-            -TimeoutSeconds 1200
+            -Exclude test-hooks-integration.ps1
 
       # run-all-tests.ps1 sweeps `test-*.ps1` only, so the one suite covering
       # the shipped bash hooks has never been executed by anything (#190) --
