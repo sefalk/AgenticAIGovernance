@@ -31,6 +31,7 @@ Usage:
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -63,6 +64,41 @@ def job_cap_seconds(text: str) -> int | None:
     """Return the tightest job timeout in seconds, or None if none is declared."""
     caps = [int(m.group(1)) for m in _JOB_CAP.finditer(text)]
     return min(caps) * 60 if caps else None
+
+
+def timeout_still_fires() -> tuple[bool, str]:
+    """Drive the runner with a one-second budget and confirm it kills the suite.
+
+    Raising the default is only safe while the kill path still works. Asserting
+    the number without asserting the behaviour would leave a runner that never
+    kills anything looking exactly like a correct one, and the difference would
+    surface as a CI job that hangs to its own cap with no suite named.
+
+    The subject is a suite that takes about three seconds, so the kill is not a
+    race, and it touches nothing outside its own temporary files.
+    """
+    proc = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(RUNNER),
+            "-Filter",
+            "curation-consistency",
+            "-TimeoutSeconds",
+            "1",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO),
+        check=False,
+    )
+    out = proc.stdout + proc.stderr
+    killed = "TIMEOUT" in out and "was killed" in out
+    return killed and proc.returncode == 1, f"exit={proc.returncode} killed={killed}"
 
 
 def report(name: str, passed: bool, detail: str) -> int:
@@ -130,6 +166,10 @@ def main() -> int:
         runner_default("param(\n    [switch]$FailOnSkip\n)") is None,
         "synthetic runner without a default parsed",
     )
+
+    total += 1
+    fired, detail = timeout_still_fires()
+    failures += report("control_the_timeout_still_kills_a_suite", fired, detail)
 
     print(f"=== {total - failures}/{total} passed ===")
     return 1 if failures else 0
