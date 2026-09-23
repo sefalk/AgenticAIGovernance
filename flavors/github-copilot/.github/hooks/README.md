@@ -398,8 +398,17 @@ blocked even inside a composite. On any parse ambiguity the hook returns `{}`
 Scans files after file-editor tool calls for hardcoded secrets. Uses
 **gitleaks** if installed, otherwise falls back to regex pattern matching.
 
-**Blocking** — exits with code 1 when secrets are detected (HARD gate).
-Previously advisory-only; hardened in v1.7.1 per governance audit finding G-07.
+**Blocking** — on a hit it emits `{"decision":"block","reason":…}` and exits
+**0**. The decision, not the exit code, is what the harness acts on: any
+non-zero exit other than 2 is a non-blocking warning and its stdout is
+discarded, so exiting 1 would throw away the very verdict it was meant to
+carry. From v1.7.1 to the fix for issue #339 this gate did exactly that —
+documented as HARD, advisory in practice.
+
+The `reason` names the offending file. VS Code Local enforces the block;
+GitHub Copilot's `postToolUse` has no block at all, so there the same payload
+surfaces as `additionalContext` — the model sees the finding, the write is not
+reverted.
 
 **Patterns detected (regex fallback):**
 

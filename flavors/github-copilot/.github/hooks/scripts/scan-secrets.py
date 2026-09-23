@@ -14,7 +14,8 @@ of the two is deliberate: the alternative is to keep whichever hole happens to
 be on the platform you are standing on.
 
 Reads a PostToolUse payload on stdin, writes one verdict object to stdout.
-Exit 1 blocks the call (HARD gate); exit 0 allows it.
+A refusal is a ``decision: block`` object at exit 0 -- see ``block`` for why
+the exit code is not the lever it looks like (#339).
 """
 
 from __future__ import annotations
@@ -144,9 +145,36 @@ def gitleaks_verdict(path: str) -> dict[str, str] | None:
     }
 
 
-def emit(verdict: dict[str, str] | None, code: int) -> int:
+def emit(verdict: dict[str, object] | None, code: int) -> int:
     print(json.dumps(verdict if verdict else {}, separators=(",", ":")))
     return code
+
+
+def block(verdict: dict[str, str], reason: str) -> int:
+    """Refuse the call in the shape each harness honours, at exit 0.
+
+    Exit 0 is the strong answer here, not the weak one. Every published
+    contract treats a non-zero exit other than 2 as a warning, and stops
+    reading stdout along with it -- so a non-zero exit discards the very
+    decision it was supposed to carry. This gate exited 1 for months while
+    its documentation called it a HARD gate (#339).
+
+    ``decision`` is what VS Code Local acts on. Copilot's ``postToolUse``
+    offers no block at all, only ``additionalContext``, which it reads at the
+    top level while Local reads it under ``hookSpecificOutput``; both are
+    emitted so each runtime gets the strongest signal it supports.
+    """
+    payload: dict[str, object] = {
+        "decision": "block",
+        "reason": reason,
+        "additionalContext": reason,
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": reason,
+        },
+    }
+    payload.update(verdict)
+    return emit(payload, 0)
 
 
 def main() -> int:
@@ -175,7 +203,11 @@ def main() -> int:
         if has_gitleaks:
             verdict = gitleaks_verdict(path)
             if verdict:
-                return emit(verdict, 1)
+                return block(
+                    verdict,
+                    f"Secret detected by gitleaks in {path}. The write already landed on "
+                    f"disk -- remove the secret before continuing.",
+                )
             continue
 
         content = read_text(path)
@@ -184,7 +216,7 @@ def main() -> int:
 
         findings = [name for name, pattern in SECRET_PATTERNS if pattern.search(content)]
         if findings:
-            return emit(
+            return block(
                 {
                     "gate": "secret-scan",
                     "status": "FAIL",
@@ -192,7 +224,8 @@ def main() -> int:
                     "file": path,
                     "patterns": ", ".join(findings),
                 },
-                1,
+                f"Secret detected in {path} ({', '.join(findings)}). The write already "
+                f"landed on disk -- remove the secret before continuing.",
             )
 
         if advisory is None and path.endswith(".py") and not has_provenance_marker(content):

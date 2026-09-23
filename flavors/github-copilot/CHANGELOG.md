@@ -258,6 +258,25 @@ build for one (#322).
 
 ### Fixed
 
+- **The secret gate never blocked anything (#339).** On a hit it printed its
+  verdict and exited 1. Every published hook contract -- VS Code Local and
+  GitHub Copilot alike -- treats a non-zero exit other than 2 as a
+  *non-blocking warning* and discards the hook's stdout along with it, so the
+  gate documented as HARD since v1.7.1 was advisory in practice and its verdict
+  was never even read. It now emits `{"decision":"block","reason":...}` at exit
+  0, which is the mechanism `PostToolUse` actually acts on; the `reason` names
+  the offending file. Under GitHub Copilot, whose `postToolUse` offers no block
+  at all, the same payload surfaces as `additionalContext` -- the model sees
+  the finding. The guarantee had lived in the README with no test behind it,
+  which is how it could rot unnoticed: `test-hook-decision-contract.ps1` now
+  drives every gate the hooks README calls **Blocking** with a payload that
+  triggers it and asserts the response in the shape the harness reads, plus a
+  clean payload that must not block. Three suites had been asserting `exit 1`
+  as the gate's signature and now assert the decision instead.
+- An explicit suite mapping in `suite-scope.json` outranks the ignore list
+  (#339). Pattern matching is by suffix, so the blanket `README.md` entry
+  ignored `hooks/README.md` too -- a file the new contract suite reads as its
+  source of truth for which gates claim to block.
 - **A regression suite spent 708 of its 788 seconds running another suite that
   had already run in the same sweep (#334).** `test-deploy-flags.ps1` asserts
   that the notebook check is part of the preflight set. To read that one string

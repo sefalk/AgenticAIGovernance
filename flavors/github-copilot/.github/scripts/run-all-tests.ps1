@@ -111,8 +111,6 @@ function Select-Suites {
     $uncovered = @()
 
     foreach ($path in $Paths) {
-        if (@($Scope.ignore | Where-Object { Test-PathMatchesPattern $path $_ }).Count -gt 0) { continue }
-
         if (@($Scope.always | Where-Object { Test-PathMatchesPattern $path $_ }).Count -gt 0) {
             foreach ($s in $AllSuites) { [void]$selected.Add($s) }
             continue
@@ -127,7 +125,14 @@ function Select-Suites {
                 if (Test-PathMatchesPattern $path $pattern) { [void]$selected.Add($entry.Name); $hit = $true }
             }
         }
-        if (-not $hit) { $uncovered += $path }
+        if ($hit) { continue }
+
+        # Ignore answers for a path no suite asked for, and never overrules one
+        # that did. Matching is by suffix, so a blanket entry like README.md
+        # otherwise swallows a file a suite reads as input (#339).
+        if (@($Scope.ignore | Where-Object { Test-PathMatchesPattern $path $_ }).Count -gt 0) { continue }
+
+        $uncovered += $path
     }
 
     return @{ Selected = @($selected); Uncovered = $uncovered }
