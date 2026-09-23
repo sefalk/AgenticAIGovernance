@@ -5,10 +5,29 @@ All notable changes to the Agent Framework are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Add entries under the **existing** `###` heading for their kind inside
+`[Unreleased]`. A second heading of the same kind is a defect, not a style
+preference: it splits one list into two, and the next author then has two
+equally plausible places to write. `check-changelog-headings.py` fails the
+build for one (#322).
+
 ## [Unreleased]
 
 ### Changed
 
+- CHANGELOG sections can no longer repeat a `###` heading kind (#322).
+  `[Unreleased]` had two `### Changed` and two `### Fixed`; `[1.22.0]` had six
+  `### Changed`, five `### Added` and five `### Fixed`. Those are not typos but
+  a loop — a duplicate heading makes "the existing heading" ambiguous, which
+  produces the next duplicate. `check-changelog-headings.py` is strict inside
+  `[Unreleased]`, where all writing happens, and holds released sections to a
+  ceiling that may only shrink. Enforcing only `[Unreleased]` was rejected
+  because `[1.22.0]` accumulated its six *while it was* `[Unreleased]`; under
+  the new rule a section is strict for its whole writable life and enters the
+  ratchet at zero. The rule also covers `###` kinds outside the six Keep a
+  Changelog kinds, of which 19 exist in released sections.
+- The duplicate headings in `[Unreleased]` are merged, which reorders entries
+  within the section but changes no text.
 - The secret-scanning gate is one Python implementation behind two thin
   wrappers instead of two maintained implementations (#287). The twins had
   drifted apart in both directions: measured on 2026-09-22 they disagreed on
@@ -178,6 +197,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   original function, which is what lets the eleven wrapper tests call the
   functions directly. A release that returned a wrapper instead would have
   left them testing something else.
+
+- **A release no longer re-attests work it did not do (#234).** A `dev` → `main`
+  promotion contains, by construction, every file the cycle touched, so both
+  declaration gates fired on it and the release author had to sign for changes
+  made in other pull requests weeks earlier. Observed on #230, where the
+  promotion changed exactly two files — `VERSION` and `CHANGELOG.md` — and
+  still had to carry a hook attestation and an environment declaration.
+
+  A contentless mandatory field is how a gate stops being a gate: it teaches
+  the author to fill the box rather than check the thing. Both gates say of
+  themselves *"Recorded, not verified"* and *"Declared, not reviewed"* — their
+  whole value is that a person stated something they believed, and a statement
+  nobody can mean is worth less than none.
+
+  The promotion is now exempt from both, and a new step checks the
+  contributing pull requests instead: it walks the first-parent chain from
+  `main` to `dev`, and for every merge that touched a gated path it reads that
+  pull request's body and confirms the declaration was there. A missing one
+  fails the promotion and names the pull request that owes it, because the
+  release author cannot supply it retroactively — the only useful thing to
+  tell them is which change arrived unattested.
+
+  Exempting the promotion would otherwise have opened a hole, since it is the
+  last point at which something that reached `dev` *without* a gate is still
+  visible. The first-parent walk is what closes it: that chain is one entry
+  per merge and one entry per direct push, so a change that arrived outside a
+  pull request is reported by construction rather than assumed absent. It
+  fails only when such a change touched a gated path, where a declaration is
+  genuinely missing. File lists come from the merge diff rather than the pull
+  request's file list, because what matters is what reached `dev`, and a pull
+  request can be edited after it merges.
+
+  `.github/scripts/test-promotion-gate.py` drives the step against a stubbed
+  `git` and `gh` — twelve cases, including the two that make the exemption
+  safe rather than convenient: a hand-run `git merge` with no pull request
+  number, and a direct push carrying a gated path. It also pins the three
+  gates to the same paths and markers, and pins the exemption to the
+  replacement: they are separate steps that cannot share a variable, and a
+  promotion gate looking for a marker the feature gate no longer demands would
+  pass every release while checking nothing.
+
+  One find worth recording, because the test found it and review would not:
+  PowerShell variable names are case-insensitive, so a stub named `$FILES` and
+  the step's own `$files` are one variable. The stub survived the first loop
+  iteration and failed on the second. `test-env-change-gate.py` carried the
+  same collision and got away with it by reading each stub exactly once; both
+  now prefix stub state with `STUB_`.
+
+- **The retro template no longer offers a status the schema rejects (#252).**
+  `documenter.agent.md` told the documenter that a workflow log's `status:` is
+  one of `COMPLETED`, `FAILED`, `ESCALATED`, and eleven lines later offered
+  `COMPLETED-WITH-ISSUES` as a retro outcome. Two vocabularies for one fact
+  invite the invalid value into the log. The template now uses the same closed
+  set, and says where a run's problems belong: in the sections below the
+  outcome, not in the word.
+
+- **The cost block is at `schema_version: 6`.** It gains `no_usage_requests` on
+  every block, and `drift` on the blocks that lost a record.
 
 ### Fixed
 
@@ -858,6 +935,248 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loses one of its paths, when the measured evidence is edited out of the
   agent, or when the skill and the agent drift apart on what the target is.
 
+- **The hard-deny tier no longer disappears on a host without Python (#251).**
+  `block-dangerous.sh` answered a missing interpreter with `echo '{}'` and exit
+  0 — byte for byte the answer it gives to a command it has inspected and found
+  harmless. On a POSIX machine where Python was simply never installed, the
+  tier that refuses force pushes, `reset --hard` and `rm -rf` was not weakened
+  but absent, and nothing on stdout or stderr said so. The PowerShell twin was
+  never affected: it parses JSON natively, so the primary safety guard had a
+  hard Python dependency on one platform and none on the other.
+
+  Measured while fixing it, and the reason the fix is not a patch to one file:
+  **nine shipped hooks carried the same branch**, six of them PreToolUse gates.
+  The defect was a habit, not an oversight.
+
+  Gates now route a missing interpreter through `af_require_python`, which
+  refuses. The refusal is scoped by each gate's own "do I judge this tool"
+  predicate, because these hooks are registered for *every* tool call:
+  refusing blindly would stop reads and searches too and take the session down
+  with the gate. A tool a gate never judges stays allowed — a real verdict
+  rather than a failure to reach one — and a payload whose `tool_name` cannot
+  be read is refused, because unreadable is not harmless.
+
+  Reading that one field without an interpreter is done with shell parameter
+  expansion, no subprocess, since one reason the interpreter can be missing is
+  a PATH that takes every external binary with it. It is defensible only for
+  this field: tool names are bare identifiers and cannot contain an escape. A
+  command string cannot forge the key — JSON requires the quotes inside a
+  string to be escaped, so the real key still wins — and a payload carrying a
+  genuinely nested second key is reported unreadable rather than guessed at.
+
+  The regression suite gains an inventory gate as well as behavioural cases,
+  because the behavioural cases only cover hooks somebody remembered to name,
+  and a hook nobody named was the defect. It asserts that every shipped
+  `*-pretooluse` hook is listed, that each routes through `af_require_python`,
+  and that none has reintroduced a fail-open branch of its own. The
+  no-interpreter state is reproduced by shadowing `python`, `python3` and `py`
+  with executables that resolve but exit non-zero — the App Execution Alias
+  state `af_find_python` already probes for — rather than by a test-only
+  switch inside the guard, since a guard with a bypass is not the guard that
+  ships.
+
+  Not fixed here: the three hooks that observe rather than gate
+  (`scan-secrets`, `coordinator-posttooluse`, `coordinator-postmerge`) still
+  fall silent without an interpreter. A PreToolUse refusal is not available to
+  them and the right answer differs, so they stay with #168, which tracks the
+  undeclared dependency and the fail-open/fail-closed inconsistency across the
+  payload.
+
+- **The planner can revise its own plan, so the review step it is measured
+  against is executable (#235).** The `tdd-orchestration` runbook mandates a
+  plan review whose only remedy is "return the plan to the planner" — but the
+  planner's sole write tool was `createFile`, which refuses to overwrite an
+  existing file. The planner returned BLOCKED, and the one review any plan
+  receives could not be acted on. Observed in a consumer project: the
+  correction was applied eleven minutes later by the **implementer**, which
+  stamped its own provenance marker on a document it does not own. Design
+  authority went to whichever agent happened to hold a write tool, and nobody
+  decided that as policy.
+
+  The planner now carries `edit/editFiles`. Its write surface does not widen:
+  `planner-pretooluse` is an allowlist over the **target path**, not over the
+  tool, so the planner still writes exactly one kind of file — a `.md` inside
+  a `plans` directory — and every other path is denied no matter which tool
+  asks. The runbook now also names the commit for the revision, since the plan
+  is committed before the review and a corrected plan that is never committed
+  leaves the reviewed and the recorded document different.
+
+  The uncomfortable half is that this gate had no executing test in either
+  harness: the only thing confining the planner was itself unverified. It now
+  has 11 cases in `test-hooks.sh` and 11 in `test-hooks.ps1` — including a
+  batch mixing a plan file with a source file, because the tool applies every
+  replacement and clearing on the first path would approve the rest
+  unexamined. The wider absence is #263.
+
+- **A deploy into a directory that is not yet a git repository no longer stops
+  without saying anything (#244).** `git branch --show-current` exits 128
+  outside a repository. `deploy.sh` runs under `set -euo pipefail`, so that
+  status propagated out of the command substitution that captured the branch
+  and terminated the script between the header and the first file — no error,
+  no summary, nothing deployed. Measured before: the run printed its four
+  header lines and exited 128. Measured after: the same run reaches its
+  summary with 213 files planned and exits 0.
+
+  `deploy.ps1` survived the identical situation only because its branch helper
+  happens to sit in a `try/catch`. That accident is the whole reason the two
+  paths disagreed, and it is why the first run of a project — before
+  `git init` — worked on Windows and failed on bash.
+
+  A non-repo target is now treated as what it is: a supported first
+  installation. Both paths ask `rev-parse --is-inside-work-tree` first, skip
+  the branch check when the answer is no, and print the same line saying so.
+  Silence was the defect; the skip itself was never wrong.
+
+  Fixing the PowerShell side surfaced the same class of bug one layer down.
+  `2>$null` on a native command does not suppress anything while
+  `$ErrorActionPreference` is `Stop` — PS 5.1 re-raises redirected native
+  stderr as a `NativeCommandError` — which aborted `test-deploy-flags.ps1`
+  before its first assertion. The redirect is now scoped locally instead of
+  trusted.
+
+  Both behaviours are now executed by tests rather than assumed:
+  `test-deploy-nonrepo.sh` is new (7 assertions across a non-repo target, a
+  repository on an `agent/` branch, and one on `dev`) and runs in CI, and
+  `test-deploy-flags.ps1` gained the matching assertion. Per #190, the two
+  deploy paths are only equivalent if both are executed. Each case stops its
+  deploy once it is provably past the branch check: a full dry run takes over
+  five minutes under Git-for-Windows bash (#260), and waiting it out three
+  times would buy the suite nothing it does not already know.
+
+- **A PR manager that could not see a branch no longer reports it as missing
+  (#245).** The branch probe had two outcomes where the world has three. "The
+  query said the ref is not there" and "the query told me nothing" both
+  collapsed into `BLOCKED (branch not published)`, and the recovery guidance
+  for that verdict was a bare *push and re-invoke*. Re-pushing a branch that
+  was in fact already merged and deleted recreates it as an orphan with no
+  request attached — the commit then sits outside the integration branch with
+  nothing pointing at it.
+
+  Both PR managers now match the ref on its **full path** including the
+  `agent/` prefix, treat a truncated listing as evidence of nothing, and
+  separate `BLOCKED_BRANCH_NOT_PUBLISHED` from
+  `BLOCKED_BRANCH_PROBE_INDETERMINATE`. Either way they report the raw query
+  and its response, so the coordinator sees the measurement and not only the
+  verdict. On the receiving side, `skills/git-workflow` and `skills/ado-shared`
+  now require `git ls-remote --heads origin agent/{id}` before a second push:
+  the probe belongs to the agent, the ref belongs to the remote, and only one
+  of those is authoritative.
+
+  The same report named a second habit worth closing. A plan reference in a
+  traceability thread may now come only from the coordinator's prompt or from
+  a verified remote read; reconstructing a plausible filename from the naming
+  convention is forbidden outright. An invented path is worse than an absent
+  one, because it is exactly the artifact a later auditor trusts without
+  re-checking. Where neither source yields a path, the answer is `none`.
+
+- **The durable cost artifacts are now actually written (#253, #217).** The
+  per-request facts file and the per-entity file were built, documented and
+  covered by eleven assertions — and no shipped file ever passed
+  `--facts-out` or `--entities-out`. The only caller was the suite proving the
+  feature worked. Every workflow rendered its `cost:` block from rows that were
+  then discarded, and the debug log they came from expires, so the dimensions
+  the block does not render were lost for every run since #217 landed.
+
+  `documenter-stop` (both twins) now passes both flags on every finalising
+  call, writing to `.github/logs/cost/{workflow-id}.{facts,entities}.ndjson`.
+  The location is deliberate: this directory's `.gitignore` matches `*`, which
+  covers subdirectories, so the artifacts are never committed — the same rule,
+  for the same lineage of data, as the workflow logs beside them.
+
+  The writers changed from overwrite to append with dedup, because a workflow
+  can span several chat sessions while the collector reads one at a time.
+  Overwriting would have made the last session the only one that ever existed,
+  and by the time the second session finalises, the log the first one's rows
+  came from is gone. Rows are keyed on the request — `(session, span, ts,
+  response_id)`, and `(session, payload, kind, name)` for entities; each
+  session contributes its own header, since coverage and rate card belong to
+  the session rather than to the file. Re-running a session already in the file
+  adds nothing, which is what lets the collector run on every finalising call
+  while the YAML block — a duplicate key would be invalid — is still written
+  once. Entity rows now carry the session they came from, so both artifact
+  schema versions move to 2.
+
+  The collector's claim that the debug log is "capped at 100 MB" and that
+  truncation "drops the oldest entries" is removed from its docstring and from
+  `logs/README.md`. It was never measured. Across 610 debug logs on one
+  machine, three exceeded 95 MB — 231, 160 and 138 MB — and the 138 MB one
+  still carried its first entry, written four days earlier. `coverage:
+  truncated` detects a log that starts mid-session; what removes the start is
+  not established, and the guess is dropped rather than replaced with another.
+
+- **One stale word no longer switches off four measurements (#252).** The
+  documenter's stop hook decided whether a workflow had ended by reading
+  `**Status:**` out of the plan file. Anything other than `COMPLETED` was read
+  as a mid-workflow call and the hook exited at its first gate — before the log
+  schema check, the timestamp check, the cost block and the invocation census.
+  The plan status is a word an agent maintains by hand, so forgetting to write
+  it disabled every measurement behind it silently, and the run reported green.
+  Observed twice, both times on workflows that had finished and merged while
+  their log said `COMPLETED` all along.
+
+  The hook now finalises when *either* the plan says `COMPLETED` or the
+  workflow log reports a terminal status, and it names the disagreement in its
+  output instead of resolving it in silence. The log match is deliberately
+  looser than the schema's closed set: an invalid value such as
+  `COMPLETED-WITH-ISSUES` must reach the schema checker that reports it, not
+  exit the gate and take the measurements with it. A log that claims no end
+  still leaves a genuine mid-workflow call alone. Both hook twins changed;
+  four assertions were added to each suite.
+
+- **The bash hook suite no longer runs its fixtures in the real repository
+  (#248).** Five fixture helpers guarded their working directory with
+  `cd "$fixture" || exit 1`. That stops a *wrong* path and not an *empty* one:
+  `cd ""` succeeds in bash and stays where it was. With the current directory
+  still at the repository root, the fixture's `git init` and
+  `git checkout -b agent/72-x` ran against the checkout itself — measured, not
+  theorised: a suite run created `agent/72-x` in a maintainer's repository and
+  two later commits landed on it.
+
+  Fixture creation now fails loudly instead of continuing with nothing, and the
+  guards use `${fixture:?}`, which refuses an empty value. Why `mktemp -d`
+  returned nothing is not established; the fix does not depend on knowing,
+  because a harness must not be able to write into the repository it is
+  testing whatever the reason.
+
+- **A request that consumed nothing no longer voids the session's cost (#238).**
+  The collector required four attributes on every `llm_request` and read a
+  missing one as a changed log schema. A failed compaction reports none of the
+  three token counts and no billing attribute — it consumed nothing, so there
+  is nothing to account for — and reading that absence as drift returned
+  `available: false, reason: schema_drift` for the whole session.
+
+  Measured across 25 session directories: 10,734 requests, 51 of them shaped
+  that way, every one an aborted compaction. They are not spread evenly. 39 of
+  the 51 sit in a single 231 MB session, 4 in another, 8 in a third, and the
+  remaining 22 sessions have none — compaction only happens once a session has
+  grown long, so the cost data died in exactly the sessions worth measuring. A
+  consumer project's workflow logs had been emitting an empty cost block on
+  that account, and the session that previously reported `schema_drift` now
+  reports 306 requests and 2327 credits.
+
+  The test is "reported no usage", not "said it failed". Of the 51 records, 50
+  carried `status: error` and one carried `status: ok`; a status-based check
+  would have let that one through and voided its session anyway. These requests
+  are counted as `no_usage_requests`, held apart from `unbilled_requests`,
+  which counts requests that did spend tokens without being charged — folding
+  the two together would file a failure inside a normal category.
+
+  Genuine drift is now subtracted instead of fatal. A *billed* request missing
+  its token fields is still drift, but it costs that one record: the rest are
+  still priced, and `drift: { records, of, fields }` names the field, the loss
+  and the base, so a reader can judge whether the total is still worth reading.
+  `schema_drift` survives and now means what it says — every request was
+  unreadable.
+
+- **The documented cost block had fallen two versions behind (#227, partly).**
+  The example in `logs/README.md` announced `schema_version: 4` against a
+  collector emitting 5. A hand-kept example is documentation only for as long
+  as something compares it to the code, so the suite now does: the version and
+  the collector tag in the README are checked against `SCHEMA_VERSION`, and the
+  check was confirmed to fail against the stale text before it was refreshed.
+  #227's wider ask — that the block's *content* and its documentation cannot
+  diverge — is untouched.
+
 ### Added
 
 - **A stop hook now diffs what the agent created against what the task asked
@@ -1116,310 +1435,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Nothing gates on it. The probe always exits 0, and a dark source fails no
   workflow, hook, or suite. This generalises the #224 principle — a check that
   does not run must announce itself — to the data source behind it.
-
-### Fixed
-
-- **The hard-deny tier no longer disappears on a host without Python (#251).**
-  `block-dangerous.sh` answered a missing interpreter with `echo '{}'` and exit
-  0 — byte for byte the answer it gives to a command it has inspected and found
-  harmless. On a POSIX machine where Python was simply never installed, the
-  tier that refuses force pushes, `reset --hard` and `rm -rf` was not weakened
-  but absent, and nothing on stdout or stderr said so. The PowerShell twin was
-  never affected: it parses JSON natively, so the primary safety guard had a
-  hard Python dependency on one platform and none on the other.
-
-  Measured while fixing it, and the reason the fix is not a patch to one file:
-  **nine shipped hooks carried the same branch**, six of them PreToolUse gates.
-  The defect was a habit, not an oversight.
-
-  Gates now route a missing interpreter through `af_require_python`, which
-  refuses. The refusal is scoped by each gate's own "do I judge this tool"
-  predicate, because these hooks are registered for *every* tool call:
-  refusing blindly would stop reads and searches too and take the session down
-  with the gate. A tool a gate never judges stays allowed — a real verdict
-  rather than a failure to reach one — and a payload whose `tool_name` cannot
-  be read is refused, because unreadable is not harmless.
-
-  Reading that one field without an interpreter is done with shell parameter
-  expansion, no subprocess, since one reason the interpreter can be missing is
-  a PATH that takes every external binary with it. It is defensible only for
-  this field: tool names are bare identifiers and cannot contain an escape. A
-  command string cannot forge the key — JSON requires the quotes inside a
-  string to be escaped, so the real key still wins — and a payload carrying a
-  genuinely nested second key is reported unreadable rather than guessed at.
-
-  The regression suite gains an inventory gate as well as behavioural cases,
-  because the behavioural cases only cover hooks somebody remembered to name,
-  and a hook nobody named was the defect. It asserts that every shipped
-  `*-pretooluse` hook is listed, that each routes through `af_require_python`,
-  and that none has reintroduced a fail-open branch of its own. The
-  no-interpreter state is reproduced by shadowing `python`, `python3` and `py`
-  with executables that resolve but exit non-zero — the App Execution Alias
-  state `af_find_python` already probes for — rather than by a test-only
-  switch inside the guard, since a guard with a bypass is not the guard that
-  ships.
-
-  Not fixed here: the three hooks that observe rather than gate
-  (`scan-secrets`, `coordinator-posttooluse`, `coordinator-postmerge`) still
-  fall silent without an interpreter. A PreToolUse refusal is not available to
-  them and the right answer differs, so they stay with #168, which tracks the
-  undeclared dependency and the fail-open/fail-closed inconsistency across the
-  payload.
-
-- **The planner can revise its own plan, so the review step it is measured
-  against is executable (#235).** The `tdd-orchestration` runbook mandates a
-  plan review whose only remedy is "return the plan to the planner" — but the
-  planner's sole write tool was `createFile`, which refuses to overwrite an
-  existing file. The planner returned BLOCKED, and the one review any plan
-  receives could not be acted on. Observed in a consumer project: the
-  correction was applied eleven minutes later by the **implementer**, which
-  stamped its own provenance marker on a document it does not own. Design
-  authority went to whichever agent happened to hold a write tool, and nobody
-  decided that as policy.
-
-  The planner now carries `edit/editFiles`. Its write surface does not widen:
-  `planner-pretooluse` is an allowlist over the **target path**, not over the
-  tool, so the planner still writes exactly one kind of file — a `.md` inside
-  a `plans` directory — and every other path is denied no matter which tool
-  asks. The runbook now also names the commit for the revision, since the plan
-  is committed before the review and a corrected plan that is never committed
-  leaves the reviewed and the recorded document different.
-
-  The uncomfortable half is that this gate had no executing test in either
-  harness: the only thing confining the planner was itself unverified. It now
-  has 11 cases in `test-hooks.sh` and 11 in `test-hooks.ps1` — including a
-  batch mixing a plan file with a source file, because the tool applies every
-  replacement and clearing on the first path would approve the rest
-  unexamined. The wider absence is #263.
-
-- **A deploy into a directory that is not yet a git repository no longer stops
-  without saying anything (#244).** `git branch --show-current` exits 128
-  outside a repository. `deploy.sh` runs under `set -euo pipefail`, so that
-  status propagated out of the command substitution that captured the branch
-  and terminated the script between the header and the first file — no error,
-  no summary, nothing deployed. Measured before: the run printed its four
-  header lines and exited 128. Measured after: the same run reaches its
-  summary with 213 files planned and exits 0.
-
-  `deploy.ps1` survived the identical situation only because its branch helper
-  happens to sit in a `try/catch`. That accident is the whole reason the two
-  paths disagreed, and it is why the first run of a project — before
-  `git init` — worked on Windows and failed on bash.
-
-  A non-repo target is now treated as what it is: a supported first
-  installation. Both paths ask `rev-parse --is-inside-work-tree` first, skip
-  the branch check when the answer is no, and print the same line saying so.
-  Silence was the defect; the skip itself was never wrong.
-
-  Fixing the PowerShell side surfaced the same class of bug one layer down.
-  `2>$null` on a native command does not suppress anything while
-  `$ErrorActionPreference` is `Stop` — PS 5.1 re-raises redirected native
-  stderr as a `NativeCommandError` — which aborted `test-deploy-flags.ps1`
-  before its first assertion. The redirect is now scoped locally instead of
-  trusted.
-
-  Both behaviours are now executed by tests rather than assumed:
-  `test-deploy-nonrepo.sh` is new (7 assertions across a non-repo target, a
-  repository on an `agent/` branch, and one on `dev`) and runs in CI, and
-  `test-deploy-flags.ps1` gained the matching assertion. Per #190, the two
-  deploy paths are only equivalent if both are executed. Each case stops its
-  deploy once it is provably past the branch check: a full dry run takes over
-  five minutes under Git-for-Windows bash (#260), and waiting it out three
-  times would buy the suite nothing it does not already know.
-
-- **A PR manager that could not see a branch no longer reports it as missing
-  (#245).** The branch probe had two outcomes where the world has three. "The
-  query said the ref is not there" and "the query told me nothing" both
-  collapsed into `BLOCKED (branch not published)`, and the recovery guidance
-  for that verdict was a bare *push and re-invoke*. Re-pushing a branch that
-  was in fact already merged and deleted recreates it as an orphan with no
-  request attached — the commit then sits outside the integration branch with
-  nothing pointing at it.
-
-  Both PR managers now match the ref on its **full path** including the
-  `agent/` prefix, treat a truncated listing as evidence of nothing, and
-  separate `BLOCKED_BRANCH_NOT_PUBLISHED` from
-  `BLOCKED_BRANCH_PROBE_INDETERMINATE`. Either way they report the raw query
-  and its response, so the coordinator sees the measurement and not only the
-  verdict. On the receiving side, `skills/git-workflow` and `skills/ado-shared`
-  now require `git ls-remote --heads origin agent/{id}` before a second push:
-  the probe belongs to the agent, the ref belongs to the remote, and only one
-  of those is authoritative.
-
-  The same report named a second habit worth closing. A plan reference in a
-  traceability thread may now come only from the coordinator's prompt or from
-  a verified remote read; reconstructing a plausible filename from the naming
-  convention is forbidden outright. An invented path is worse than an absent
-  one, because it is exactly the artifact a later auditor trusts without
-  re-checking. Where neither source yields a path, the answer is `none`.
-
-- **The durable cost artifacts are now actually written (#253, #217).** The
-  per-request facts file and the per-entity file were built, documented and
-  covered by eleven assertions — and no shipped file ever passed
-  `--facts-out` or `--entities-out`. The only caller was the suite proving the
-  feature worked. Every workflow rendered its `cost:` block from rows that were
-  then discarded, and the debug log they came from expires, so the dimensions
-  the block does not render were lost for every run since #217 landed.
-
-  `documenter-stop` (both twins) now passes both flags on every finalising
-  call, writing to `.github/logs/cost/{workflow-id}.{facts,entities}.ndjson`.
-  The location is deliberate: this directory's `.gitignore` matches `*`, which
-  covers subdirectories, so the artifacts are never committed — the same rule,
-  for the same lineage of data, as the workflow logs beside them.
-
-  The writers changed from overwrite to append with dedup, because a workflow
-  can span several chat sessions while the collector reads one at a time.
-  Overwriting would have made the last session the only one that ever existed,
-  and by the time the second session finalises, the log the first one's rows
-  came from is gone. Rows are keyed on the request — `(session, span, ts,
-  response_id)`, and `(session, payload, kind, name)` for entities; each
-  session contributes its own header, since coverage and rate card belong to
-  the session rather than to the file. Re-running a session already in the file
-  adds nothing, which is what lets the collector run on every finalising call
-  while the YAML block — a duplicate key would be invalid — is still written
-  once. Entity rows now carry the session they came from, so both artifact
-  schema versions move to 2.
-
-  The collector's claim that the debug log is "capped at 100 MB" and that
-  truncation "drops the oldest entries" is removed from its docstring and from
-  `logs/README.md`. It was never measured. Across 610 debug logs on one
-  machine, three exceeded 95 MB — 231, 160 and 138 MB — and the 138 MB one
-  still carried its first entry, written four days earlier. `coverage:
-  truncated` detects a log that starts mid-session; what removes the start is
-  not established, and the guess is dropped rather than replaced with another.
-
-- **One stale word no longer switches off four measurements (#252).** The
-  documenter's stop hook decided whether a workflow had ended by reading
-  `**Status:**` out of the plan file. Anything other than `COMPLETED` was read
-  as a mid-workflow call and the hook exited at its first gate — before the log
-  schema check, the timestamp check, the cost block and the invocation census.
-  The plan status is a word an agent maintains by hand, so forgetting to write
-  it disabled every measurement behind it silently, and the run reported green.
-  Observed twice, both times on workflows that had finished and merged while
-  their log said `COMPLETED` all along.
-
-  The hook now finalises when *either* the plan says `COMPLETED` or the
-  workflow log reports a terminal status, and it names the disagreement in its
-  output instead of resolving it in silence. The log match is deliberately
-  looser than the schema's closed set: an invalid value such as
-  `COMPLETED-WITH-ISSUES` must reach the schema checker that reports it, not
-  exit the gate and take the measurements with it. A log that claims no end
-  still leaves a genuine mid-workflow call alone. Both hook twins changed;
-  four assertions were added to each suite.
-
-- **The bash hook suite no longer runs its fixtures in the real repository
-  (#248).** Five fixture helpers guarded their working directory with
-  `cd "$fixture" || exit 1`. That stops a *wrong* path and not an *empty* one:
-  `cd ""` succeeds in bash and stays where it was. With the current directory
-  still at the repository root, the fixture's `git init` and
-  `git checkout -b agent/72-x` ran against the checkout itself — measured, not
-  theorised: a suite run created `agent/72-x` in a maintainer's repository and
-  two later commits landed on it.
-
-  Fixture creation now fails loudly instead of continuing with nothing, and the
-  guards use `${fixture:?}`, which refuses an empty value. Why `mktemp -d`
-  returned nothing is not established; the fix does not depend on knowing,
-  because a harness must not be able to write into the repository it is
-  testing whatever the reason.
-
-- **A request that consumed nothing no longer voids the session's cost (#238).**
-  The collector required four attributes on every `llm_request` and read a
-  missing one as a changed log schema. A failed compaction reports none of the
-  three token counts and no billing attribute — it consumed nothing, so there
-  is nothing to account for — and reading that absence as drift returned
-  `available: false, reason: schema_drift` for the whole session.
-
-  Measured across 25 session directories: 10,734 requests, 51 of them shaped
-  that way, every one an aborted compaction. They are not spread evenly. 39 of
-  the 51 sit in a single 231 MB session, 4 in another, 8 in a third, and the
-  remaining 22 sessions have none — compaction only happens once a session has
-  grown long, so the cost data died in exactly the sessions worth measuring. A
-  consumer project's workflow logs had been emitting an empty cost block on
-  that account, and the session that previously reported `schema_drift` now
-  reports 306 requests and 2327 credits.
-
-  The test is "reported no usage", not "said it failed". Of the 51 records, 50
-  carried `status: error` and one carried `status: ok`; a status-based check
-  would have let that one through and voided its session anyway. These requests
-  are counted as `no_usage_requests`, held apart from `unbilled_requests`,
-  which counts requests that did spend tokens without being charged — folding
-  the two together would file a failure inside a normal category.
-
-  Genuine drift is now subtracted instead of fatal. A *billed* request missing
-  its token fields is still drift, but it costs that one record: the rest are
-  still priced, and `drift: { records, of, fields }` names the field, the loss
-  and the base, so a reader can judge whether the total is still worth reading.
-  `schema_drift` survives and now means what it says — every request was
-  unreadable.
-
-- **The documented cost block had fallen two versions behind (#227, partly).**
-  The example in `logs/README.md` announced `schema_version: 4` against a
-  collector emitting 5. A hand-kept example is documentation only for as long
-  as something compares it to the code, so the suite now does: the version and
-  the collector tag in the README are checked against `SCHEMA_VERSION`, and the
-  check was confirmed to fail against the stale text before it was refreshed.
-  #227's wider ask — that the block's *content* and its documentation cannot
-  diverge — is untouched.
-
-### Changed
-
-- **A release no longer re-attests work it did not do (#234).** A `dev` → `main`
-  promotion contains, by construction, every file the cycle touched, so both
-  declaration gates fired on it and the release author had to sign for changes
-  made in other pull requests weeks earlier. Observed on #230, where the
-  promotion changed exactly two files — `VERSION` and `CHANGELOG.md` — and
-  still had to carry a hook attestation and an environment declaration.
-
-  A contentless mandatory field is how a gate stops being a gate: it teaches
-  the author to fill the box rather than check the thing. Both gates say of
-  themselves *"Recorded, not verified"* and *"Declared, not reviewed"* — their
-  whole value is that a person stated something they believed, and a statement
-  nobody can mean is worth less than none.
-
-  The promotion is now exempt from both, and a new step checks the
-  contributing pull requests instead: it walks the first-parent chain from
-  `main` to `dev`, and for every merge that touched a gated path it reads that
-  pull request's body and confirms the declaration was there. A missing one
-  fails the promotion and names the pull request that owes it, because the
-  release author cannot supply it retroactively — the only useful thing to
-  tell them is which change arrived unattested.
-
-  Exempting the promotion would otherwise have opened a hole, since it is the
-  last point at which something that reached `dev` *without* a gate is still
-  visible. The first-parent walk is what closes it: that chain is one entry
-  per merge and one entry per direct push, so a change that arrived outside a
-  pull request is reported by construction rather than assumed absent. It
-  fails only when such a change touched a gated path, where a declaration is
-  genuinely missing. File lists come from the merge diff rather than the pull
-  request's file list, because what matters is what reached `dev`, and a pull
-  request can be edited after it merges.
-
-  `.github/scripts/test-promotion-gate.py` drives the step against a stubbed
-  `git` and `gh` — twelve cases, including the two that make the exemption
-  safe rather than convenient: a hand-run `git merge` with no pull request
-  number, and a direct push carrying a gated path. It also pins the three
-  gates to the same paths and markers, and pins the exemption to the
-  replacement: they are separate steps that cannot share a variable, and a
-  promotion gate looking for a marker the feature gate no longer demands would
-  pass every release while checking nothing.
-
-  One find worth recording, because the test found it and review would not:
-  PowerShell variable names are case-insensitive, so a stub named `$FILES` and
-  the step's own `$files` are one variable. The stub survived the first loop
-  iteration and failed on the second. `test-env-change-gate.py` carried the
-  same collision and got away with it by reading each stub exactly once; both
-  now prefix stub state with `STUB_`.
-
-- **The retro template no longer offers a status the schema rejects (#252).**
-  `documenter.agent.md` told the documenter that a workflow log's `status:` is
-  one of `COMPLETED`, `FAILED`, `ESCALATED`, and eleven lines later offered
-  `COMPLETED-WITH-ISSUES` as a retro outcome. Two vocabularies for one fact
-  invite the invalid value into the log. The template now uses the same closed
-  set, and says where a run's problems belong: in the sections below the
-  outcome, not in the word.
-
-- **The cost block is at `schema_version: 6`.** It gains `no_usage_requests` on
-  every block, and `drift` on the blocks that lost a record.
 
 ## [1.23.0] -- 2026-08-26
 
