@@ -1207,6 +1207,30 @@ build for one (#322).
 
 ### Added
 
+- **Every regression suite now declares what it is allowed to cost, and the
+  runner fails the sweep when one exceeds it (#334).** The nested re-run fixed
+  above was green for as long as it existed: `test-deploy-flags.ps1` asserted
+  everything it meant to assert while spending 708 of its 788 seconds running
+  another suite. Correctness gates cannot see that class of defect, because
+  nothing is incorrect — only expensive. A static "no suite may execute another
+  suite" check was written first and discarded: `deploy.ps1` must keep
+  *mentioning* `test-hooks.ps1` in its check list, so a filename scan flags the
+  caller even after it stopped executing anything, and telling a mention from a
+  call would need real PowerShell call-graph analysis. Runtime is the honest
+  signal. `suite-budgets.json` holds a ceiling per suite, roughly twice the
+  measured local runtime with a 30s floor, and `run-all-tests.ps1` reports a
+  suite over its ceiling as `SLOW` and exits non-zero. Ceilings come from the
+  slower environment — this developer machine runs the full sweep in ~2209s
+  against ~1204s in CI — so a CI-derived number would fail locally for no
+  reason. The margin is deliberately loose because the defect class is a ~30x
+  event, not a 20% one. `test-suite-budgets.ps1` requires every suite to have
+  an explicit entry, rejects entries for suites that no longer exist, rejects
+  ceilings at or above the kill timeout where they could never fire, and drives
+  the runner against a one-second fixture budget to prove the ceiling is
+  enforced rather than merely declared. Raising a ceiling stays possible and
+  stays a visible diff that needs a reason; mechanically forbidding it against
+  git history was not attempted.
+
 - **A stop hook now diffs what the agent created against what the task asked
   for, instead of trusting the agent's self-report (#123, direction 3).** The
   incident that opened the issue was a test-writer that dropped

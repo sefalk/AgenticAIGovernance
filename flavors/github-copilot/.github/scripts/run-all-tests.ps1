@@ -31,7 +31,9 @@ param(
     # variable (#333). 1800 clears the slowest measured suite (788s) with room
     # and stays well under the CI job's own 60-minute cap, so a genuinely hung
     # suite is still killed and still named.
-    [int]$TimeoutSeconds = 1800
+    [int]$TimeoutSeconds = 1800,
+    # Overridable so the budget suite can drive this runner against a fixture.
+    [string]$BudgetFile = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,6 +44,25 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 # runner works under both Windows PowerShell and pwsh without a hardcoded name.
 $psExe = (Get-Process -Id $PID).Path
 if (-not $psExe) { $psExe = 'powershell' }
+
+# Runtime ceilings. A suite can pass every assertion it makes and still be a
+# defect: #334's nested re-run of test-hooks.ps1 was green for as long as it
+# existed and cost a third of the whole sweep. A missing or unreadable file is
+# not fatal -- the run still has to happen -- but the budget suite fails on it.
+$defaultBudget = 120
+$budgets = @{}
+if (-not $BudgetFile) { $BudgetFile = Join-Path $scriptDir 'suite-budgets.json' }
+if (Test-Path $BudgetFile) {
+    try {
+        $declared = Get-Content $BudgetFile -Raw | ConvertFrom-Json
+        if ($null -ne $declared.default) { $defaultBudget = [int]$declared.default }
+        foreach ($entry in $declared.suites.PSObject.Properties) {
+            $budgets[$entry.Name] = [int]$entry.Value
+        }
+    } catch {
+        Write-Host "Could not read $BudgetFile -- falling back to ${defaultBudget}s for every suite."
+    }
+}
 
 $suites = Get-ChildItem -Path $scriptDir -Filter 'test-*.ps1' |
     Where-Object { $_.Name -like "*$Filter*" -or $Filter -eq '*' } |
@@ -61,6 +82,7 @@ $results = @()
 
 foreach ($suite in $suites) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
+    $overBudget = ''
 
     # Deliberately not Start-Process -PassThru: without -Wait it leaves
     # .ExitCode empty, and an empty value compares as non-zero, which reports
@@ -109,12 +131,23 @@ foreach ($suite in $suites) {
         elseif ($code -ne 0) { $status = 'FAIL' }
         elseif ($skipped)    { $status = 'SKIP' }
         else                 { $status = 'PASS' }
+
+        if ($status -eq 'PASS') {
+            $budget = if ($budgets.ContainsKey($suite.Name)) { $budgets[$suite.Name] } else { $defaultBudget }
+            if ($sw.Elapsed.TotalSeconds -gt $budget) {
+                $status = 'SLOW'
+                $overBudget = 'Took {0}s against a {1}s budget -- make it faster, or raise the ceiling in suite-budgets.json and say why.' -f [math]::Round($sw.Elapsed.TotalSeconds, 1), $budget
+            }
+        }
     }
 
     $proc.Dispose()
 
     $reason = ''
-    if ($status -eq 'SKIP') {
+    if ($status -eq 'SLOW') {
+        $reason = $overBudget
+    }
+    elseif ($status -eq 'SKIP') {
         $m = [regex]::Match($output, '(?m)^\s*SKIP:\s*(.+)$')
         if ($m.Success) { $reason = $m.Groups[1].Value.Trim() }
     }
@@ -138,6 +171,7 @@ foreach ($suite in $suites) {
 }
 
 $passed  = @($results | Where-Object { $_.Status -eq 'PASS' })
+$slow    = @($results | Where-Object { $_.Status -eq 'SLOW' })
 $skipped = @($results | Where-Object { $_.Status -eq 'SKIP' })
 $blocked = @($results | Where-Object { $_.Status -eq 'BLOCKED' })
 $failed  = @($results | Where-Object { $_.Status -eq 'FAIL' -or $_.Status -eq 'TIMEOUT' })
@@ -158,9 +192,9 @@ foreach ($f in $failed) {
 
 Write-Host ''
 Write-Host ("-" * 78)
-Write-Host ("TOTAL {0} suite(s) in {1:N1}s -- {2} passed, {3} skipped, {4} blocked, {5} failed" -f `
+Write-Host ('TOTAL {0} suite(s) in {1:N1}s -- {2} passed, {3} over budget, {4} skipped, {5} blocked, {6} failed' -f `
     $results.Count, (($results | Measure-Object -Property Seconds -Sum).Sum), `
-    $passed.Count, $skipped.Count, $blocked.Count, $failed.Count)
+    $passed.Count, $slow.Count, $skipped.Count, $blocked.Count, $failed.Count)
 
 if ($silent.Count -gt 0) {
     Write-Host ''
@@ -171,6 +205,14 @@ if ($silent.Count -gt 0) {
 if ($failed.Count -gt 0) {
     Write-Host ''
     Write-Host 'RESULT: FAILED'
+    exit 1
+}
+if ($slow.Count -gt 0) {
+    Write-Host ''
+    Write-Host 'Suites over their declared runtime budget:'
+    foreach ($s in $slow) { Write-Host ("  {0}: {1}" -f $s.Suite, $s.Reason) }
+    Write-Host ''
+    Write-Host 'RESULT: FAILED -- a suite costs more than it is allowed to.'
     exit 1
 }
 if ($FailOnSkip -and $silent.Count -gt 0) {
