@@ -25,7 +25,13 @@ param(
     [switch]$FailOnSkip,
     [string]$Filter = '*',
     [string[]]$Exclude = @(),
-    [int]$TimeoutSeconds = 600
+    # The only place the per-suite budget is stated. CI used to pass its own
+    # value, so the same suite on the same tree passed there and reported
+    # FAILED on a developer's machine, with nothing saying the budget was the
+    # variable (#333). 1800 clears the slowest measured suite (788s) with room
+    # and stays well under the CI job's own 60-minute cap, so a genuinely hung
+    # suite is still killed and still named.
+    [int]$TimeoutSeconds = 1800
 )
 
 $ErrorActionPreference = 'Stop'
