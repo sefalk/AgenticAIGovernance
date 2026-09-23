@@ -55,6 +55,10 @@
     - quick: test-hooks + validate-skills + audit-tools
     - full:  quick + test-worktree-scripts
 
+.PARAMETER ListPreflightChecks
+    Print the names of the checks the selected profile would run, then exit
+    without running any of them and without touching a target.
+
 .PARAMETER BackupPruneDays
     Automatically delete stale .af-backup-* folders in the target root that
     are older than this many days.
@@ -100,6 +104,7 @@ param(
     [switch]$RequirePreflight,
     [ValidateSet('quick', 'full')]
     [string]$PreflightMode = 'quick',
+    [switch]$ListPreflightChecks,
     [int]$BackupPruneDays = -1
 )
 
@@ -638,14 +643,13 @@ function Find-PythonCommand {
     return @()
 }
 
-function Invoke-IntegrityPreflight {
+# Building the check list is separate from running it, so that a caller can ask
+# what preflight consists of without paying for its execution (#334).
+function Get-IntegrityPreflightChecks {
     param(
         [ValidateSet('quick', 'full')]
-        [string]$Mode,
-        [switch]$Required
+        [string]$Mode
     )
-
-    Write-Host "=== AF Preflight ($Mode) ===" -ForegroundColor Cyan
 
     $checks = @(
         [PSCustomObject]@{
@@ -699,6 +703,20 @@ function Invoke-IntegrityPreflight {
         }
     }
 
+    return $checks
+}
+
+function Invoke-IntegrityPreflight {
+    param(
+        [ValidateSet('quick', 'full')]
+        [string]$Mode,
+        [switch]$Required
+    )
+
+    Write-Host "=== AF Preflight ($Mode) ===" -ForegroundColor Cyan
+
+    $checks = @(Get-IntegrityPreflightChecks -Mode $Mode)
+
     $failed = @()
     foreach ($check in $checks) {
         Write-Host "  RUN     $($check.Name)"
@@ -729,6 +747,19 @@ function Invoke-IntegrityPreflight {
     Write-Host "Preflight failed, but deployment will continue (optional mode)." -ForegroundColor Yellow
     Write-Host ""
     return $false
+}
+
+# ── ListPreflightChecks mode ──────────────────────────────────────────────
+# Answers "what does preflight consist of" without running it and without a
+# target. The regression suite asserting that composition used to execute every
+# check, which re-ran test-hooks.ps1 inside another suite: 708 of that suite's
+# 788 seconds, for a string comparison whose result it never read (#334).
+if ($ListPreflightChecks) {
+    Write-Host "=== AF Preflight checks ($PreflightMode) ==="
+    foreach ($check in (Get-IntegrityPreflightChecks -Mode $PreflightMode)) {
+        Write-Host "  CHECK   $($check.Name)"
+    }
+    exit 0
 }
 
 # ── UpdateHashes mode ─────────────────────────────────────────────────────
