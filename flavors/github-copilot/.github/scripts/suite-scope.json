@@ -1,0 +1,115 @@
+{
+  "_note": "Which regression suites a changed path requires (#334). Patterns are written WITHOUT the flavors/github-copilot/ prefix so the same file works in this repo and in a project the payload was deployed into; matching is by path suffix. A pattern is either a concrete path or a directory ending in /**, which keeps matching to plain string comparison instead of a second glob implementation. A changed path that no pattern covers falls back to the FULL sweep, so an incomplete map costs time, never coverage. Editing a suite always selects that suite -- the runner knows this and the map does not repeat it. CI is unaffected and keeps sweeping everything; this only scopes local runs.",
+  "always": [
+    ".github/scripts/run-all-tests.ps1"
+  ],
+  "ignore": [
+    "VERSION",
+    "README.md",
+    "docs/**",
+    "ideas/**",
+    ".github/logs/**",
+    ".github/retros/**"
+  ],
+  "suites": {
+    "test-agent-invocations.ps1": [
+      ".github/hooks/scripts/collect-agent-invocations.py"
+    ],
+    "test-changelog-headings.ps1": [
+      ".github/scripts/check-changelog-headings.py",
+      "CHANGELOG.md"
+    ],
+    "test-context-budget.ps1": [
+      ".github/scripts/check-context-budget.py",
+      ".github/hooks/scripts/check-context-budget-staged.py",
+      ".github/af-env.conf",
+      ".github/copilot-instructions.md",
+      ".github/instructions/**",
+      ".github/agents/**",
+      ".github/skills/**",
+      ".github/prompts/**"
+    ],
+    "test-cost-source.ps1": [
+      ".github/scripts/check-cost-source.ps1",
+      ".github/scripts/check-cost-source.sh"
+    ],
+    "test-curation-consistency.ps1": [
+      ".github/scripts/check-curation-consistency.py",
+      ".github/skills/**"
+    ],
+    "test-deploy-flags.ps1": [
+      "deploy.ps1",
+      ".github/af-env.conf"
+    ],
+    "test-dialect-wrappers.ps1": [
+      ".github/scripts/check-dialect-wrappers.py",
+      ".github/hooks/scripts/**"
+    ],
+    "test-hooks-integration.ps1": [
+      ".github/hooks/**"
+    ],
+    "test-hooks.ps1": [
+      ".github/hooks/**",
+      ".github/af-env.conf"
+    ],
+    "test-large-file-guard.ps1": [
+      ".github/hooks/scripts/check-large-files.py",
+      ".github/af-env.conf"
+    ],
+    "test-lint-gate.ps1": [
+      ".github/scripts/check-python-linting.py",
+      ".github/scripts/check-python-quality.py",
+      ".github/scripts/run-tests.ps1",
+      ".github/hooks/scripts/implementer-stop.ps1",
+      ".github/hooks/scripts/refactorer-stop.ps1",
+      ".github/af-env.conf"
+    ],
+    "test-plan-budget.ps1": [
+      ".github/hooks/scripts/check-plan-budget.py",
+      ".github/af-env.conf"
+    ],
+    "test-plan-structure.ps1": [
+      ".github/hooks/scripts/check-plan-structure.py"
+    ],
+    "test-planner-write-scope.ps1": [
+      ".github/hooks/scripts/planner-pretooluse.ps1",
+      ".github/hooks/scripts/planner-pretooluse.sh",
+      ".github/hooks/scripts/check-plan-budget.py"
+    ],
+    "test-quality-gate.ps1": [
+      ".github/scripts/check-python-quality.py",
+      ".github/af-env.conf"
+    ],
+    "test-retry-economy.ps1": [
+      ".github/scripts/analyze-retry-economy.py",
+      ".github/MANIFEST.md"
+    ],
+    "test-run-tests.ps1": [
+      ".github/scripts/run-tests.ps1",
+      ".github/scripts/run-tests.sh",
+      ".github/hooks/scripts/implementer-stop.ps1"
+    ],
+    "test-session-cost.ps1": [
+      ".github/scripts/collect-session-cost.py",
+      ".github/instructions/**"
+    ],
+    "test-suite-budgets.ps1": [
+      ".github/scripts/suite-budgets.json"
+    ],
+    "test-suite-scope.ps1": [
+      ".github/scripts/suite-scope.json"
+    ],
+    "test-workflow-log-schema.ps1": [
+      ".github/hooks/scripts/check-workflow-log.py",
+      ".github/scripts/analyze-retry-economy.py",
+      ".github/MANIFEST.md"
+    ],
+    "test-worktree-scripts.ps1": [
+      ".github/scripts/setup-worktree.ps1",
+      ".github/scripts/setup-worktree.sh",
+      ".github/scripts/cleanup-worktree.ps1",
+      ".github/scripts/cleanup-worktree.sh",
+      ".github/af-env.conf"
+    ]
+  }
+}

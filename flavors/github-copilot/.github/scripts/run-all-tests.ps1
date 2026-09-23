@@ -19,6 +19,8 @@
 #   .\run-all-tests.ps1 -FailOnSkip      # CI: a skipped suite fails the run
 #   .\run-all-tests.ps1 -Filter hooks    # only suites whose name matches
 #   .\run-all-tests.ps1 -Exclude a.ps1   # leave a suite out (see the workflow)
+#   .\run-all-tests.ps1 -Changed         # local: only suites the diff requires
+#   .\run-all-tests.ps1 -ListSelection   # show what -Changed would run
 
 [CmdletBinding()]
 param(
@@ -33,7 +35,15 @@ param(
     # suite is still killed and still named.
     [int]$TimeoutSeconds = 1800,
     # Overridable so the budget suite can drive this runner against a fixture.
-    [string]$BudgetFile = ''
+    [string]$BudgetFile = '',
+    # Scope a local run to the suites the working diff requires. CI does not
+    # pass this and keeps sweeping everything (#334).
+    [switch]$Changed,
+    [switch]$ListSelection,
+    [string]$Since = 'origin/dev',
+    [string]$ScopeFile = '',
+    # Bypasses git so the scope suite can assert selection deterministically.
+    [string[]]$ChangedFiles = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -68,6 +78,110 @@ $suites = Get-ChildItem -Path $scriptDir -Filter 'test-*.ps1' |
     Where-Object { $_.Name -like "*$Filter*" -or $Filter -eq '*' } |
     Where-Object { $Exclude -notcontains $_.Name } |
     Sort-Object Name
+
+# ── Path-scoped selection ─────────────────────────────────────────────────
+
+# Patterns are matched by suffix so the same map works here, where the tree
+# starts at flavors/github-copilot/, and in a project the payload was deployed
+# into, where it starts at .github/.
+function Test-PathMatchesPattern {
+    param([string]$Path, [string]$Pattern)
+    $p = ($Path -replace '\\', '/').TrimStart('./')
+    if ($Pattern.EndsWith('/**')) {
+        $dir = $Pattern.Substring(0, $Pattern.Length - 3)
+        return ($p -eq $dir) -or $p.StartsWith("$dir/") -or $p.Contains("/$dir/")
+    }
+    return ($p -eq $Pattern) -or $p.EndsWith("/$Pattern")
+}
+
+function Get-ChangedPaths {
+    param([string]$Base)
+    $ErrorActionPreference = 'Continue'
+    $paths = @()
+    $paths += @(git diff --name-only "$Base...HEAD" 2>$null)
+    $paths += @(git status --porcelain 2>$null | ForEach-Object { $_.Substring(3).Trim('"') })
+    if ($LASTEXITCODE -ne 0 -and $paths.Count -eq 0) { return $null }
+    return @($paths | Where-Object { $_ } | Sort-Object -Unique)
+}
+
+function Select-Suites {
+    param([string[]]$Paths, $Scope, [string[]]$AllSuites)
+
+    $selected = New-Object 'System.Collections.Generic.HashSet[string]'
+    $uncovered = @()
+
+    foreach ($path in $Paths) {
+        if (@($Scope.ignore | Where-Object { Test-PathMatchesPattern $path $_ }).Count -gt 0) { continue }
+
+        if (@($Scope.always | Where-Object { Test-PathMatchesPattern $path $_ }).Count -gt 0) {
+            foreach ($s in $AllSuites) { [void]$selected.Add($s) }
+            continue
+        }
+
+        $hit = $false
+        foreach ($s in $AllSuites) {
+            if (Test-PathMatchesPattern $path ".github/scripts/$s") { [void]$selected.Add($s); $hit = $true }
+        }
+        foreach ($entry in $Scope.suites.PSObject.Properties) {
+            foreach ($pattern in @($entry.Value)) {
+                if (Test-PathMatchesPattern $path $pattern) { [void]$selected.Add($entry.Name); $hit = $true }
+            }
+        }
+        if (-not $hit) { $uncovered += $path }
+    }
+
+    return @{ Selected = @($selected); Uncovered = $uncovered }
+}
+
+if ($Changed -or $ListSelection) {
+    if (-not $ScopeFile) { $ScopeFile = Join-Path $scriptDir 'suite-scope.json' }
+    $allNames = @($suites | Select-Object -ExpandProperty Name)
+    $chosen = $allNames
+    $uncovered = @()
+
+    $scope = $null
+    if (Test-Path $ScopeFile) {
+        try { $scope = Get-Content $ScopeFile -Raw | ConvertFrom-Json } catch { $scope = $null }
+    }
+
+    $paths = $ChangedFiles
+    if ($paths.Count -eq 0) { $paths = Get-ChangedPaths -Base $Since }
+
+    # No map, no diff, or a git that would not answer: sweep everything. Every
+    # unknown has to resolve towards more testing, not less.
+    if ($null -eq $scope) {
+        $uncovered = @("no usable $ScopeFile")
+    } elseif ($null -eq $paths) {
+        $uncovered = @('could not read the diff')
+    } else {
+        $selection = Select-Suites -Paths $paths -Scope $scope -AllSuites $allNames
+        $uncovered = $selection.Uncovered
+        if ($uncovered.Count -eq 0) { $chosen = @($selection.Selected | Sort-Object) }
+    }
+
+    if ($ListSelection) {
+        Write-Host ''
+        Write-Host "=== AF suite selection ($($paths.Count) changed path(s)) ==="
+        if ($uncovered.Count -gt 0) {
+            Write-Host ("  FALLBACK  no mapping covers: {0} -- running every suite" -f ($uncovered -join ', '))
+        }
+        if ($chosen.Count -eq 0) {
+            Write-Host '  (nothing selected -- no changed path requires a suite)'
+        } else {
+            foreach ($name in $chosen) { Write-Host "  SELECT  $name" }
+        }
+        exit 0
+    }
+
+    if ($uncovered.Count -gt 0) {
+        Write-Host ("Scoped run widened to every suite -- no mapping covers: {0}" -f ($uncovered -join ', '))
+    }
+    if ($chosen.Count -eq 0) {
+        Write-Host 'Nothing to run -- no changed path requires a suite. CI still sweeps everything.'
+        exit 0
+    }
+    $suites = @($suites | Where-Object { $chosen -contains $_.Name })
+}
 
 if ($suites.Count -eq 0) {
     Write-Host "No suites matched filter '$Filter'."
