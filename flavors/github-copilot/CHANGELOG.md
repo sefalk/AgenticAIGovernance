@@ -258,6 +258,19 @@ build for one (#322).
 
 ### Fixed
 
+- **The per-suite test timeout had two values, so the same suite passed in CI
+  and reported `FAILED` locally (#333).** `run-all-tests.ps1` defaulted to 600
+  seconds; `regression.yml` invoked it with 1200. Nothing declared the
+  difference, so a developer watching `test-hooks.ps1` (691s) and
+  `test-deploy-flags.ps1` (788s) get killed had no reason to suspect the budget
+  was the variable rather than the code. The default is now 1800 seconds and is
+  the only place the budget is stated -- the workflow passes nothing. A new
+  `test-suite-timeout.py` asserts the two cannot drift apart again, that the
+  per-suite cap stays below the job's own cap (a kill that never fires names no
+  suite), and -- by driving the runner with a one-second budget -- that the kill
+  path still works, because raising a limit is only safe while it is still
+  enforced.
+
 - **A narrowed test run was filed under the scope key it was narrowed from, so
   a partial run could close a gate on behalf of the whole suite (#303).**
   `run-tests.ps1 -File tests/adapters/x.py` wrote the `adapters` entry: eleven
