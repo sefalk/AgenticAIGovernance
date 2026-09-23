@@ -137,6 +137,11 @@ try {
 
 - three
 '@
+    # Normalise first: this file is stored with CRLF, and `(?m)$` in .NET
+    # matches before the `\n`, so every `^...$` below would silently fail to
+    # match with the `\r` still in place -- and a fixture that was never
+    # modified makes the rejection cases pass against clean input.
+    $clean = $clean -replace "`r", ''
     $cleanPath = Join-Path $dir 'clean.md'
     Write-Text $cleanPath $clean
     $r = Invoke-Checker @($cleanPath)
