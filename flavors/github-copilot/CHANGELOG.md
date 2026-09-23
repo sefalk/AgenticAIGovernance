@@ -1231,6 +1231,29 @@ build for one (#322).
   stays a visible diff that needs a reason; mechanically forbidding it against
   git history was not attempted.
 
+- **A local regression run can be scoped to the suites the diff actually
+  requires (#334).** `regression.yml` has no `paths:` filter and the runner
+  sweeps every `test-*.ps1`, so a developer ran all 20 suites and the pull
+  request then ran the identical 20. The second run is the one that gates the
+  merge, which makes the first the redundant half. `suite-scope.json` maps each
+  suite to the paths that require it and `run-all-tests.ps1 -Changed` runs only
+  those; `-ListSelection` shows the choice without running anything. **CI is
+  deliberately unchanged and keeps sweeping everything** — the saving is taken
+  where the result is advisory, not where it is the gate. Three properties make
+  an incomplete map survivable rather than dangerous: a changed path that no
+  pattern covers widens the run to the full sweep instead of narrowing it to
+  nothing, an unreadable map or an unanswerable `git diff` does the same, and
+  editing a suite always selects that suite without the map having to say so.
+  Patterns are a concrete path or a directory ending in `/**` and are matched
+  by suffix, so the same file works in this repository and in a project the
+  payload was deployed into, and there is no second glob implementation to
+  drift (#287). `VERSION` is on the ignore list for a specific reason: the
+  pre-commit hook bumps it on every commit, so without that entry every scoped
+  run would hit the fallback and degrade straight back to a full sweep.
+  `test-suite-scope.ps1` holds the map honest — every suite mapped, no mapping
+  pointing at a file that no longer exists, and the fallback, the ignore list
+  and the self-selection rule each driven through the real runner.
+
 - **A stop hook now diffs what the agent created against what the task asked
   for, instead of trusting the agent's self-report (#123, direction 3).** The
   incident that opened the issue was a test-writer that dropped
