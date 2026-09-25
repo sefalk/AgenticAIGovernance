@@ -391,6 +391,23 @@ hidden dangerous segment (`… ; rm -rf /`, `Write-Host (git push --force)`) is
 blocked even inside a composite. On any parse ambiguity the hook returns `{}`
 (prompt) — it never accidentally auto-approves.
 
+#### PreToolUse: Work Item Owner Gate
+
+**Scripts:** `scripts/block-dangerous.ps1` (Windows) / `scripts/block-dangerous.sh`
+(Unix), both delegating to `scripts/work-item-owner.py`
+
+Refuses any `*wit_work_item_write` call that would create an unowned ADO work
+item (#36): `action=create` without a non-empty `System.AssignedTo`, and every
+`action=add_child`, whose schema has no assignee field at all. The reason names
+the fix — the `ADO_DEFAULT_ASSIGNED_TO` value to pass, or, when that key is
+empty, that the agent must ask the human. Updates are not judged.
+
+**Blocking** — answers `hookSpecificOutput.permissionDecision: "deny"` at exit
+0\. `PreToolUse` is the one event both VS Code Local and GitHub Copilot let a
+hook refuse. It rides in the existing hook rather than registering its own:
+Local ignores matchers, so a separate hook would start another shell on every
+tool call. Without a Python interpreter it refuses the call (#251).
+
 #### PostToolUse: Secret Detection Scan
 
 **Scripts:** `scripts/scan-secrets.ps1` (Windows) / `scripts/scan-secrets.sh` (Unix)
