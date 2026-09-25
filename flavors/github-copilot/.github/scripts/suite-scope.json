@@ -59,6 +59,7 @@
       ".github/af-env.conf"
     ],
     "test-work-item-owner.ps1": [
+      ".github/hooks/scripts/work-item-owner.py",
       ".github/hooks/scripts/block-dangerous.ps1",
       ".github/hooks/scripts/block-dangerous.sh",
       ".github/af-env.conf",
