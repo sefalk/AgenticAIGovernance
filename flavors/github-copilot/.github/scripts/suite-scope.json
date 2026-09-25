@@ -44,7 +44,8 @@
     "test-hook-decision-contract.ps1": [
       ".github/hooks/README.md",
       ".github/hooks/scripts/scan-secrets.py",
-      ".github/hooks/scripts/scan-secrets.ps1"
+      ".github/hooks/scripts/scan-secrets.ps1",
+      ".github/hooks/scripts/block-dangerous.ps1"
     ],
     "test-dialect-wrappers.ps1": [
       ".github/scripts/check-dialect-wrappers.py",
@@ -56,6 +57,12 @@
     "test-hooks.ps1": [
       ".github/hooks/**",
       ".github/af-env.conf"
+    ],
+    "test-work-item-owner.ps1": [
+      ".github/hooks/scripts/block-dangerous.ps1",
+      ".github/hooks/scripts/block-dangerous.sh",
+      ".github/af-env.conf",
+      ".github/agents/ado-work-item-manager.agent.md"
     ],
     "test-large-file-guard.ps1": [
       ".github/hooks/scripts/check-large-files.py",

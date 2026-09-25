@@ -92,6 +92,14 @@ function Get-TriggerFixture {
                 Names   = 'secret.py'
             }
         }
+        'block-dangerous' {
+            $create = { param($f) @{ tool_name = 'mcp_azure_devops__wit_work_item_write'; tool_input = @{ action = 'create'; project = 'P'; workItemType = 'Task'; fields = $f } } | ConvertTo-Json -Depth 6 -Compress }
+            return @{
+                Trigger = (& $create @(@{ name = 'System.Title'; value = 'x' }))
+                Clean   = (& $create @(@{ name = 'System.Title'; value = 'x' }, @{ name = 'System.AssignedTo'; value = 'Owner <o@example.com>' }))
+                Names   = 'System.AssignedTo'
+            }
+        }
         default { return $null }
     }
 }
