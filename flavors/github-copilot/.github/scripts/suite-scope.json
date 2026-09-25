@@ -69,6 +69,14 @@
       ".github/hooks/scripts/check-large-files.py",
       ".github/af-env.conf"
     ],
+    "test-long-line-guard.ps1": [
+      ".github/hooks/scripts/scan-secrets.py",
+      ".github/hooks/scripts/scan-secrets.ps1",
+      ".github/hooks/scripts/scan-secrets.sh",
+      ".github/hooks/scripts/_common.ps1",
+      ".github/skills/ado-shared/SKILL.md",
+      ".github/skills/ado-workitem/SKILL.md"
+    ],
     "test-lint-gate.ps1": [
       ".github/scripts/check-python-linting.py",
       ".github/scripts/check-python-quality.py",
