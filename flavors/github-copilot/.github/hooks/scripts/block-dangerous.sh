@@ -60,6 +60,7 @@ bd_is_gated_tool() {
         *terminal*|*Terminal*) return 0 ;;
         create_and_run_task|createAndRunTask) return 0 ;;
         run_task|runTask) return 0 ;;
+        *wit_work_item_write) return 0 ;;
     esac
     bd_is_exec_surface "$1" && return 0
     return 1
@@ -76,6 +77,20 @@ if ! bd_is_gated_tool "$tool_name"; then
     echo '{}'
     exit 0
 fi
+
+# Ownership of created ADO work items (#36); the check lives in the shared core.
+case "$tool_name" in
+    *wit_work_item_write)
+        _bd_conf=""
+        [ "$AF_CONF_FOUND" = 1 ] && _bd_conf="$AF_CONF"
+        if [ ! -f "$AF_SCRIPT_DIR/work-item-owner.py" ]; then
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Policy hard-deny: work-item-owner.py is missing, so the gate cannot check that the item gets an owner (#36). Redeploy the framework payload."}}\n'
+            exit 0
+        fi
+        printf '%s' "$raw" | AF_CONF_RESOLVED="$_bd_conf" "$PYTHON" "$AF_SCRIPT_DIR/work-item-owner.py"
+        exit 0
+        ;;
+esac
 
 # --- Execution-surface switch (issue #138) ---------------------------------
 # Deliberately not a re-classification of the snippet. Reconstructing the

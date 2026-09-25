@@ -1226,6 +1226,21 @@ build for one (#322).
 
 ### Added
 
+- **An agent can no longer create an unowned ADO work item (#36).** Unowned
+  items fall off the board, and they kept appearing -- 6 of 7 in one run --
+  because the assignee was neither configurable nor checked: it depended on
+  the agent remembering. New `ADO_DEFAULT_ASSIGNED_TO` in `af-env.conf`
+  (shipped empty, per project). The PreToolUse hook now refuses a
+  `wit_work_item_write` `create` without a non-empty `System.AssignedTo`, and
+  refuses `add_child` outright: its MCP schema has no assignee field, so every
+  child it creates is unowned by construction -- which is the likeliest source
+  of the recurrence. The refusal names the value to pass, or tells the agent
+  to ask when the key is empty. The check is a Python core
+  (`work-item-owner.py`) behind both `block-dangerous` dialects rather than a
+  new registered hook, because the Local harness ignores matchers and would
+  start another shell on every tool call. `test-work-item-owner.ps1` drives
+  both dialects; the hooks README marks the gate **Blocking**, so the #339
+  contract suite drives it too.
 - **Every regression suite now declares what it is allowed to cost, and the
   runner fails the sweep when one exceeds it (#334).** The nested re-run fixed
   above was green for as long as it existed: `test-deploy-flags.ps1` asserted

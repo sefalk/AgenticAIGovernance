@@ -94,7 +94,9 @@ Add-Result 'A5_every_budget_is_below_the_kill_timeout' (($timeout -gt 0) -and ($
 
 $tight = $null
 $generous = $null
-try { $tight = Invoke-RunnerWithBudget -Budget 1 } catch { $tight = @{ Output = "$_"; ExitCode = -1 } }
+# Zero, not one second: a 1 s ceiling depends on runner speed and stopped
+# tripping in CI on PR 343. Any measured run exceeds zero.
+try { $tight = Invoke-RunnerWithBudget -Budget 0 } catch { $tight = @{ Output = "$_"; ExitCode = -1 } }
 try { $generous = Invoke-RunnerWithBudget -Budget 9999 } catch { $generous = @{ Output = "$_"; ExitCode = -1 } }
 
 Add-Result 'B1_a_suite_over_its_budget_is_not_reported_as_passed' `
@@ -107,7 +109,7 @@ Add-Result 'B2_a_suite_within_its_budget_still_passes' `
     "exit=$($generous.ExitCode)"
 
 Add-Result 'B3_the_report_states_measured_and_allowed_seconds' `
-    ($tight.Output -match 'Took [\d.,]+s against a 1s budget') `
+    ($tight.Output -match 'Took [\d.,]+s against a 0s budget') `
     'wording'
 
 # ── Report ────────────────────────────────────────────────────────────────

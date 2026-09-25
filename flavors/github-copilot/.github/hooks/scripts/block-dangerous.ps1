@@ -64,6 +64,22 @@ try {
 $execSurfacePattern = 'runCodeSnippet|run_notebook_cell|runNotebookCell|run_playwright_code|browser_run_code|browser_evaluate|run_vscode_command|runVsCodeCommand'
 
 $toolName = $inputData.tool_name
+
+# Ownership of created ADO work items (#36). Matched by suffix: the hook-side
+# spelling of an MCP tool id has not been captured.
+if ([string]$toolName -match 'wit_work_item_write$') {
+    $ownerCore = Join-Path $PSScriptRoot 'work-item-owner.py'
+    if (-not $AfPython -or -not (Test-Path $ownerCore)) {
+        @{ hookSpecificOutput = @{ hookEventName = 'PreToolUse'; permissionDecision = 'deny'
+                permissionDecisionReason = 'Policy hard-deny: the work-item-owner gate found no working Python interpreter (tried AF_PYTHON_OVERRIDE, python3, python, py) or work-item-owner.py is missing, and cannot check that the item gets an owner (#36, #251). Install Python 3, or set AF_PYTHON_OVERRIDE.' }
+        } | ConvertTo-Json -Depth 3 -Compress
+        exit 0
+    }
+    $env:AF_CONF_RESOLVED = if ($AfConfFound) { $AfConfPath } else { '' }
+    $raw | & $AfPython $ownerCore
+    exit 0
+}
+
 $isTaskShaped = ($toolName -eq 'create_and_run_task' -or $toolName -eq 'createAndRunTask')
 $isTaskRun = ($toolName -eq 'run_task' -or $toolName -eq 'runTask')
 $isExecSurface = ($toolName -match $execSurfacePattern)

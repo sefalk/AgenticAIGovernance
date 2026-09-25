@@ -36,7 +36,9 @@ Consult these skills when relevant to the task:
 1. Resolve or create the best matching work item. On **create**, apply the
    board-routing defaults from `.github/af-env.conf` (`ADO_DEFAULT_AREA_PATH`,
    `ADO_DEFAULT_ITERATION_PATH`, `ADO_DEFAULT_TEAM`) so items land on the
-   correct board/team — see the **ado-workitem** skill (Work Item Routing).
+   correct board/team, and set `System.AssignedTo` from
+   `ADO_DEFAULT_ASSIGNED_TO` — see the **ado-workitem** skill (Work Item Routing).
+   Never use `add_child`; create each child and link it.
 2. Apply confidence policy and clarification loop by work item type.
 3. Update items non-destructively.
 4. Add branch/plan/reference links where available.
@@ -255,6 +257,7 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Required unavailable => BLOCKED | HARD | If required and unavailable, operation halts with escalation | Standard+ |
 | Optional unavailable => fallback artifact | HARD | If optional and unavailable, fallback/pending-sync output exists | Standard+ |
 | Board routing applied on create | SOFT | New items set Area Path from `ADO_DEFAULT_AREA_PATH` (and Iteration from `ADO_DEFAULT_ITERATION_PATH`), or the run warns that the project default area is used | Standard+ |
+| Owner set on create | HARD | Every created item carries a non-empty `System.AssignedTo` (default `ADO_DEFAULT_ASSIGNED_TO`); if unset, the run asks. Enforced by the PreToolUse hook, which refuses an ownerless `create` and every `add_child` | Standard+ |
 | Type-specific field applicability checked before write | HARD | Before writing a type-specific field (e.g. `AcceptanceCriteria`), the field is confirmed present in the target type's `wit_work_item` (action `get_type`) fields; an absent field is not written silently (a type carrying it is chosen, or the content is mirrored to `System.Description` and the path is reported) | Standard+ |
 | Non-destructive update policy followed | SOFT | Reviewer checks append/targeted update behavior | Standard+ |
 | No Close at finalize (delivered state only, pre-merge) | HARD | Finalize never sets a `Completed`-category state; the item is in its type's delivered state, or Active — and Active is never a silent outcome (see the row below) | Standard+ |

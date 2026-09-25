@@ -32,6 +32,12 @@ and items may appear on an unexpected board/team:
 - Set `System.IterationPath` from `ADO_DEFAULT_ITERATION_PATH` when present;
   otherwise inherit from the parent item / project default.
 - Use `ADO_DEFAULT_TEAM` for team-scoped board or query calls when set.
+- Set `System.AssignedTo` from `ADO_DEFAULT_ASSIGNED_TO`. If it is empty, ask
+  the human who owns the item. The PreToolUse hook refuses an ownerless create
+  (#36), so this is not optional.
+- Do not use `action=add_child`: its schema has no assignee field, so every
+  child would be unowned, and the hook refuses it. Create each child with
+  `action=create`, then link it with `wit_work_item_link_write`.
 - Pass these fields explicitly on the create call; never rely on interactive
   prompts. On update, do not overwrite an existing area/iteration unless the
   human explicitly requests a move.

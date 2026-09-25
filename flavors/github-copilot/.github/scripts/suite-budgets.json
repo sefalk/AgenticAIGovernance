@@ -23,6 +23,7 @@
     "test-session-cost.ps1": 50,
     "test-suite-budgets.ps1": 30,
     "test-suite-scope.ps1": 30,
+    "test-work-item-owner.ps1": 90,
     "test-workflow-log-schema.ps1": 60,
     "test-worktree-scripts.ps1": 60
   }
