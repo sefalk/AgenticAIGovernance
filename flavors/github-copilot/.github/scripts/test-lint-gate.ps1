@@ -41,20 +41,8 @@ $ghRoot    = (Resolve-Path (Join-Path $scriptDir '..')).Path
 $hookDir   = Join-Path $ghRoot 'hooks/scripts'
 $repoRoot  = (Resolve-Path (Join-Path $ghRoot '..')).Path
 
-function Resolve-Python {
-    foreach ($c in @(
-        (Join-Path $repoRoot '.venv/Scripts/python.exe'),
-        (Join-Path $repoRoot '.venv/bin/python')
-    )) { if (Test-Path $c) { return $c } }
-    foreach ($name in @('python3', 'python')) {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd) {
-            $v = & $cmd.Source --version 2>&1
-            if ($LASTEXITCODE -eq 0 -and $v -match 'Python 3') { return $cmd.Source }
-        }
-    }
-    return $null
-}
+. (Join-Path $scriptDir '_suite_env.ps1')
+function Resolve-Python { Get-AfSuitePython $scriptDir }
 
 function Resolve-Ruff {
     foreach ($c in @(
