@@ -8,7 +8,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 . "$PSScriptRoot/_common.ps1"
 
-$raw = [Console]::In.ReadToEnd()
+$raw = Read-AfStdin
 $core = Join-Path $PSScriptRoot 'scan-secrets.py'
 
 if (-not $AfPython -or -not (Test-Path $core)) {

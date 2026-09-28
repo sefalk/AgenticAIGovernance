@@ -158,6 +158,20 @@ try {
     Add-Result 'L10_the_ado_skills_point_at_the_record_and_the_narrow_read' `
         ($skillText.Contains('tool-limits.json') -and $skillText -match '"System\.Description"\]') 'skills must name tool-limits.json and a fields-scoped read'
 
+    # Setting [Console]::*Encoding calls SetConsoleCP and flips the CALLER's
+    # console too; its later pipes then carry a BOM and the secret scan answered
+    # {} for every payload. Caught here during #341 before it shipped.
+    $leaky = @(Get-ChildItem $hookScripts -Filter *.ps1 | Where-Object {
+            (Get-Content $_.FullName -Raw) -match '\[Console\]::(Input|Output)Encoding\s*='
+        } | Select-Object -ExpandProperty Name)
+    Add-Result 'L11_no_hook_sets_the_console_encoding' ($leaky.Count -eq 0) "sets it: $($leaky -join ', ')"
+
+    $cpBefore = (chcp) -replace '\D', ''
+    '{"tool_name":"read_file","tool_input":{}}' | & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $psHook | Out-Null
+    '{"tool_name":"read_file","tool_input":{}}' | & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $hookScripts 'block-dangerous.ps1') | Out-Null
+    $cpAfter = (chcp) -replace '\D', ''
+    Add-Result 'L12_a_hook_call_leaves_the_callers_code_page_alone' ($cpBefore -eq $cpAfter) "before=$cpBefore after=$cpAfter"
+
     # Drift: the record is only true for the extension it was measured on. CI
     # has no VS Code, so there the comparison is reported, never counted.
     $pkgs = @()

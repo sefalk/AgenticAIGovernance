@@ -19,6 +19,21 @@
 # resolves to nothing whenever the agent process is not sitting at the repo
 # root, and an unread config is indistinguishable from an empty one.
 
+# The harness speaks UTF-8; PowerShell 5.1 reads stdin as the OEM code page and
+# pipes to native commands as ASCII, turning every non-ASCII character into '?'
+# before a Python core sees it (#341, measured). Never set [Console]::*Encoding
+# here: that calls SetConsoleCP and leaks into the CALLER's console -- measured,
+# it flipped the caller to 65001, whose pipes then carry a BOM that made every
+# later secret scan answer {}. Process-local only: $OutputEncoding + Read-AfStdin.
+$afUtf8 = New-Object System.Text.UTF8Encoding $false
+$OutputEncoding = $afUtf8
+
+function Read-AfStdin {
+    $ms = New-Object System.IO.MemoryStream
+    [Console]::OpenStandardInput().CopyTo($ms)
+    return $afUtf8.GetString($ms.ToArray()).TrimStart([char]0xFEFF)
+}
+
 $script:AfScriptDir = if ($PSScriptRoot) {
     $PSScriptRoot
 } else {
