@@ -342,6 +342,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--json", action="store_true")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--baseline", type=Path)
+    # af-caller-ok: run by the maintainer who records a decision after the gate reports NEW.
     mode.add_argument("--write-baseline", type=Path)
     args = parser.parse_args(argv)
     inv = inventory(Path(args.root))
