@@ -247,6 +247,13 @@ thing that drifts.
 `$AfPython` / `$AF_PYTHON`, hands stdin to the core, and returns its exit code;
 when no interpreter is available it says so instead of silently passing.
 
+**Encoding (#341).** Read stdin with `Read-AfStdin` (bytes, UTF-8), never
+`[Console]::In`, and never set `[Console]::InputEncoding`/`OutputEncoding`:
+that calls `SetConsoleCP` and changes the *caller's* console. Measured: one hook
+call flipped it from 437 to 65001, its pipes then carried a BOM, and every later
+secret scan answered `{}`. A Python core reads `sys.stdin.buffer` as
+`utf-8-sig`. `test-long-line-guard.ps1` L11/L12 hold both rules.
+
 **The rule is enforced, not merely documented.**
 `.github/scripts/check-dialect-wrappers.py` fails a build when a `.ps1`/`.sh`
 pair carries logic instead of delegating (`DW001`), when a wrapper never names
@@ -435,6 +442,22 @@ reverted.
 | Generic Secret | `password = "mysecret123"` |
 | Private Key | `-----BEGIN RSA PRIVATE KEY-----` |
 | Connection String | `Server=...;Password=...` |
+
+#### PostToolUse: Long-Line Notice
+
+**Scripts:** `scripts/scan-secrets.ps1` / `scripts/scan-secrets.sh`, via
+`scripts/_long_lines.py`; limits in `scripts/tool-limits.json`
+
+Advisory, never blocks. A text tool result over the spill threshold reaches the
+model only as a file path, and `read_file` then cuts every line over 2,000
+characters — an ADO HTML description is usually one line (#341). For a
+non-write tool whose result will spill *and* carries such a line, the hook
+answers with `additionalContext` naming the long fields and their lengths, and
+writes a lossless copy to `%TEMP%/af-long-lines/` with those lines split into
+1,000-character chunks ending ` <<AF-WRAP>>`. `read_file` itself cannot be
+watched — its `tool_response` reaches hooks empty — so the check sits on the
+tool that produced the result. It shares the secret scan's process rather than
+starting a second interpreter on every call.
 
 #### Stop: Test Suite Gate
 

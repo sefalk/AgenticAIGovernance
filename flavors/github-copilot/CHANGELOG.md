@@ -258,6 +258,16 @@ build for one (#322).
 
 ### Fixed
 
+- **PowerShell hooks turned every non-ASCII character into `?` before a Python
+  core saw it (#341).** Windows PowerShell 5.1 reads stdin in the OEM code page
+  and pipes to native commands as ASCII; measured, `Gr` + o-umlaut + sharp-s +
+  `e` arrived as `Gr????e`. Wrappers now read stdin as bytes (`Read-AfStdin`)
+  and cores decode `sys.stdin.buffer` as `utf-8-sig`. The obvious fix --
+  setting `[Console]::InputEncoding` -- was tried first and is **wrong**: it
+  calls `SetConsoleCP` and changes the caller's console (measured 437 -> 65001),
+  whose pipes then carry a BOM, and every later secret scan answered `{}`. The
+  suites caught it before it shipped; `test-long-line-guard.ps1` L11/L12 now
+  forbid it statically and check the caller's code page live.
 - **The secret gate never blocked anything (#339).** On a hit it printed its
   verdict and exited 1. Every published hook contract -- VS Code Local and
   GitHub Copilot alike -- treats a non-zero exit other than 2 as a
@@ -1226,6 +1236,19 @@ build for one (#322).
 
 ### Added
 
+- **Long lines in a spilled tool result are announced, with a lossless copy
+  (#341).** Work-item descriptions arrived cut mid-sentence. Not the ADO MCP
+  (2.10.0 has no cap): Copilot Chat writes a text result over
+  `github.copilot.chat.agent.largeToolResultsToDisk.thresholdBytes` (8192,
+  undocumented) to a file, and `read_file` cuts every line over 2,000
+  characters -- hardcoded, and paging cannot recover a line. `read_file` itself
+  cannot be watched (its `tool_response` reaches hooks empty), so the PostToolUse
+  process checks the tool that produced the result, which still holds it in
+  full. It answers with `additionalContext` naming the long fields and writes a
+  copy with those lines wrapped. The limits are a structured record,
+  `hooks/scripts/tool-limits.json`; the ADO skills point at it and prescribe a
+  `fields`-scoped read, which usually keeps the result inline. D1 checks the
+  record against the installed extension and says so where none is installed.
 - **An agent can no longer create an unowned ADO work item (#36).** Unowned
   items fall off the board, and they kept appearing -- 6 of 7 in one run --
   because the assignee was neither configurable nor checked: it depended on
