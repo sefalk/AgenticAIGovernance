@@ -110,6 +110,12 @@
       ".github/scripts/analyze-retry-economy.py",
       ".github/MANIFEST.md"
     ],
+    "test-rule-drift.ps1": [
+      ".github/MANIFEST.md",
+      ".github/copilot-instructions.md",
+      ".github/instructions/**",
+      ".github/agents/**"
+    ],
     "test-run-tests.ps1": [
       ".github/scripts/run-tests.ps1",
       ".github/scripts/run-tests.sh",

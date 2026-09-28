@@ -1248,6 +1248,21 @@ build for one (#322).
 
 ### Added
 
+- **The rule-duplication inventory is derived, not written (#304).** A
+  hand-written inventory for #30 was stale before anyone acted on it: the files
+  it covered grew by a third to double while the issue sat open.
+  `check-rule-drift.py` extracts every sentence carrying a modal (*must*,
+  *never*, *always*, *do not*, *may only*, *shall*) from `MANIFEST.md`,
+  `copilot-instructions.md`, `instructions/` and `agents/` -- skipping
+  frontmatter, fenced code, tables and comments, and joining wrapped lines so a
+  rule is compared as a sentence -- clusters near-duplicates across files and
+  labels each cluster `agree` or `diverge`. Deterministic, offline, no model in
+  the path; it only reports and always exits 0. Baseline on the shipped payload:
+  228 rules, 11 clusters (4 agree, 7 diverge), committed as
+  `docs/metrics/rule-drift-baseline.json`. False positives, judged over all 11
+  clusters by the agent (not a human): 0 of 11 clusters, 1 of 25 locations
+  (4 %). Recall is not measured; a rule without a modal ("Only the coordinator
+  runs git.") is invisible to it by definition. No rule text was edited.
 - **Long lines in a spilled tool result are announced, with a lossless copy
   (#341).** Work-item descriptions arrived cut mid-sentence. Not the ADO MCP
   (2.10.0 has no cap): Copilot Chat writes a text result over
