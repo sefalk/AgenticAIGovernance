@@ -258,6 +258,23 @@ build for one (#322).
 
 ### Fixed
 
+- **Six shipped suites failed inside every consumer for layout reasons alone
+  (#349).** Measured after deploying 1.23.142 into a consumer: 26 suites, 19
+  passed, 6 failed -- none because a hook misbehaved. They asserted facts about
+  this repository: its `CHANGELOG.md`, `deploy.ps1` as a caller and as a scope
+  pattern, a `.venv` at this repository's depth (the Store `python3` stub then
+  aborted the suite), and a shipped-*empty* owner key that a configured project
+  rightly sets. A suite red for no fault teaches a consumer to ignore red. New
+  `scripts/_suite_env.ps1`: `Test-AfSourceTree` (one marker -- `deploy.ps1`
+  beside `.github` -- replacing three ad-hoc checks) and `Get-AfSuitePython`
+  (probes both venv depths, then candidates, under `Continue`). Framework-repo
+  facts now print `SKIP <case> -- <reason>` elsewhere and are never counted as
+  passed; W10 asserts in a project that the key is *declared*. New
+  `test-suite-portability.ps1` copies `.github` into a bare directory configured
+  like a project, runs the five affected suites there and requires each to reach
+  its guard -- the check that would have caught all six before release. In this
+  repository every touched suite still runs with zero skips; `test-hooks.ps1`
+  491/0.
 - **`test-hooks-integration.ps1` never attributed agent-scoped PowerShell hooks,
   then listed them as orphans (#326).** It matched `Running:` lines with one
   pattern for backslash `.ps1` paths and one for forward-slash `.sh` paths; a hook
