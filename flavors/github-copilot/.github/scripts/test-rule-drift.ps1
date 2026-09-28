@@ -112,12 +112,61 @@ try {
     Add-Result 'R8_the_text_report_names_file_line_and_verdict' `
         ($a -match 'MANIFEST\.md:3' -and $a -match '(?i)\bagree\b' -and $a -match '(?i)\bdiverge\b') 'text report'
 
+    # The gate (#305): every cluster carries a recorded decision, keyed by file
+    # and wording rather than line, so a moved rule stays decided and a new or
+    # reworded duplicate does not.
+    $bl = Join-Path ([IO.Path]::GetTempPath()) ((Split-Path $root -Leaf) + '-baseline.json')
+    $null = Invoke-Detector @('--write-baseline', $bl)
+    $g = Invoke-Detector @('--baseline', $bl)
+    Add-Result 'R10_an_undecided_cluster_fails_the_gate' ($g.Exit -eq 1 -and $g.Out -match 'UNDECIDED') "exit=$($g.Exit) out=$($g.Out.Trim())"
+
+    $j = $null
+    try { $j = [IO.File]::ReadAllText($bl) | ConvertFrom-Json } catch { $j = $null }
+    if ($j -and $j.PSObject.Properties['clusters']) {
+        foreach ($c in $j.clusters) {
+            $c | Add-Member -NotePropertyName decision -NotePropertyValue 'keep' -Force
+            $c | Add-Member -NotePropertyName reason -NotePropertyValue 'fixture: each agent needs the rule in its own file' -Force
+        }
+        [IO.File]::WriteAllText($bl, ($j | ConvertTo-Json -Depth 10))
+    }
+    $g = Invoke-Detector @('--baseline', $bl)
+    Add-Result 'R11_the_gate_passes_when_every_cluster_is_decided' ($g.Exit -eq 0) "exit=$($g.Exit) out=$($g.Out.Trim())"
+
+    $null = Invoke-Detector @('--write-baseline', $bl)
+    $kept = $null
+    try { $kept = @(([IO.File]::ReadAllText($bl) | ConvertFrom-Json).clusters | Where-Object { $_.decision -eq 'keep' }) } catch { $kept = $null }
+    Add-Result 'R12_rewriting_the_baseline_keeps_its_decisions' ($kept -and $kept.Count -eq $clusters.Count -and $kept.Count -gt 0) "kept=$(if ($kept) { $kept.Count } else { 'none' }) of $($clusters.Count)"
+
+    Write-Fixture 'agents/extra.agent.md' @('# Extra', '', 'Tests must always pass before a commit.')
+    $g = Invoke-Detector @('--baseline', $bl)
+    Add-Result 'R13_a_new_duplicate_fails_the_gate' ($g.Exit -eq 1 -and $g.Out -match 'NEW' -and $g.Out -match 'agents/extra\.agent\.md') "exit=$($g.Exit) out=$($g.Out.Trim())"
+    Remove-Item (Join-Path $root 'agents/extra.agent.md')
+
+    Write-Fixture 'copilot-instructions.md' @('# Project', '', '- **Workers never run any git command themselves.**')
+    $g = Invoke-Detector @('--baseline', $bl)
+    Add-Result 'R14_a_reworded_member_fails_the_gate' ($g.Exit -eq 1 -and $g.Out -match 'NEW' -and $g.Out -match 'copilot-instructions\.md') "exit=$($g.Exit) out=$($g.Out.Trim())"
+
+    Write-Fixture 'copilot-instructions.md' @('# Project', '', 'The weather is irrelevant to any rule here.')
+    $g = Invoke-Detector @('--baseline', $bl)
+    Add-Result 'R15_a_resolved_cluster_passes_the_gate' ($g.Exit -eq 0) "exit=$($g.Exit) out=$($g.Out.Trim())"
+    Remove-Item $bl -ErrorAction SilentlyContinue
+
     if (Test-AfSourceTree $scriptDir) {
         $baseline = Join-Path $repoRoot 'docs/metrics/rule-drift-baseline.json'
         $bl = $null
         try { $bl = Get-Content $baseline -Raw | ConvertFrom-Json } catch { $bl = $null }
         Add-Result 'R9_a_baseline_of_the_shipped_payload_is_committed' `
             ($bl -and $bl.PSObject.Properties['clusters'] -and $bl.PSObject.Properties['corpus']) "baseline=$baseline"
+
+        $ErrorActionPreference = 'Continue'
+        $shippedOut = & $python $detector --root (Split-Path $scriptDir) --baseline $baseline 2>&1 | Out-String
+        $shippedExit = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        Add-Result 'R16_the_shipped_payload_passes_its_committed_baseline' ($shippedExit -eq 0) "exit=$shippedExit out=$($shippedOut.Trim())"
+
+        # Written once through a PowerShell pipe, the baseline stored every dash as cp437 mojibake.
+        $blText = [IO.File]::ReadAllText($baseline)
+        Add-Result 'R17_the_committed_baseline_is_not_mojibake' (-not $blText.Contains([string][char]0x0393 + [char]0x00C7)) 'baseline contains U+0393 U+00C7'
     } else {
         $notes += 'R9_a_baseline_of_the_shipped_payload_is_committed -- the baseline lives in the framework repo'
     }
