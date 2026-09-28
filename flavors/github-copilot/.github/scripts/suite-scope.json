@@ -47,6 +47,9 @@
       ".github/hooks/scripts/scan-secrets.ps1",
       ".github/hooks/scripts/block-dangerous.ps1"
     ],
+    "test-hook-log-attribution.ps1": [
+      ".github/scripts/test-hooks-integration.ps1"
+    ],
     "test-dialect-wrappers.ps1": [
       ".github/scripts/check-dialect-wrappers.py",
       ".github/hooks/scripts/**"
