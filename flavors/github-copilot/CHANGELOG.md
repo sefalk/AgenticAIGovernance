@@ -35,6 +35,14 @@ build for one (#322).
   as cp437 mojibake -- it had been written through a PowerShell pipe -- so the
   detector now writes it itself (`--write-baseline`, decisions carried over by
   key) and R17 fails on the mojibake signature.
+- **The CLI caller check (#253) now runs as its own suite, scoped to the scripts
+  it guards.** It lived only inside `test-hooks.ps1`, which `suite-scope.json`
+  selects for `hooks/**` — so the new `--write-baseline` option of #305 passed
+  every locally selected suite and failed only in CI. `test-cli-callers.ps1`
+  runs the same checker in seconds and is selected by `scripts/**`,
+  `hooks/scripts/**` and the deploy scripts. `--write-baseline` itself is a
+  maintainer command and carries the checker's `af-caller-ok` marker with that
+  reason.
 - CHANGELOG sections can no longer repeat a `###` heading kind (#322).
   `[Unreleased]` had two `### Changed` and two `### Fixed`; `[1.22.0]` had six
   `### Changed`, five `### Added` and five `### Fixed`. Those are not typos but
