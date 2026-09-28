@@ -15,7 +15,10 @@
 
 param(
     [switch]$All,
-    [switch]$Verbose
+    [switch]$Verbose,
+    # Analyse this file instead of the VS Code logs -- how the attribution suite
+    # drives the parser with fixtures (#326).
+    [string]$LogPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,6 +26,9 @@ $ErrorActionPreference = 'Stop'
 # -- Locate hook log files ------------------------------------------------
 
 $logsRoot = "$env:APPDATA\Code\logs"
+if ($LogPath) {
+    $hookLogs = @(Get-Item -LiteralPath $LogPath)
+} else {
 if (-not (Test-Path $logsRoot)) {
     Write-Output "ERROR: VS Code logs directory not found at $logsRoot"
     exit 2
@@ -43,6 +49,7 @@ if (-not $All) {
     # Only analyse the most recent log
     $hookLogs = @($hookLogs[0])
 }
+}
 
 Write-Output "=== Hook Integration Verification ==="
 Write-Output "  Analysing $($hookLogs.Count) log file(s)"
@@ -58,6 +65,7 @@ $script:failures = 0
 $script:denials = 0
 $script:warnings = @()
 $script:hookCounts = @{}        # EventName -> set of hook counts seen
+$script:unattributed = @()      # Running: lines that named no hook script
 
 foreach ($logFile in $hookLogs) {
     $sessionDir = $logFile.Directory.Parent.Parent.Parent.Name  # session timestamp
@@ -104,20 +112,22 @@ foreach ($logFile in $hookLogs) {
                 $script:hookCounts[$event]["$hookCount"] = $true
             }
 
-            # Track which scripts are being run
-            if ($message -match '^Running:.*?File\s+[^\s]+\\\\([^\\]+\.ps1)') {
-                $scriptName = $Matches[1]
-                if (-not $script:hookScripts.ContainsKey($scriptName)) {
-                    $script:hookScripts[$scriptName] = 0
+            # Track which scripts are being run. One extraction for every
+            # spelling: agent-hooks.json paths arrive with `\\` or `\\\\`,
+            # .agent.md frontmatter paths with `/` (#326). Only the command is
+            # read -- the cwd beside it is a path too.
+            if ($message -match '^Running:') {
+                $command = if ($message -match '"command":"((?:[^"\\]|\\.)*)"') { $Matches[1] } else { $message }
+                $normalised = $command -replace '\\+', '/'
+                if ($normalised -match 'hooks/scripts/([^/\s"]+\.(?:ps1|sh))') {
+                    $scriptName = $Matches[1]
+                    if (-not $script:hookScripts.ContainsKey($scriptName)) {
+                        $script:hookScripts[$scriptName] = 0
+                    }
+                    $script:hookScripts[$scriptName]++
+                } else {
+                    $script:unattributed += "[$event] #$seqNum $command"
                 }
-                $script:hookScripts[$scriptName]++
-            }
-            elseif ($message -match '^Running:.*?scripts/([^/"]+\.sh)') {
-                $scriptName = $Matches[1]
-                if (-not $script:hookScripts.ContainsKey($scriptName)) {
-                    $script:hookScripts[$scriptName] = 0
-                }
-                $script:hookScripts[$scriptName]++
             }
 
             # Track tool names from Input JSON
@@ -293,6 +303,18 @@ if ($script:toolsSeen.Count -ge 3) {
     $checksPassed++
 } else {
     Write-Output "  WARN  Only $($script:toolsSeen.Count) distinct tool type(s) seen"
+}
+
+# Check 8: the report's own shape assumptions hold. An unattributed run is
+# missing from the script counts AND would reappear as an orphan candidate --
+# the silent failure of #326. So it fails here instead of vanishing.
+if ($script:unattributed.Count -eq 0) {
+    Write-Output "  PASS  Every hook run is attributed to a script"
+    $checksPassed++
+} else {
+    Write-Output "  FAIL  $($script:unattributed.Count) hook run(s) not attributed to any hooks/scripts/ file:"
+    foreach ($u in ($script:unattributed | Select-Object -First 5)) { Write-Output "        $u" }
+    $checksFailed++
 }
 
 Write-Output ""
