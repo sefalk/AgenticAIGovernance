@@ -82,10 +82,19 @@ Add-Result 'S4_patterns_are_a_concrete_path_or_a_directory' ($badShape.Count -eq
 
 # A pattern pointing at something that no longer exists is a mapping that can
 # never fire again -- the suite quietly stops being selected.
+. (Join-Path $scriptDir '_suite_env.ps1')
+$frameworkOnly = @('CHANGELOG.md', 'deploy.ps1', 'deploy.sh')
+$inSource = Test-AfSourceTree $scriptDir
 $dead = @()
+$absentHere = @()
 foreach ($p in $patterns) {
     $rel = $p -replace '/\*\*$', ''
-    if (-not (Test-Path (Join-Path $payloadRoot $rel))) { $dead += $p }
+    if (-not (Test-Path (Join-Path $payloadRoot $rel))) {
+        if (-not $inSource -and $frameworkOnly -contains $rel) { $absentHere += $p } else { $dead += $p }
+    }
+}
+if ($absentHere.Count -gt 0) {
+    Write-Output "  SKIP  S5 framework-only patterns ($($absentHere -join ', ')) -- not shipped into a project"
 }
 Add-Result 'S5_every_pattern_points_at_something_that_exists' ($dead.Count -eq 0) "dead=$($dead -join ', ')"
 

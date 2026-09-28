@@ -144,9 +144,13 @@ try {
         Add-Result 'W9_the_bash_twin_gives_the_same_verdicts' $false 'no bash found -- this case would prove nothing'
     }
 
+    # The template must ship the key empty; a configured project must declare it,
+    # with any value -- asserting the template into a project would fail it for being set up.
+    . (Join-Path $scriptDir '_suite_env.ps1')
     $confText = if (Test-Path $shippedConf) { Get-Content $shippedConf -Raw } else { '' }
+    $keyShape = if (Test-AfSourceTree $scriptDir) { '(?m)^ADO_DEFAULT_ASSIGNED_TO=\s*$' } else { '(?m)^ADO_DEFAULT_ASSIGNED_TO=' }
     Add-Result 'W10_the_shipped_config_declares_the_owner_key' `
-        ($confText -match '(?m)^ADO_DEFAULT_ASSIGNED_TO=\s*$') 'af-env.conf must ship the key, empty'
+        ($confText -match $keyShape) "af-env.conf must declare ADO_DEFAULT_ASSIGNED_TO (empty in the framework template)"
 
     $agentText = if (Test-Path $agentFile) { Get-Content $agentFile -Raw } else { '' }
     Add-Result 'W11_the_worker_gate_table_carries_a_hard_owner_row' `

@@ -12,19 +12,8 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $detector = Join-Path $scriptDir 'check-rule-drift.py'
 $repoRoot = Split-Path (Split-Path (Split-Path (Split-Path $scriptDir)))
 
-$python = $null
-foreach ($c in @((Join-Path $repoRoot '.venv/Scripts/python.exe'), (Join-Path $repoRoot '.venv/bin/python'))) {
-    if (Test-Path $c) { $python = $c; break }
-}
-if (-not $python) {
-    foreach ($name in 'python3', 'python') {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd) {
-            $v = & $cmd.Source --version 2>&1
-            if ($LASTEXITCODE -eq 0 -and "$v" -match 'Python 3') { $python = $cmd.Source; break }
-        }
-    }
-}
+. (Join-Path $scriptDir '_suite_env.ps1')
+$python = Get-AfSuitePython $scriptDir
 if (-not $python) {
     Write-Host 'SKIP: no Python 3 interpreter found; cannot run the rule-drift detector.'
     exit 0
@@ -32,6 +21,7 @@ if (-not $python) {
 
 $results = [ordered]@{}
 $details = [ordered]@{}
+$notes = @()
 function Add-Result([string]$Name, [bool]$Ok, [string]$Detail) {
     $script:results[$Name] = $Ok
     $script:details[$Name] = $Detail
@@ -122,16 +112,21 @@ try {
     Add-Result 'R8_the_text_report_names_file_line_and_verdict' `
         ($a -match 'MANIFEST\.md:3' -and $a -match '(?i)\bagree\b' -and $a -match '(?i)\bdiverge\b') 'text report'
 
-    $baseline = Join-Path $repoRoot 'docs/metrics/rule-drift-baseline.json'
-    $bl = $null
-    try { $bl = Get-Content $baseline -Raw | ConvertFrom-Json } catch { $bl = $null }
-    Add-Result 'R9_a_baseline_of_the_shipped_payload_is_committed' `
-        ($bl -and $bl.PSObject.Properties['clusters'] -and $bl.PSObject.Properties['corpus']) "baseline=$baseline"
+    if (Test-AfSourceTree $scriptDir) {
+        $baseline = Join-Path $repoRoot 'docs/metrics/rule-drift-baseline.json'
+        $bl = $null
+        try { $bl = Get-Content $baseline -Raw | ConvertFrom-Json } catch { $bl = $null }
+        Add-Result 'R9_a_baseline_of_the_shipped_payload_is_committed' `
+            ($bl -and $bl.PSObject.Properties['clusters'] -and $bl.PSObject.Properties['corpus']) "baseline=$baseline"
+    } else {
+        $notes += 'R9_a_baseline_of_the_shipped_payload_is_committed -- the baseline lives in the framework repo'
+    }
 } finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 Write-Output '===== rule-drift detector tests (issue #304) ====='
+foreach ($n in $notes) { Write-Output "  SKIP  $n" }
 $failed = 0
 foreach ($k in $results.Keys) {
     if ($results[$k]) {

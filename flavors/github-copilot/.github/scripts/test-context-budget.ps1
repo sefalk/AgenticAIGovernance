@@ -601,7 +601,8 @@ try {
     #     checked where the deploy scripts live -- a consumer has no copy.
     $deployPs1 = Join-Path $repoRootAF 'deploy.ps1'
     $deploySh = Join-Path $repoRootAF 'deploy.sh'
-    if ((Test-Path $deployPs1) -and (Test-Path $deploySh)) {
+    . (Join-Path $scriptDir '_suite_env.ps1')
+    if (Test-AfSourceTree $scriptDir) {
         $results['SS_deploy_ps1_seeds_project_budget'] =
             ((Get-Content $deployPs1 -Raw) -match '--seed-project-budget')
         $results['SS_deploy_sh_seeds_project_budget'] =

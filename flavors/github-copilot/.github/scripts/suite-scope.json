@@ -128,6 +128,16 @@
     "test-suite-budgets.ps1": [
       ".github/scripts/suite-budgets.json"
     ],
+    "test-suite-portability.ps1": [
+      ".github/scripts/_suite_env.ps1",
+      ".github/scripts/test-changelog-headings.ps1",
+      ".github/scripts/test-deploy-flags.ps1",
+      ".github/scripts/test-rule-drift.ps1",
+      ".github/scripts/test-suite-scope.ps1",
+      ".github/scripts/test-work-item-owner.ps1",
+      ".github/scripts/test-context-budget.ps1",
+      ".github/scripts/test-hooks.ps1"
+    ],
     "test-suite-scope.ps1": [
       ".github/scripts/suite-scope.json"
     ],

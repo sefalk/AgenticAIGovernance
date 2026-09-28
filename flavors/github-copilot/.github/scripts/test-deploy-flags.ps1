@@ -6,6 +6,12 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $deployScript = Join-Path $repoRoot 'deploy.ps1'
 
+. (Join-Path $PSScriptRoot '_suite_env.ps1')
+if (-not (Test-AfSourceTree)) {
+    Write-Output '  SKIP  deploy flags -- deploy.ps1 ships only with the framework, not into a project'
+    exit 0
+}
+
 $failures = 0
 
 function Assert-Contains {
