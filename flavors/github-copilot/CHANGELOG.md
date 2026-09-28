@@ -258,6 +258,18 @@ build for one (#322).
 
 ### Fixed
 
+- **`test-hooks-integration.ps1` never attributed agent-scoped PowerShell hooks,
+  then listed them as orphans (#326).** It matched `Running:` lines with one
+  pattern for backslash `.ps1` paths and one for forward-slash `.sh` paths; a hook
+  declared in `.agent.md` frontmatter is a forward-slash `.ps1` and fell through
+  both. One extraction now reads the `command` field (never the `cwd` beside it),
+  normalises every separator and matches `hooks/scripts/<name>.(ps1|sh)`. Measured
+  on the live log (5,587 invocations): seven hooks that were missing now appear,
+  including `implementer-stop.ps1` (136) and `test-writer-pretooluse.ps1` (504).
+  A new check fails when any `Running:` line names no script, so an unattributed
+  run can no longer vanish into the orphan list. `-LogPath` lets
+  `test-hook-log-attribution.ps1` drive the parser with fixtures in all three
+  spellings -- the first time it runs in CI, which excludes the live-log suite.
 - **PowerShell hooks turned every non-ASCII character into `?` before a Python
   core saw it (#341).** Windows PowerShell 5.1 reads stdin in the OEM code page
   and pipes to native commands as ASCII; measured, `Gr` + o-umlaut + sharp-s +
