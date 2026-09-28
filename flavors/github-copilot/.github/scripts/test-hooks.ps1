@@ -23,6 +23,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $githubDir = (Resolve-Path "$PSScriptRoot/..").Path
 $scriptDir = Join-Path $githubDir 'hooks/scripts'
+. "$PSScriptRoot/_suite_env.ps1"
+$inAfSource = Test-AfSourceTree $PSScriptRoot
 
 if (-not (Test-Path $scriptDir)) {
     Write-Output "ERROR: hooks/scripts not found at $scriptDir"
@@ -2072,7 +2074,7 @@ $REAL_CONF = Get-Content $confPath -Raw
 # where that file lives. A consumer's copy is [customizable] and is expected to
 # differ -- asserting the default into it teaches the consumer to ignore red
 # output, which is worse than shipping no test at all (issue #209).
-if (Test-Path (Join-Path $githubDir '../../../.githooks/pre-commit')) {
+if ($inAfSource) {
     Assert-True "the shipped af-env.conf carries RETRO_DIR at the unchanged default" `
         ($REAL_CONF -match '(?m)^RETRO_DIR=\.github/retros/auto\s*$') `
         "an upgrading consumer must not have its retro destination move under it"
@@ -3552,7 +3554,12 @@ if ((Test-Path $callerChecker) -and $pyExe) {
     if (Test-Path (Join-Path $payloadRoot 'deploy.sh')) { $callerRoots += $payloadRoot }
 
     & $pyExe $callerChecker $PSScriptRoot @callerRoots *> $null
-    Assert-True "every shipped CLI option has a production caller" ($LASTEXITCODE -eq 0) "checker exit $LASTEXITCODE"
+    if ($inAfSource) {
+        Assert-True "every shipped CLI option has a production caller" ($LASTEXITCODE -eq 0) "checker exit $LASTEXITCODE"
+    } else {
+        # Some options are passed only by deploy.ps1, which a project never receives (#349).
+        Write-Output "  SKIP  every shipped CLI option has a production caller -- deploy.ps1 is a caller and does not ship here"
+    }
 
     $seed = Join-Path ([System.IO.Path]::GetTempPath()) "af-caller-$(Get-Random)"
     New-Item -ItemType Directory -Path (Join-Path $seed 'scripts') -Force | Out-Null

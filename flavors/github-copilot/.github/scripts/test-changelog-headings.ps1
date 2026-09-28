@@ -95,15 +95,22 @@ try {
     $details['A1_checker_ships_with_the_suite'] = "expected $checker"
 
     $shipped = Invoke-Checker @($shippedChangelog)
-    $results['A2_shipped_changelog_passes'] = ($shipped.Code -eq 0)
-    $details['A2_shipped_changelog_passes'] = "exit $($shipped.Code): $($shipped.Out)"
+    . (Join-Path $scriptDir '_suite_env.ps1')
+    if (Test-AfSourceTree $scriptDir) {
+        $results['A2_shipped_changelog_passes'] = ($shipped.Code -eq 0)
+        $details['A2_shipped_changelog_passes'] = "exit $($shipped.Code): $($shipped.Out)"
 
-    # The ratchet is only a ratchet if [Unreleased] contributes nothing to it.
-    # A section that is allowed to carry legacy duplicates while it is still
-    # being written is how 1.22.0 got six.
-    $results['A10_unreleased_contributes_nothing_to_the_baseline'] =
-        ($shipped.Out -notmatch '(?m)^CH00\d \[Unreleased\]')
-    $details['A10_unreleased_contributes_nothing_to_the_baseline'] = $shipped.Out
+        # The ratchet is only a ratchet if [Unreleased] contributes nothing to it.
+        # A section that is allowed to carry legacy duplicates while it is still
+        # being written is how 1.22.0 got six.
+        $results['A10_unreleased_contributes_nothing_to_the_baseline'] =
+            ($shipped.Out -notmatch '(?m)^CH00\d \[Unreleased\]')
+        $details['A10_unreleased_contributes_nothing_to_the_baseline'] = $shipped.Out
+    } else {
+        # A10 would pass vacuously on the checker's missing-file message.
+        Write-Output '  SKIP  A2_shipped_changelog_passes -- the framework CHANGELOG does not ship into a project'
+        Write-Output '  SKIP  A10_unreleased_contributes_nothing_to_the_baseline -- same file'
+    }
 
     $base = Invoke-Checker @('--print-baseline')
     $dupCeiling = if ($base.Out -match 'duplicate-sections=(\d+)') { [int]$Matches[1] } else { -1 }

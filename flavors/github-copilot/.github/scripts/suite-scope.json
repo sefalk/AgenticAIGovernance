@@ -129,6 +129,7 @@
       ".github/scripts/suite-budgets.json"
     ],
     "test-suite-portability.ps1": [
+      ".github/scripts/_suite_env.ps1",
       ".github/scripts/test-changelog-headings.ps1",
       ".github/scripts/test-deploy-flags.ps1",
       ".github/scripts/test-rule-drift.ps1",
