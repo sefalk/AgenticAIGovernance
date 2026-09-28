@@ -39,7 +39,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 . "$PSScriptRoot/_common.ps1"
 
 # Read and parse stdin
-$raw = [Console]::In.ReadToEnd()
+$raw = Read-AfStdin
 try {
     $inputData = $raw | ConvertFrom-Json
 } catch {

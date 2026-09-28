@@ -22,6 +22,9 @@ Reusable guidance for Azure DevOps provider integrations.
 3. Run a lightweight availability probe before write operations.
 4. If `required` and unavailable: halt and escalate.
 5. If `optional` and unavailable: continue with fallback artifact + pending-sync marker.
+6. Large results are spilled to a file and long lines cut on read — values in
+   `.github/hooks/scripts/tool-limits.json`; read narrow, per the
+   **ado-workitem** skill (Read Strategy).
 
 ## Fallback Contract
 

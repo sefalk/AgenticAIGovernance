@@ -71,7 +71,7 @@ def owner_hint(owner: str) -> str:
 
 def main() -> int:
     try:
-        payload = json.load(sys.stdin)
+        payload = json.loads(sys.stdin.buffer.read().decode("utf-8-sig", errors="replace"))
     except (json.JSONDecodeError, UnicodeDecodeError):
         return defer()
     tool_input = payload.get("tool_input") if isinstance(payload, dict) else None
