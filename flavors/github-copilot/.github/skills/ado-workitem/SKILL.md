@@ -70,6 +70,23 @@ project (#112): create lands in `New`, the update to `Active` carries
   probe the equivalent Azure DevOps read behaviour once and record it there
   rather than assuming the answer transfers.
 
+## Read Strategy (long fields)
+
+A result over the spill threshold reaches you only as a file path, and
+`read_file` cuts every line over 2,000 characters there — an HTML description
+is usually one line. Values and sources: `.github/hooks/scripts/tool-limits.json`.
+
+1. **Read narrow.** `wit_work_item` `action=get` with
+   `fields: ["System.Description"]` (or the fields you need) instead of
+   `expand: "All"`; `fields` and `expand` cannot be combined, so fetch
+   relations in a separate `expand: "Relations"` call. A narrow result usually
+   stays inline and complete.
+2. **If it spilled anyway**, the PostToolUse hook names the long fields and a
+   lossless copy with those lines wrapped — read the copy, not the spill file.
+3. **Fallback:** parse the spill file in the terminal (`ConvertFrom-Json`),
+   never trust a `[truncated]` line. Never rewrite a field you could not read
+   in full.
+
 ## Linking Strategy
 
 - Use native artifact links where available.
