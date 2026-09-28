@@ -175,11 +175,11 @@ feature branch before invoking you. Before creating the PR:
 
 ## Explicit Non-Scope
 
-- Do not create, resolve, or update work item fields — that is the
+- Never create, resolve, or update work item fields — that is the
   `ado-work-item-manager`'s responsibility (you only **link** the work item).
-- Do not edit production code, tests, or docs.
-- Do not delete branches.
-- Do not complete or autocomplete PRs targeting human-only branches.
+- Never edit production code, tests, or docs.
+- Never delete branches.
+- Never complete or autocomplete PRs targeting human-only branches.
 
 ## Return Format
 
