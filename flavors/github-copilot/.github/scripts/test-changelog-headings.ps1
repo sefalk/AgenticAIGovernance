@@ -40,22 +40,8 @@ $shippedChangelog = Join-Path $repoRootAF 'CHANGELOG.md'
 $maxDuplicateSections = 4
 $maxNonStandardKinds = 19
 
-function Resolve-Python {
-    foreach ($c in @((Join-Path $repoRootAF '.venv/Scripts/python.exe'),
-                     (Join-Path $repoRootAF '.venv/bin/python'))) {
-        if (Test-Path $c) { return @($c) }
-    }
-    foreach ($name in @('python3', 'python')) {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd) {
-            $v = & $cmd.Source --version 2>&1
-            if ($LASTEXITCODE -eq 0 -and $v -match 'Python 3') { return @($cmd.Source) }
-        }
-    }
-    $py = Get-Command py -ErrorAction SilentlyContinue
-    if ($py) { return @($py.Source, '-3') }
-    return $null
-}
+. (Join-Path $scriptDir '_suite_env.ps1')
+function Resolve-Python { Get-AfSuitePython $scriptDir }
 
 $python = @(Resolve-Python)
 if ($python.Count -eq 0 -or -not $python[0]) {
@@ -95,7 +81,6 @@ try {
     $details['A1_checker_ships_with_the_suite'] = "expected $checker"
 
     $shipped = Invoke-Checker @($shippedChangelog)
-    . (Join-Path $scriptDir '_suite_env.ps1')
     if (Test-AfSourceTree $scriptDir) {
         $results['A2_shipped_changelog_passes'] = ($shipped.Code -eq 0)
         $details['A2_shipped_changelog_passes'] = "exit $($shipped.Code): $($shipped.Out)"

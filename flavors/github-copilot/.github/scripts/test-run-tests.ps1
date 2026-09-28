@@ -44,23 +44,8 @@ $runTestsPs1 = (Resolve-Path (Join-Path $scriptDir 'run-tests.ps1')).Path
 $runTestsSh  = (Resolve-Path (Join-Path $scriptDir 'run-tests.sh')).Path
 $repoRootAF  = (Resolve-Path (Join-Path $scriptDir '..' | Join-Path -ChildPath '..')).Path
 
-# Resolve a real Python 3 interpreter (skip the Windows Store alias by probing).
-function Resolve-Python {
-    foreach ($c in @((Join-Path $repoRootAF '.venv/Scripts/python.exe'),
-                     (Join-Path $repoRootAF '.venv/bin/python'))) {
-        if (Test-Path $c) { return @($c) }
-    }
-    foreach ($name in @('python3', 'python')) {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd) {
-            $v = & $cmd.Source --version 2>&1
-            if ($LASTEXITCODE -eq 0 -and $v -match 'Python 3') { return @($cmd.Source) }
-        }
-    }
-    $py = Get-Command py -ErrorAction SilentlyContinue
-    if ($py) { return @($py.Source, '-3') }
-    return $null
-}
+. (Join-Path $scriptDir '_suite_env.ps1')
+function Resolve-Python { Get-AfSuitePython $scriptDir }
 
 # @(...) is required: PowerShell unwraps a single-element array on return, so
 # a bare assignment would yield a string and $python[0] would be a character.
