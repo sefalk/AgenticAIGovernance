@@ -185,6 +185,41 @@ escalation:
     # change that file's shape for every reader downstream.
     $topLevel = @($r.Output -split "`r?`n" | Where-Object { $_ -match '^[A-Za-z_]' })
     $results['I_single_top_level_key'] = ($topLevel.Count -eq 1 -and $topLevel[0] -match '^agent_invocations:')
+
+    # --- J..N: skills read, measured from read_file calls (issue #348) -------
+    # The declared `Skills Read:` line was cut off in 289 of 305 truncated
+    # returns and named a never-opened skill in 88 of 278 comparable ones, so
+    # the log records what was read, and the declaration only as a cross-check.
+    function New-Record([hashtable]$Record) { return ($Record | ConvertTo-Json -Compress -Depth 6) }
+    function New-Read([string]$Path) {
+        New-Record @{ type = 'tool_call'; name = 'read_file'; attrs = @{ args = (@{ filePath = $Path; startLine = 1; endLine = 50 } | ConvertTo-Json -Compress); result = 'x' } }
+    }
+    function New-Response([string]$Text) {
+        $parts = @(@{ role = 'assistant'; parts = @(@{ type = 'text'; content = $Text }) }) | ConvertTo-Json -Compress -Depth 6
+        New-Record @{ type = 'agent_response'; attrs = @{ response = "[$($parts.TrimStart('[').TrimEnd(']'))]" } }
+    }
+    $impl = @(
+        (New-Read 'c:\\repo\\.github\\skills\\python-dev\\SKILL.md'),
+        (New-Read '/repo/.github/skills/_available/data-quality/SKILL.md'),
+        (New-Read 'c:\\repo\\.github\\skills\\python-dev\\SKILL.md'),
+        (New-Record @{ type = 'tool_call'; name = 'grep_search'; attrs = @{ args = '{"query":"skills/grep-only/SKILL.md"}'; result = 'x' } }),
+        (New-Record @{ type = 'tool_call'; name = 'read_file'; attrs = @{ args = '{"filePath":"c:\\\\repo\\\\src\\\\a.py"}'; result = 'see skills/result-only/SKILL.md' } }),
+        (New-Response "Done.`n### Gate Summary`n- **Skills Read:** ``python-dev/SKILL.md``, ``hexagonal-architecture/SKILL.md``")
+    ) -join "`n"
+    $dir = New-SessionDir @('runSubagent-test-writer-toolu_ccc.jsonl')
+    [IO.File]::WriteAllText((Join-Path $dir 'runSubagent-implementer-toolu_ddd.jsonl'), $impl + "`n")
+    [IO.File]::WriteAllText((Join-Path $dir 'main.jsonl'), (New-Read '.github/skills/tdd-orchestration/SKILL.md') + "`n")
+    $r = Invoke-Tool @('--session-dir', $dir)
+    $results['J_skills_read_block_present']      = ($r.Output -match '(?m)^  skills_read:\s*$')
+    $results['J_reads_listed_sorted_and_unique'] = ($r.Output -match '(?m)^    implementer: \[data-quality, python-dev\]\s*$')
+    $results['K_grep_and_results_are_not_reads'] = ($r.Output -notmatch 'grep-only|result-only')
+    $results['L_agent_that_read_nothing_says_so'] = ($r.Output -match '(?m)^    test-writer: \[\]\s*$')
+    $results['M_parent_session_counted_as_main'] = ($r.Output -match '(?m)^    main: \[tdd-orchestration\]\s*$')
+    $results['N_declared_but_not_read_is_named'] = ($r.Output -match '(?ms)^  skills_declared_not_read:\s*$.*^    implementer: \[hexagonal-architecture\]\s*$')
+    $declaredNotRead = [regex]::Match($r.Output, '(?ms)^  skills_declared_not_read:\s*$(.*)').Groups[1].Value
+    $results['N_read_and_declared_not_accused']  = ($declaredNotRead -ne '' -and $declaredNotRead -notmatch 'python-dev')
+    $topLevel = @($r.Output -split "`r?`n" | Where-Object { $_ -match '^[A-Za-z_]' })
+    $results['N_still_single_top_level_key'] = ($topLevel.Count -eq 1)
 }
 finally {
     foreach ($f in $fixtures) {
