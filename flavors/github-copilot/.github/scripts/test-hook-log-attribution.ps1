@@ -52,6 +52,11 @@ $bad = $good + (New-Invocation 6 'PreToolUse' @('node ./tools/custom-gate.js'))
 $badLog = Join-Path $fixtureDir 'bad.log'
 [IO.File]::WriteAllLines($badLog, $bad)
 
+# Multi-root window: the consumer's deployed hook and the framework repo's dev hook, one call (#345).
+$dup = $good + (New-Invocation 7 'PreToolUse' @(($ps + '.github\\hooks\\scripts\\block-dangerous.ps1'), ($ps + 'flavors/github-copilot/.github/hooks/scripts/block-dangerous.ps1')))
+$dupLog = Join-Path $fixtureDir 'dup.log'
+[IO.File]::WriteAllLines($dupLog, $dup)
+
 function Invoke-Subject([string]$Log) {
     $ErrorActionPreference = 'Continue'
     $out = & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $subject -LogPath $Log 2>&1 | Out-String
@@ -72,6 +77,13 @@ try {
     Add-Result 'A4_a_bash_hook_is_still_attributed' ((Get-Count $r.Out 'block-dangerous.sh') -eq 1) 'block-dangerous.sh'
     Add-Result 'A5_the_cwd_path_is_not_mistaken_for_a_script' ($r.Out -notmatch '(?m)^\s+repo : ') 'cwd must be ignored'
     Add-Result 'A6_a_fully_attributed_log_reports_no_unattributed_runs' ($r.Out -match 'PASS\s+Every hook run is attributed') 'expected the attribution check to pass'
+    Add-Result 'D1_a_log_without_duplicates_reports_none' ($r.Out -match 'PASS\s+No hook script runs twice') 'expected the duplicate check to pass'
+
+    $r = Invoke-Subject $dupLog
+    Add-Result 'D2_the_same_script_twice_in_one_call_is_warned_and_named' `
+        ($r.Out -match 'WARN\s+1 invocation\(s\) ran the same hook script twice' -and $r.Out -match 'block-dangerous\.ps1 x2') `
+        "out=$($r.Out.Substring([Math]::Max(0, $r.Out.IndexOf('## Integration Checks'))))"
+    Add-Result 'D3_a_duplicate_warns_but_does_not_fail_the_run' ($r.Exit -eq 0) "exit=$($r.Exit)"
 
     $r = Invoke-Subject $badLog
     Add-Result 'W1_an_unattributable_run_fails_loudly_and_is_quoted' `
