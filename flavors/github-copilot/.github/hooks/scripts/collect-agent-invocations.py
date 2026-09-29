@@ -41,6 +41,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -49,6 +50,73 @@ from _agentlog import agent_from
 
 KEY = re.compile(r"^(?P<indent>\s*)(?:-\s+)?(?P<key>[A-Za-z_][\w-]*)\s*:(?P<rest>.*)$")
 BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*\s*$")
+
+# `.github/skills/<name>/SKILL.md`, active or parked under `_available/`.
+SKILL_PATH = re.compile(r"skills[\\/]+(?:_available[\\/]+)?([\w.-]+)[\\/]+SKILL\.md", re.IGNORECASE)
+DECLARED = re.compile(r"Skills Read\W*:\W*(?P<rest>[^\n]*)", re.IGNORECASE)
+
+
+def _reads_and_declaration(path: str) -> tuple[set[str], set[str] | None]:
+    """Skills opened with `read_file` in one log, and the skills its last return declares.
+
+    Only `read_file` arguments count (issue #348). A `grep_search` hit or a path
+    quoted in a tool result is not a read. The declaration is None when the
+    return carries no `Skills Read:` line -- cut off by the editor's 5000-character
+    cap in 289 of 305 truncated returns measured, so absence proves nothing.
+    """
+    reads: set[str] = set()
+    last_response = None
+    try:
+        with open(path, "rb") as handle:
+            for raw in handle:
+                if b'"tool_call"' in raw and b"read_file" in raw:
+                    try:
+                        record = json.loads(raw.decode("utf-8", "replace"))
+                    except ValueError:
+                        continue
+                    if record.get("type") == "tool_call" and record.get("name") == "read_file":
+                        args = (record.get("attrs") or {}).get("args")
+                        reads.update(m.group(1).lower() for m in SKILL_PATH.finditer(str(args)))
+                elif b'"agent_response"' in raw:
+                    try:
+                        record = json.loads(raw.decode("utf-8", "replace"))
+                    except ValueError:
+                        continue
+                    if record.get("type") == "agent_response":
+                        last_response = (record.get("attrs") or {}).get("response")
+    except OSError:
+        return reads, None
+
+    match = DECLARED.search(last_response) if isinstance(last_response, str) else None
+    if not match:
+        return reads, None
+    # JSON-escaped when the return was truncated and could not be parsed.
+    rest = match.group("rest").replace("\\\\", "/").split("\\n", 1)[0]
+    return reads, {m.lower() for m in re.findall(r"([\w.-]+)[\\/]+SKILL\.md", rest)}
+
+
+def skills_read(session_dir: str) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Per agent: skills read, and skills declared in a return but never read."""
+    read: dict[str, set[str]] = {}
+    declared_only: dict[str, set[str]] = {}
+    try:
+        names = sorted(os.listdir(session_dir))
+    except OSError:
+        return {}, {}
+    for name in names:
+        if name == "main.jsonl":
+            agent = "main"
+        elif name.startswith("runSubagent-") and name.endswith(".jsonl"):
+            agent = agent_from(name)
+        else:
+            continue
+        reads, declared = _reads_and_declaration(os.path.join(session_dir, name))
+        read.setdefault(agent, set()).update(reads)
+        if declared is not None and declared - reads:
+            declared_only.setdefault(agent, set()).update(declared - reads)
+    # Read in another invocation of the same agent is still read.
+    unread = {a: sorted(s - read.get(a, set())) for a, s in declared_only.items() if s - read.get(a, set())}
+    return {a: sorted(s) for a, s in read.items()}, unread
 
 
 def observed(session_dir: str) -> dict[str, int]:
@@ -106,7 +174,12 @@ def claimed(log_path: str) -> list[str]:
     return names
 
 
-def render(counts: dict[str, int], missing: list[str]) -> str:
+def render(
+    counts: dict[str, int],
+    missing: list[str],
+    read: dict[str, list[str]] | None = None,
+    unread: dict[str, list[str]] | None = None,
+) -> str:
     lines = [
         "# Measured by documenter-stop from the editor's subagent debug logs,",
         "# so these counts never passed through a language model (issue #173).",
@@ -123,6 +196,17 @@ def render(counts: dict[str, int], missing: list[str]) -> str:
         lines.append("  claimed_without_invocation:")
         for agent in missing:
             lines.append(f"    - {agent}")
+    if read:
+        lines.append("  # Every read_file of a SKILL.md, per agent -- measured, not declared (#348).")
+        lines.append("  # A lower bound: a skill that reached context another way is not seen.")
+        lines.append("  skills_read:")
+        for agent in sorted(read):
+            lines.append(f"    {agent}: [{', '.join(read[agent])}]")
+    if unread:
+        lines.append("  # Declared under `Skills Read:` in a return, never opened with read_file.")
+        lines.append("  skills_declared_not_read:")
+        for agent in sorted(unread):
+            lines.append(f"    {agent}: [{', '.join(unread[agent])}]")
     return "\n".join(lines)
 
 
@@ -140,7 +224,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     missing = [a for a in claimed(args.log) if a not in counts] if args.log else []
-    sys.stdout.write(render(counts, missing) + "\n")
+    read, unread = skills_read(args.session_dir)
+    sys.stdout.write(render(counts, missing, read, unread) + "\n")
     return 0
 
 
