@@ -15,6 +15,34 @@ build for one (#322).
 
 ### Changed
 
+- **Rule duplication is now a gate, not a report (#305).** Every cluster the
+  #304 detector finds must carry a recorded `decision` (`keep` or `aligned`) and
+  a `reason` in `docs/metrics/rule-drift-baseline.json`, or
+  `check-rule-drift.py --baseline` exits 1; `test-rule-drift.ps1` R16 runs that
+  on the shipped payload, so CI fails. Clusters are keyed by file and normalised
+  wording, not line: moving a rule keeps its decision, while a new duplicate --
+  or one reworded member, which is how two copies start to drift -- has none.
+  Resolving a duplicate always passes. All 11 clusters were decided on the
+  evidence the issue asks for -- enforcing hook, the agent's tool list, who reads
+  the rule: 9 kept, 2 aligned (ado-pr-manager's non-scope list now says *Never*
+  like gh-pr-manager's; implementer carries refactorer's `tests: all` wording).
+  No rule removed. Cluster 5 (*push, merge, or mutate refs* vs *push or mutate
+  refs*) is a divergence **kept on purpose**: gh-pr-manager holds
+  `merge_pull_request` and may merge into the allowlisted branch, so aligning
+  it would have made one agent's rule contradict its own tool. Measured: always-on
+  set unchanged (no always-on file in the diff; 3,479/3,500 tok), implementer
+  +15 bytes, ado-pr-manager -4. The committed baseline also carried every dash
+  as cp437 mojibake -- it had been written through a PowerShell pipe -- so the
+  detector now writes it itself (`--write-baseline`, decisions carried over by
+  key) and R17 fails on the mojibake signature.
+- **The CLI caller check (#253) now runs as its own suite, scoped to the scripts
+  it guards.** It lived only inside `test-hooks.ps1`, which `suite-scope.json`
+  selects for `hooks/**` — so the new `--write-baseline` option of #305 passed
+  every locally selected suite and failed only in CI. `test-cli-callers.ps1`
+  runs the same checker in seconds and is selected by `scripts/**`,
+  `hooks/scripts/**` and the deploy scripts. `--write-baseline` itself is a
+  maintainer command and carries the checker's `af-caller-ok` marker with that
+  reason.
 - CHANGELOG sections can no longer repeat a `###` heading kind (#322).
   `[Unreleased]` had two `### Changed` and two `### Fixed`; `[1.22.0]` had six
   `### Changed`, five `### Added` and five `### Fixed`. Those are not typos but
@@ -1285,7 +1313,7 @@ build for one (#322).
   frontmatter, fenced code, tables and comments, and joining wrapped lines so a
   rule is compared as a sentence -- clusters near-duplicates across files and
   labels each cluster `agree` or `diverge`. Deterministic, offline, no model in
-  the path; it only reports and always exits 0. Baseline on the shipped payload:
+  the path; on its own it only reports and exits 0 (the gate followed in #305). Baseline on the shipped payload:
   228 rules, 11 clusters (4 agree, 7 diverge), committed as
   `docs/metrics/rule-drift-baseline.json`. False positives, judged over all 11
   clusters by the agent (not a human): 0 of 11 clusters, 1 of 25 locations

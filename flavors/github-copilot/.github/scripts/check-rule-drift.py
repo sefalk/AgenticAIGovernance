@@ -22,10 +22,21 @@ each keeps at least three content words. Verdict: `agree` when every
 normalised wording is identical, `diverge` otherwise -- the case that matters,
 because two wordings of one rule drift apart.
 
-Reporting only: always exits 0. The gate comes after the findings are resolved.
+Without --baseline it only reports and always exits 0.
+
+The gate (#305): with --baseline FILE every cluster must appear in FILE with a
+`decision` (`keep` or `aligned`) and a `reason`; otherwise exit 1. A cluster
+is identified by its members' file and normalised wording, not their line, so
+moving a rule keeps its decision while a new duplicate -- or a reworded member,
+which is how two copies start to drift -- has none. A baseline cluster that no
+longer occurs passes: resolving a duplicate is always allowed.
+
+--write-baseline FILE writes the inventory to FILE, carrying each decision over
+by the same key. It writes the file itself because a PowerShell pipe once
+stored every dash of the baseline as cp437 mojibake.
 
 Usage:
-    check-rule-drift.py [--root DIR] [--json]
+    check-rule-drift.py [--root DIR] [--json] [--baseline FILE | --write-baseline FILE]
 """
 
 from __future__ import annotations
@@ -38,6 +49,8 @@ from pathlib import Path
 
 SIMILARITY = 0.6
 MIN_CONTENT_WORDS = 3
+DECISIONS = frozenset({"keep", "aligned"})
+MIN_REASON_CHARS = 20
 
 _MODAL = re.compile(r"\b(must|never|always|do not|don't|may only|shall)\b", re.IGNORECASE)
 _FENCE = re.compile(r"^\s*(```|~~~)")
@@ -278,15 +291,71 @@ def render(inv: dict[str, object]) -> str:
     return "\n".join(out)
 
 
+def cluster_key(cluster: dict[str, object]) -> str:
+    return "\n".join(sorted(f"{loc['file']}\t{normalise(loc['text'])}" for loc in cluster["locations"]))
+
+
+def load_decisions(path: Path) -> dict[str, dict[str, object]]:
+    if not path.is_file():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {cluster_key(c): c for c in data.get("clusters", [])}
+
+
+def gate(inv: dict[str, object], decided: dict[str, dict[str, object]]) -> tuple[int, str]:
+    findings = []
+    current = set()
+    for cluster in inv["clusters"]:
+        key = cluster_key(cluster)
+        current.add(key)
+        where = ", ".join(f"{loc['file']}:{loc['line']}" for loc in cluster["locations"])
+        entry = decided.get(key)
+        if entry is None:
+            findings.append(f"NEW        {cluster['verdict']}: {where}\n           {cluster['statement']}")
+        elif entry.get("decision") not in DECISIONS or len(str(entry.get("reason") or "").strip()) < MIN_REASON_CHARS:
+            findings.append(f"UNDECIDED  {cluster['verdict']}: {where}\n           {cluster['statement']}")
+    resolved = sum(1 for key in decided if key not in current)
+    head = (
+        f"rule-drift gate: {len(inv['clusters'])} clusters, {len(findings)} without a recorded decision, "
+        f"{resolved} resolved since the baseline"
+    )
+    if not findings:
+        return 0, head
+    hint = (
+        "Resolve the duplicate, or record why each agent needs it: add `decision` "
+        f"({' | '.join(sorted(DECISIONS))}) and `reason` to the cluster in the baseline."
+    )
+    return 1, "\n".join([head, *findings, hint])
+
+
+def write_baseline(inv: dict[str, object], path: Path) -> None:
+    decided = load_decisions(path)
+    for index, cluster in enumerate(inv["clusters"]):
+        entry = decided.get(cluster_key(cluster), {})
+        inv["clusters"][index] = {"decision": entry.get("decision"), "reason": entry.get("reason"), **cluster}
+    path.write_text(json.dumps(inv, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", default=str(Path(__file__).resolve().parent.parent))
     parser.add_argument("--json", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--baseline", type=Path)
+    # af-caller-ok: run by the maintainer who records a decision after the gate reports NEW.
+    mode.add_argument("--write-baseline", type=Path)
     args = parser.parse_args(argv)
     inv = inventory(Path(args.root))
-    text = json.dumps(inv, indent=2, ensure_ascii=False) if args.json else render(inv)
+    code = 0
+    if args.write_baseline:
+        write_baseline(inv, args.write_baseline)
+        text = f"rule-drift: baseline written to {args.write_baseline} ({inv['summary']['clusters']} clusters)"
+    elif args.baseline:
+        code, text = gate(inv, load_decisions(args.baseline))
+    else:
+        text = json.dumps(inv, indent=2, ensure_ascii=False) if args.json else render(inv)
     sys.stdout.buffer.write((text + "\n").encode("utf-8"))
-    return 0
+    return code
 
 
 if __name__ == "__main__":

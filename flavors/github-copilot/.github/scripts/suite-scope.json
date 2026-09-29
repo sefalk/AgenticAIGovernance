@@ -19,6 +19,12 @@
       ".github/scripts/check-changelog-headings.py",
       "CHANGELOG.md"
     ],
+    "test-cli-callers.ps1": [
+      ".github/scripts/**",
+      ".github/hooks/scripts/**",
+      "deploy.ps1",
+      "deploy.sh"
+    ],
     "test-context-budget.ps1": [
       ".github/scripts/check-context-budget.py",
       ".github/hooks/scripts/check-context-budget-staged.py",
