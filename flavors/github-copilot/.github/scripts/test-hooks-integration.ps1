@@ -66,6 +66,7 @@ $script:denials = 0
 $script:warnings = @()
 $script:hookCounts = @{}        # EventName -> set of hook counts seen
 $script:unattributed = @()      # Running: lines that named no hook script
+$script:perCall = @{}           # log|event|seq -> script names run in that one invocation
 
 foreach ($logFile in $hookLogs) {
     $sessionDir = $logFile.Directory.Parent.Parent.Parent.Name  # session timestamp
@@ -125,6 +126,9 @@ foreach ($logFile in $hookLogs) {
                         $script:hookScripts[$scriptName] = 0
                     }
                     $script:hookScripts[$scriptName]++
+                    $callKey = "$($logFile.FullName)|$event|$seqNum"
+                    if (-not $script:perCall.ContainsKey($callKey)) { $script:perCall[$callKey] = @() }
+                    $script:perCall[$callKey] += $scriptName
                 } else {
                     $script:unattributed += "[$event] #$seqNum $command"
                 }
@@ -315,6 +319,32 @@ if ($script:unattributed.Count -eq 0) {
     Write-Output "  FAIL  $($script:unattributed.Count) hook run(s) not attributed to any hooks/scripts/ file:"
     foreach ($u in ($script:unattributed | Select-Object -First 5)) { Write-Output "        $u" }
     $checksFailed++
+}
+
+# Check 9: one call, one copy of each gate. A multi-root window holding a
+# consumer and the framework repo ran block-dangerous twice per tool call --
+# ~2.5 s extra, judged against a second policy (#345). WARN, not FAIL: the
+# window layout is the user's choice, but it must not stay invisible.
+$dupScripts = @{}
+$dupCalls = 0
+foreach ($names in $script:perCall.Values) {
+    $repeated = @($names | Group-Object | Where-Object { $_.Count -gt 1 })
+    if ($repeated.Count -eq 0) { continue }
+    $dupCalls++
+    foreach ($g in $repeated) {
+        if (-not $dupScripts.ContainsKey($g.Name)) { $dupScripts[$g.Name] = @{ Max = 0; Calls = 0 } }
+        $dupScripts[$g.Name].Calls++
+        if ($g.Count -gt $dupScripts[$g.Name].Max) { $dupScripts[$g.Name].Max = $g.Count }
+    }
+}
+if ($dupCalls -eq 0) {
+    Write-Output "  PASS  No hook script runs twice in one invocation"
+    $checksPassed++
+} else {
+    Write-Output "  WARN  $dupCalls invocation(s) ran the same hook script twice -- usually a multi-root window loading two .github/hooks (see AF #345):"
+    foreach ($name in ($dupScripts.Keys | Sort-Object)) {
+        Write-Output "        $name x$($dupScripts[$name].Max) in $($dupScripts[$name].Calls) call(s)"
+    }
 }
 
 Write-Output ""
