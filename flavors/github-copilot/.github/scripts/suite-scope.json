@@ -53,6 +53,10 @@
       ".github/hooks/scripts/scan-secrets.ps1",
       ".github/hooks/scripts/block-dangerous.ps1"
     ],
+    "test-hook-declarations.ps1": [
+      ".github/agents/**",
+      ".github/hooks/agent-hooks.json"
+    ],
     "test-hook-log-attribution.ps1": [
       ".github/scripts/test-hooks-integration.ps1"
     ],

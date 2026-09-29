@@ -57,6 +57,11 @@ $dup = $good + (New-Invocation 7 'PreToolUse' @(($ps + '.github\\hooks\\scripts\
 $dupLog = Join-Path $fixtureDir 'dup.log'
 [IO.File]::WriteAllLines($dupLog, $dup)
 
+# An agent hook ran, the global gate did not: the hole #166 feared once duplicates are gone (#345).
+$gap = $good + (New-Invocation 8 'PreToolUse' @(($ps + '.github/hooks/scripts/test-writer-pretooluse.ps1')))
+$gapLog = Join-Path $fixtureDir 'gap.log'
+[IO.File]::WriteAllLines($gapLog, $gap)
+
 function Invoke-Subject([string]$Log) {
     $ErrorActionPreference = 'Continue'
     $out = & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $subject -LogPath $Log 2>&1 | Out-String
@@ -84,6 +89,13 @@ try {
         ($r.Out -match 'WARN\s+1 invocation\(s\) ran the same hook script twice' -and $r.Out -match 'block-dangerous\.ps1 x2') `
         "out=$($r.Out.Substring([Math]::Max(0, $r.Out.IndexOf('## Integration Checks'))))"
     Add-Result 'D3_a_duplicate_warns_but_does_not_fail_the_run' ($r.Exit -eq 0) "exit=$($r.Exit)"
+
+    $r = Invoke-Subject $goodLog
+    Add-Result 'G1_every_invocation_that_ran_its_global_gates_passes' ($r.Out -match 'PASS\s+Every invocation ran the global hooks of its event') 'expected the coverage check to pass'
+    $r = Invoke-Subject $gapLog
+    Add-Result 'G2_an_invocation_missing_its_global_gate_fails_and_is_named' `
+        ($r.Exit -eq 1 -and $r.Out -match 'FAIL\s+1 invocation\(s\) did not run a global hook' -and $r.Out -match 'PreToolUse #8: block-dangerous') `
+        "exit=$($r.Exit) out=$($r.Out.Substring([Math]::Max(0, $r.Out.IndexOf('## Integration Checks'))))"
 
     $r = Invoke-Subject $badLog
     Add-Result 'W1_an_unattributable_run_fails_loudly_and_is_quoted' `
