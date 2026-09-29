@@ -108,6 +108,9 @@
       ".github/hooks/scripts/planner-pretooluse.sh",
       ".github/hooks/scripts/check-plan-budget.py"
     ],
+    "test-python-missing-notice.ps1": [
+      ".github/hooks/scripts/**"
+    ],
     "test-quality-gate.ps1": [
       ".github/scripts/check-python-quality.py",
       ".github/af-env.conf"

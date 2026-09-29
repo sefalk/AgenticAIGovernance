@@ -20,6 +20,7 @@
     "test-plan-budget.ps1": 50,
     "test-plan-structure.ps1": 80,
     "test-planner-write-scope.ps1": 80,
+    "test-python-missing-notice.ps1": 40,
     "test-quality-gate.ps1": 150,
     "test-retry-economy.ps1": 30,
     "test-rule-drift.ps1": 30,
