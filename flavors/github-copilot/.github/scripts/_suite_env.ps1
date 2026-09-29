@@ -17,14 +17,13 @@ function Test-AfSourceTree {
 function Get-AfSuitePython {
     param([string]$ScriptsDir = $PSScriptRoot)
     $payloadRoot = Split-Path (Split-Path $ScriptsDir)
-    $candidates = @()
-    # A consumer keeps its venv beside .github; the framework repo two levels higher.
-    foreach ($root in @($payloadRoot, (Split-Path (Split-Path $payloadRoot)))) {
-        if ($root) {
-            $candidates += (Join-Path $root '.venv/Scripts/python.exe')
-            $candidates += (Join-Path $root '.venv/bin/python')
-        }
-    }
+    # Only the venv beside .github: in the framework repo that path has none and
+    # PATH decides, as it always did. The repo-root venv two levels up lacks the
+    # checkers' PyYAML, and preferring it turned two suites silently weaker.
+    $candidates = @(
+        (Join-Path $payloadRoot '.venv/Scripts/python.exe'),
+        (Join-Path $payloadRoot '.venv/bin/python')
+    )
     foreach ($c in $candidates) { if (Test-Path $c) { return $c } }
 
     # Probed, not merely resolved: python3 on Windows is a Store stub that exits

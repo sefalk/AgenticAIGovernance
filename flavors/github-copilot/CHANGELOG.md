@@ -295,7 +295,7 @@ build for one (#322).
   rightly sets. A suite red for no fault teaches a consumer to ignore red. New
   `scripts/_suite_env.ps1`: `Test-AfSourceTree` (one marker -- `deploy.ps1`
   beside `.github` -- replacing three ad-hoc checks) and `Get-AfSuitePython`
-  (probes both venv depths, then candidates, under `Continue`). Framework-repo
+  (probes the venv beside `.github`, then candidates, under `Continue`). Framework-repo
   facts now print `SKIP <case> -- <reason>` elsewhere and are never counted as
   passed; W10 asserts in a project that the key is *declared*. New
   `test-suite-portability.ps1` copies `.github` into a bare directory configured
@@ -303,6 +303,17 @@ build for one (#322).
   its guard -- the check that would have caught all six before release. In this
   repository every touched suite still runs with zero skips; `test-hooks.ps1`
   491/0.
+- **Fourteen suites carried their own copy of the Python resolver (#349).** The
+  copies had drifted into three shapes; nine returned `py -3` as a two-element
+  array, which five of them then ran as `& $python` -- a call that fails the
+  moment `py` is the only interpreter. All fourteen now delegate to
+  `Get-AfSuitePython`, and `test-suite-portability.ps1` P3 fails for any suite
+  that probes on its own. The resolver also dropped the repo-root venv it had
+  gained in the same issue: preferring it here picked an interpreter without
+  PyYAML, and two suites went quietly weaker -- one skipped, one failed -- which
+  is how it was found. The hooks keep `Find-AfPython` in `_common.ps1`:
+  dot-sourcing that file into a suite runs its worktree and config
+  initialisation, a cost the suites do not need.
 - **`test-hooks-integration.ps1` never attributed agent-scoped PowerShell hooks,
   then listed them as orphans (#326).** It matched `Running:` lines with one
   pattern for backslash `.ps1` paths and one for forward-slash `.sh` paths; a hook

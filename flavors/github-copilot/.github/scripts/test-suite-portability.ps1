@@ -37,6 +37,13 @@ foreach ($suite in Get-ChildItem $scriptDir -Filter 'test-*.ps1') {
 }
 Add-Result 'P1_every_suite_touching_a_framework_only_file_uses_the_shared_guard' ($unguarded.Count -eq 0) "unguarded: $($unguarded -join ', ')"
 
+# One interpreter resolver. Fourteen private copies had drifted into three
+# shapes, one of which returned `py -3` as an array that `& $python` cannot run.
+$ownProbe = @(Get-ChildItem $scriptDir -Filter '*.ps1' |
+    Where-Object { $_.Name -notin @('_suite_env.ps1', 'test-suite-portability.ps1') -and (Get-Content $_.FullName -Raw) -match "-match 'Python 3'" } |
+    ForEach-Object { $_.Name })
+Add-Result 'P3_no_suite_carries_its_own_interpreter_probe' ($ownProbe.Count -eq 0) "own probe: $($ownProbe -join ', ')"
+
 # Each entry: the suite, and the skip it must print when it is not in the
 # framework repo -- proof the guard was reached, not merely that nothing failed.
 $live = [ordered]@{

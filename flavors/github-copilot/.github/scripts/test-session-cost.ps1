@@ -13,23 +13,8 @@ $scriptDir  = Split-Path -Parent $PSCommandPath
 $repoRootAF = (Resolve-Path (Join-Path $scriptDir '..' | Join-Path -ChildPath '..')).Path
 $collector  = Join-Path $scriptDir 'collect-session-cost.py'
 
-function Resolve-Python {
-    $candidates = @(
-        (Join-Path $repoRootAF '.venv/Scripts/python.exe'),
-        (Join-Path $repoRootAF '.venv/bin/python')
-    )
-    foreach ($c in $candidates) { if (Test-Path $c) { return @($c) } }
-    foreach ($name in @('python3', 'python')) {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd) {
-            $v = & $cmd.Source --version 2>&1
-            if ($LASTEXITCODE -eq 0 -and $v -match 'Python 3') { return @($cmd.Source) }
-        }
-    }
-    $py = Get-Command py -ErrorAction SilentlyContinue
-    if ($py) { return @($py.Source, '-3') }
-    return $null
-}
+. (Join-Path $scriptDir '_suite_env.ps1')
+function Resolve-Python { Get-AfSuitePython $scriptDir }
 
 $python = Resolve-Python
 if (-not $python) {
