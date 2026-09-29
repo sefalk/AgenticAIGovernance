@@ -126,9 +126,18 @@ So `chat.hookFilesLocations` from this folder's settings loads `hooks-dev/`.
 The command is harmless on purpose: without a rebase in progress, git would
 only have reported an error had the hook not fired.
 
-**Multi-root window with a consumer: pending.** Record before merge whether the
-dev hook still runs there. If it does, fall back to an early exit in the hook
-for calls outside this repository (#345, option B).
+**Multi-root window with a consumer: the dev hook does not run.** On
+2026-09-29 the multi-root window (this repository + MPUsageXPTP) was reloaded
+with this layout checked out. Same hook log, split at the reload (sequence
+`#3687 -> #0`, 15:19:41):
+
+| | PreToolUse calls | dev hook runs |
+|---|---|---|
+| before reload (`.github/hooks/`) | 547 | 526 |
+| after reload (`.github/hooks-dev/` + setting) | 12 | **0** |
+
+The folder's window setting is ignored in a multi-root window, as assumed, so
+the fallback (#345, option B) is not needed.
 
 ## Deliberately not here
 
