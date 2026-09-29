@@ -44,6 +44,21 @@ $ownProbe = @(Get-ChildItem $scriptDir -Filter '*.ps1' |
     ForEach-Object { $_.Name })
 Add-Result 'P3_no_suite_carries_its_own_interpreter_probe' ($ownProbe.Count -eq 0) "own probe: $($ownProbe -join ', ')"
 
+# `SKIP:` tells run-all-tests the WHOLE suite asserted nothing, so it may only
+# precede an exit. A per-case skip printed that way turned a 99-check suite into
+# "skipped" in a consumer (#357); per-case skips use `  SKIP  <case> -- <reason>`.
+$skipMisuse = @()
+foreach ($suite in Get-ChildItem $scriptDir -Filter 'test-*.ps1') {
+    if ($suite.Name -eq 'test-suite-portability.ps1') { continue }
+    $lines = @(Get-Content $suite.FullName)
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^\s*#' -or $lines[$i] -notmatch 'SKIP:') { continue }
+        $window = ($lines[$i..([Math]::Min($i + 3, $lines.Count - 1))]) -join "`n"
+        if ($window -notmatch '\bexit\b') { $skipMisuse += "$($suite.Name):$($i + 1)" }
+    }
+}
+Add-Result 'P4_whole_suite_skip_is_only_printed_before_an_exit' ($skipMisuse.Count -eq 0) "per-case skip in whole-suite format: $($skipMisuse -join ', ')"
+
 # Each entry: the suite, and the skip it must print when it is not in the
 # framework repo -- proof the guard was reached, not merely that nothing failed.
 $live = [ordered]@{
