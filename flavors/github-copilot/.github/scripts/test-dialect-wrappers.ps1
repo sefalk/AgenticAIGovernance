@@ -236,11 +236,11 @@ exec "$AF_PYTHON" "$(dirname -- "${BASH_SOURCE[0]}")/demo-gate.py"
 
     $caseDir = New-Fixture 'cases'
     $files = @{
-        conn     = 'CONN = "Server=db01;User Id=sa;Password=hunter2xyz"'
-        apikey   = 'apikey = "abcdef1234567890"'
-        aws      = 'key=AKIAIOSFODNN7EXAMPLE'
-        pw       = 'password = "SuperSecret123!"'
-        privkey  = "-----BEGIN RSA PRIVATE KEY-----`nMIIBOgIBAAJBAK`n-----END RSA PRIVATE KEY-----"
+        conn     = Get-AfSecretFixture conn
+        apikey   = Get-AfSecretFixture apikey
+        aws      = Get-AfSecretFixture aws
+        pw       = Get-AfSecretFixture password
+        privkey  = Get-AfSecretFixture privkey
         clean    = "# copilot:generated | test | 2026-09-22`nvalue = 1"
         unmarked = 'value = 1'
     }

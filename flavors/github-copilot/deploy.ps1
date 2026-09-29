@@ -173,8 +173,8 @@ function Get-TierModels([string]$Tier) {
 function Resolve-TierTokens([string]$Text) {
     $nl = if ($Text.Contains("`r`n")) { "`r`n" } else { "`n" }
     foreach ($tier in 'PREMIUM', 'BALANCED', 'EFFICIENT') {
-        $token = "__AF_TIER_${tier}__"
-        if ($Text -notmatch [regex]::Escape($token)) { continue }
+        $placeholder = "__AF_TIER_${tier}__"
+        if ($Text -notmatch [regex]::Escape($placeholder)) { continue }
         $models = Get-TierModels $tier
         if ($models.Count -le 1) {
             $repl = "model: $($models[0])"
@@ -184,7 +184,7 @@ function Resolve-TierTokens([string]$Text) {
         # Match the whole `model: <token>` line without consuming the line break
         # (lookahead), so CRLF/LF endings are preserved. Model names contain no
         # '$', so a literal replacement string is safe.
-        $pattern = '(?m)^model:[ \t]*' + [regex]::Escape($token) + '[ \t]*(?=\r?\n|$)'
+        $pattern = '(?m)^model:[ \t]*' + [regex]::Escape($placeholder) + '[ \t]*(?=\r?\n|$)'
         $Text = [regex]::Replace($Text, $pattern, $repl)
     }
     return $Text

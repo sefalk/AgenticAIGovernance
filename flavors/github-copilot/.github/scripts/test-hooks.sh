@@ -584,7 +584,8 @@ run_case "reading a file is not the gate's business" \
 # instead of whitespace and never fired.
 echo "## scan-secrets.sh"
 secret_dir=$(mktemp -d)
-printf 'password = "SuperSecret123!"\n' > "$secret_dir/secret.py"
+# Assembled at run time, like Get-AfSecretFixture: a literal would trip the gate on every edit here (#350).
+printf '%s%s = "%s"\n' 'pass' 'word' 'SuperSecret123!' > "$secret_dir/secret.py"
 # The path travels INSIDE the payload, and since #287 the reader is Python.
 # MSYS rewrites POSIX paths to Windows ones when it hands them to a native
 # binary as an ARGUMENT, never inside data -- so an embedded `/tmp/x` reaches
