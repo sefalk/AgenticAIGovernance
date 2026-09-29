@@ -56,8 +56,26 @@ if ($testLogPath -and (Test-Path $testLogPath -ErrorAction SilentlyContinue)) {
     } catch {}
 }
 
+# Without an interpreter most gates degrade quietly, per call; say which, once (#342).
+# Derived from the hooks themselves, so a new Python-backed hook is named without a list to maintain.
+$pythonNotice = ''
+if (-not $AfPython) {
+    $common = Get-Content (Join-Path $PSScriptRoot '_common.ps1') -Raw
+    $helpers = @([regex]::Matches($common, '(?ms)^function\s+([\w-]+)\s*\{(.*?)^\}') |
+        Where-Object { $_.Groups[2].Value -cmatch 'AfPython' } | ForEach-Object { $_.Groups[1].Value })
+    $degraded = @(Get-ChildItem $PSScriptRoot -Filter '*.ps1' |
+        Where-Object { $_.Name -notlike '_*' -and $_.BaseName -ne 'session-context' } |
+        Where-Object {
+            $body = Get-Content $_.FullName -Raw
+            ($body -cmatch 'AfPython') -or @($helpers | Where-Object { $body -match [regex]::Escape($_) }).Count -gt 0
+        } | ForEach-Object { $_.BaseName })
+    $offList = if ($degraded) { $degraded -join ', ' } else { 'none' }
+    $pythonNotice = " | AF WARNING: no working Python interpreter (tried AF_PYTHON_OVERRIDE, python3, python, py). " +
+        "Running without their Python-backed check: $offList. Install Python 3 or set AF_PYTHON_OVERRIDE (#342)."
+}
+
 # Build context string
-$context = "Project: $project | Branch: $branch | Last commit: $commit | $pyVer$testLogSummary"
+$context = "Project: $project | Branch: $branch | Last commit: $commit | $pyVer$testLogSummary$pythonNotice"
 
 # Return JSON
 @{

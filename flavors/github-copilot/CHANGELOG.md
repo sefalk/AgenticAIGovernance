@@ -286,6 +286,26 @@ build for one (#322).
 
 ### Fixed
 
+- **A session without a working Python interpreter is now told once which gates
+  are off (#342).** #331 kept the policy (degrade, do not block), but each hook
+  reported the degradation on its own, per call, where nobody reads it back.
+  The two dialects also do not fail the same way, which nothing stated:
+  - **PowerShell:** 7 hooks run without their Python-backed check.
+  - **Bash:** 8 degrade the same way, and 6 PreToolUse gates (block-dangerous,
+    coordinator, planner, refactorer, researcher, test-writer) **refuse every
+    call they guard** since #251.
+
+  `session-context.{ps1,sh}` now appends one `AF WARNING` to the SessionStart
+  context that names both lists and the fix (install Python 3 or set
+  `AF_PYTHON_OVERRIDE`). The lists are derived at session start from the hook
+  scripts and from the shared helpers that use the interpreter, so a new
+  Python-backed hook is named without a list to maintain. The derivation is pure
+  shell because it has to run exactly when Python is missing.
+
+  Watchdog: `test-python-missing-notice.ps1` hides every interpreter from both
+  dialects. It requires the notice exactly once, requires it to be silent when
+  Python works, and compares both lists against an independent derivation in
+  Python that follows helper calls transitively.
 - **Eight shipped files tripped the secret gate on their own, so every edit to
   them was refused (#350).** Since #339 the gate blocks, and it reads the whole
   edited file. Measured with the core's own patterns over the payload: 15 lines
