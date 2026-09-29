@@ -6,6 +6,21 @@ receives. This file arms one of those guards for work done **on the framework
 itself**, which #61 records as a gap: the framework ships safety hooks and
 develops without them.
 
+## Why `hooks-dev/` and not `hooks/`
+
+VS Code loads `.github/hooks` from **every** folder of a window. In a
+multi-root window holding this repository and a consumer, this hook therefore
+ran on every tool call of the consumer's work too: about 2.5 s extra per call,
+judged against this repository's policy instead of the consumer's (#345).
+
+It now lives outside the default location and is enabled only by
+`chat.hookFilesLocations` in this repository's `.vscode/settings.json`. That
+setting has no resource scope, so it applies when this repository is opened
+**on its own**. In a multi-root window VS Code does not read window settings
+from a folder's `.vscode/settings.json`, so the hook is not loaded there. Both
+halves were decided on #345 to be checked live before merge. The outcome is
+recorded below under *Scoped to its own window*.
+
 ## What is armed
 
 `block-dangerous` on `PreToolUse`, and nothing else. It is the guard whose
@@ -83,17 +98,46 @@ Roughly 1.9 s per tool call, spent before the tool runs. That is PowerShell
 startup, not analysis. In a window that also has a payload deployed, the two
 guards together add about 4 s to every `PreToolUse`.
 
-Not proven: that the guard *denies* in this arrangement. Every run above
-returned allow, because no dangerous command was issued. The deny paths were
-demonstrated by driving the script directly, above — which is evidence about
-the script, not about VS Code's handling of a non-zero hook decision from a
-folder-scoped hook. Treat a live deny as untested until one is observed.
+Not proven until 2026-09-29: that the guard *denies* in this arrangement. The
+deny paths had only been demonstrated by driving the script directly. The first
+live deny is recorded under *Scoped to its own window* below.
 
 Note also that this hook sees **every** tool call in the window, including
 calls that concern the other workspace folder, and it sees them with its own
 `cwd`. For a guard that classifies the command string that is harmless, and
 arguably desirable. For any future hook here that inspects the working tree, it
 would not be.
+
+## Scoped to its own window (#345)
+
+**Opened alone: the dev hook runs, and it denies live.** On 2026-09-29 a new
+window opened on this folder only, and the agent was asked to run
+`git rebase --abort`. That window's hook log shows exactly one PreToolUse hook,
+this one, with `cwd` in this repository. It returned the deny, and the chat
+reported the command as blocked:
+
+```
+[#0] [PreToolUse] Executing 1 hook(s)
+[#0] [PreToolUse] Running: powershell -NoProfile -ExecutionPolicy Bypass -File flavors/github-copilot/.github/hooks/scripts/block-dangerous.ps1
+[#0] [PreToolUse] Output: {"hookSpecificOutput":{"permissionDecision":"deny", ... "Policy hard-deny: rebase (history rewrite)..."}}
+```
+
+So `chat.hookFilesLocations` from this folder's settings loads `hooks-dev/`.
+The command is harmless on purpose: without a rebase in progress, git would
+only have reported an error had the hook not fired.
+
+**Multi-root window with a consumer: the dev hook does not run.** On
+2026-09-29 the multi-root window (this repository + MPUsageXPTP) was reloaded
+with this layout checked out. Same hook log, split at the reload (sequence
+`#3687 -> #0`, 15:19:41):
+
+| | PreToolUse calls | dev hook runs |
+|---|---|---|
+| before reload (`.github/hooks/`) | 547 | 526 |
+| after reload (`.github/hooks-dev/` + setting) | 12 | **0** |
+
+The folder's window setting is ignored in a multi-root window, as assumed, so
+the fallback (#345, option B) is not needed.
 
 ## Deliberately not here
 
