@@ -220,6 +220,25 @@ escalation:
     $results['N_read_and_declared_not_accused']  = ($declaredNotRead -ne '' -and $declaredNotRead -notmatch 'python-dev')
     $topLevel = @($r.Output -split "`r?`n" | Where-Object { $_ -match '^[A-Za-z_]' })
     $results['N_still_single_top_level_key'] = ($topLevel.Count -eq 1)
+
+    # --- O: the corpus answers "which skill is read at all" (issue #348) ----
+    # #306 had to scan chat transcripts for this. The aggregator reads only
+    # what documenter-stop stamped, and says which logs it could not count.
+    $reporter = Join-Path $repoRootAF '.github/scripts/report-skill-reads.py'
+    $corpus = Join-Path ([IO.Path]::GetTempPath()) ("agentinv-corpus-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $logsDir = Join-Path $corpus 'logs'
+    $skillsDir = Join-Path $corpus 'skills'
+    foreach ($s in 'python-dev', 'git-workflow', 'never-read', '_available/parked') { New-Item -ItemType Directory -Path (Join-Path $skillsDir $s) -Force | Out-Null; [IO.File]::WriteAllText((Join-Path $skillsDir "$s/SKILL.md"), '# x') }
+    New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $logsDir 'a.yaml'), "workflow_id: a`nagent_invocations:`n  observed:`n    implementer: 1`n  skills_read:`n    implementer: [python-dev]`n    main: [git-workflow, python-dev]`n")
+    [IO.File]::WriteAllText((Join-Path $logsDir 'b.yaml'), "workflow_id: b`nagent_invocations:`n  observed:`n    planner: 1`n  skills_read:`n    planner: []`n")
+    [IO.File]::WriteAllText((Join-Path $logsDir 'c.yaml'), "workflow_id: c`nsteps:`n  - step: 1`n")
+    $script:fixtures += (Join-Path $logsDir 'a.yaml')
+    $out = & $python $reporter --logs $logsDir --skills $skillsDir 2>&1 | Out-String
+    $results['O_counts_workflows_per_skill']    = ($out -match '(?m)^\s*python-dev\s+1\s') -and ($out -match '(?m)^\s*git-workflow\s+1\s')
+    $results['O_names_active_skill_never_read'] = ($out -match '(?m)^\s*never-read\s+0\s') -and ($out -notmatch 'parked')
+    $results['O_states_logs_it_could_not_count'] = ($out -match '(?m)measured in 2 of 3 workflow logs')
+    Remove-Item $corpus -Recurse -Force -ErrorAction SilentlyContinue
 }
 finally {
     foreach ($f in $fixtures) {
