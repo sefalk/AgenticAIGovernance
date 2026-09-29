@@ -98,11 +98,9 @@ Roughly 1.9 s per tool call, spent before the tool runs. That is PowerShell
 startup, not analysis. In a window that also has a payload deployed, the two
 guards together add about 4 s to every `PreToolUse`.
 
-Not proven: that the guard *denies* in this arrangement. Every run above
-returned allow, because no dangerous command was issued. The deny paths were
-demonstrated by driving the script directly, above — which is evidence about
-the script, not about VS Code's handling of a non-zero hook decision from a
-folder-scoped hook. Treat a live deny as untested until one is observed.
+Not proven until 2026-09-29: that the guard *denies* in this arrangement. The
+deny paths had only been demonstrated by driving the script directly. The first
+live deny is recorded under *Scoped to its own window* below.
 
 Note also that this hook sees **every** tool call in the window, including
 calls that concern the other workspace folder, and it sees them with its own
@@ -112,13 +110,25 @@ would not be.
 
 ## Scoped to its own window (#345)
 
-Pending live check. Record the two observations here before merge:
+**Opened alone: the dev hook runs, and it denies live.** On 2026-09-29 a new
+window opened on this folder only, and the agent was asked to run
+`git rebase --abort`. That window's hook log shows exactly one PreToolUse hook,
+this one, with `cwd` in this repository. It returned the deny, and the chat
+reported the command as blocked:
 
-- This repository opened alone: the dev hook runs.
-- Multi-root window with a consumer: the dev hook does not run.
+```
+[#0] [PreToolUse] Executing 1 hook(s)
+[#0] [PreToolUse] Running: powershell -NoProfile -ExecutionPolicy Bypass -File flavors/github-copilot/.github/hooks/scripts/block-dangerous.ps1
+[#0] [PreToolUse] Output: {"hookSpecificOutput":{"permissionDecision":"deny", ... "Policy hard-deny: rebase (history rewrite)..."}}
+```
 
-If the second fails, fall back to an early exit in the hook for calls outside
-this repository (#345, option B).
+So `chat.hookFilesLocations` from this folder's settings loads `hooks-dev/`.
+The command is harmless on purpose: without a rebase in progress, git would
+only have reported an error had the hook not fired.
+
+**Multi-root window with a consumer: pending.** Record before merge whether the
+dev hook still runs there. If it does, fall back to an early exit in the hook
+for calls outside this repository (#345, option B).
 
 ## Deliberately not here
 
