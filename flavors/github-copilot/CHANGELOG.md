@@ -286,6 +286,28 @@ build for one (#322).
 
 ### Fixed
 
+- **Eight shipped files tripped the secret gate on their own, so every edit to
+  them was refused (#350).** Since #339 the gate blocks, and it reads the whole
+  edited file. Measured with the core's own patterns over the payload: 15 lines
+  in 8 files. Three kinds:
+  - **Test fixtures** in `test-hooks.ps1`, `test-hooks.sh`,
+    `test-hook-decision-contract.ps1` and `test-dialect-wrappers.ps1`. An agent
+    told to "remove the secret" would delete the fixture and disarm the test
+    that proves the gate. They now come from one helper, `Get-AfSecretFixture`
+    in `_suite_env.ps1`, which joins the pieces at run time. The single bash
+    fixture uses the same split through `printf`.
+  - **Self-hits.** `scan-secrets.py` matched its own private-key pattern, and
+    the pattern table in `hooks/README.md` quoted three matching examples. Now
+    written as `-{5}` and as prose.
+  - **False positives on a variable name**: `$token` in `deploy.ps1` and
+    `$secret` in `test-session-cost.ps1`, renamed.
+
+  No allowlist was added to the scanner: an exemption by path would also exempt
+  a real secret committed into a test file. The watchdog is the new
+  `test-secret-fixtures.ps1`, selected for any change under `.github/**`. It
+  runs the core's patterns over every shipped file and fails on a match. It also
+  requires every assembled fixture to still be flagged as its intended kind, so
+  splitting a fixture can never quietly disarm it.
 - **Six shipped suites failed inside every consumer for layout reasons alone
   (#349).** Measured after deploying 1.23.142 into a consumer: 26 suites, 19
   passed, 6 failed -- none because a hook misbehaved. They asserted facts about
