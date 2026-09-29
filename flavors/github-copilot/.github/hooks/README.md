@@ -51,12 +51,24 @@ months:
   `test-writer.agent.md` declares the second and not the first, so the two
   sources fired into a single event.
 
-**Do not de-duplicate declarations on the strength of that.** The same log
-shows a script running two or three times inside one event — `scan-secrets`
-twice, 476 times over — with no frontmatter hook present to account for the
-repeat. Until that is explained, a script declared in both places stays
-declared in both places: a hook that runs twice costs a second, a guard that
-quietly stops running is a hole nobody sees (#166).
+**Declare a hook in one place.** A hook every agent needs goes into
+`agent-hooks.json`; an agent's frontmatter holds only the hooks that agent
+alone needs. The shipped agents used to re-declare global hooks, and this
+section used to forbid removing the copies until the repeats seen in #166 were
+explained. They are now: across 8 hook logs, all 4,951 repeats of a script
+within one call came from a second declaration: global JSON plus a
+frontmatter copy, or a second workspace root. None came from the same
+declaration firing twice. Over all 6,415 retained invocations, every global
+hook ran in every call of its event, so the copies guarded nothing (#345).
+
+The concern behind the old rule still holds: a guard that quietly stops
+running is a hole nobody sees. It is now a check rather than a duplicate:
+
+- `test-hooks-integration.ps1` Check 10 **fails** when an invocation did not
+  run a global hook registered for its event. Check 9 **warns** when a script
+  runs twice in one call.
+- `test-hook-declarations.ps1` **fails** when an agent re-declares a global
+  hook for the same event.
 
 Each hook:
 
