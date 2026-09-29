@@ -286,6 +286,18 @@ build for one (#322).
 
 ### Fixed
 
+- **`test-context-budget` was counted as a skipped suite in every consumer
+  (#357).** It printed its three framework-only per-case skips as
+  `  SKIP: <case>`, and `run-all-tests.ps1` reads any `SKIP:` line as "this
+  suite asserted nothing". So 96 real checks were reported as skipped, and a
+  consumer CI running with `-FailOnSkip` would have failed. Found in the
+  1.23.158 deploy sweep in MPUsageXPTP. The per-case form is now
+  `  SKIP  <case> -- <reason>`, as `_suite_env.ps1` documents. New
+  `test-suite-portability.ps1` P4 fails on any `SKIP:` line that is not
+  followed by an `exit` within three lines, so the whole-suite form stays
+  reserved for an early exit. Measured in a consumer-shaped copy:
+  `run-all-tests.ps1 -Filter test-context-budget.ps1 -FailOnSkip` now reports
+  `1 passed, 0 skipped`.
 - **A session without a working Python interpreter is now told once which gates
   are off (#342).** #331 kept the policy (degrade, do not block), but each hook
   reported the degradation on its own, per call, where nobody reads it back.
