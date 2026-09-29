@@ -286,6 +286,22 @@ build for one (#322).
 
 ### Fixed
 
+- **The hook integration report now shows when one call runs the same hook
+  script twice (#345).** `test-hooks-integration.ps1` Check 9 records the
+  scripts per invocation. It prints a WARN, not a FAIL, naming each repeated
+  script, its maximum repeat and the number of calls. The window layout is
+  the user's choice, but it must not stay invisible. Measured on its first
+  live run (multi-root window, consumer + framework repo): 280 of 435
+  invocations repeated a script. `block-dangerous` ran **three** times in 213
+  calls:
+  - the consumer's global hook;
+  - the framework repo's dev hook;
+  - the coordinator's frontmatter copy of the global hook.
+
+  `scan-secrets` ran twice in 64 calls, via the frontmatter copies in five
+  agents. The duplicate declarations themselves are left alone:
+  `hooks/README.md` forbids de-duplicating them until the unexplained repeats
+  of #166 are accounted for. That decision stays open on #345.
 - **`test-context-budget` was counted as a skipped suite in every consumer
   (#357).** It printed its three framework-only per-case skips as
   `  SKIP: <case>`, and `run-all-tests.ps1` reads any `SKIP:` line as "this
