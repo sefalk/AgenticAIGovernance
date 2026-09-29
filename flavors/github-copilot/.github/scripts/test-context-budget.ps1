@@ -881,7 +881,7 @@ foreach ($name in $results.Keys) {
     if ($results[$name]) { Write-Host "  PASS: $name" }
     else { Write-Host "  FAIL: $name"; $failed++ }
 }
-foreach ($name in $skipped.Keys) { Write-Host "  SKIP: $name -- $($skipped[$name])" }
+foreach ($name in $skipped.Keys) { Write-Host "  SKIP  $name -- $($skipped[$name])" }
 Write-Host ''
 Write-Host "  Checks passed: $($results.Count - $failed)"
 Write-Host "  Checks failed: $failed"
