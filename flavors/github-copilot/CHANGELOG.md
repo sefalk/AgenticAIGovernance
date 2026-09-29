@@ -286,6 +286,28 @@ build for one (#322).
 
 ### Fixed
 
+- **Global hooks no longer run twice for five agents (#345, cause 2).** The
+  coordinator re-declared four global hooks in its frontmatter
+  (session-context, block-dangerous, scan-secrets, stop-tests), and documenter,
+  implementer, refactorer and test-writer re-declared scan-secrets. The hook
+  then ran once per declaration: `block-dangerous` up to three times per
+  coordinator call in a multi-root window. The copies are removed.
+  Agent-specific hooks stay: they are how a hook runs only for the agents that
+  need it.
+
+  Human decision, recorded on #345. It rests on two measurements:
+  - across 8 hook logs, all 4,951 repeats came from a second declaration and
+    none from one declaration firing twice;
+  - across all 6,415 retained invocations, every global hook ran in every call
+    of its event.
+
+  The old "do not de-duplicate" rule in `hooks/README.md` existed so that a
+  guard could not quietly stop running (#166). That is now enforced instead of
+  hedged: `test-hooks-integration.ps1` Check 10 **fails** when an invocation
+  skips a global hook of its event, and the new `test-hook-declarations.ps1`
+  fails when an agent re-declares one. Cause 1 (this repo's dev hook in a
+  multi-root window) is decided as well and follows separately, because it
+  needs a live window check first.
 - **The hook integration report now shows when one call runs the same hook
   script twice (#345).** `test-hooks-integration.ps1` Check 9 records the
   scripts per invocation. It prints a WARN, not a FAIL, naming each repeated

@@ -347,6 +347,42 @@ if ($dupCalls -eq 0) {
     }
 }
 
+# Check 10: every invocation ran the global hooks of its event. Agents no longer
+# repeat global hooks in their frontmatter (#345), so a global hook that stops
+# loading would leave no second copy behind -- the hole #166 feared. It fails
+# here instead. SessionStart is exempt: a log opened mid-session never holds it.
+$globalByEvent = @{}
+$hooksJson = Join-Path (Split-Path -Parent $PSScriptRoot) 'hooks/agent-hooks.json'
+if (Test-Path $hooksJson) {
+    foreach ($ev in (Get-Content $hooksJson -Raw | ConvertFrom-Json).hooks.PSObject.Properties) {
+        if ($ev.Name -eq 'SessionStart') { continue }
+        $globalByEvent[$ev.Name] = @($ev.Value | ForEach-Object {
+                if (([string]$_.command -replace '\\+', '/') -match 'hooks/scripts/([\w-]+)\.\w+') { $Matches[1] }
+            } | Sort-Object -Unique)
+    }
+}
+$gaps = @()
+foreach ($callKey in $script:perCall.Keys) {
+    $parts = $callKey -split '\|'
+    $ev = $parts[-2]
+    if (-not $globalByEvent.ContainsKey($ev)) { continue }
+    $ran = @($script:perCall[$callKey] | ForEach-Object { $_ -replace '\.\w+$', '' })
+    foreach ($stem in $globalByEvent[$ev]) {
+        if ($ran -notcontains $stem) { $gaps += "$ev #$($parts[-1]): $stem" }
+    }
+}
+if (-not (Test-Path $hooksJson)) {
+    Write-Output "  WARN  agent-hooks.json not found beside this script; global-hook coverage not checked"
+} elseif ($gaps.Count -eq 0) {
+    Write-Output "  PASS  Every invocation ran the global hooks of its event"
+    $checksPassed++
+} else {
+    $gapCalls = @($gaps | ForEach-Object { ($_ -split ':')[0] } | Sort-Object -Unique).Count
+    Write-Output "  FAIL  $gapCalls invocation(s) did not run a global hook registered for their event:"
+    foreach ($g in ($gaps | Select-Object -First 5)) { Write-Output "        $g" }
+    $checksFailed++
+}
+
 Write-Output ""
 
 # -- Warnings -------------------------------------------------------------
