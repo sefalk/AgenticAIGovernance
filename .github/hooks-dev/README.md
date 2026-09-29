@@ -6,6 +6,21 @@ receives. This file arms one of those guards for work done **on the framework
 itself**, which #61 records as a gap: the framework ships safety hooks and
 develops without them.
 
+## Why `hooks-dev/` and not `hooks/`
+
+VS Code loads `.github/hooks` from **every** folder of a window. In a
+multi-root window holding this repository and a consumer, this hook therefore
+ran on every tool call of the consumer's work too: about 2.5 s extra per call,
+judged against this repository's policy instead of the consumer's (#345).
+
+It now lives outside the default location and is enabled only by
+`chat.hookFilesLocations` in this repository's `.vscode/settings.json`. That
+setting has no resource scope, so it applies when this repository is opened
+**on its own**. In a multi-root window VS Code does not read window settings
+from a folder's `.vscode/settings.json`, so the hook is not loaded there. Both
+halves were decided on #345 to be checked live before merge. The outcome is
+recorded below under *Scoped to its own window*.
+
 ## What is armed
 
 `block-dangerous` on `PreToolUse`, and nothing else. It is the guard whose
@@ -94,6 +109,16 @@ calls that concern the other workspace folder, and it sees them with its own
 `cwd`. For a guard that classifies the command string that is harmless, and
 arguably desirable. For any future hook here that inspects the working tree, it
 would not be.
+
+## Scoped to its own window (#345)
+
+Pending live check. Record the two observations here before merge:
+
+- This repository opened alone: the dev hook runs.
+- Multi-root window with a consumer: the dev hook does not run.
+
+If the second fails, fall back to an early exit in the hook for calls outside
+this repository (#345, option B).
 
 ## Deliberately not here
 
