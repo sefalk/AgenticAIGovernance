@@ -338,10 +338,10 @@ try {
         'credits_by_kind:\s*\{\s*input_uncached:\s*0(\.0+)?,\s*cache_read:\s*0(\.0+)?,\s*output:\s*0(\.0+)?,\s*unexplained:\s*1\.5\s*\}')
 
     # --- Q: the facts artifact outlives the log (issue #217) ----------------
-    $secret = 'SUPERSECRET-FACTS-ghp_zzz999'
+    $canary = 'SUPERSECRET-FACTS-ghp_zzz999'
     $dir = New-SessionFixture -RateCard -Main @(
         (New-SessionStart),
-        (New-LlmRequest -NanoAiu 1500000000 -SecretText $secret),
+        (New-LlmRequest -NanoAiu 1500000000 -SecretText $canary),
         (New-LlmRequest -NanoAiu 500000000 -DebugName 'summarizeConversationHistory')
     )
     $fixtures += $dir
@@ -540,10 +540,10 @@ try {
                                            $r.Output -match '(?m)^\s*credits:\s*1\.5\s*$')
 
     # --- I: no text from the log ever reaches the output --------------------
-    $secret = 'SUPERSECRET-TOKEN-ghp_abcdef123456'
+    $canary = 'SUPERSECRET-TOKEN-ghp_abcdef123456'
     $dir = New-SessionFixture -Main @(
         (New-SessionStart),
-        (New-LlmRequest -NanoAiu 1500000000 -SecretText $secret)
+        (New-LlmRequest -NanoAiu 1500000000 -SecretText $canary)
     )
     $fixtures += $dir
     $r = Invoke-Collector @('--session-dir', $dir)

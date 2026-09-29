@@ -24,6 +24,7 @@
     "test-retry-economy.ps1": 30,
     "test-rule-drift.ps1": 30,
     "test-run-tests.ps1": 170,
+    "test-secret-fixtures.ps1": 30,
     "test-session-cost.ps1": 50,
     "test-suite-budgets.ps1": 30,
     "test-suite-portability.ps1": 100,

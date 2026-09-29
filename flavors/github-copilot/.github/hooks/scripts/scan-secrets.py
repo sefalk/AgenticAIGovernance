@@ -69,7 +69,7 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     # Looser than the PowerShell twin's `(RSA |EC |DSA )?`: the Bash twin
     # matched any BEGIN...PRIVATE KEY line, and a key type nobody enumerated
     # is still a key.
-    ("Private Key", re.compile(r"-----BEGIN[^\n]*PRIVATE KEY-----")),
+    ("Private Key", re.compile(r"-{5}BEGIN[^\n]*PRIVATE KEY-{5}")),
     ("Connection String", re.compile(r"(?i)(Server|Data Source)=.+;(User Id|Password)=")),
 ]
 

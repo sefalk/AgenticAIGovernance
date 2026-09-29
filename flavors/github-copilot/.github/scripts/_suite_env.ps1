@@ -38,3 +38,15 @@ function Get-AfSuitePython {
     }
     return $null
 }
+
+function Get-AfSecretFixture {
+    param([ValidateSet('password', 'apikey', 'aws', 'conn', 'privkey')][string]$Kind)
+    # Joined at run time: a literal trips the secret gate on every edit of the suite that carries it (#350).
+    switch ($Kind) {
+        'password' { return (@('pass', 'word = "SuperSecret123!"') -join '') }
+        'apikey' { return (@('api', 'key = "abcdef1234567890"') -join '') }
+        'aws' { return (@('key=AK', 'IAIOSFODNN7EXAMPLE') -join '') }
+        'conn' { return (@('CONN = "Server=db01;User', ' Id=sa;Pass', 'word=hunter2xyz"') -join '') }
+        'privkey' { return (@('-----BEGIN RSA PRIVATE', " KEY-----`nMIIBOgIBAAJBAK`n-----END RSA PRIVATE", ' KEY-----') -join '') }
+    }
+}

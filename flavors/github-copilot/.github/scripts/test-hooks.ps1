@@ -1655,7 +1655,7 @@ $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "hook-test-$(Get-Random)"
 New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 
 $secretFile = Join-Path $tempDir "secret.py"
-Set-Content -Path $secretFile -Value 'password = "SuperSecret123!"'
+Set-Content -Path $secretFile -Value (Get-AfSecretFixture password)
 
 $cleanFile = Join-Path $tempDir "clean.py"
 

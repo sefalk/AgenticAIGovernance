@@ -439,9 +439,9 @@ reverted.
 | Pattern | Example |
 |---|---|
 | AWS Access Key | `AKIA...` (20-char key) |
-| Generic Secret | `password = "mysecret123"` |
-| Private Key | `-----BEGIN RSA PRIVATE KEY-----` |
-| Connection String | `Server=...;Password=...` |
+| Generic Secret | `password`, `secret`, `token`, `api_key` or `apikey`, then `=` or `:` and a quoted value of 8+ characters |
+| Private Key | a PEM `BEGIN ... PRIVATE KEY` header line |
+| Connection String | `Server=` or `Data Source=`, followed by a `User Id` or `Password` key |
 
 #### PostToolUse: Long-Line Notice
 

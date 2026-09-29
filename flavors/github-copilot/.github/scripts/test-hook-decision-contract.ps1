@@ -25,6 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $scriptDir '_suite_env.ps1')
 $hookDir = Join-Path (Split-Path -Parent $scriptDir) 'hooks'
 $readmePath = Join-Path $hookDir 'README.md'
 $hookScripts = Join-Path $hookDir 'scripts'
@@ -83,7 +84,7 @@ function Get-TriggerFixture {
     switch ($Stem) {
         'scan-secrets' {
             $bad = Join-Path $fixtureRoot 'secret.py'
-            Set-Content -Path $bad -Value 'password = "SuperSecret123!"' -Encoding UTF8
+            Set-Content -Path $bad -Value (Get-AfSecretFixture password) -Encoding UTF8
             $good = Join-Path $fixtureRoot 'clean.py'
             Set-Content -Path $good -Value "# copilot:generated | test | 2026-09-23`nvalue = 1" -Encoding UTF8
             return @{

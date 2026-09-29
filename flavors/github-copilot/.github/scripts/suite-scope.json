@@ -127,6 +127,11 @@
       ".github/scripts/run-tests.sh",
       ".github/hooks/scripts/implementer-stop.ps1"
     ],
+    "test-secret-fixtures.ps1": [
+      ".github/**",
+      "deploy.ps1",
+      "deploy.sh"
+    ],
     "test-session-cost.ps1": [
       ".github/scripts/collect-session-cost.py",
       ".github/instructions/**"
