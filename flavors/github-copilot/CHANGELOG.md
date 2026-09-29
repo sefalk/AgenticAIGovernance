@@ -15,6 +15,25 @@ build for one (#322).
 
 ### Changed
 
+- **Workflow logs record which skills were read, measured rather than declared
+  (#348).** `collect-agent-invocations.py`, which `documenter-stop` already runs
+  in both dialects, now adds `skills_read:` per agent to the `agent_invocations`
+  block: every `read_file` of a `SKILL.md` in the session's debug logs, parent
+  session as `main`. An agent that read nothing is listed with `[]`, so
+  "measured, none" and "not measured" stay distinct. The issue proposed having
+  the documenter copy each producer's `Skills Read:` line instead. Measured over
+  1,315 subagent logs, that line is the weaker signal:
+  - 305 returns hit the editor's 5,000-character cap, and the line survived in
+    only 16 of them;
+  - in 88 of 278 comparable returns (32 %) it named a skill that was never
+    opened.
+
+  The declaration is kept as a cross-check only: `skills_declared_not_read:`
+  lists what a return claimed but the agent never read. New
+  `scripts/report-skill-reads.py` counts per active skill how many workflow
+  logs read it, lists never-read skills as 0, and states how many logs carried
+  no block, so a staleness review like #306 becomes a query. Counts only
+  `read_file` calls, one session per workflow: a lower bound, labelled as one.
 - **Rule duplication is now a gate, not a report (#305).** Every cluster the
   #304 detector finds must carry a recorded `decision` (`keep` or `aligned`) and
   a `reason` in `docs/metrics/rule-drift-baseline.json`, or

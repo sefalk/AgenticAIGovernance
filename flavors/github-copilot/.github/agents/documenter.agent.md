@@ -132,8 +132,8 @@ escalation:
   resolution: "<human decision or arbiter verdict>"
   step_at_escalation: <step number>
 
-# Appended by your Stop hook from the editor's own subagent logs. Do not write
-# it, and do not anticipate what it will say.
+# Appended by your Stop hook from the editor's own subagent logs, including
+# `skills_read` per agent. Do not write it, and do not anticipate what it will say.
 agent_invocations: <appended by your Stop hook>
 ```
 
