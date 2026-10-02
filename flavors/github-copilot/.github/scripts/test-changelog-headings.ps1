@@ -221,9 +221,10 @@ try {
     # accidentally emptied would pass A2 and look healthy.
     $injected = Join-Path $dir 'injected.md'
     $shippedText = [System.IO.File]::ReadAllText($shippedChangelog)
-    $marker = "`n### Changed`n`n- injected duplicate, negative control`n"
-    $idx = $shippedText.IndexOf("`n## [1.23.0]")
-    if ($idx -lt 0) { $idx = $shippedText.Length }
+    # Two headings, so the duplicate exists even right after a release cut empties [Unreleased].
+    $marker = "`n### Changed`n`n- injected, negative control`n`n### Changed`n`n- injected duplicate, negative control`n"
+    $unreleased = $shippedText.IndexOf("`n## [Unreleased]")
+    if ($unreleased -lt 0) { $idx = $shippedText.Length } else { $idx = $shippedText.IndexOf("`n", $unreleased + 1) + 1 }
     Write-Text $injected ($shippedText.Substring(0, $idx) + $marker + $shippedText.Substring($idx))
     $r = Invoke-Checker @($injected)
     $results['D4_negative_control_known_bad_input_fails'] = ($r.Code -ne 0 -and $r.Out -match 'CH001')
