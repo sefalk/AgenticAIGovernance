@@ -13,6 +13,8 @@ build for one (#322).
 
 ## [Unreleased]
 
+## [1.24.0] -- 2026-10-02
+
 ### Changed
 
 - **Workflow logs record which skills were read, measured rather than declared
@@ -304,6 +306,12 @@ build for one (#322).
   every block, and `drift` on the blocks that lost a record.
 
 ### Fixed
+
+- **The CHANGELOG guard's negative control survives a release cut.**
+  `test-changelog-headings.ps1` D4 injected its duplicate before a pinned
+  `## [1.23.0]`, so cutting this release moved the injection into a released
+  section and turned the suite red. It now injects two `### Changed` directly
+  after `## [Unreleased]`, which holds before and after any cut.
 
 - **Global hooks no longer run twice for five agents (#345, cause 2).** The
   coordinator re-declared four global hooks in its frontmatter
