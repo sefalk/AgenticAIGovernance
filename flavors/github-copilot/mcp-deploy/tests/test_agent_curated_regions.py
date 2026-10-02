@@ -36,23 +36,24 @@ def test_agents_dir_present() -> None:
 
 
 def test_expected_agents_carry_exactly_one_empty_region() -> None:
+    agents = _agent_files()
     with_region = 0
-    for path in _agent_files():
+    for path in agents:
         text = path.read_text(encoding="utf-8")
         has_skills = "\n## Skills" in text or text.startswith("## Skills")
         stem = path.stem.replace(".agent", "")
         if stem in NO_SKILLS_AGENTS:
             assert START not in text, f"{path.name} should not carry the region"
             continue
-        if not has_skills:
-            continue
+        assert has_skills, f"{path.name}: no '## Skills' section and not listed in NO_SKILLS_AGENTS"
         assert text.count(START) == 1, f"{path.name}: expected exactly one START"
         assert text.count(END) == 1, f"{path.name}: expected exactly one END"
         # Empty body: END immediately follows the START line.
         assert f"{START}\n{END}" in text, f"{path.name}: region body is not empty"
         with_region += 1
-    # All 13 skill-bearing agents (everything except coordinator/compliance-checker).
-    assert with_region == 13, with_region
+    # Counted against the agent set, not a literal: a new agent must carry the
+    # region or be declared exempt, and neither can pass by the count drifting.
+    assert with_region == len(agents) - len(NO_SKILLS_AGENTS), f"{with_region} of {len(agents)} agents"
 
 
 def test_shipped_regions_are_well_formed_for_the_engine() -> None:

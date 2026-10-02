@@ -28,6 +28,11 @@ BASE_BRANCH=$(af_conf_get BASE_BRANCH '')
 # logs, which is how the gate below tells its own edits from a peer's (#101).
 stdin_raw=$(cat)
 
+# Every gate below is a blocking one, so all of them sit behind the loop guard:
+# this hook has twelve blocking sites and a second invocation would reach the
+# same verdict on the same unchanged tree (issue #298).
+af_stop_loop_guard "$stdin_raw" implementer 'tests, provenance, python quality, ignore hygiene, linting'
+
 # A missing test runner disables the TEST gate only. Provenance, quality,
 # linting and ignore hygiene need neither pytest nor a tests/ directory, and
 # exiting here used to take them down with it (issue #12).
@@ -41,6 +46,13 @@ fi
 # ---------- Test Log Freshness Check ----------
 # Accept last run if ALL tests passed AND no code changed since (committed or uncommitted).
 # No time limit — change detection is the criterion, not elapsed time.
+#
+# `partial` must be explicitly false, not merely absent. A narrowed run used to
+# be filed under the scope key it was narrowed from, so a handful of green
+# tests could close this gate on behalf of the whole suite (#303). Logs written
+# before that fix carry no `partial` field at all, and those are precisely the
+# entries that cannot be trusted -- so a missing field falls through to running
+# the suite, which costs one full run once and never reports a false green.
 TEST_LOG=".github/test-log.json"
 from_log=false
 if [[ -z "$test_gate_skipped" ]] && [[ -f "$TEST_LOG" ]]; then
@@ -48,7 +60,8 @@ if [[ -z "$test_gate_skipped" ]] && [[ -f "$TEST_LOG" ]]; then
     _all_block=$(echo "$_flat" | sed -n 's/.*"all" *: *\({[^}]*}\).*/\1/p')
     if [[ -n "$_all_block" ]]; then
         _ec=$(echo "$_all_block" | sed -n 's/.*"exit_code" *: *\([0-9][0-9]*\).*/\1/p')
-        if [[ "$_ec" == "0" ]]; then
+        _partial=$(echo "$_all_block" | sed -n 's/.*"partial" *: *\(true\|false\).*/\1/p')
+        if [[ "$_ec" == "0" ]] && [[ "$_partial" == "false" ]]; then
             _lr=$(echo "$_all_block" | sed -n 's/.*"last_run" *: *"\([^"]*\)".*/\1/p')
             if [[ -n "$_lr" ]]; then
                 commits_since=$(git log --oneline --after="$_lr" -- "${SRC_DIR}/" 'tests/' 2>/dev/null)
@@ -143,7 +156,7 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
     fi
 
     if [ -n "$missing" ]; then
-        echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Provenance gate: these changed .py files carry no copilot:generated or copilot:modified marker anywhere: ${missing}. Add a marker in the position instructions/provenance.instructions.md prescribes before completing.\"}}"
+        echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Provenance gate: these changed .py files carry no copilot:generated or copilot:modified marker anywhere: $(af_json_escape "$missing"). Add a marker in the position instructions/provenance.instructions.md prescribes before completing.\"}}"
         exit 0
     fi
 
@@ -206,7 +219,7 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
         quality_output=$(echo "$changed_src_py" | xargs "$python_exe" "$quality_script" $diff_base_args --files 2>&1)
         quality_exit=$?
         if [ "$quality_exit" -ne 0 ]; then
-            summary=$(echo "$quality_output" | head -10 | tr '\n' ' ' | sed 's/"/\\"/g')
+            summary=$(echo "$quality_output" | head -10 | af_json_escape)
             echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Python quality gate failed (type hints/docstrings/ignore hygiene). Summary: ${summary}\"}}"
             exit 0
         fi
@@ -234,7 +247,7 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
         hygiene_output=$(echo "$hygiene_py" | xargs "$python_exe" "$quality_script" $diff_base_args --checks ignore-hygiene --files 2>&1)
         hygiene_exit=$?
         if [ "$hygiene_exit" -ne 0 ]; then
-            summary=$(echo "$hygiene_output" | head -10 | tr '\n' ' ' | sed 's/"/\\"/g')
+            summary=$(echo "$hygiene_output" | head -10 | af_json_escape)
             echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Green phase violation: ignore hygiene gate failed -- every suppression must be explicit and justified. Findings: ${summary}\"}}"
             exit 0
         fi
@@ -261,14 +274,14 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
                 inherited_exit=$?
             fi
             if [ "$lint_exit" -eq 2 ]; then
-                lint_summary=$(echo "$lint_output" | head -15 | tr '\n' ' ' | sed 's/"/\\"/g')
+                lint_summary=$(echo "$lint_output" | head -15 | af_json_escape)
                 echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Green phase violation: linting gate failed. Fix with: ruff check --fix <files>. Violations: ${lint_summary}\"}}"
                 exit 0
             elif [ "$lint_exit" -eq 1 ] || [ "$inherited_exit" -eq 1 ]; then
                 echo '{"hookSpecificOutput": {"hookEventName": "Stop", "decision": "block", "reason": "Green phase blocked: linting gate unavailable because ruff is not installed. Install dev dependencies or run: pip install ruff"}}'
                 exit 0
             elif [ "$inherited_exit" -eq 2 ]; then
-                inherited_summary=$(echo "$inherited_output" | head -15 | tr '\n' ' ' | sed 's/"/\\"/g')
+                inherited_summary=$(echo "$inherited_output" | head -15 | af_json_escape)
                 echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Green phase violation: linting gate failed on files this branch committed in an EARLIER phase (branch delta vs ${BASE_BRANCH}). You did not author them in this step, but they ship on merge. Two legal moves: fix them (usually ruff check --fix <files>), or acknowledge each one with '# noqa: RULE  # reason' in its own standalone commit ([agent:name] justify ignore: file:line RULE -- reason). Do not leave them unrecorded. Violations: ${inherited_summary}\"}}"
                 exit 0
             else
@@ -301,10 +314,38 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
     else
         pass_detail="all tests pass"
     fi
-    echo "{\"systemMessage\": \"implementer:Stop \u2014 Green gate PASS: ${pass_detail}, provenance + python quality verified, linting: ${lint_status}\"}"
+    # Issue #123 direction 5: an implementer modified seven files and "returned
+    # nothing at all", and every gate still passed -- because no gate read the
+    # return. This one does.
+    #
+    # It warns instead of blocking, on purpose -- but the reason has changed.
+    # It used to be that `unavailable` conflated "the agent said nothing" with
+    # "the reader could not run", so blocking risked a missing python shutting
+    # down every implementer. #175 split that conflation: `empty` now means the
+    # log was found and the record parsed with no words in it, which no blind
+    # spot can produce. Loop safety used to be the second reason and no longer
+    # is -- #298 put a guard in front of this hook. What is left is #108: an
+    # agent that returned nothing once is the least likely to return words on a
+    # forced retry, and that retry now runs with EVERY gate skipped, so blocking
+    # buys a wasted round trip and a weaker second pass.
+    return_note=""
+    ret_status=$(af_subagent_return "$stdin_raw" implementer | head -1)
+    case "$ret_status" in
+        truncated)
+            return_note=", RETURN TRUNCATED \u2014 the tail was cut by the 5000-char cap, which is where the Gate Summary sits; re-state it in your reply"
+            ;;
+        empty)
+            return_note=", RETURN EMPTY \u2014 your log records this turn but no words in it; the coordinator has no verdict to route on, so state your Gate Summary and file list in your reply"
+            ;;
+        unavailable)
+            return_note=", RETURN UNREADABLE \u2014 no return text could be recovered; state your Gate Summary explicitly so the coordinator is not left guessing"
+            ;;
+    esac
+
+    echo "{\"systemMessage\": \"implementer:Stop \u2014 Green gate PASS: ${pass_detail}, provenance + python quality verified, linting: ${lint_status}${return_note}\"}"
     exit 0
 else
-    summary=$(echo "$output" | grep -v '^===' | tail -3 | tr '\n' ' ' | sed 's/"/\\"/g')
+    summary=$(echo "$output" | grep -v '^===' | tail -3 | af_json_escape)
     echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Green phase violation: tests are failing. Fix the failing tests before completing. Summary: ${summary}\"}}"
     exit 0
 fi

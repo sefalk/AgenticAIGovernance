@@ -19,6 +19,21 @@
 # resolves to nothing whenever the agent process is not sitting at the repo
 # root, and an unread config is indistinguishable from an empty one.
 
+# The harness speaks UTF-8; PowerShell 5.1 reads stdin as the OEM code page and
+# pipes to native commands as ASCII, turning every non-ASCII character into '?'
+# before a Python core sees it (#341, measured). Never set [Console]::*Encoding
+# here: that calls SetConsoleCP and leaks into the CALLER's console -- measured,
+# it flipped the caller to 65001, whose pipes then carry a BOM that made every
+# later secret scan answer {}. Process-local only: $OutputEncoding + Read-AfStdin.
+$afUtf8 = New-Object System.Text.UTF8Encoding $false
+$OutputEncoding = $afUtf8
+
+function Read-AfStdin {
+    $ms = New-Object System.IO.MemoryStream
+    [Console]::OpenStandardInput().CopyTo($ms)
+    return $afUtf8.GetString($ms.ToArray()).TrimStart([char]0xFEFF)
+}
+
 $script:AfScriptDir = if ($PSScriptRoot) {
     $PSScriptRoot
 } else {
@@ -398,4 +413,158 @@ function Get-AfPeerEdits {
     if ($LASTEXITCODE -ne 0) { return @() }
 
     return @($out | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })
+}
+
+# ── This agent's own final return text (issue #285) ────────────────────
+#
+# Returns @{ Status = 'complete'|'truncated'|'empty'|'unavailable'; Text = <string> }.
+#
+# Note the inverted failure direction versus Get-AfPeerEdits above. That one
+# stays silent when it cannot measure, because subtracting nothing is today's
+# behaviour. This one must SAY it could not measure: a caller deciding on the
+# absence of text would read silence as "the agent returned nothing" and fail
+# the agent for the hook's own blind spot. Every failure path therefore returns
+# `unavailable`, which callers report as BLOCKED rather than as a verdict.
+#
+# `empty` is the opposite case and never a failure path: the reader found the
+# log, the record parsed, and there were no words in it (issue #175).
+function Get-AfSubagentReturn {
+    param(
+        [string]$StdinRaw,
+        [string]$Agent,
+        [string]$CodeRoot,
+        [string]$MainRoot
+    )
+
+    $blocked = @{ Status = 'unavailable'; Text = '' }
+    if (-not $StdinRaw -or -not $Agent) { return $blocked }
+
+    try { $payload = $StdinRaw | ConvertFrom-Json } catch { return $blocked }
+    $sid = $payload.session_id
+    $transcript = $payload.transcript_path
+    if (-not $sid -or -not $transcript) { return $blocked }
+
+    # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
+    $chatDir = Split-Path -Parent (Split-Path -Parent $transcript)
+    if (-not $chatDir) { return $blocked }
+    $sessionDir = Join-Path (Join-Path $chatDir 'debug-logs') $sid
+    if (-not (Test-Path $sessionDir)) { return $blocked }
+
+    $reader = Join-Path $MainRoot '.github/hooks/scripts/subagent-return.py'
+    if (-not (Test-Path $reader)) { return $blocked }
+
+    $python = Join-Path $CodeRoot '.venv/Scripts/python.exe'
+    if (-not (Test-Path $python)) {
+        $python = if ($AfPython) { $AfPython } else { $null }
+    }
+    if (-not $python) { return $blocked }
+
+    $out = & $python $reader '--session-dir' $sessionDir '--agent' $Agent 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $out) { return $blocked }
+
+    # The reader puts the status on line 1 and the text from line 2 on, so a
+    # return whose own text starts with 'complete' cannot shift the parse.
+    $lines = @($out)
+    $status = ([string]$lines[0]).Trim()
+    if ($status -notin @('complete', 'truncated', 'empty', 'unavailable')) { return $blocked }
+    $text = if ($lines.Count -gt 1) { ($lines[1..($lines.Count - 1)] -join "`n") } else { '' }
+    return @{ Status = $status; Text = $text }
+}
+
+# ── Undeclared files created at the repository root (issue #123) ───────
+#
+# Returns the names of files this agent CREATED directly in the repository root
+# that its own delegation prompt never mentions. An empty array means either
+# "nothing to report" or "could not measure", and the caller must treat both as
+# no finding.
+#
+# The failure direction is Get-AfPeerEdits', not Get-AfSubagentReturn's: the
+# caller blocks on a non-empty result, so returning empty when the measurement
+# is impossible leaves today's behaviour in place. A missing interpreter must
+# never become an outage -- a watchdog that fails a legitimate workflow gets
+# switched off (issue #108).
+function Get-AfUndeclaredScratch {
+    param(
+        [string]$StdinRaw,
+        [string]$Agent,
+        [string]$CodeRoot,
+        [string]$MainRoot
+    )
+
+    if (-not $StdinRaw -or -not $Agent) { return @() }
+
+    try { $payload = $StdinRaw | ConvertFrom-Json } catch { return @() }
+    $sid = $payload.session_id
+    $transcript = $payload.transcript_path
+    if (-not $sid -or -not $transcript) { return @() }
+
+    # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
+    $chatDir = Split-Path -Parent (Split-Path -Parent $transcript)
+    if (-not $chatDir) { return @() }
+    $sessionDir = Join-Path (Join-Path $chatDir 'debug-logs') $sid
+    if (-not (Test-Path $sessionDir)) { return @() }
+
+    $reader = Join-Path $MainRoot '.github/hooks/scripts/undeclared-scratch.py'
+    if (-not (Test-Path $reader)) { return @() }
+
+    $python = Join-Path $CodeRoot '.venv/Scripts/python.exe'
+    if (-not (Test-Path $python)) {
+        $python = if ($AfPython) { $AfPython } else { $null }
+    }
+    if (-not $python) { return @() }
+
+    $out = & $python $reader '--session-dir' $sessionDir '--agent' $Agent '--repo-root' $CodeRoot 2>$null
+    if ($LASTEXITCODE -ne 0) { return @() }
+
+    return @($out | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })
+}
+
+# ---------------------------------------------------------------------------
+# Stop-hook loop guard (issue #298)
+#
+# A blocking stop hook forces the agent to try again, and the editor re-invokes
+# the hook on that attempt with `stop_hook_active: true` in the input. Nothing
+# read that field: implementer-stop.ps1 carried a comment describing this guard
+# while 31 blocking sites across four stop hooks ran without one, so a gate the
+# retry cannot clear blocks the very retry it demanded.
+#
+# Read the field the way af_tool_name_from_json reads its own: by string
+# surgery, not by parsing. Here the argument is stronger than there, because the
+# value is a JSON boolean literal -- `true` or `false`, never a string -- so no
+# escape, quote or nesting can appear inside it. Parsing properly would mean an
+# interpreter, and making Python a hard dependency of every stop hook is the
+# defect #168 is already open about.
+function Test-AfStopHookActive {
+    param([string]$StdinRaw)
+    if (-not $StdinRaw) { return $false }
+    $hits = [regex]::Matches($StdinRaw, '"stop_hook_active"\s*:\s*(true|false)')
+    # Two occurrences mean a nested object carries the key as well, and this
+    # cannot say which one the editor meant. Report unreadable rather than
+    # guess -- the rule af_tool_name_from_json already follows.
+    if ($hits.Count -ne 1) { return $false }
+    return ($hits[0].Groups[1].Value -eq 'true')
+}
+
+# Returns control to the agent when a stop hook is already active, otherwise
+# returns normally so the caller's gates run. Same contract as af_require_python
+# on the bash side: the happy path is a plain return, the unhappy path emits the
+# verdict and exits.
+#
+# Two decisions worth stating, because neither is obvious:
+#
+#   * It speaks. A silent pass is indistinguishable from a gate that ran and
+#     found nothing, and the only thing worse than a skipped gate is a skipped
+#     gate nobody can see.
+#   * An unreadable or absent field does NOT guard. The gates run exactly as
+#     they do today. A loop is a cost; an unenforced gate is a defect, and the
+#     rule here is to fail rather than pass on an unanswered question. Only a
+#     single, explicit `true` turns the gates off.
+function Invoke-AfStopLoopGuard {
+    param([string]$StdinRaw, [string]$Agent, [string]$Gates)
+    if (-not (Test-AfStopHookActive $StdinRaw)) { return }
+    $output = @{
+        systemMessage = "${Agent}:Stop -- gates NOT run: the input carries stop_hook_active true, so this is a re-invocation after a block and blocking again would loop. Skipped: $Gates. The verdict from the previous invocation stands -- act on it."
+    } | ConvertTo-Json -Compress
+    Write-Output $output
+    exit 0
 }

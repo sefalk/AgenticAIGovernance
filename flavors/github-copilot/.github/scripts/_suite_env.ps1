@@ -1,0 +1,52 @@
+# Where a regression suite runs decides what it may assert (#349).
+#
+# The suites ship into every consumer, but some assertions are facts about this
+# framework's own repository -- its CHANGELOG, deploy.ps1, the shipped-default
+# af-env.conf. Run inside a consumer they failed for layout reasons alone, and a
+# suite that is red for no fault teaches the consumer to ignore red. Dot-source
+# this file; ask Test-AfSourceTree before asserting a framework-repo fact, and
+# report the skip as `  SKIP  <case> -- <reason>` (no colon: `SKIP:` would mark
+# the whole suite skipped in run-all-tests.ps1).
+
+function Test-AfSourceTree {
+    param([string]$ScriptsDir = $PSScriptRoot)
+    # deploy.ps1 sits beside .github only in the framework payload; a consumer never receives it.
+    return (Test-Path (Join-Path (Split-Path (Split-Path $ScriptsDir)) 'deploy.ps1'))
+}
+
+function Get-AfSuitePython {
+    param([string]$ScriptsDir = $PSScriptRoot)
+    $payloadRoot = Split-Path (Split-Path $ScriptsDir)
+    # Only the venv beside .github: in the framework repo that path has none and
+    # PATH decides, as it always did. The repo-root venv two levels up lacks the
+    # checkers' PyYAML, and preferring it turned two suites silently weaker.
+    $candidates = @(
+        (Join-Path $payloadRoot '.venv/Scripts/python.exe'),
+        (Join-Path $payloadRoot '.venv/bin/python')
+    )
+    foreach ($c in $candidates) { if (Test-Path $c) { return $c } }
+
+    # Probed, not merely resolved: python3 on Windows is a Store stub that exits
+    # non-zero, and under -ErrorAction Stop its stderr alone would end the suite.
+    $ErrorActionPreference = 'Continue'
+    foreach ($name in @($env:AF_PYTHON_OVERRIDE, 'python3', 'python', 'py')) {
+        if (-not $name) { continue }
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if (-not $cmd -or -not $cmd.Source) { continue }
+        $version = & $cmd.Source --version 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0 -and $version -match 'Python 3') { return $cmd.Source }
+    }
+    return $null
+}
+
+function Get-AfSecretFixture {
+    param([ValidateSet('password', 'apikey', 'aws', 'conn', 'privkey')][string]$Kind)
+    # Joined at run time: a literal trips the secret gate on every edit of the suite that carries it (#350).
+    switch ($Kind) {
+        'password' { return (@('pass', 'word = "SuperSecret123!"') -join '') }
+        'apikey' { return (@('api', 'key = "abcdef1234567890"') -join '') }
+        'aws' { return (@('key=AK', 'IAIOSFODNN7EXAMPLE') -join '') }
+        'conn' { return (@('CONN = "Server=db01;User', ' Id=sa;Pass', 'word=hunter2xyz"') -join '') }
+        'privkey' { return (@('-----BEGIN RSA PRIVATE', " KEY-----`nMIIBOgIBAAJBAK`n-----END RSA PRIVATE", ' KEY-----') -join '') }
+    }
+}

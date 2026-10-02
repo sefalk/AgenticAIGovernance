@@ -114,19 +114,25 @@ def main() -> int:
             # what PowerShell does with a native command's multi-line output.
             # A stub that returned one string made this suite pass while CI
             # failed on the very pull request that added the gate.
+            #
+            # The STUB_ prefix keeps the stub's state out of the step's way:
+            # PowerShell variable names are case-insensitive, so a stub named
+            # $FILES and the step's own $files are one variable. This gate
+            # reads each stub exactly once before overwriting it, so it got
+            # away with it; the promotion gate loops, and did not.
             prelude = (
                 "$ErrorActionPreference = 'Stop'\n"
                 "$env:REPO = 'sefalk/AgenticAIGovernance'\n"
                 "$env:PR_NUMBER = '999'\n"
-                f"$FILES = {ps_array(files)}\n"
-                "$BODY = @'\n"
+                f"$STUB_FILES = {ps_array(files)}\n"
+                "$STUB_BODY = @'\n"
                 f"{body}\n"
                 "'@\n"
                 "function gh {\n"
                 "    $joined = $args -join ' '\n"
                 "    $global:LASTEXITCODE = 0\n"
-                "    if ($joined -like '*/files*') { return $FILES }\n"
-                "    return $BODY -split [char]10\n"
+                "    if ($joined -like '*/files*') { return $STUB_FILES }\n"
+                "    return $STUB_BODY -split [char]10\n"
                 "}\n\n"
             )
             case_file = work / f"case_{name}.ps1"

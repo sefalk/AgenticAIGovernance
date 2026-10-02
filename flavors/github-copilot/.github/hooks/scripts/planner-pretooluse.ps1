@@ -52,7 +52,7 @@ if ($filePaths.Count -eq 0) {
         hookSpecificOutput = @{
             hookEventName      = 'PreToolUse'
             permissionDecision = 'deny'
-            permissionDecisionReason = "Plan directory confinement: planner called the write tool '$toolName' with no readable file path, so the target cannot be checked against the plan directory. The planner may only create the plan document."
+            permissionDecisionReason = "Plan directory confinement: planner called the write tool '$toolName' with no readable file path, so the target cannot be checked against the plan directory. The planner may only write the plan document."
         }
     } | ConvertTo-Json -Depth 3 -Compress
     exit 0
@@ -61,8 +61,16 @@ if ($filePaths.Count -eq 0) {
 function Test-AfPlanPath {
     param([string]$Path, [string]$Root)
 
+    # `Join-Path` concatenates unconditionally, so an absolute path -- the only
+    # kind the planner's write tool accepts -- became `C:\repo\C:\repo\...`, and
+    # the gate denied it as malformed instead of judging where it points (#232).
+    # The bash twin already branched here; this puts the two back in step.
     try {
-        $full = [System.IO.Path]::GetFullPath((Join-Path $Root $Path))
+        $full = if ([System.IO.Path]::IsPathRooted($Path)) {
+            [System.IO.Path]::GetFullPath($Path)
+        } else {
+            [System.IO.Path]::GetFullPath((Join-Path $Root $Path))
+        }
     } catch {
         return $false
     }
@@ -93,7 +101,7 @@ foreach ($filePath in $filePaths) {
         hookSpecificOutput = @{
             hookEventName      = 'PreToolUse'
             permissionDecision = 'deny'
-            permissionDecisionReason = "Plan directory confinement: planner cannot write to '$filePath'. The planner may create only the plan document -- a .md file inside a 'plans' directory within the repository (default docs/plans/). Everything else in this workflow is written by the test-writer, implementer, refactorer or documenter."
+            permissionDecisionReason = "Plan directory confinement: planner cannot write to '$filePath'. The planner may write only the plan document -- a .md file inside a 'plans' directory within the repository (default docs/plans/). Everything else in this workflow is written by the test-writer, implementer, refactorer or documenter."
         }
     } | ConvertTo-Json -Depth 3 -Compress
     exit 0

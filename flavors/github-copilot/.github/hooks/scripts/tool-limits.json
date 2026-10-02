@@ -1,0 +1,46 @@
+{
+  "_note": "Limits the agent harness imposes on what an agent can read, measured from the installed extension (#341). Read by _long_lines.py; referenced by the ado-shared and ado-workitem skills. test-long-line-guard.ps1 D1 compares the two values against the installed extension wherever one exists.",
+  "measured": {
+    "on": "2026-09-25",
+    "extension": "GitHub Copilot Chat bundled with VS Code build 2242ebbb54",
+    "evidence": "dist/extension.js and package.json of that build; probe file with a 3,011-character line"
+  },
+  "limits": {
+    "spill_threshold_chars": {
+      "value": 8192,
+      "source": "setting github.copilot.chat.agent.largeToolResultsToDisk.thresholdBytes (compared against the result's string length)",
+      "configurable": true,
+      "documented": false,
+      "applies_to": "text tool results (MCP, terminal); not read_file, not search/explore/execution subagents, not memory",
+      "effect": "the model receives only a path; the result is written to content.json (pretty-printed when it parses as JSON) or content.txt",
+      "workaround": "narrow the call so the result stays under the threshold, e.g. wit_work_item get with fields instead of expand All"
+    },
+    "spill_enabled": {
+      "value": true,
+      "source": "setting github.copilot.chat.agent.largeToolResultsToDisk.enabled",
+      "configurable": true,
+      "documented": false,
+      "applies_to": "same as spill_threshold_chars",
+      "effect": "switches the spill on or off",
+      "workaround": "leave on: without it every large result lands in context in full"
+    },
+    "read_file_line_chars": {
+      "value": 2000,
+      "source": "hardcoded in read_file",
+      "configurable": false,
+      "documented": false,
+      "applies_to": "every line read_file returns, including spilled tool results",
+      "effect": "a longer line is cut and marked [truncated]; paging does not help, a line cannot be paged",
+      "workaround": "read the lossless copy the PostToolUse hook names, or parse the file in the terminal"
+    },
+    "read_file_lines_per_call": {
+      "value": 1999,
+      "source": "hardcoded in read_file (offset/limit form; startLine/endLine is not capped)",
+      "configurable": false,
+      "documented": false,
+      "applies_to": "read_file",
+      "effect": "a large file is read in several calls",
+      "workaround": "page with further calls; lossless for ordinary line lengths"
+    }
+  }
+}

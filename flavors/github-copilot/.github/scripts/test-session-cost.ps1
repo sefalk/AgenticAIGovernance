@@ -13,23 +13,8 @@ $scriptDir  = Split-Path -Parent $PSCommandPath
 $repoRootAF = (Resolve-Path (Join-Path $scriptDir '..' | Join-Path -ChildPath '..')).Path
 $collector  = Join-Path $scriptDir 'collect-session-cost.py'
 
-function Resolve-Python {
-    $candidates = @(
-        (Join-Path $repoRootAF '.venv/Scripts/python.exe'),
-        (Join-Path $repoRootAF '.venv/bin/python')
-    )
-    foreach ($c in $candidates) { if (Test-Path $c) { return @($c) } }
-    foreach ($name in @('python3', 'python')) {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd) {
-            $v = & $cmd.Source --version 2>&1
-            if ($LASTEXITCODE -eq 0 -and $v -match 'Python 3') { return @($cmd.Source) }
-        }
-    }
-    $py = Get-Command py -ErrorAction SilentlyContinue
-    if ($py) { return @($py.Source, '-3') }
-    return $null
-}
+. (Join-Path $scriptDir '_suite_env.ps1')
+function Resolve-Python { Get-AfSuitePython $scriptDir }
 
 $python = Resolve-Python
 if (-not $python) {
@@ -65,7 +50,8 @@ function New-LlmRequest {
         [long]$Ts = 0,
         [switch]$OmitTokenFields,
         [string]$SecretText = '',
-        [switch]$Payloads
+        [switch]$Payloads,
+        [string]$Status = 'ok'
     )
     if ($Ts -eq 0) { $Ts = $T0 + 1000 }
     $attrs = [ordered]@{ model = $Model; debugName = $DebugName }
@@ -85,7 +71,7 @@ function New-LlmRequest {
     if ($SecretText) { $attrs.userRequest = $SecretText; $attrs.inputMessages = $SecretText }
     [ordered]@{
         ts = $Ts; dur = 100; sid = $SID
-        type = 'llm_request'; name = "chat:$Model"; spanId = 'r1'; parentSpanId = 's0'; status = 'ok'
+        type = 'llm_request'; name = "chat:$Model"; spanId = 'r1'; parentSpanId = 's0'; status = $Status
         attrs = $attrs
     } | ConvertTo-Json -Compress -Depth 6
 }
@@ -157,10 +143,13 @@ function New-SessionFixture {
         [switch]$RateCard,
         [switch]$Dumps,
         [switch]$BadDumps,
-        [switch]$MixedDumps
+        [switch]$MixedDumps,
+        # The collector takes the session identity from the directory name, so
+        # this is how a fixture stands for a different chat session.
+        [string]$SessionId = $SID
     )
     $base = Join-Path ([IO.Path]::GetTempPath()) ("sesscost-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
-    $dir  = Join-Path $base $SID
+    $dir  = Join-Path $base $SessionId
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
     if ($RateCard) {
         # Shape mirrors the real models.json dump: prices per `batch_size`
@@ -241,7 +230,7 @@ try {
     $results['A_session_reported'] = ($r.Output -match [regex]::Escape($SID))
     $results['A_environment']      = ($r.Output -match 'vscode:\s*"?1\.131\.0' -and
                                       $r.Output -match 'copilot_chat:\s*"?0\.59\.0')
-    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*5\s*$')
+    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*6\s*$')
     $results['A_collector_named']  = ($r.Output -match 'collector:\s*"?collect-session-cost\.py@')
 
     # --- B: subagent child file is summed, per model ------------------------
@@ -349,10 +338,10 @@ try {
         'credits_by_kind:\s*\{\s*input_uncached:\s*0(\.0+)?,\s*cache_read:\s*0(\.0+)?,\s*output:\s*0(\.0+)?,\s*unexplained:\s*1\.5\s*\}')
 
     # --- Q: the facts artifact outlives the log (issue #217) ----------------
-    $secret = 'SUPERSECRET-FACTS-ghp_zzz999'
+    $canary = 'SUPERSECRET-FACTS-ghp_zzz999'
     $dir = New-SessionFixture -RateCard -Main @(
         (New-SessionStart),
-        (New-LlmRequest -NanoAiu 1500000000 -SecretText $secret),
+        (New-LlmRequest -NanoAiu 1500000000 -SecretText $canary),
         (New-LlmRequest -NanoAiu 500000000 -DebugName 'summarizeConversationHistory')
     )
     $fixtures += $dir
@@ -376,7 +365,7 @@ try {
         # One header plus one row per request. An aggregate cannot be
         # un-aggregated, so a missing row is a question never askable again.
         $results['Q_facts_row_per_request'] = ($factLines.Count -eq 3)
-        $results['Q_facts_header_versioned'] = ($factLines[0] -match '"facts_schema_version":\s*1' -and
+        $results['Q_facts_header_versioned'] = ($factLines[0] -match '"facts_schema_version":\s*2' -and
                                                 $factLines[0] -match '"record":\s*"header"')
         # The facts file is meant to be keepable; a prompt in it would make it
         # exactly as unshareable as the debug log it replaces.
@@ -398,6 +387,34 @@ try {
     # Writing the artifact is opt-in: the collector is not the log's writer.
     $r = Invoke-Collector @('--session-dir', $dir)
     $results['Q_facts_opt_in'] = ($r.Output -match '(?m)^\s*facts:\s*null\s*$')
+
+    # --- V: a later call adds to the artifact, it never replaces it (#253) --
+    #
+    # A workflow that spans two chat sessions runs the collector twice, and by
+    # the second call the debug log the first session's rows came from is gone.
+    # An overwrite would therefore delete the only surviving copy of them.
+    $accPath = Join-Path $dir 'accumulate.ndjson'
+    $second = New-SessionFixture -RateCard -SessionId 'a1b2c3d4-0000-4000-8000-000000000002' -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 2500000000)
+    )
+    $fixtures += $second
+
+    $null = Invoke-Collector @('--session-dir', $dir, '--facts-out', $accPath)
+    $firstPass = @([IO.File]::ReadAllLines($accPath) | Where-Object { $_.Trim() })
+    $null = Invoke-Collector @('--session-dir', $second, '--facts-out', $accPath)
+    $secondPass = @([IO.File]::ReadAllLines($accPath) | Where-Object { $_.Trim() })
+    $results['V_later_session_appends'] = ($secondPass.Count -eq ($firstPass.Count + 2))
+    # One header per session: a reader has to know which coverage and which
+    # rate card the rows following it were priced under.
+    $results['V_header_per_session'] =
+        (@($secondPass | Where-Object { $_ -match '"record":\s*"header"' }).Count -eq 2)
+
+    # The hook fires on every finalising call, so re-reading a session already
+    # in the file must add nothing at all.
+    $null = Invoke-Collector @('--session-dir', $second, '--facts-out', $accPath)
+    $thirdPass = @([IO.File]::ReadAllLines($accPath) | Where-Object { $_.Trim() })
+    $results['V_repeat_call_adds_nothing'] = ($thirdPass.Count -eq $secondPass.Count)
 
     # --- R: the purpose axis (issue #215) -----------------------------------
     # Compaction is the price of the session having grown too long. Folded into
@@ -523,10 +540,10 @@ try {
                                            $r.Output -match '(?m)^\s*credits:\s*1\.5\s*$')
 
     # --- I: no text from the log ever reaches the output --------------------
-    $secret = 'SUPERSECRET-TOKEN-ghp_abcdef123456'
+    $canary = 'SUPERSECRET-TOKEN-ghp_abcdef123456'
     $dir = New-SessionFixture -Main @(
         (New-SessionStart),
-        (New-LlmRequest -NanoAiu 1500000000 -SecretText $secret)
+        (New-LlmRequest -NanoAiu 1500000000 -SecretText $canary)
     )
     $fixtures += $dir
     $r = Invoke-Collector @('--session-dir', $dir)
@@ -541,7 +558,7 @@ try {
         'main', 'environment', 'vscode', 'copilot_chat', 'claude-opus-5',
         'claude-haiku-4.5', 'rate_card', 'credits_by_kind', 'cache_read',
         'unexplained', 'facts', 'by_purpose', 'agent_work', 'compaction',
-        'background', 'other', 'unbilled', 'by_entity'
+        'background', 'other', 'unbilled', 'by_entity', 'no_usage_requests'
     )
     $keys = [regex]::Matches($r.Output, '(?m)(?:^\s*|[{,]\s*)([A-Za-z][\w.\-]*)\s*:') |
             ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
@@ -582,6 +599,124 @@ print(mod.NANO_AIU_PER_CREDIT)
     Remove-Item $probeFile -Force -ErrorAction SilentlyContinue
     $results['M_watched_attrs_pinned'] = ($probeOut -match 'cachedTokens,copilotUsageNanoAiu,inputTokens,model,outputTokens')
     $results['M_credit_unit_pinned']   = ($probeOut -match '(?m)^1000000000\s*$')
+
+    # --- N: the documented example cannot fall behind the collector ---------
+    # It fell three versions behind unnoticed (issue #227). A hand-kept example
+    # is documentation only for as long as something compares it to the code.
+    $readme  = Join-Path $repoRootAF '.github/logs/README.md'
+    $docVer  = -1
+    $codeVer = -1
+    $readmeText = ''
+    if (Test-Path $readme) {
+        $readmeText = [IO.File]::ReadAllText($readme)
+        if ($readmeText -match '(?m)^\s*schema_version:\s*(\d+)\s*$') { $docVer = [int]$Matches[1] }
+    }
+    if ((Get-Content $collector -Raw) -match '(?m)^SCHEMA_VERSION\s*=\s*(\d+)') { $codeVer = [int]$Matches[1] }
+    $results['N_readme_version_matches'] = ($codeVer -gt 0 -and $docVer -eq $codeVer)
+    $results['N_readme_collector_tag']   = ($codeVer -gt 0 -and
+                                            $readmeText -match "collect-session-cost\.py@$codeVer")
+    if ($docVer -ne $codeVer) { Write-Host "  (README documents v$docVer, collector emits v$codeVer)" }
+
+    # The version scalar can match while the documented taxonomy is a class
+    # short: the example block shows whichever classes one session happened to
+    # carry, so it cannot be the register. Derived from the collector rather
+    # than listed here, or this check becomes the third copy to fall behind.
+    $classProbe = @'
+import importlib.util, re, sys
+spec = importlib.util.spec_from_file_location("c", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+with open(sys.argv[1], encoding="utf-8") as handle:
+    literal = set(re.findall(r'"class": "(\w+)"', handle.read()))
+print(",".join(sorted(set(mod.PROMPT_ENTITY) | literal)))
+'@
+    $classFile = Join-Path ([IO.Path]::GetTempPath()) ("cost-classes-" + [Guid]::NewGuid().ToString('N') + '.py')
+    Set-Content -LiteralPath $classFile -Value $classProbe -Encoding UTF8
+    $codeClasses = @(((& $python $classFile $collector 2>&1) -join '').Trim() -split ',' | Where-Object { $_ })
+    Remove-Item $classFile -Force -ErrorAction SilentlyContinue
+    $docSentence = [regex]::Match($readmeText, 'classes` is a closed set:\*\*([\s\S]*?)\.').Groups[1].Value
+    $docClasses  = @([regex]::Matches($docSentence, '`([a-z_]+)`') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+    # Guards the extraction: a reworded bullet would otherwise compare two
+    # empty sets and pass.
+    $results['N_class_set_found'] = ($codeClasses.Count -ge 5 -and $docClasses.Count -ge 5)
+    $results['N_class_set_documented'] = (($codeClasses -join ',') -eq ($docClasses -join ','))
+    if (($codeClasses -join ',') -ne ($docClasses -join ',')) {
+        Write-Host "  (README documents [$($docClasses -join ', ')], collector emits [$($codeClasses -join ', ')])"
+    }
+
+    # --- T: a request that reported no usage is not drift (issue #238) ------
+    # A failed compaction carries no token counts and no billing attribute: it
+    # consumed nothing, so there is nothing to account for. Reading that
+    # absence as drift discarded the whole session's cost -- and compaction
+    # only happens in long sessions, so the data died where it was worth most.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -InputTokens 1000 -CachedTokens 400 -OutputTokens 50 -NanoAiu 1500000000),
+        (New-LlmRequest -OmitTokenFields -NanoAiu $null -Status 'error' -DebugName 'summarizeConversationHistory'),
+        (New-LlmRequest -InputTokens 2000 -CachedTokens 900 -OutputTokens 60 -NanoAiu 2500000000)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['T_available_true'] = ($r.Output -match '(?m)^\s*available:\s*true\s*$')
+    $results['T_billed_still_summed'] = ($r.Output -match '(?m)^\s*requests:\s*2\s*$' -and
+                                         $r.Output -match '(?m)^\s*credits:\s*4(\.0+)?\s*$')
+    # Counted, not swallowed: the request was made, it just cost nothing.
+    $results['T_no_usage_counted'] = ($r.Output -match '(?m)^\s*no_usage_requests:\s*1\s*$')
+    # And not folded into `unbilled`, which is for requests that DID spend
+    # tokens -- merging the two would hide a failure inside a normal category.
+    $results['T_not_counted_unbilled'] = ($r.Output -match '(?m)^\s*unbilled_requests:\s*0\s*$')
+
+    # One such record in 51 carried `status: ok`, so the test is "reported no
+    # usage", not "said it failed". A status-based check would let that one
+    # through and void the session anyway.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1500000000),
+        (New-LlmRequest -OmitTokenFields -NanoAiu $null)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['T_ok_status_no_usage'] = ($r.Output -match '(?m)^\s*available:\s*true\s*$' -and
+                                        $r.Output -match '(?m)^\s*no_usage_requests:\s*1\s*$')
+
+    # --- U: real drift degrades per record, not per session -----------------
+    # A BILLED request missing its token fields is genuine drift. It must not
+    # take the requests that parsed cleanly down with it.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -InputTokens 1000 -CachedTokens 400 -OutputTokens 50 -NanoAiu 1500000000),
+        (New-LlmRequest -OmitTokenFields -NanoAiu 1500000000),
+        (New-LlmRequest -InputTokens 2000 -CachedTokens 900 -OutputTokens 60 -NanoAiu 2500000000)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['U_partial_drift_available'] = ($r.Output -match '(?m)^\s*available:\s*true\s*$' -and
+                                             $r.Output -match '(?m)^\s*requests:\s*2\s*$')
+    # The loss is stated at the grain that lets a reader judge it: which field
+    # moved, and how many records it cost out of how many.
+    $results['U_drift_named'] = ($r.Output -match 'drift:\s*\{\s*records:\s*1,\s*of:\s*3,\s*fields:\s*\[inputTokens\],\s*logs:\s*\[main\.jsonl\]\s*\}')
+
+    # A session is many logs. Drift confined to one subagent is a different
+    # finding from drift in main.jsonl, and only the log name separates them.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -InputTokens 1000 -CachedTokens 400 -OutputTokens 50 -NanoAiu 1500000000)
+    ) -Child @(
+        (New-LlmRequest -OmitTokenFields -NanoAiu 1500000000)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['U_drift_names_its_log'] = ($r.Output -match 'logs:\s*\[runSubagent-implementer-toolu_test\.jsonl\]' -and
+                                         $r.Output -notmatch 'logs:\s*\[[^\]]*main\.jsonl')
+
+    # Silence is the bug the key exists to prevent -- but a clean session must
+    # not carry it either, or it stops meaning anything.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1500000000)
+    )
+    $fixtures += $dir
+    $results['U_no_drift_no_key'] = ((Invoke-Collector @('--session-dir', $dir)).Output -notmatch '(?m)^\s*drift:')
 
     # --- S: the entity axis (issue #214) ------------------------------------
     # Get-Bucket slices a 4-space agent bucket; `by_entity` sits at the top
@@ -677,7 +812,7 @@ print(mod.NANO_AIU_PER_CREDIT)
         # 8 definitions x 1 payload each, plus the header.
         $results['S_entity_rows'] = ($el.Count -eq 9)
         $results['S_entity_header'] = (
-            $el[0] -match '"entity_schema_version":\s*1' -and
+            $el[0] -match '"entity_schema_version":\s*2' -and
             $el[0] -match '"grain":\s*"payload x entity"' -and
             $el[0] -match '"credits_attributable":\s*false')
         # No credit figure exists at this grain, so none may appear here --
@@ -691,7 +826,7 @@ print(mod.NANO_AIU_PER_CREDIT)
         }
         $rowKeys = $rowKeys | Sort-Object -Unique
         $results['S_entity_row_keys_pinned'] =
-            (($rowKeys -join ',') -eq 'chars,class,group,name,payload,record,requests,tokens_est')
+            (($rowKeys -join ',') -eq 'chars,class,group,name,payload,record,requests,session,tokens_est')
         $results['S_entity_no_credit_column'] =
             (($el[1..($el.Count - 1)] -join "`n") -notmatch '"[^"]*(credit|nano|aiu|price|cost)[^"]*":')
         # The fan-out is visible in the file's own shape: `requests` is a

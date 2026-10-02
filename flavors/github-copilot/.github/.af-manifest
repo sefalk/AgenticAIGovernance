@@ -69,6 +69,9 @@ scripts/test-plan-budget.ps1
 scripts/test-plan-structure.ps1
 scripts/collect-session-cost.py
 scripts/test-session-cost.ps1
+scripts/check-cost-source.ps1
+scripts/check-cost-source.sh
+scripts/test-cost-source.ps1
 scripts/analyze-retry-economy.py
 scripts/test-retry-economy.ps1
 scripts/test-workflow-log-schema.ps1

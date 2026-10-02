@@ -21,10 +21,6 @@ tools:
   - read/getNotebookSummary
   - vscode.mermaid-markdown-features/renderMermaidDiagram
 hooks:
-  PostToolUse:
-    - type: command
-      command: 'bash .github/hooks/scripts/scan-secrets.sh'
-      windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\scan-secrets.ps1'
   SubagentStop:
     - type: command
       command: 'bash .github/hooks/scripts/documenter-stop.sh'
@@ -83,7 +79,8 @@ workflow_id: "<workflow-id>"
 trigger: "<user request>"
 status: "COMPLETED"  # COMPLETED | FAILED | ESCALATED
 git_branch: "agent/<workflow-id>"
-af_version: "<version from .github/.af-version, e.g. 1.18.22>"
+# af_version: stamped by your Stop hook -- do not write it.
+af_version_note: "<optional -- a caveat qualifying the stamped version, or omit>"
 
 steps:
   - step: 1
@@ -135,8 +132,8 @@ escalation:
   resolution: "<human decision or arbiter verdict>"
   step_at_escalation: <step number>
 
-# Appended by your Stop hook from the editor's own subagent logs. Do not write
-# it, and do not anticipate what it will say.
+# Appended by your Stop hook from the editor's own subagent logs, including
+# `skills_read` per agent. Do not write it, and do not anticipate what it will say.
 agent_invocations: <appended by your Stop hook>
 ```
 
@@ -179,6 +176,21 @@ oldest commit dates the start. Never estimate them — a documenter once wrote a
 fabricated data, and every gate downstream accepted it, because they check that
 the field is present and an invented value is present (issue #91).
 
+**Do not write `af_version:`.** Your Stop hook reads `.github/.af-version` and
+stamps it, or stamps `null` when there is no version file to read. It was the
+last header field transcribed by hand, out of a file with three lines you had
+to pick one of, and across 68 logs 23 carried no value at all while 7 carried
+something that was not a version — `n/a`, `not measured`, and in one case the
+instruction *"read from `.github/.af-version`"* written into the field verbatim
+(issue #309).
+
+**`af_version_note:` is yours, and it is the only part of this that is.** When
+you have something to say *about* the version — that a root-cause analysis in
+this workflow ran against a framework source far ahead of this deployment, so
+fixes present there must not be assumed present here — that belongs in the
+note, not in the version. It is free text, it is optional, and nothing parses
+it.
+
 **Do not write a `cost:` block.** Your Stop hook measures the session and
 appends it after your artifact gate passes. Never estimate or transcribe those
 numbers — an unmeasured cost is worse than none.
@@ -214,13 +226,15 @@ case — write the log accurately and the condition follows.
 `af-env.conf`; it defaults to `.github/retros/auto`. Your Stop hook resolves
 the same key, so writing anywhere else is a blocked finalisation.
 
-**Format:**
+**Format:** `Outcome` is the same closed set as the log's `status:`. A run that
+finished with problems is `COMPLETED`; the problems belong in the sections
+below, not in the word.
 
 ```markdown
 # {workflow-id} — {date}
 
 **Task:** {1-line summary}
-**Outcome:** {COMPLETED | COMPLETED-WITH-ISSUES | FAILED | ESCALATED}
+**Outcome:** {COMPLETED | FAILED | ESCALATED}
 
 ## What went well
 - {1–3 bullet points from the workflow}

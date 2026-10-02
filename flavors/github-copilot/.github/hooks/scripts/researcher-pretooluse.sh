@@ -13,10 +13,25 @@ set -euo pipefail
 . "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 
 RAW=$(cat)
-# `A && B && exit` returns 1 when A is false, which under `set -e` aborts the
-# hook instead of falling through. Explicit `if` blocks do not.
+# Explicit `if`, not `[ -z "$X" ] && echo '{}' && exit 0`. Measured on bash
+# 5.2.37: that list does NOT abort under `set -e` -- the failing test is not the
+# command after the final `&&`, so the exception applies. What it does do is
+# leave $? = 1 when the guard does not fire, which becomes the hook's exit
+# status if the list is ever the last statement, and it hides the control flow.
 if [ -z "$RAW" ]; then echo '{}'; exit 0; fi
-if [ -z "$AF_PYTHON" ]; then echo '{}'; exit 0; fi
+
+# Only fetch calls are inspected -- named once, so the no-interpreter path and
+# the classifier below cannot drift apart.
+rs_is_gated_tool() {
+    case "$1" in
+        *fetch*|*Fetch*) return 0 ;;
+    esac
+    return 1
+}
+
+# No interpreter means the URL allowlist cannot be evaluated, so fetches are
+# refused rather than waved through (issue #251).
+af_require_python "$RAW" rs_is_gated_tool "researcher fetch-allowlist"
 
 TOOL_NAME=$(echo "$RAW" | "$AF_PYTHON" -c "
 import sys, json
@@ -27,11 +42,7 @@ except Exception:
     print('')
 " 2>/dev/null)
 
-# Only inspect fetch tool calls
-case "$TOOL_NAME" in
-    *fetch*|*Fetch*) ;;
-    *) echo '{}'; exit 0 ;;
-esac
+if ! rs_is_gated_tool "$TOOL_NAME"; then echo '{}'; exit 0; fi
 
 # VS Code's fetch tool sends `urls` -- an array, beside `query`. The single
 # `url`/`uri` string this hook was written against is a legacy shape, so both
@@ -57,10 +68,6 @@ except Exception:
 " 2>/dev/null)
 
 if [ -z "$URLS" ]; then echo '{}'; exit 0; fi
-
-json_escape() {
-    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
-}
 
 scan_credentials() {
     local url="$1" found=""
@@ -145,7 +152,7 @@ EOF
 if [ -n "$FINDINGS" ]; then
     # Build a warning note; do NOT short-circuit to allow here -- a credentialed
     # URL to a non-allowlisted domain must still go through the prompt below.
-    CRED_NOTE=" WARNING: URL contains embedded credentials ($(json_escape "$FINDINGS")). Strip them from your research brief output."
+    CRED_NOTE=" WARNING: URL contains embedded credentials ($(af_json_escape "$FINDINGS")). Strip them from your research brief output."
 else
     CRED_NOTE=""
 fi
@@ -155,9 +162,9 @@ fi
 # array, so approving on the first match would wave the rest through unseen.
 if [ -n "$UNLISTED" ]; then
     if [ "$CONF_FOUND" -eq 1 ]; then
-        WHY="Not in WEB_FETCH_ALLOWLIST: $(json_escape "$UNLISTED")."
+        WHY="Not in WEB_FETCH_ALLOWLIST: $(af_json_escape "$UNLISTED")."
     else
-        WHY="No allowlist available: .github/af-env.conf was not found at $(json_escape "$CONF")."
+        WHY="No allowlist available: .github/af-env.conf was not found at $(af_json_escape "$CONF")."
     fi
     cat <<EOF
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"$WHY Approve to fetch once. To auto-approve in future, add the domain to WEB_FETCH_ALLOWLIST in .github/af-env.conf (the agent can do this on your confirmation).$CRED_NOTE"}}

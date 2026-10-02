@@ -121,17 +121,29 @@ Write-Output "=== Test Runner: $targetDisplay filter=$filterDisplay ==="
 # ---------- Test log (.github/test-log.json) ----------
 $testLogPath = Join-Path $workspaceRoot '.github/test-log.json'
 
-# Which entry this run owns. $null means the run cannot be attributed to a
-# scope (a -File run outside the known test trees), and such a run records
-# nothing rather than guessing.
+# A run is PARTIAL when anything narrowed the selection below the scope it
+# would otherwise represent -- a single file, or a -k expression, or both.
+# This is the one place that decides it; the key, the label and the consumer
+# gate all derive from it, so a future narrowing flag needs adding here and
+# nowhere else.
+$isPartial   = [bool]$File -or [bool]$Filter
+$runTarget   = if ($File) { $File } else { $scopeMap[$Scope] }
+$runSelector = if ($Filter) { $Filter } else { $null }
+
+# Which entry this run owns.
+#
+# A partial run never writes a scope key. It used to: a -File run was filed
+# under the scope its path happened to sit in, so eleven green tests from one
+# file were indistinguishable from the whole adapters suite passing, and a
+# reader working to a once-per-workflow test budget skipped the real run on
+# that evidence (#303). `-Scope all -Filter x` was the worse half of the same
+# bug, because `all` is the key the stop hooks trust.
+#
+# All partial runs share ONE key rather than a key per target. A key per
+# target would grow the log without bound for a file whose only reader wants
+# the last result, and the log is a regenerable cache, not a history.
 function Get-LogScopeKey {
-    if ($File) {
-        if ($File -match 'tests/domain')     { return 'domain' }
-        if ($File -match 'tests/adapters')   { return 'adapters' }
-        if ($File -match 'tests/properties') { return 'properties' }
-        if ($File -match 'tests/contracts')  { return 'contracts' }
-        return $null
-    }
+    if ($isPartial) { return 'partial' }
     return $Scope
 }
 
@@ -204,6 +216,9 @@ if ($logScope) {
         exit_code        = $null
         coverage_percent = $null
         status           = 'running'
+        partial          = $isPartial
+        target           = $runTarget
+        selector         = $runSelector
     }
     Save-TestLog $startLog
 }
@@ -252,7 +267,12 @@ $runnerFailed = ((-not $summaryLine) -and $pytestExit -ne 0)
 $testLog = Read-TestLog
 Show-LogWarnings
 
-# Build scope entry
+# Build scope entry.
+#
+# `partial` is written on every entry, including `false` on a full run. A
+# consumer must be able to REQUIRE completeness rather than infer it from a
+# missing field, because every log written before #303 also lacks the field
+# and those are exactly the entries that cannot be trusted.
 $entry = @{
     last_run        = (Get-Date -Format 'o')
     started         = $startedAt
@@ -265,6 +285,9 @@ $entry = @{
     exit_code       = $pytestExit
     coverage_percent = $null
     status          = 'ok'
+    partial         = $isPartial
+    target          = $runTarget
+    selector        = $runSelector
 }
 
 if ($runnerFailed) {

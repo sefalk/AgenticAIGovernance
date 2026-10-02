@@ -14,23 +14,8 @@ $scriptDir  = Split-Path -Parent $PSCommandPath
 $repoRootAF = (Resolve-Path (Join-Path $scriptDir '..' | Join-Path -ChildPath '..')).Path
 $tool       = Join-Path $repoRootAF '.github/hooks/scripts/collect-agent-invocations.py'
 
-function Resolve-Python {
-    $candidates = @(
-        (Join-Path $repoRootAF '.venv/Scripts/python.exe'),
-        (Join-Path $repoRootAF '.venv/bin/python')
-    )
-    foreach ($c in $candidates) { if (Test-Path $c) { return @($c) } }
-    foreach ($name in @('python3', 'python')) {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd) {
-            $v = & $cmd.Source --version 2>&1
-            if ($LASTEXITCODE -eq 0 -and $v -match 'Python 3') { return @($cmd.Source) }
-        }
-    }
-    $py = Get-Command py -ErrorAction SilentlyContinue
-    if ($py) { return @($py.Source, '-3') }
-    return $null
-}
+. (Join-Path $scriptDir '_suite_env.ps1')
+function Resolve-Python { Get-AfSuitePython $scriptDir }
 
 $python = Resolve-Python
 if (-not $python) {
@@ -200,6 +185,60 @@ escalation:
     # change that file's shape for every reader downstream.
     $topLevel = @($r.Output -split "`r?`n" | Where-Object { $_ -match '^[A-Za-z_]' })
     $results['I_single_top_level_key'] = ($topLevel.Count -eq 1 -and $topLevel[0] -match '^agent_invocations:')
+
+    # --- J..N: skills read, measured from read_file calls (issue #348) -------
+    # The declared `Skills Read:` line was cut off in 289 of 305 truncated
+    # returns and named a never-opened skill in 88 of 278 comparable ones, so
+    # the log records what was read, and the declaration only as a cross-check.
+    function New-Record([hashtable]$Record) { return ($Record | ConvertTo-Json -Compress -Depth 6) }
+    function New-Read([string]$Path) {
+        New-Record @{ type = 'tool_call'; name = 'read_file'; attrs = @{ args = (@{ filePath = $Path; startLine = 1; endLine = 50 } | ConvertTo-Json -Compress); result = 'x' } }
+    }
+    function New-Response([string]$Text) {
+        $parts = @(@{ role = 'assistant'; parts = @(@{ type = 'text'; content = $Text }) }) | ConvertTo-Json -Compress -Depth 6
+        New-Record @{ type = 'agent_response'; attrs = @{ response = "[$($parts.TrimStart('[').TrimEnd(']'))]" } }
+    }
+    $impl = @(
+        (New-Read 'c:\\repo\\.github\\skills\\python-dev\\SKILL.md'),
+        (New-Read '/repo/.github/skills/_available/data-quality/SKILL.md'),
+        (New-Read 'c:\\repo\\.github\\skills\\python-dev\\SKILL.md'),
+        (New-Record @{ type = 'tool_call'; name = 'grep_search'; attrs = @{ args = '{"query":"skills/grep-only/SKILL.md"}'; result = 'x' } }),
+        (New-Record @{ type = 'tool_call'; name = 'read_file'; attrs = @{ args = '{"filePath":"c:\\\\repo\\\\src\\\\a.py"}'; result = 'see skills/result-only/SKILL.md' } }),
+        (New-Response "Done.`n### Gate Summary`n- **Skills Read:** ``python-dev/SKILL.md``, ``hexagonal-architecture/SKILL.md``")
+    ) -join "`n"
+    $dir = New-SessionDir @('runSubagent-test-writer-toolu_ccc.jsonl')
+    [IO.File]::WriteAllText((Join-Path $dir 'runSubagent-implementer-toolu_ddd.jsonl'), $impl + "`n")
+    [IO.File]::WriteAllText((Join-Path $dir 'main.jsonl'), (New-Read '.github/skills/tdd-orchestration/SKILL.md') + "`n")
+    $r = Invoke-Tool @('--session-dir', $dir)
+    $results['J_skills_read_block_present']      = ($r.Output -match '(?m)^  skills_read:\s*$')
+    $results['J_reads_listed_sorted_and_unique'] = ($r.Output -match '(?m)^    implementer: \[data-quality, python-dev\]\s*$')
+    $results['K_grep_and_results_are_not_reads'] = ($r.Output -notmatch 'grep-only|result-only')
+    $results['L_agent_that_read_nothing_says_so'] = ($r.Output -match '(?m)^    test-writer: \[\]\s*$')
+    $results['M_parent_session_counted_as_main'] = ($r.Output -match '(?m)^    main: \[tdd-orchestration\]\s*$')
+    $results['N_declared_but_not_read_is_named'] = ($r.Output -match '(?ms)^  skills_declared_not_read:\s*$.*^    implementer: \[hexagonal-architecture\]\s*$')
+    $declaredNotRead = [regex]::Match($r.Output, '(?ms)^  skills_declared_not_read:\s*$(.*)').Groups[1].Value
+    $results['N_read_and_declared_not_accused']  = ($declaredNotRead -ne '' -and $declaredNotRead -notmatch 'python-dev')
+    $topLevel = @($r.Output -split "`r?`n" | Where-Object { $_ -match '^[A-Za-z_]' })
+    $results['N_still_single_top_level_key'] = ($topLevel.Count -eq 1)
+
+    # --- O: the corpus answers "which skill is read at all" (issue #348) ----
+    # #306 had to scan chat transcripts for this. The aggregator reads only
+    # what documenter-stop stamped, and says which logs it could not count.
+    $reporter = Join-Path $repoRootAF '.github/scripts/report-skill-reads.py'
+    $corpus = Join-Path ([IO.Path]::GetTempPath()) ("agentinv-corpus-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $logsDir = Join-Path $corpus 'logs'
+    $skillsDir = Join-Path $corpus 'skills'
+    foreach ($s in 'python-dev', 'git-workflow', 'never-read', '_available/parked') { New-Item -ItemType Directory -Path (Join-Path $skillsDir $s) -Force | Out-Null; [IO.File]::WriteAllText((Join-Path $skillsDir "$s/SKILL.md"), '# x') }
+    New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $logsDir 'a.yaml'), "workflow_id: a`nagent_invocations:`n  observed:`n    implementer: 1`n  skills_read:`n    implementer: [python-dev]`n    main: [git-workflow, python-dev]`n")
+    [IO.File]::WriteAllText((Join-Path $logsDir 'b.yaml'), "workflow_id: b`nagent_invocations:`n  observed:`n    planner: 1`n  skills_read:`n    planner: []`n")
+    [IO.File]::WriteAllText((Join-Path $logsDir 'c.yaml'), "workflow_id: c`nsteps:`n  - step: 1`n")
+    $script:fixtures += (Join-Path $logsDir 'a.yaml')
+    $out = & $python $reporter --logs $logsDir --skills $skillsDir 2>&1 | Out-String
+    $results['O_counts_workflows_per_skill']    = ($out -match '(?m)^\s*python-dev\s+1\s') -and ($out -match '(?m)^\s*git-workflow\s+1\s')
+    $results['O_names_active_skill_never_read'] = ($out -match '(?m)^\s*never-read\s+0\s') -and ($out -notmatch 'parked')
+    $results['O_states_logs_it_could_not_count'] = ($out -match '(?m)measured in 2 of 3 workflow logs')
+    Remove-Item $corpus -Recurse -Force -ErrorAction SilentlyContinue
 }
 finally {
     foreach ($f in $fixtures) {

@@ -39,9 +39,11 @@ function Test-LintPath {
 # logs, which is how the gate below tells its own edits from a peer's (#101).
 $stdinRaw = [Console]::In.ReadToEnd()
 
-# Check if stop hook is already active (prevent infinite loop)
-# The input JSON contains stop_hook_active but we read it as raw;
-# a simple env-based guard is more reliable for scripts.
+# Every gate below is a blocking one, so all of them sit behind the loop guard:
+# this hook has twelve blocking sites and a second invocation would reach the
+# same verdict on the same unchanged tree (issue #298).
+Invoke-AfStopLoopGuard -StdinRaw $stdinRaw -Agent 'implementer' `
+    -Gates 'tests, provenance, python quality, ignore hygiene, linting'
 
 # A missing test runner disables the TEST gate only. Provenance, quality,
 # linting and ignore hygiene need neither pytest nor a tests/ directory, and
@@ -56,6 +58,13 @@ if (-not (Get-Command pytest -ErrorAction SilentlyContinue)) {
 # ---------- Test Log Freshness Check ----------
 # Accept last run if ALL tests passed AND no code changed since (committed or uncommitted).
 # No time limit — change detection is the criterion, not elapsed time.
+#
+# `partial` must be explicitly false, not merely absent. A narrowed run used to
+# be filed under the scope key it was narrowed from, so a handful of green
+# tests could close this gate on behalf of the whole suite (#303). Logs written
+# before that fix carry no `partial` field at all, and those are precisely the
+# entries that cannot be trusted -- so a missing field falls through to running
+# the suite, which costs one full run once and never reports a false green.
 $testLogPath = Join-Path $mainRoot '.github/test-log.json'
 $fromLog = $false
 if (-not $testGateSkipped -and (Test-Path $testLogPath)) {
@@ -63,7 +72,7 @@ if (-not $testGateSkipped -and (Test-Path $testLogPath)) {
         $log = Get-Content $testLogPath -Raw | ConvertFrom-Json
         $allEntry = $null
         if ($log.PSObject.Properties.Name -contains 'all') { $allEntry = $log.all }
-        if ($allEntry -and $allEntry.exit_code -eq 0 -and $allEntry.last_run) {
+        if ($allEntry -and $allEntry.exit_code -eq 0 -and $allEntry.last_run -and $allEntry.partial -eq $false) {
             $commitsSince = git -C $codeRoot log --oneline --after="$($allEntry.last_run)" -- "$SRC_DIR/" 'tests/' 2>$null
             $uncommitted = git -C $codeRoot diff --name-only HEAD -- "$SRC_DIR/" 'tests/' 2>$null
             if (-not $commitsSince -and -not $uncommitted) {
@@ -375,8 +384,30 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
     $testsStatus = if ($testGateSkipped) { "gate skipped ($testGateSkipped)" }
                    elseif ($fromLog) { 'accepted from log' }
                    else { 'all pass' }
+    # Issue #123 direction 5: an implementer modified seven files and "returned
+    # nothing at all", and every gate still passed -- because no gate read the
+    # return. This one does.
+    #
+    # It warns instead of blocking, on purpose -- but the reason has changed.
+    # It used to be that `unavailable` conflated "the agent said nothing" with
+    # "the reader could not run", so blocking risked a missing python shutting
+    # down every implementer. #175 split that conflation: `empty` now means the
+    # log was found and the record parsed with no words in it, which no blind
+    # spot can produce. Loop safety used to be the second reason and no longer
+    # is -- #298 put a guard in front of this hook. What is left is #108: an
+    # agent that returned nothing once is the least likely to return words on a
+    # forced retry, and that retry now runs with EVERY gate skipped, so blocking
+    # buys a wasted round trip and a weaker second pass.
+    $ret = Get-AfSubagentReturn -StdinRaw $stdinRaw -Agent 'implementer' -MainRoot $mainRoot
+    $returnNote = switch ($ret.Status) {
+        'truncated' { ', RETURN TRUNCATED -- the tail was cut by the 5000-char cap, which is where the Gate Summary sits; re-state it in your reply' }
+        'empty' { ', RETURN EMPTY -- your log records this turn but no words in it; the coordinator has no verdict to route on, so state your Gate Summary and file list in your reply' }
+        'unavailable' { ', RETURN UNREADABLE -- no return text could be recovered; state your Gate Summary explicitly so the coordinator is not left guessing' }
+        default { '' }
+    }
+
     $output = @{
-        systemMessage = "implementer:Stop -- Green gate PASS: tests $testsStatus, provenance + python quality verified, linting: $lintStatus"
+        systemMessage = "implementer:Stop -- Green gate PASS: tests $testsStatus, provenance + python quality verified, linting: $lintStatus$returnNote"
     } | ConvertTo-Json -Compress
     Write-Output $output
     exit 0

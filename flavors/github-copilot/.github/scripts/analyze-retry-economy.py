@@ -24,6 +24,9 @@ Exit codes:
     0  report produced, no drift
     1  report produced, drift found (named in the Drift section)
     2  cannot measure at all -- no logs, or no YAML parser
+
+No hook runs this: it answers a question a human asked, at a terminal, about a
+corpus that already exists (af-caller-ok).
 """
 
 from __future__ import annotations
@@ -105,7 +108,7 @@ class Economy:
         agents = [str(s.get("agent", "?")).strip() for s in steps]
         verdicts = [_normalise(s.get("verdict")) for s in steps]
 
-        for agent, verdict, raw in zip(agents, verdicts, (s.get("verdict") for s in steps)):
+        for agent, verdict, raw in zip(agents, verdicts, (s.get("verdict") for s in steps), strict=True):
             self.steps[agent] += 1
             self.workflows_seen[agent].add(workflow)
             if verdict and verdict not in CANONICAL:
@@ -116,7 +119,7 @@ class Economy:
         retries = escalations = 0
         runs: dict[str, int] = {}
         last_index: dict[str, int] = {}
-        for index, (agent, verdict) in enumerate(zip(agents, verdicts)):
+        for index, (agent, verdict) in enumerate(zip(agents, verdicts, strict=True)):
             if verdict == "ESCALATE":
                 escalations += 1
                 self.escalations[agent] += 1

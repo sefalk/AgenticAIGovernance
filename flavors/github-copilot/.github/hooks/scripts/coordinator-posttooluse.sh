@@ -18,8 +18,12 @@ set -euo pipefail
 SRC_DIR=$(af_conf_get SRC_DIR src)
 
 RAW=$(cat)
-# `A && B && exit` returns 1 when A is false, which under `set -e` aborts the
-# hook instead of falling through. Explicit `if` blocks do not.
+# Explicit `if`, not `[ -z "$X" ] && echo '{}' && exit 0`. Measured on bash
+# 5.2.37: that list does NOT abort under `set -e` -- the failing test is not the
+# command after the final `&&`, so the exception applies and the script falls
+# through as intended. What it does do is leave $? = 1 when the guard does not
+# fire, which becomes the hook's exit status if the list is ever the last
+# statement, and it hides the control flow. The `if` form has neither problem.
 if [ -z "$RAW" ]; then echo '{}'; exit 0; fi
 if [ -z "$AF_PYTHON" ]; then echo '{}'; exit 0; fi
 
@@ -44,13 +48,15 @@ esac
 # dirty, so only what appeared since is attributable to this call (#172).
 # No baseline means no evidence -- and a guard that accuses without evidence is
 # the defect this replaced, so it stays silent instead.
-GIT_DIR_ABS=$(git rev-parse --absolute-git-dir 2>/dev/null || true)
+# -C AF_CODE_ROOT, never the cwd: PreToolUse anchors the snapshot there, and a
+# hook runs from wherever the agent sits (issue #54).
+GIT_DIR_ABS=$(git -C "$AF_CODE_ROOT" rev-parse --absolute-git-dir 2>/dev/null || true)
 if [ -z "$GIT_DIR_ABS" ] || [ ! -d "$GIT_DIR_ABS" ]; then echo '{}'; exit 0; fi
 SNAPSHOT="${GIT_DIR_ABS}/af-delegation.snapshot"
 if [ ! -f "$SNAPSHOT" ]; then echo '{}'; exit 0; fi
 
 # Check for modified/new files in source directories
-STATUS=$(git status --porcelain -- "${SRC_DIR}/" tests/ 2>/dev/null || true)
+STATUS=$(git -C "$AF_CODE_ROOT" status --porcelain -- "${SRC_DIR}/" tests/ 2>/dev/null || true)
 if [ -z "$STATUS" ]; then rm -f "$SNAPSHOT"; echo '{}'; exit 0; fi
 
 # Keep only entries the baseline did not already contain. Comparing the whole

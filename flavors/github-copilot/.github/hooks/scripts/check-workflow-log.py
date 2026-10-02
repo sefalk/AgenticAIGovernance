@@ -15,6 +15,14 @@ VOCABULARY is a choice the documenter makes and can correct, so it is
 reported as a violation: `status` must be one of the schema's values and a step
 `verdict` must be in the MANIFEST closed set or explicitly absent.
 
+REPRESENTATION is nobody's choice: `started:` and `completed:` are stamped by
+two producers inside `documenter-stop`, and they drifted apart (issue #240).
+One carried the committer's local offset and the other was UTC, each valid ISO
+8601 on its own, so the pair was only wrong when read together -- a consumer
+subtracting them saw a workflow that finished 66 minutes before it began. The
+rule compares the two designators against each other rather than demanding
+`Z`, so a consistently stamped historical log is not retroactively rejected.
+
 COUNTERS are not a choice. `summary.retries` and `summary.escalations` are
 mechanically derivable from `steps`, which is exactly what
 `scripts/analyze-retry-economy.py` does when it reads a corpus. Asking a
@@ -28,6 +36,22 @@ declared zero fabricated data).
 The retry definition here MUST match `analyze-retry-economy.py`: an agent
 appearing more than once in one `steps` list. Two tools disagreeing about what
 a retry is would be worse than neither existing.
+
+`af_version` is the COUNTERS argument applied to a field that is not a number.
+It is a transcription of `.github/.af-version`, which the hook can read itself,
+and across 68 logs 23 carried no value while 7 carried something that was not a
+version -- `n/a`, `not measured`, and in one case the instruction "read from
+.github/.af-version" written into the field verbatim (issue #309).
+`documenter-stop` now stamps it; the rule here constrains the value to a
+semantic version or an explicit absence, so a producer that stops working
+becomes visible instead of silently reverting to prose.
+
+So must the escalation definition. The analyser reads parsed YAML and asks
+`if doc.get("escalation")`, where `escalation: null` is falsy and so is not an
+escalation. A line scanner has to reach the same answer without a parser, which
+means asking whether the section carries nested content -- not whether it
+carries more than one line, because the blank line after a denial makes every
+denial two lines long.
 
 Stdlib only, on purpose -- a gate that needs `pip install` stops being run.
 The structural rules are checked by a line scanner rather than a YAML parser,
@@ -63,12 +87,22 @@ STATUS_VALUES = ("COMPLETED", "FAILED", "ESCALATED")
 # MANIFEST § 13, Inter-Agent Contracts -> Verdict Format.
 VERDICT_VALUES = ("APPROVED", "REJECTED", "ESCALATE", "RESOLVED", "COMPROMISE")
 
-# A step that was not reviewed says so. These are absence, not vocabulary.
-VERDICT_ABSENT = ("", "NULL", "NONE", "~")
+# How a log says a field has no value. A step that was not reviewed says so,
+# and so does a workflow whose `completed:` was never stamped.
+ABSENT = ("", "NULL", "NONE", "~")
 
 KEY = re.compile(r"^(?P<indent>\s*)(?:-\s+)?(?P<key>[A-Za-z_][\w-]*)\s*:(?P<rest>.*)$")
 LIST_ITEM = re.compile(r"^(?P<indent>\s*)-\s")
 BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*\s*$")
+NESTED = re.compile(r"^\s+\S")
+ZONE = re.compile(r"(?P<zone>Z|[+-]\d{2}:?\d{2})$")
+SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
+
+
+def _zone(value: str) -> str:
+    """The timezone designator a timestamp ends with, or `none` if it carries none."""
+    match = ZONE.search(value.strip())
+    return match.group("zone") if match else "none"
 
 
 def _value(rest: str) -> str:
@@ -131,6 +165,23 @@ def _keys(block: list[tuple[int, str]], name: str) -> list[tuple[int, str]]:
     return found
 
 
+def _populated(block: list[tuple[int, str]]) -> bool:
+    """Whether a section says anything beyond its own header.
+
+    `escalation: null` is how a log states that nothing was escalated, and a
+    section is never one line long -- the blank line that follows it belongs to
+    it. Counting lines therefore reads the denial as the event. Only nested
+    content is content; a comment appended by a Stop hook is not.
+    """
+    for _, line in block[1:]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if NESTED.match(line):
+            return True
+    return False
+
+
 def _step_agents(steps: list[tuple[int, str]]) -> list[str]:
     return [value for _, value in _keys(steps, "agent")]
 
@@ -150,7 +201,7 @@ def _derive(sections: dict[str, list[tuple[int, str]]]) -> tuple[int, int]:
     # verdict for -- a deferral to a human reads as prose, not as ESCALATE. The
     # two kinds are conflated here rather than one of them being lost, and the
     # analyser conflates them identically so the tools cannot disagree.
-    if len(sections.get("escalation", [])) > 1:
+    if _populated(sections.get("escalation", [])):
         escalations = max(escalations, 1)
     return retries, escalations
 
@@ -196,13 +247,66 @@ def _findings(text: str) -> tuple[list[str], list[str]]:
 
     for number, value in _keys(steps, "verdict"):
         upper = value.strip().upper()
-        if upper in VERDICT_ABSENT:
+        if upper in ABSENT:
             continue
         # `APPROVED (Attempt 2)` is the verdict with a note; `APPROVED-WITH-ISSUES`
         # is a different word. analyze-retry-economy.py draws the line here too.
         if not any(upper == name or upper.startswith((name + " ", name + "(")) for name in VERDICT_VALUES):
             violations.append(
                 f"line {number}: verdict {value!r} is outside the MANIFEST closed set ({'/'.join(VERDICT_VALUES)})"
+            )
+
+    # A count of escalations needs something that escalated. With no ESCALATE
+    # verdict and no populated `escalation:` block, the number rests on nothing
+    # in the file -- which is the shape a fabricated counter takes.
+    for number, value in _keys(sections.get("summary", []), "escalations"):
+        try:
+            stated = int(value.strip())
+        except ValueError:
+            continue
+        if stated <= 0:
+            continue
+        escalated = any(v.strip().upper().startswith("ESCALATE") for _, v in _keys(steps, "verdict"))
+        if not escalated and not _populated(sections.get("escalation", [])):
+            violations.append(
+                f"line {number}: summary.escalations is {stated} with no ESCALATE verdict "
+                "and no populated `escalation:` block -- nothing in the file escalated"
+            )
+
+    # `started:` and `completed:` are stamped by two producers in documenter-stop.
+    # One carried the committer's local offset while the other was UTC, so both
+    # were individually valid and a reader subtracting them got a workflow that
+    # finished 66 minutes before it began (issue #240). Comparing the two rather
+    # than demanding `Z` keeps a consistently-stamped historical log passing.
+    stamps: list[tuple[str, int, str]] = []
+    for name in ("started", "completed"):
+        found = _keys(sections.get(name, []), name)
+        if found:
+            number, value = found[0]
+            if value.strip().upper() not in ABSENT:
+                stamps.append((name, number, value))
+    if len(stamps) == 2 and len({_zone(value) for _, _, value in stamps}) > 1:
+        detail = " vs ".join(f"{name} {value!r}" for name, _, value in stamps)
+        violations.append(
+            f"line {stamps[1][1]}: {detail} -- the two timestamps are expressed against "
+            "different references, so any consumer subtracting them is wrong; both must be UTC (`Z`)"
+        )
+
+    # `af_version` is stamped by documenter-stop from `.github/.af-version`, so a
+    # value that is not a version means it was written by hand -- which is how the
+    # field came to hold `n/a` and the instruction itself (issue #309). A missing
+    # key is left alone: this check runs before the stamp, and the stamp supplies
+    # one either way.
+    version = _keys(sections.get("af_version", []), "af_version")
+    if version:
+        number, value = version[0]
+        stated = value.strip()
+        if stated.upper() not in ABSENT and not SEMVER.match(stated):
+            shown = stated if len(stated) <= 60 else stated[:57] + "..."
+            violations.append(
+                f"line {number}: af_version {shown!r} is not a version -- the field is stamped by "
+                "your Stop hook from `.github/.af-version`, so do not write it; remove the line, "
+                "and put anything you want to say about the version in `af_version_note:`"
             )
 
     return violations, unchecked
@@ -254,11 +358,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{TAG} CANNOT CHECK -- {path}: {exc}")
         return 2
 
-    violations, unchecked = _findings(text)
-
+    # Repair first, then judge what the file now says. Checking the stale text
+    # would report a contradiction this same run has already removed.
     if args.fix_counters:
         for note in _rewrite_counters(path, text):
             print(f"{TAG} derived {note}")
+        text = path.read_text(encoding="utf-8", errors="replace")
+
+    violations, unchecked = _findings(text)
 
     for note in unchecked:
         print(f"{TAG} NOT CHECKED -- {note}")

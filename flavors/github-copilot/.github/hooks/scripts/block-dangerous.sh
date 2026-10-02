@@ -35,22 +35,109 @@ PYTHON="$AF_PYTHON"
 
 raw=$(cat)
 
-if [ -z "$PYTHON" ]; then
+# create_and_run_task and run_task are the names VS Code actually sends; the
+# camelCase spellings never occur in a captured payload and are kept only so a
+# rename upstream degrades to a stale alias rather than to an inert gate.
+# The code-execution tools are gated as a class, not for what they run but for
+# what they are: a second way to reach a subprocess. Issue #138 recorded a
+# subagent denied in the terminal re-running the same CLI call through the
+# Pylance snippet tool, and this hook allowing it -- not because it was
+# misconfigured, but because it looked at the tool name, matched nothing, and
+# printed `{}`, which is consent. A gate whose set is an allowlist grants
+# everything it forgot to name.
+bd_is_exec_surface() {
+    case "$1" in
+        *runCodeSnippet*|*RunCodeSnippet*) return 0 ;;
+        *run_notebook_cell*|*runNotebookCell*) return 0 ;;
+        *run_playwright_code*|*browser_run_code*|*browser_evaluate*) return 0 ;;
+        *run_vscode_command*|*runVsCodeCommand*) return 0 ;;
+    esac
+    return 1
+}
+
+bd_is_gated_tool() {
+    case "$1" in
+        *terminal*|*Terminal*) return 0 ;;
+        create_and_run_task|createAndRunTask) return 0 ;;
+        run_task|runTask) return 0 ;;
+        *wit_work_item_write) return 0 ;;
+    esac
+    bd_is_exec_surface "$1" && return 0
+    return 1
+}
+
+# No interpreter means this hook cannot read the command it exists to
+# classify, so it refuses the calls it gates rather than emitting the same
+# bytes as consent (issue #251). Calls it never judges stay allowed.
+af_require_python "$raw" bd_is_gated_tool "dangerous-command"
+
+tool_name=$(echo "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_name',''))" 2>/dev/null)
+
+if ! bd_is_gated_tool "$tool_name"; then
     echo '{}'
     exit 0
 fi
 
-tool_name=$(echo "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_name',''))" 2>/dev/null)
-
-# create_and_run_task and run_task are the names VS Code actually sends; the
-# camelCase spellings never occur in a captured payload and are kept only so a
-# rename upstream degrades to a stale alias rather than to an inert gate.
+# Ownership of created ADO work items (#36); the check lives in the shared core.
 case "$tool_name" in
-    *terminal*|*Terminal*) ;;
-    create_and_run_task|createAndRunTask) ;;
-    run_task|runTask) ;;
-    *) echo '{}'; exit 0 ;;
+    *wit_work_item_write)
+        _bd_conf=""
+        [ "$AF_CONF_FOUND" = 1 ] && _bd_conf="$AF_CONF"
+        if [ ! -f "$AF_SCRIPT_DIR/work-item-owner.py" ]; then
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Policy hard-deny: work-item-owner.py is missing, so the gate cannot check that the item gets an owner (#36). Redeploy the framework payload."}}\n'
+            exit 0
+        fi
+        printf '%s' "$raw" | AF_CONF_RESOLVED="$_bd_conf" "$PYTHON" "$AF_SCRIPT_DIR/work-item-owner.py"
+        exit 0
+        ;;
 esac
+
+# --- Execution-surface switch (issue #138) ---------------------------------
+# Deliberately not a re-classification of the snippet. Reconstructing the
+# command a program will eventually assemble means guessing, and a gate that
+# guesses is worse than none -- it produces the appearance of coverage. What is
+# decidable is whether the snippet reaches for a subprocess at all, and on
+# these tools that is never legitimate: a gated terminal is available for
+# exactly that. So the rule removes a bypass rather than a capability.
+#
+# Strings are collected recursively because the field holding the code differs
+# per tool (`code`, `snippet`, `cell`, ...) and enumerating them is the same
+# allowlist mistake one level down. POSIX classes only, no \s -- see #281.
+if bd_is_exec_surface "$tool_name"; then
+    exec_payload=$(echo "$raw" | "$PYTHON" -c "
+import sys, json
+out = []
+def walk(v):
+    if isinstance(v, str):
+        out.append(v)
+    elif isinstance(v, dict):
+        for x in v.values():
+            walk(x)
+    elif isinstance(v, list):
+        for x in v:
+            walk(x)
+walk(json.load(sys.stdin).get('tool_input', {}))
+print('\n'.join(out))
+" 2>/dev/null)
+
+    spawn_pat='subprocess|os\.(system|popen|exec|spawn)|Popen|pty\.spawn|child_process|Start-Process|Invoke-Expression|%%(bash|sh)|%system|%sx'
+    spawn_hit=""
+    if printf '%s\n' "$exec_payload" | grep -qEi "$spawn_pat"; then
+        spawn_hit=$(printf '%s\n' "$exec_payload" | grep -oEi "$spawn_pat" | head -n 1)
+    elif printf '%s\n' "$exec_payload" | grep -qE '^[[:space:]]*!'; then
+        spawn_hit="notebook shell escape"
+    fi
+
+    if [ -n "$spawn_hit" ]; then
+        reason="Policy hard-deny: a code-execution tool may not spawn a process. This payload reaches for one ($spawn_hit) on $tool_name, which is not the surface this hook classifies commands on. Run it in the terminal instead, where it is classified. If the terminal already denied it, that denial stands -- report BLOCKED and escalate. Looking for another route is itself the finding (issue #138)."
+        reason=$(af_json_escape "$reason")
+        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$reason"
+        exit 0
+    fi
+
+    echo '{}'
+    exit 0
+fi
 
 if [ "$tool_name" = "createAndRunTask" ] || [ "$tool_name" = "create_and_run_task" ]; then
     # ------------------------------------------------------------------
@@ -72,7 +159,7 @@ if [ "$tool_name" = "createAndRunTask" ] || [ "$tool_name" = "create_and_run_tas
         # interpolation would emit \s, an invalid JSON escape, and an
         # unparsable verdict reads exactly like no verdict at all.
         local reason
-        reason=$(printf '%s' "$2" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\r' | tr '\n' ' ')
+        reason=$(af_json_escape "$2")
         printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$1" "$reason"
         exit 0
     }
@@ -290,7 +377,7 @@ emit() {
     # JSON, and an unparsable verdict is indistinguishable from no verdict --
     # the gate would disarm itself precisely when it had something to say.
     local reason
-    reason=$(printf '%s' "$2" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\r' | tr '\n' ' ')
+    reason=$(af_json_escape "$2")
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$1" "$reason"
     exit 0
 }
