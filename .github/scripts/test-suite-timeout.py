@@ -31,8 +31,10 @@ Usage:
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -66,6 +68,45 @@ def job_cap_seconds(text: str) -> int | None:
     return min(caps) * 60 if caps else None
 
 
+def run_fixture_suite(sleep_seconds: int, budget_seconds: int) -> tuple[int, str]:
+    """Run a copy of the runner whose only suite sleeps for ``sleep_seconds``.
+
+    The subject used to be the real ``test-curation-consistency.ps1`` with a
+    one-second budget, on the reasoning that it "takes about three seconds".
+    It does locally; on the faster CI runner it finished inside the second, so
+    nothing was killed and the control failed with ``exit=0 killed=False`` --
+    twice, never reproducibly on a workstation. A control whose verdict depends
+    on the machine's speed is a race, so the subject is now a fixture whose
+    duration is set here, and the runner is copied next to it so discovery
+    finds that fixture and nothing else.
+    """
+    with tempfile.TemporaryDirectory(prefix="af-timeout-control-") as tmp:
+        scripts = Path(tmp)
+        shutil.copy2(RUNNER, scripts / RUNNER.name)
+        (scripts / "test-fixture-sleeps.ps1").write_text(
+            f"Start-Sleep -Seconds {sleep_seconds}\nWrite-Host 'fixture finished'\nexit 0\n",
+            encoding="utf-8",
+        )
+        proc = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(scripts / RUNNER.name),
+                "-TimeoutSeconds",
+                str(budget_seconds),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=tmp,
+            check=False,
+        )
+    return proc.returncode, proc.stdout + proc.stderr
+
+
 def timeout_still_fires() -> tuple[bool, str]:
     """Drive the runner with a one-second budget and confirm it kills the suite.
 
@@ -73,32 +114,21 @@ def timeout_still_fires() -> tuple[bool, str]:
     the number without asserting the behaviour would leave a runner that never
     kills anything looking exactly like a correct one, and the difference would
     surface as a CI job that hangs to its own cap with no suite named.
-
-    The subject is a suite that takes about three seconds, so the kill is not a
-    race, and it touches nothing outside its own temporary files.
     """
-    proc = subprocess.run(
-        [
-            "powershell",
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(RUNNER),
-            "-Filter",
-            "curation-consistency",
-            "-TimeoutSeconds",
-            "1",
-        ],
-        capture_output=True,
-        text=True,
-        cwd=str(REPO),
-        check=False,
-    )
-    out = proc.stdout + proc.stderr
+    code, out = run_fixture_suite(sleep_seconds=60, budget_seconds=1)
     killed = "TIMEOUT" in out and "was killed" in out
-    return killed and proc.returncode == 1, f"exit={proc.returncode} killed={killed}"
+    return killed and code == 1, f"exit={code} killed={killed}"
+
+
+def timeout_spares_a_suite_inside_the_budget() -> tuple[bool, str]:
+    """The same fixture, finishing well inside its budget, must pass.
+
+    Without this, a runner that reports TIMEOUT for every suite would satisfy
+    the kill control above.
+    """
+    code, out = run_fixture_suite(sleep_seconds=0, budget_seconds=60)
+    killed = "TIMEOUT" in out
+    return (not killed) and code == 0, f"exit={code} killed={killed}"
 
 
 def report(name: str, passed: bool, detail: str) -> int:
@@ -170,6 +200,10 @@ def main() -> int:
     total += 1
     fired, detail = timeout_still_fires()
     failures += report("control_the_timeout_still_kills_a_suite", fired, detail)
+
+    total += 1
+    spared, detail = timeout_spares_a_suite_inside_the_budget()
+    failures += report("control_a_suite_inside_the_budget_is_not_killed", spared, detail)
 
     print(f"=== {total - failures}/{total} passed ===")
     return 1 if failures else 0
