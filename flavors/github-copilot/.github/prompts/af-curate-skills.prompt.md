@@ -191,9 +191,17 @@ For each agent in the assignment map:
 Regenerate `skills/INDEX.md`:
 1. List all active skills (from `skills/*/SKILL.md` frontmatter)
 2. List all available skills (from `skills/_available/*/SKILL.md` frontmatter)
+3. Write each section as a heading, then one table, then its rows. A table
+   header belongs to the rows under it -- an index that opens with a header
+   introducing nothing renders as an empty table and shipped that way for
+   months (#112), because the index was only ever checked for *which* skills
+   it named.
+4. Verify with `python .github/scripts/validate-skills.py`, which checks the
+   listing and the layout.
 
-Update `copilot-instructions.md` Available Skills table to match the new
-active skill set.
+Do not copy the catalogue into `copilot-instructions.md`. `skills/INDEX.md` is
+the only record; agents already receive each skill's name and description from
+the skill files themselves.
 
 ## Step 8: Write State Files
 
@@ -255,6 +263,33 @@ previous_state:
 
 ---
 
+## Step 9: Verify the Records Agree
+
+Curation has just written three records of the same state:
+`curated-assignments.json`, the agent managed regions, and
+`.af-skills-curated` plus `skills/INDEX.md`. Nothing else compares them, so a
+skill dropped from one of them is invisible until an agent silently runs
+without it (#257). Check your own output before reporting success.
+
+Run:
+
+```
+python .github/scripts/check-curation-consistency.py
+```
+
+- **Exit 0 (no output):** the records agree. Report the curation summary.
+- **Exit 1:** the script prints each disagreement by name. These are defects in
+  what you just wrote — correct them and re-run, do not report them to the user
+  as findings.
+- **Script or Python missing:** say so in the summary
+  ("consistency not verified: no Python interpreter"). Do not claim it passed.
+
+A promoted base skill is not a disagreement: when a curated skill already
+exists as a base bullet outside the region, Step 7.3 deliberately drops it from
+both the region and `assignments`. The checker knows this and stays silent.
+
+---
+
 ## Reapply Mode
 
 Deterministic replay of curated skill state after a deploy. No tech-stack
@@ -277,9 +312,10 @@ re-discovery, no user confirmation.
    stale bare curated bullets. Never write curated skills as bare `## Skills`
    bullets.
 5. Regenerate `skills/INDEX.md` from current active/available skill folders.
-6. Update `copilot-instructions.md` Available Skills table.
-7. Print summary: "Reapplied curated skills: {N} activated, {M} deactivated,
+6. Print summary: "Reapplied curated skills: {N} activated, {M} deactivated,
    {K} agent files updated."
+7. Run the **Step 9** consistency check. A reapply exists to restore agreement
+   between the records; ending with them still in disagreement means it failed.
 
 ---
 
@@ -297,6 +333,6 @@ Restore skills to pre-curation state using the sentinel snapshot.
 4. For each agent in `previous_state.agent_skill_assignments`: restore the saved
    assignment into the agent's managed region per the **Managed region write
    protocol** (Step 7). A pre-curation empty assignment leaves the region empty.
-5. Regenerate `skills/INDEX.md` and update `copilot-instructions.md`.
+5. Regenerate `skills/INDEX.md`.
 6. Write updated `skills/curated-assignments.json` reflecting the restored state.
 7. Print summary: "Rolled back to pre-curation state: {details}."

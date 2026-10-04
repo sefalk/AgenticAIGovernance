@@ -170,18 +170,48 @@ echo "=== Test Runner: $TARGET_DISPLAY filter=$FILTER_DISPLAY ==="
 # ---------- Test log (.github/test-log.json) ----------
 TEST_LOG_PATH="$WORKSPACE_ROOT/.github/test-log.json"
 
-# Determine scope key
-if [[ -n "$FILE" ]]; then
-    SCOPE_KEY="file"
-    [[ "$FILE" == *"tests/domain"* ]]     && SCOPE_KEY="domain"
-    [[ "$FILE" == *"tests/adapters"* ]]   && SCOPE_KEY="adapters"
-    [[ "$FILE" == *"tests/properties"* ]] && SCOPE_KEY="properties"
-    [[ "$FILE" == *"tests/contracts"* ]]  && SCOPE_KEY="contracts"
-elif [[ "$SCOPE" == "all" ]]; then
-    SCOPE_KEY="all"
+# A run is PARTIAL when anything narrowed the selection below the scope it
+# would otherwise represent -- a single file, or a -k expression, or both.
+# This is the one place that decides it; the key, the label and the consumer
+# gate all derive from it, so a future narrowing flag needs adding here and in
+# the PowerShell twin, and nowhere else.
+IS_PARTIAL=false
+if [[ -n "$FILE" ]] || [[ -n "$FILTER" ]]; then
+    IS_PARTIAL=true
+fi
+
+# A partial run never writes a scope key. It used to: a --file run was filed
+# under the scope its path happened to sit in, so eleven green tests from one
+# file were indistinguishable from the whole adapters suite passing (#303).
+# All partial runs share ONE key rather than a key per target, to keep the log
+# bounded -- it is a regenerable cache, not a history.
+if [[ "$IS_PARTIAL" == true ]]; then
+    SCOPE_KEY="partial"
 else
     SCOPE_KEY="$SCOPE"
 fi
+
+# What this run actually covered, so a partial entry names its own target
+# instead of leaving the reader to guess.
+if [[ -n "$FILE" ]]; then
+    RUN_TARGET="$FILE"
+elif [[ "$SCOPE" == "all" ]]; then
+    RUN_TARGET="tests"
+else
+    RUN_TARGET="tests/$SCOPE"
+fi
+
+json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+RUN_TARGET_J="$(json_escape "$RUN_TARGET")"
+if [[ -n "$FILTER" ]]; then
+    RUN_SELECTOR_J="\"$(json_escape "$FILTER")\""
+else
+    RUN_SELECTOR_J="null"
+fi
+# `partial` is written on every entry, including false on a full run: a
+# consumer must be able to REQUIRE completeness, not infer it from a missing
+# field, because every log written before #303 also lacks the field.
+LABEL_FIELDS="\"partial\":$IS_PARTIAL,\"target\":\"$RUN_TARGET_J\",\"selector\":$RUN_SELECTOR_J"
 
 # Merge one entry into the existing log (or create it) — pure bash, no python
 # NOTE: The sed extraction below assumes test-log.json has a FLAT structure:
@@ -189,13 +219,15 @@ fi
 # Constraints for correctness:
 #   1. Each scope value must be a single-level object (no nested braces).
 #   2. The greedy .* in sed patterns matches the LAST occurrence of each key.
-#      This is safe because the known scope names (domain, adapters, properties,
-#      contracts, all, file) do not appear as substrings in value fields.
+#      This is safe because the known key names (domain, adapters, properties,
+#      contracts, all, partial) are only matched when followed by `: {`, which
+#      no string value produces -- `"target": "tests/domain"` does not match
+#      the domain pattern.
 # If the schema gains nested objects, dynamic keys, or scope names in values,
 # replace this with jq or python.
 write_log_entry() {
     local _key="$1" _entry="$2"
-    local d_domain="" d_adapters="" d_properties="" d_contracts="" d_all="" d_file=""
+    local d_domain="" d_adapters="" d_properties="" d_contracts="" d_all="" d_partial=""
     local _flat _first _scope _val
     if [[ -f "$TEST_LOG_PATH" ]]; then
         _flat=$(tr -d '\n\r' < "$TEST_LOG_PATH" | tr -s ' ')
@@ -204,7 +236,7 @@ write_log_entry() {
         d_properties=$(echo "$_flat" | sed -n 's/.*"properties" *: *\({[^}]*}\).*/\1/p')
         d_contracts=$(echo "$_flat" | sed -n 's/.*"contracts" *: *\({[^}]*}\).*/\1/p')
         d_all=$(echo "$_flat" | sed -n 's/.*"all" *: *\({[^}]*}\).*/\1/p')
-        d_file=$(echo "$_flat" | sed -n 's/.*"file" *: *\({[^}]*}\).*/\1/p')
+        d_partial=$(echo "$_flat" | sed -n 's/.*"partial" *: *\({[^}]*}\).*/\1/p')
     fi
 
     case "$_key" in
@@ -213,20 +245,20 @@ write_log_entry() {
         properties) d_properties="$_entry" ;;
         contracts)  d_contracts="$_entry" ;;
         all)        d_all="$_entry" ;;
-        file)       d_file="$_entry" ;;
+        partial)    d_partial="$_entry" ;;
     esac
 
     {
         printf '{\n'
         _first=true
-        for _scope in domain adapters properties contracts all file; do
+        for _scope in domain adapters properties contracts all partial; do
             case "$_scope" in
                 domain)     _val="$d_domain" ;;
                 adapters)   _val="$d_adapters" ;;
                 properties) _val="$d_properties" ;;
                 contracts)  _val="$d_contracts" ;;
                 all)        _val="$d_all" ;;
-                file)       _val="$d_file" ;;
+                partial)    _val="$d_partial" ;;
             esac
             if [[ -n "$_val" ]]; then
                 $_first || printf ',\n'
@@ -249,7 +281,7 @@ write_log_entry() {
 # Counters are null, never 0, for the same reason the runner-failure path uses
 # null: "0 failed" is indistinguishable from a clean green run.
 STARTED=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-write_log_entry "$SCOPE_KEY" "{\"last_run\":\"$STARTED\",\"started\":\"$STARTED\",\"passed\":null,\"failed\":null,\"errors\":null,\"total\":null,\"runtime_seconds\":null,\"run_by\":\"run-tests.sh\",\"exit_code\":null,\"coverage_percent\":null,\"status\":\"running\"}"
+write_log_entry "$SCOPE_KEY" "{\"last_run\":\"$STARTED\",\"started\":\"$STARTED\",\"passed\":null,\"failed\":null,\"errors\":null,\"total\":null,\"runtime_seconds\":null,\"run_by\":\"run-tests.sh\",\"exit_code\":null,\"coverage_percent\":null,\"status\":\"running\",$LABEL_FIELDS}"
 
 # Run pytest. stderr is captured to a file rather than discarded: it is noise on
 # a successful run (PySpark), but it is the ONLY diagnosis when the runner itself
@@ -315,12 +347,12 @@ if [[ "$RUNNER_FAILED" == true ]]; then
     # Escape for JSON embedding (backslash, quote, control chars).
     ERR_MSG="$(printf '%s' "$ERR_MSG" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/ /g')"
     ENTRY=$(cat <<ENTRY_EOF
-{"last_run":"$NOW","started":"$STARTED","passed":null,"failed":null,"errors":null,"total":0,"runtime_seconds":0,"run_by":"run-tests.sh","exit_code":$PYTEST_EXIT,"coverage_percent":null,"status":"error","error_message":"$ERR_MSG"}
+{"last_run":"$NOW","started":"$STARTED","passed":null,"failed":null,"errors":null,"total":0,"runtime_seconds":0,"run_by":"run-tests.sh","exit_code":$PYTEST_EXIT,"coverage_percent":null,"status":"error","error_message":"$ERR_MSG",$LABEL_FIELDS}
 ENTRY_EOF
 )
 else
     ENTRY=$(cat <<ENTRY_EOF
-{"last_run":"$NOW","started":"$STARTED","passed":$PASSED,"failed":$FAILED,"errors":$ERRORS,"total":$TOTAL,"runtime_seconds":$RUNTIME,"run_by":"run-tests.sh","exit_code":$PYTEST_EXIT,"coverage_percent":$COV_PCT,"status":"ok"}
+{"last_run":"$NOW","started":"$STARTED","passed":$PASSED,"failed":$FAILED,"errors":$ERRORS,"total":$TOTAL,"runtime_seconds":$RUNTIME,"run_by":"run-tests.sh","exit_code":$PYTEST_EXIT,"coverage_percent":$COV_PCT,"status":"ok",$LABEL_FIELDS}
 ENTRY_EOF
 )
 fi

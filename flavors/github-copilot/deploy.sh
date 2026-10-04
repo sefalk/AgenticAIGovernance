@@ -137,13 +137,20 @@ resolve_backup_prune_days() {
     echo "$default_days"
 }
 
+target_is_git_repo() {
+    local repo_dir="$1"
+    command -v git >/dev/null 2>&1 || return 1
+    git -C "$repo_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
 get_current_git_branch() {
     local repo_dir="$1"
     if ! command -v git >/dev/null 2>&1; then
         echo ""
         return
     fi
-    git -C "$repo_dir" branch --show-current 2>/dev/null | tr -d '[:space:]'
+    # Outside a repo this exits 128, which `set -e` turned into a silent abort (#244).
+    git -C "$repo_dir" branch --show-current 2>/dev/null | tr -d '[:space:]' || true
 }
 
 # ── Read versions ──────────────────────────────────────────────────────────
@@ -1041,9 +1048,14 @@ if [[ "$BACKUP_PRUNE_DAYS" -gt 0 ]]; then
 else
     echo "  Backup prune: disabled"
 fi
-CURRENT_BRANCH="$(get_current_git_branch "$TARGET_DIR")"
-if [[ "$CURRENT_BRANCH" == agent/* ]]; then
-    echo "  WARNING: Target repo is on '$CURRENT_BRANCH'. Prefer running framework rollouts on dev/main."
+if target_is_git_repo "$TARGET_DIR"; then
+    CURRENT_BRANCH="$(get_current_git_branch "$TARGET_DIR")"
+    if [[ "$CURRENT_BRANCH" == agent/* ]]; then
+        echo "  WARNING: Target repo is on '$CURRENT_BRANCH'. Prefer running framework rollouts on dev/main."
+    fi
+else
+    CURRENT_BRANCH=""
+    echo "  Note: Target is not a git repository -- branch checks skipped."
 fi
 if [[ "$DRY_RUN" == "true" ]]; then
     echo "  [DRY RUN — no changes will be made]"
@@ -1155,15 +1167,51 @@ if [[ "$DRY_RUN" == "true" ]]; then
     echo "  [DRY RUN — no files were changed. Remove --dry-run to apply.]"
 fi
 
-# ── Curated skills reminder ────────────────────────────────────────────────
-# If the project has a curated-assignments.json, remind the user to reapply
-# curated skill state after deploy (agent sections, activated/deactivated folders).
+# ── Curated skills consistency ─────────────────────────────────────────────
+# Curated state lives in three records (curated-assignments.json, the agent
+# regions, .af-skills-curated/INDEX.md) and nothing used to compare them, so a
+# lost assignment was silent (#257). Report the actual disagreement; say
+# nothing when they agree. Advisory only -- never fails the deploy.
 curated_json="$TARGET_GITHUB/skills/curated-assignments.json"
 if [[ -f "$curated_json" ]]; then
-    echo ""
-    echo "  Post-deploy step: curated skills detected."
-    echo "  A deploy overwrites AF-owned files (agents) and resets curated skill assignments."
-    echo "  -> Run /af-curate-skills --reapply to restore them (the MCP af_deploy prompt does this automatically)."
+    curation_probe="$SOURCE_GITHUB/scripts/check-curation-consistency.py"
+    python_bin=""
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            python_bin="$candidate"
+            break
+        fi
+    done
+
+    if [[ -f "$curation_probe" && -n "$python_bin" ]]; then
+        curation_out="$("$python_bin" "$curation_probe" --project-dir "$TARGET_DIR" --brief 2>&1 || true)"
+        if [[ -n "$curation_out" ]]; then
+            echo ""
+            echo "$curation_out"
+        fi
+    else
+        # No Python: fall back to the reminder, minus the claim that a deploy
+        # resets assignments -- managed regions made that false.
+        echo ""
+        echo "  Curated skills detected; consistency was not checked (no Python interpreter)."
+        echo "  -> Run /af-curate-skills --reapply if agent skill sections look wrong."
+    fi
+fi
+
+# ── Cost tracking source ───────────────────────────────────────────────────
+# A workflow log records `cost: available: false` when VS Code's agent debug
+# log is off, and that file is not one anybody opens unprompted. A deploy is
+# the one moment an existing consumer is already reading framework output, and
+# it is the only channel that reaches installs predating the setting -- the
+# .vscode/settings.json that would carry the key is PRESERVE'd on update.
+# Advisory only: never fatal, never gating (issue #228).
+cost_probe="$SOURCE_GITHUB/scripts/check-cost-source.sh"
+if [[ -f "$cost_probe" ]]; then
+    cost_output=$(bash "$cost_probe" --brief 2>/dev/null)
+    if [[ -n "$cost_output" ]]; then
+        echo ""
+        echo "$cost_output"
+    fi
 fi
 
 # Prune stale backups from previous deploy runs

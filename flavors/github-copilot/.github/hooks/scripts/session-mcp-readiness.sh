@@ -125,7 +125,7 @@ fi
 
 # Backslashes first -- escaping quotes before backslashes would re-escape the
 # backslash this step just introduced.
-msg_escaped=$(printf '%s' "$msg" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+msg_escaped=$(af_json_escape "$msg")
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$msg_escaped"
 
 exit 0

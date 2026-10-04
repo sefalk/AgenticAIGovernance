@@ -39,6 +39,16 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      # First, not later: the declaration gates below invoke
+      # .github/scripts/match-local-check.ps1 out of the workspace. They ran
+      # ahead of the checkout while their matching was inline PowerShell, and
+      # extracting it to a script made that placement a CommandNotFoundException
+      # on every hook pull request (#327).
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       # test-hooks-integration.ps1 is excluded from the sweep below because a
       # hosted runner cannot run it. That left the hooks -- the most
       # safety-critical part of the payload -- covered by nothing once the
@@ -49,8 +59,14 @@ jobs:
       # they ran the suite. It cannot prove they did, and nothing built on it
       # may be described as evidence that the hooks were tested. It is worth
       # having because the failure it prevents is forgetting, not lying.
+      #
+      # A dev -> main promotion is exempt: it contains every file the release
+      # cycle touched, so this gate would always fire and the author would
+      # attest to work they did not do in that pull request. A statement
+      # nobody can mean is worse than no statement (#234). The promotion step
+      # further down checks the contributing pull requests instead.
       - name: Require local-check attestation for hook changes
-        if: github.event_name == 'pull_request'
+        if: ${{ github.event_name == 'pull_request' && !(github.base_ref == 'main' && github.head_ref == 'dev') }}
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
@@ -81,18 +97,26 @@ jobs:
             exit 1
           }
 
-          # HTML comments are stripped first. The pull request template carries
-          # the marker line commented out, and a template nobody edited must
-          # not satisfy a check about work somebody did.
-          $body = [regex]::Replace([string]$body, '(?s)<!--.*?-->', '')
+          # Matching lives in match-local-check.ps1, invoked by this gate and
+          # by the promotion check below. It strips HTML comments before it
+          # matches, so the template's commented-out marker still fails (#234),
+          # and it reports an unreadable attestation separately from a missing
+          # one (#313).
+          $matcher = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/match-local-check.ps1'
+          & $matcher -Body ([string]$body) | Out-Null
+          $verdict = $LASTEXITCODE
 
-          if ($body -like "*$marker*") {
+          if ($verdict -eq 0) {
             Write-Host "Attestation present. Recorded, not verified."
             exit 0
           }
 
           Write-Host "Changed under the hooks directory:"
           $hookFiles | ForEach-Object { Write-Host "  $_" }
+          if ($verdict -eq 2) {
+            Write-Host "::error::This pull request changes files under flavors/github-copilot/.github/hooks/. The body has a 'local-check:' line, but not one this gate can read -- most often because the line names the suite in bold, as a link, or inside a fenced code block. Backticks around the filename are fine. Write it as: $marker"
+            exit 1
+          }
           Write-Host "::error::This pull request changes files under flavors/github-copilot/.github/hooks/. test-hooks-integration.ps1 covers them and CI cannot run it. Run it locally, then add this line to the pull request body and re-run this job: $marker"
           exit 1
 
@@ -113,8 +137,10 @@ jobs:
       #
       # It runs even when the step above failed, so that an author learns about
       # both problems in one run rather than in two round trips.
+      #
+      # Exempt on a dev -> main promotion, for the reason given above (#234).
       - name: Require declaration for environment changes
-        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && !(github.base_ref == 'main' && github.head_ref == 'dev') }}
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
@@ -188,10 +214,151 @@ jobs:
           Write-Host "::error::This pull request changes files that govern this repository's own development environment. Add a line to the pull request body saying why, then re-run this job: env-change: <reason>"
           exit 1
 
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      # The two gates above are exempt on a dev -> main promotion, which would
+      # otherwise leave the release the one pull request that declares nothing.
+      # This step is what replaces them: instead of asking the release author
+      # to re-attest work they did not do, it checks that each change actually
+      # arrived through a pull request that carried its own declaration.
+      #
+      # It walks the first-parent chain rather than every commit, because that
+      # chain is exactly the list of things that landed on dev: one entry per
+      # merge, and one entry per direct push. A direct push is the case the
+      # per-feature gates can never see, so it is reported here even though it
+      # is not itself a missing declaration -- it fails only when it carried a
+      # gated path, where a declaration is genuinely absent.
+      #
+      # File lists come from the merge diff, not from the pull request's file
+      # list: what matters is what reached dev, and a pull request can be
+      # edited after it merges.
+      - name: Verify contributing declarations on a promotion
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref == 'dev' }}
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $hookPrefix = 'flavors/github-copilot/.github/hooks/'
+          $envPrefixes = @('.vscode/', '.githooks/', '.github/')
+          $hookMarker = 'local-check: test-hooks-integration.ps1'
+          # The same matcher the per-feature attestation gate uses. Shared so
+          # that the two checks cannot drift into separate notions of what an
+          # attestation looks like, which is how #313 happened.
+          $matcher = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/match-local-check.ps1'
+
+          foreach ($ref in @($env:BASE_SHA, $env:HEAD_SHA)) {
+            git cat-file -e "$ref^{commit}" 2>$null
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "::error::Commit $ref is not present in this checkout, so the promotion cannot be examined. Failing rather than passing on an unanswered question."
+              exit 1
+            }
+          }
+
+          # Unit separator, because a commit subject may contain anything else.
+          $log = git log --first-parent --format="%H%x1f%P%x1f%s" "$env:BASE_SHA..$env:HEAD_SHA"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Could not read the commit range. Failing rather than passing on an unanswered question."
+            exit 1
+          }
+          if (-not $log) {
+            Write-Host "Nothing on dev that is not already on main -- no contributing changes to check."
+            exit 0
+          }
+
+          $bodyCache = @{}
+          function Get-PrBody($number) {
+            if ($bodyCache.ContainsKey($number)) { return $bodyCache[$number] }
+            $raw = gh api "repos/$env:REPO/pulls/$number" --jq '.body'
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "::error::Could not read the body of pull request #$number. Failing rather than passing on an unanswered question."
+              exit 1
+            }
+            # Out-String restores the newlines a native command's line array
+            # loses when cast to a string; without it every line anchor below
+            # matches nothing (measured on #165).
+            $text = $raw | Out-String
+            # The template carries both markers commented out, and a template
+            # nobody edited must not satisfy a check about work somebody did.
+            $text = [regex]::Replace([string]$text, '(?s)<!--.*?-->', '')
+            $bodyCache[$number] = $text
+            return $text
+          }
+
+          $violations = @()
+          $unattributed = @()
+          $checked = 0
+
+          foreach ($line in @($log)) {
+            if (-not $line) { continue }
+            $parts = $line -split [char]31
+            $sha = $parts[0]
+            $subject = $parts[2]
+
+            $files = @(git diff --name-only "$sha^1" $sha)
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "::error::Could not diff $sha against its first parent. Failing rather than passing on an unanswered question."
+              exit 1
+            }
+
+            $hookFiles = @($files | Where-Object { $_ -like "$hookPrefix*" })
+            $envFiles = @($files | Where-Object {
+              $path = $_
+              @($envPrefixes | Where-Object { $path.StartsWith($_) }).Count -gt 0
+            })
+            $gated = $hookFiles.Count -gt 0 -or $envFiles.Count -gt 0
+
+            $match = [regex]::Match($subject, '^Merge pull request #(\d+)')
+            if (-not $match.Success) {
+              $short = $sha.Substring(0, 7)
+              $note = if ($gated) { 'touched a gated path' } else { 'no gated path' }
+              $unattributed += "$short  $note  $subject"
+              if ($gated) {
+                $violations += "$short arrived on dev without a pull request and changed a gated path, so no declaration was ever required for it."
+              }
+              continue
+            }
+
+            if (-not $gated) { continue }
+
+            $number = $match.Groups[1].Value
+            $body = Get-PrBody $number
+            $checked++
+
+            if ($hookFiles.Count -gt 0) {
+              & $matcher -Body $body | Out-Null
+              if ($LASTEXITCODE -ne 0) {
+                $violations += "#$number changed $($hookFiles.Count) file(s) under $hookPrefix without the line '$hookMarker' in its body."
+              }
+            }
+
+            if ($envFiles.Count -gt 0) {
+              $reason = ''
+              foreach ($m in [regex]::Matches($body, '(?m)^[ \t]*env-change:[ \t]*(.*)$')) {
+                $candidate = $m.Groups[1].Value.Trim()
+                if ($candidate.Length -ge 10) { $reason = $candidate; break }
+              }
+              if (-not $reason) {
+                $violations += "#$number changed $($envFiles.Count) environment file(s) without an 'env-change: <reason>' line of at least 10 characters in its body."
+              }
+            }
+          }
+
+          if ($unattributed.Count -gt 0) {
+            Write-Host "Changes that reached dev outside a pull request:"
+            $unattributed | ForEach-Object { Write-Host "  $_" }
+          }
+
+          if ($violations.Count -eq 0) {
+            Write-Host "$checked contributing pull request(s) touched a gated path; each carried its declaration."
+            Write-Host "Declared per feature, not re-declared here."
+            exit 0
+          }
+
+          Write-Host "The declaration is missing on the change itself, not on this release:"
+          $violations | ForEach-Object { Write-Host "  $_" }
+          Write-Host "::error::$($violations.Count) contributing change(s) reached dev without the declaration their paths require. They are named above. A declaration added to this promotion would cover none of them -- see #234."
+          exit 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -211,6 +378,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install ruff==0.16.2 pyyaml
+          python -m pip install -e "flavors/github-copilot/mcp-deploy[dev]"
 
       # Several suites build throwaway git repositories and commit inside them.
       # A fresh runner has no global git identity, so those commits would fail
@@ -231,6 +399,121 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-env-change-gate.py
 
+      # The promotion gate decides whether a release may merge, and it is the
+      # only gate that runs on no ordinary pull request -- so without this it
+      # would first execute on the release it is supposed to protect. The
+      # suite also pins the three gates to the same paths and markers: they
+      # are separate steps that cannot share a variable, and a promotion gate
+      # looking for a marker the feature gate no longer demands would pass
+      # every release while checking nothing.
+      - name: Test the promotion declaration gate
+        shell: powershell
+        run: python .github\scripts\test-promotion-gate.py
+
+      # The attestation gate rejected a correctly attested pull request for a
+      # year's worth of markdown habit before #313 caught it, and it told the
+      # author to add the line they had already written. Both failure modes
+      # are cheap to re-introduce -- the marker's shape is a regex, and the
+      # difference between "absent" and "unreadable" is one exit code -- so
+      # the accepted shapes are pinned here rather than rediscovered on a
+      # release.
+      - name: Test the local-check attestation marker
+        shell: powershell
+        run: python .github\scripts\test-local-check-marker.py
+
+      # The per-suite timeout is declared in run-all-tests.ps1 and nowhere
+      # else. It used to be declared here as well, at a different value, which
+      # is how a 691-second suite passed in CI and reported FAILED on a laptop
+      # against the same tree (#333). Re-introducing the drift costs one flag,
+      # so the agreement is asserted rather than remembered.
+      - name: Test the per-suite timeout single source
+        shell: powershell
+        run: python .github\scripts\test-suite-timeout.py
+
+      # The always-on payload is read on every chat request in every project,
+      # so a record copied into it is paid for forever. #126 shipped a skills
+      # table under a line declaring another file canonical, and four prompts
+      # instructed agents to write it -- deleting the copy would not have kept
+      # it gone. The property is asserted rather than the instance, because
+      # the next duplicate will be a different record.
+      - name: Test the always-on restatement guard
+        shell: powershell
+        run: python .github\scripts\test-always-on-restatement.py
+
+      # check-issue-drift.py is a reporting tool, not a gate: it never fails a
+      # build and never changes issue state. Its suite runs here for the same
+      # reason as the one above -- CI's own machinery is otherwise a shipped
+      # script nobody executes, and a classifier that silently stops matching
+      # would leave the drift it detects invisible again (#231).
+      - name: Test the issue drift detector
+        shell: powershell
+        run: python .github\scripts\test-issue-drift.py
+
+      # .githooks/pre-commit is this repository's own hook, so the payload
+      # sweep never reaches it either. Its formatting gate is the local half of
+      # the CI check below, and a gate that blocks a commit has to be exercised
+      # in both directions before it is trusted with anyone's working tree.
+      - name: Test the pre-commit formatting gate
+        shell: powershell
+        run: python .github\scripts\test-precommit-format-gate.py
+
+      # The delivery paths are a skill, not prose, precisely so that they can be
+      # checked (#236). This asserts every path still ends in a verification, that
+      # the hotfix path still names the checkout trap, that the release cut still
+      # rebuilds the wheel, and that the staleness states the skill tells readers
+      # to trust still exist in deploy_core. A fifth path added without a
+      # verification fails here instead of shipping.
+      - name: Test the deployment skill contract
+        shell: powershell
+        run: python .github\scripts\test-deployment-skill.py
+
+      # The framework mandated a transition to `Resolved`, the ADO `Task` type
+      # has no such state, and nothing could notice -- items were unclosable by
+      # construction while the gate that caused it read as correct prose
+      # (#267). The contract is now a role resolved from the type via
+      # `get_type`. This fails when a transition names a state again, when the
+      # guard loses one of its paths, or when the skill and the agent drift
+      # apart on what the target is.
+      - name: Test the work-item state contract
+        shell: powershell
+        run: python .github\scripts\test-ado-work-item-states.py
+
+      # `validate-skills.py` checked that INDEX.md listed the right skills and
+      # never what it looked like, so a duplicated table header shipped inside
+      # the payload and was copied into every new project (#112). Worse,
+      # nothing ran that validator in CI at all -- it was reachable only by
+      # invoking `/af-validate-framework` by hand. This runs it against the
+      # shipped payload, feeds its new layout check a known-bad index so an
+      # emptied check cannot pass as a clean one, and asserts the same
+      # property over the payload's other records.
+      - name: Test the skill index layout
+        shell: powershell
+        run: python .github\scripts\test-skill-index-layout.py
+
+      # 122 tests over the code that decides whether a consumer project's file
+      # is overwritten, preserved, or flagged -- and until #270 nothing ran
+      # them. The first CI-shaped run found a test that had been failing
+      # unnoticed. The runner script owns the parts that must not live in YAML:
+      # Git's unix tools on PATH (without `awk` the sh-parity tests self-skip
+      # and the suite passes while asserting nothing about deploy.sh), and the
+      # rule that an unexpected skip fails the step.
+      - name: Run the deploy engine test suite
+        shell: powershell
+        run: python .github\scripts\run-deploy-suite.py
+
+      # Naming that suite in the step above fixed one instance. The gap was
+      # structural: suites reach CI either through the run-all-tests.ps1 sweep
+      # or by being named here one at a time, and one fitting neither falls
+      # between them -- #190, then #270. This asserts the property instead, so
+      # a suite added in a new place fails on the pull request that adds it.
+      - name: Check that every suite runs in CI
+        shell: powershell
+        run: python .github\scripts\test-ci-suite-coverage.py
+
+      - name: Check that no step reads the checkout before it runs
+        shell: powershell
+        run: python .github\scripts\test-workflow-checkout-order.py
+
       # #124 made `ruff format` blocking for consumers while the framework's
       # own Python went unformatted (#167). The file list comes from git rather
       # than a hardcoded glob, so a new file is covered the moment it is
@@ -247,6 +530,21 @@ jobs:
           Write-Host "Checking $($files.Count) tracked Python files."
           ruff format --check --no-respect-gitignore @files
 
+      # Formatting was enforced; the lint selection in ruff.toml was not, so
+      # `select = [E, F, W, I, UP, B, SIM]` was a statement of intent that
+      # nothing measured -- #182. Same file list as the step above on purpose:
+      # a second glob would drift away from the first one silently.
+      - name: Lint the framework's own Python
+        shell: powershell
+        run: |
+          $files = git ls-files '*.py'
+          if (-not $files) {
+            Write-Error 'No tracked Python found -- the glob is wrong, not the repository.'
+            exit 1
+          }
+          Write-Host "Linting $($files.Count) tracked Python files."
+          ruff check --no-respect-gitignore @files
+
       # test-hooks-integration.ps1 is excluded on purpose. It does not test the
       # payload: it reads VS Code's own hook log under %APPDATA%\Code\logs to
       # confirm that hooks actually fired during a real agent session on a
@@ -258,5 +556,61 @@ jobs:
         run: |
           .\flavors\github-copilot\.github\scripts\run-all-tests.ps1 `
             -FailOnSkip `
-            -Exclude test-hooks-integration.ps1 `
-            -TimeoutSeconds 1200
+            -Exclude test-hooks-integration.ps1
+
+      # run-all-tests.ps1 sweeps `test-*.ps1` only, so the one suite covering
+      # the shipped bash hooks has never been executed by anything (#190) --
+      # the defect class of #61, in the half of the payload that reading alone
+      # was trusted to verify. Git for Windows puts bash on every Windows
+      # runner; it is simply not on PATH. The suite exits 0 when it finds no
+      # usable interpreter, which here has to fail rather than pass quietly.
+      - name: Run the bash hook suite
+        shell: powershell
+        run: |
+          $bash = 'C:\Program Files\Git\bin\bash.exe'
+          if (-not (Test-Path $bash)) {
+            Write-Error "No bash at $bash -- this step would prove nothing."
+            exit 1
+          }
+          $out = & $bash -c 'bash flavors/github-copilot/.github/scripts/test-hooks.sh 2>&1' | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $out
+          if ($code -ne 0) {
+            Write-Error "The bash hook suite failed (exit $code)."
+            exit 1
+          }
+          if ($out -match 'SKIP:') {
+            Write-Error 'The suite skipped itself, so it asserted nothing.'
+            exit 1
+          }
+          $passed = [regex]::Match($out, 'Passed:\s*(\d+)')
+          if (-not $passed.Success -or [int]$passed.Groups[1].Value -lt 1) {
+            Write-Error 'No passing assertions reported -- the suite ran but proved nothing.'
+            exit 1
+          }
+          Write-Host "Bash hook suite: $($passed.Groups[1].Value) assertions passed."
+
+      # deploy.sh aborted at exit 128 on a target that was not yet a git
+      # repository, while deploy.ps1 handled the same case (#244). Nothing
+      # executed the bash deploy, so the two paths could disagree unobserved.
+      - name: Run the bash deploy non-repo suite
+        shell: powershell
+        run: |
+          $bash = 'C:\Program Files\Git\bin\bash.exe'
+          if (-not (Test-Path $bash)) {
+            Write-Error "No bash at $bash -- this step would prove nothing."
+            exit 1
+          }
+          $out = & $bash -c 'bash flavors/github-copilot/.github/scripts/test-deploy-nonrepo.sh 2>&1' | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $out
+          if ($code -ne 0) {
+            Write-Error "The bash deploy non-repo suite failed (exit $code)."
+            exit 1
+          }
+          $passed = [regex]::Match($out, 'Passed:\s*(\d+)')
+          if (-not $passed.Success -or [int]$passed.Groups[1].Value -lt 1) {
+            Write-Error 'No passing assertions reported -- the suite ran but proved nothing.'
+            exit 1
+          }
+          Write-Host "Bash deploy non-repo suite: $($passed.Groups[1].Value) assertions passed."

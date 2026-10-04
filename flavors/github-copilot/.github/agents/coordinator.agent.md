@@ -40,28 +40,15 @@ agents:
    - researcher
    - compliance-checker
 hooks:
-  SessionStart:
-    - type: command
-      command: 'bash .github/hooks/scripts/session-context.sh'
-      windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\session-context.ps1'
   PreToolUse:
     - type: command
       command: 'bash .github/hooks/scripts/coordinator-pretooluse.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\coordinator-pretooluse.ps1'
-    - type: command
-      command: 'bash .github/hooks/scripts/block-dangerous.sh'
-      windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\block-dangerous.ps1'
   PostToolUse:
     - type: command
       command: 'bash .github/hooks/scripts/coordinator-posttooluse.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\coordinator-posttooluse.ps1'
-    - type: command
-      command: 'bash .github/hooks/scripts/scan-secrets.sh'
-      windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\scan-secrets.ps1'
   Stop:
-    - type: command
-      command: 'bash .github/hooks/scripts/stop-tests.sh'
-      windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\stop-tests.ps1'
     - type: command
       command: 'bash .github/hooks/scripts/coordinator-postmerge.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\coordinator-postmerge.ps1'
@@ -368,6 +355,13 @@ variant: `skills/tdd-orchestration/SKILL.md` § 2.
 
 **After the final commit,** narrate to the human:
 `"All local commits complete on branch agent/{id}. Ready for git push when you are."`
+
+### Framework Delivery
+
+Before any deploy or `af_*` tool — release cut, project upgrade, hotfix into a
+mid-flight project, conflict resolution — read `skills/deployment/SKILL.md`. It
+carries the decision table and the content assertion each path ends in: deploy
+counters and a green suite are both consistent with shipping the wrong bytes.
 
 ### Subagent Context Injection
 

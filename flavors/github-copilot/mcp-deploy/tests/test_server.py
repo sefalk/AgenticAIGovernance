@@ -1,8 +1,9 @@
 """Tests for the MCP tool/prompt wrappers in ``server.py``.
 
-These exercise the thin FastMCP wrappers directly (FastMCP returns the original
-function), covering the ``confirm`` guards, error paths, and payload resolution
-via ``AF_SOURCE_ROOT``. Skipped cleanly if the ``mcp`` package is unavailable.
+These exercise the thin MCPServer wrappers directly (the decorators return the
+original function), covering the ``confirm`` guards, error paths, and payload
+resolution via ``AF_SOURCE_ROOT``. Skipped cleanly if the ``mcp`` package is
+unavailable.
 """
 
 from __future__ import annotations
@@ -36,6 +37,29 @@ def payload(tmp_path: Path, monkeypatch) -> Path:
     src = _make_source(tmp_path / "src")
     monkeypatch.setenv("AF_SOURCE_ROOT", str(src))
     return src
+
+
+def test_mcp_api_surface() -> None:
+    """Pin the two things about the mcp package every other test here assumes.
+
+    The rename that broke the 1.x import (#274) was found by a collection error
+    naming a module, not the API. Asserting the surface turns the next such
+    change into a named failure, and the identity property below is the
+    undocumented assumption this whole file rests on: if a future release made
+    the decorators return a wrapper object, the eleven tests would stop calling
+    the functions they think they are calling.
+    """
+    for name in ("tool", "resource", "prompt", "run"):
+        assert hasattr(server.mcp, name), f"the mcp server object no longer exposes .{name}()"
+
+    def probe(value: str) -> str:
+        return value
+
+    # A throwaway server, so the registry the other tests use is left untouched.
+    fresh = type(server.mcp)("probe")
+    assert fresh.tool()(probe) is probe
+    assert fresh.prompt()(probe) is probe
+    assert fresh.resource("probe://{value}")(probe) is probe
 
 
 def test_status_not_deployed(payload: Path, tmp_path: Path) -> None:

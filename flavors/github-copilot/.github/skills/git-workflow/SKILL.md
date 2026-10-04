@@ -38,6 +38,7 @@ For worktree creation, cleanup, and troubleshooting see the separate
 | `git push --force` (any) | **Forbidden** | Destructive remote rewrite |
 | `git pull` / `git merge` / `cherry-pick` / `revert` (local) | Coordinator | Reversible topology change (reflog / `ORIG_HEAD`); protected-branch push still gated |
 | `git branch -d {merged, non-protected}` | Coordinator | git deletes only merged branches; ref recreatable |
+| `git push origin --delete agent/{id}` (merged) | Coordinator | Same ref, other side; the commits survive in the branch it merged into |
 | `git branch -D` (force) / delete protected | **Forbidden** | Deletes unmerged commits / protected branch |
 | `git reset --hard` | **Human** | Destructive state rewrite (loses uncommitted work) |
 | `git rebase` | **Human** | History rewrite risk |
@@ -52,7 +53,8 @@ implementer, refactorer, etc.) executes git commands — only the
 coordinator does. The hook is a three-tier classifier: feature-branch git
 ops (`commit`, staging specific files, creating and pushing `agent/*`
 branches), reversible topology changes (`pull`, `merge`, `cherry-pick`,
-`revert`), merged non-protected branch deletion (`git branch -d`), and
+`revert`), merged non-protected branch deletion (`git branch -d`, and the
+same branch on the remote), and
 read-only/test commands are **auto-approved** per the autonomy policy in
 `.github/af-env.conf`; force pushes, pushes naming a protected branch,
 `git reset --hard`, `git rebase`, force/protected branch deletion (`-D`),
@@ -88,6 +90,11 @@ A PR/MR provider capability is enabled (e.g. Azure DevOps via
     creates the request; a human completes it.
 - Merge into shared branches happens **through the request**, never via local
   `git merge`.
+- If the worker reports the branch as unpublished or its probe as
+  indeterminate, **confirm with `git ls-remote --heads origin agent/{id}`
+  before pushing again.** Push only when that returns nothing: re-pushing a
+  branch that is already published, or already merged and deleted, recreates
+  it as an orphan with no request attached.
 
 The completion control is a **server-side branch policy plus permission
 scoping** (no policy-bypass on the agent identity) — agent prompts are
@@ -126,9 +133,11 @@ exactly one point: post-merge, evidence-based reconciliation.
   azure-devops-mcp default is `true`). A fast autocomplete merge must not
   auto-close linked items or outrun a corrective call.
 - Work-item lifecycle follows the commit lifecycle:
-  **New → Active** (at work start, before the branch) **→ Resolved**
+  **New → Active** (at work start, before the branch) **→ delivered**
   (post-merge into the integration branch, with an AC→evidence map) **→ Closed**
-  (only at verification / promotion, against merged evidence).
+  (only at verification / promotion, against merged evidence). The *delivered*
+  state is resolved from the work-item type — `Resolved` on a User Story or
+  Bug, absent on a Task — never assumed by name.
 - The `ado-work-item-manager` performs every status transition; the coordinator
   triggers the post-merge reconciliation once the merge is confirmed.
 

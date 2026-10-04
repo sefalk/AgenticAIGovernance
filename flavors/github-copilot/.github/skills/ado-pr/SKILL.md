@@ -91,8 +91,19 @@ always a human-completed PR.
 - The coordinator pushes the feature branch (`agent/*`) before the PR manager
   is invoked, from the active work location (main checkout or worktree,
   depending on `WORKTREE_ENABLED`).
-- Verify the source branch exists on the remote before creating the PR; if it
-  is absent, return `BLOCKED (branch not published)` so the coordinator pushes.
+- Verify the source branch exists on the remote before creating the PR. Match
+  the **full ref** including the `agent/` prefix, and treat a `list` result as
+  evidence only when it is complete — a truncated page says nothing about the
+  refs it did not return.
+- **Three outcomes, not two.** "Verified absent" and "could not tell" are
+  different facts and earn different recovery advice:
+  - ref found → proceed;
+  - query succeeded and the ref is not in the result →
+    `BLOCKED_BRANCH_NOT_PUBLISHED`;
+  - query errored, was truncated, or returned an unusable shape →
+    `BLOCKED_BRANCH_PROBE_INDETERMINATE`.
+- Report the raw query and its response either way. A bare verdict asserts a
+  fact about the remote that the probe may never have established.
 
 ## Safety Note
 
@@ -104,7 +115,9 @@ identity). Agent prompts are conventions, not the security boundary.
 
 - `BLOCKED_AUTH`: credentials/session unavailable.
 - `BLOCKED_CONFIG`: required defaults missing (project/repository).
-- `BLOCKED_BRANCH_NOT_PUBLISHED`: source branch absent on the remote.
+- `BLOCKED_BRANCH_NOT_PUBLISHED`: source branch verified absent on the remote.
+- `BLOCKED_BRANCH_PROBE_INDETERMINATE`: the branch probe established neither
+  presence nor absence (tool error, truncated list, unexpected shape).
 - `NEEDS_HUMAN_COMPLETION`: PR targets a human-only branch.
 - `DEGRADED`: PR created but autocomplete unavailable (policy not configured).
 

@@ -32,14 +32,8 @@ docs/             # Documentation
 
 ## Governing Manifest
 
-All agents follow the principles in [MANIFEST.md](MANIFEST.md):
-
-1. **Test-Driven Development** — Red → Green → Refactor as separate steps
-2. **Layered Architecture** — domain core has no I/O dependencies
-3. **Maker-Checker** — every output is reviewed by a critic agent
-4. **Metrics as Proof** — coverage, complexity, lint are quality gates
-5. **Traceability** — provenance markers + workflow logs
-6. **Human-in-the-Loop** — agents escalate, humans decide
+All agents follow the principles in [MANIFEST.md](MANIFEST.md). They are not
+restated here: a copy is paid for on every request and drifts from its source.
 
 ## Coding Standards
 
@@ -68,9 +62,8 @@ All agents follow the principles in [MANIFEST.md](MANIFEST.md):
 
 ### Git Conventions
 
-- Agent branches: `agent/{workflow-id}`
-- Agent commits: `[agent:{agent-name}] {action summary}`
-- Human commits: conventional commits format
+Branch naming and the commit contract live in `git-workflow.instructions.md`,
+which is already always-on. Human commits use conventional-commits format.
 
 ## What NOT to Do
 
@@ -86,34 +79,10 @@ All agents follow the principles in [MANIFEST.md](MANIFEST.md):
 Skills provide domain-specific guidance. Agents should consult relevant
 skills when their task falls within the skill's scope.
 
-> Canonical source: `skills/INDEX.md` — consult it for descriptions
-> and the full agent-skill matrix.
-
-| Skill | Directory | Primary Consumer |
-|---|---|---|
-| **ado-shared** | `skills/ado-shared/` | ado-work-item-manager, ado-wiki-manager, ado-pipeline-manager |
-| **ado-workitem** | `skills/ado-workitem/` | ado-work-item-manager |
-| **ado-wiki** | `skills/ado-wiki/` | ado-wiki-manager |
-| **code-review** | `skills/code-review/` | test-critic, code-critic |
-| **dependency-management** | `skills/dependency-management/` | implementer, code-critic |
-| **design-patterns** | `skills/design-patterns/` | planner, implementer, refactorer, arbiter |
-| **documentation** | `skills/documentation/` | documenter |
-| **error-handling** | `skills/error-handling/` | test-writer, implementer |
-| **hexagonal-architecture** | `skills/hexagonal-architecture/` | implementer, refactorer, code-critic, arbiter |
-| **human-escalation** | `skills/human-escalation/` | test-writer, implementer, refactorer, arbiter |
-| **metrics** | `skills/metrics/` | code-critic |
-| **property-testing** | `skills/property-testing/` | test-writer, test-critic |
-| **pydantic** | `skills/pydantic/` | implementer, refactorer |
-| **refactoring** | `skills/refactoring/` | refactorer |
-| **risk-management** | `skills/risk-management/` | planner |
-| **secure-coding** | `skills/secure-coding/` | code-critic |
-| **static-analysis** | `skills/static-analysis/` | implementer, code-critic |
-| **task-decomposition** | `skills/task-decomposition/` | planner |
-| **test-execution** | `skills/test-execution/` | test-writer, test-critic, implementer, refactorer, code-critic |
-| **copilot-authoring** | `skills/copilot-authoring/` | any agent editing a `.agent.md` / `.prompt.md` / `.instructions.md` |
-| **unit-testing** | `skills/unit-testing/` | test-writer, test-critic |
-| **git-worktrees** | `skills/git-worktrees/` | coordinator |
-| **notebook-execution** | `skills/notebook-execution/` | coordinator, implementer, refactorer, code-critic, test-writer |
+The catalogue lives in `skills/INDEX.md` — descriptions, the agent-skill
+matrix, and which skills are active for this project. It is not copied here:
+the copy was paid for on every request, and a list of names is exactly the
+part an agent already receives when its skills are surfaced to it.
 
 ## Pre-Delivery Checklist (Mandatory)
 

@@ -31,10 +31,6 @@ tools:
   - ms-toolsai.jupyter/configureNotebook
   - ms-python.python/configurePythonEnvironment
 hooks:
-  PostToolUse:
-    - type: command
-      command: 'bash .github/hooks/scripts/scan-secrets.sh'
-      windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\scan-secrets.ps1'
   SubagentStop:
     - type: command
       command: 'bash .github/hooks/scripts/implementer-stop.sh'
@@ -156,7 +152,8 @@ changed). One `all` run at the very end only.
 **Workflow:**
 1. After each subtask → run `tests: domain` (or `tests: domain + fail-fast`)
 2. If you modified adapter code → run `tests: adapters` once
-3. **Do NOT run `tests: all`** — the stop hook validates the full suite automatically
+3. **Do NOT run `tests: all`** — the stop hook runs the full suite automatically
+   when you finish.
 4. Before running any scope, check `.github/test-log.json` — skip if scope
    passed recently and no relevant code changed since
 
@@ -227,6 +224,7 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | No secrets in changed files | HARD | Grep for credential patterns, API keys | Standard+ |
 | New deps declared in spec file | HARD | If a new package was `import`ed, verify it appears in the project dep file (`af-env.conf` → `DEP_FILE` / `DEP_DEV_FILE`) | Standard+ |
 | Provenance markers on new/modified files | HARD | Verify markers present | Standard+ |
+| Measured result names an openable artifact | HARD | When reporting a number obtained from a run rather than read from the repo: name a run id, URL, table + query, or committed output file. No durable channel ⇒ BLOCKED | Standard+ |
 | Skills read declaration | SOFT | `Skills Read:` line in Gate Summary (critic flags if missing) | Standard+ |
 | Architecture boundaries respected | SOFT | code-critic reviews | Standard+ |
 | Complexity ≤ threshold | SOFT | code-critic verifies: Domain ≤ 10, Ports ≤ 5, Adapters ≤ 15, Utilities ≤ 8 | Deep |

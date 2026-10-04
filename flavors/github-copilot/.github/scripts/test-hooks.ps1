@@ -23,6 +23,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $githubDir = (Resolve-Path "$PSScriptRoot/..").Path
 $scriptDir = Join-Path $githubDir 'hooks/scripts'
+. "$PSScriptRoot/_suite_env.ps1"
+$inAfSource = Test-AfSourceTree $PSScriptRoot
 
 if (-not (Test-Path $scriptDir)) {
     Write-Output "ERROR: hooks/scripts not found at $scriptDir"
@@ -170,8 +172,18 @@ function Invoke-HookInFixture {
     if (Test-Path $commonSrc) { Copy-Item $commonSrc $fixtureHooks }
     # Helper scripts a hook shells out to. Without them the hook takes its
     # degrade-silently path, and a case asserting what the helper produced
-    # would be asserting on an absent file rather than on the hook.
-    foreach ($helper in @('collect-agent-invocations.py', 'concurrent-agent-edits.py')) {
+    # would be asserting on an absent file rather than on the hook. The list is
+    # deliberate and not a wildcard: copying every `*.py` also brings the
+    # schema checkers, which turns "the fixture is missing a helper" into a
+    # different hook running that the case never asked for.
+    $helpers = @('collect-agent-invocations.py', 'concurrent-agent-edits.py')
+    # Shared modules those helpers import, matched by the underscore prefix that
+    # marks a module rather than a hook. Derived, because the maintained list
+    # went stale the moment `_agentlog.py` was extracted (#291) and the symptom
+    # was four failures inside the collector, none naming the missing file.
+    $helpers += @(Get-ChildItem -Path (Split-Path $HookPath) -Filter '_*.py' -File |
+        ForEach-Object { $_.Name })
+    foreach ($helper in $helpers) {
         $helperSrc = Join-Path (Split-Path $HookPath) $helper
         if (Test-Path $helperSrc) { Copy-Item $helperSrc $fixtureHooks }
     }
@@ -433,6 +445,32 @@ function Assert-ExitCode {
         } else {
             $script:failed++
             $script:errors += "FAIL  $TestName -- expected exit $Expected, got $($result.ExitCode) (output: $($result.Output))"
+        }
+    } catch {
+        $script:failed++
+        $script:errors += "ERROR $TestName -- $($_.Exception.Message)"
+    }
+}
+
+# A PostToolUse verdict is binding only in the shape the harness reads: exit 0
+# so stdout is processed, top-level `decision`, and a reason naming the file.
+# A non-zero exit is the weaker answer, not the stronger one -- it makes the
+# decision unreadable (#339).
+function Assert-Blocked {
+    param([string]$TestName, [string]$Script, [string]$Json, [string]$Names)
+    try {
+        $result = Invoke-Hook -Script $Script -JsonInput $Json
+        $parsed = $null
+        try { $parsed = $result.Output | ConvertFrom-Json -ErrorAction Stop } catch { $parsed = $null }
+        $decision = if ($parsed) { [string]$parsed.decision } else { '' }
+        $reason = if ($parsed) { [string]$parsed.reason } else { '' }
+        $ok = ($result.ExitCode -eq 0) -and ($decision -eq 'block') -and ($reason -match [regex]::Escape($Names))
+        if ($ok) {
+            $script:passed++
+            if ($Verbose) { Write-Output "  PASS  $TestName" }
+        } else {
+            $script:failed++
+            $script:errors += "FAIL  $TestName -- expected exit 0 with decision 'block' naming '$Names', got exit $($result.ExitCode) decision '$decision' reason '$reason' (output: $($result.Output))"
         }
     } catch {
         $script:failed++
@@ -776,6 +814,36 @@ Assert-Deny "rm -rf broad path is denied" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"rm -rf /tmp/data"}}'
 
+# --- Execution-surface switch (issue #138) ---------------------------------
+# The first case is the recorded occurrence: a subagent denied in the terminal
+# re-ran the same CLI call through the Pylance snippet tool. Before this gate
+# it was allowed, and silently -- the hook printed `{}` because its set named
+# only the terminal.
+
+Assert-Deny "a snippet tool spawning a subprocess is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"mcp_pylance_mcp_s_pylanceRunCodeSnippet","tool_input":{"code":"import subprocess; subprocess.run(cmd, check=True)"}}'
+
+Assert-Deny "a notebook shell escape is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"run_notebook_cell","tool_input":{"cell":"!databricks jobs submit --json @job.json"}}'
+
+Assert-Deny "browser evaluate reaching for child_process is denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"mcp_playwright_browser_evaluate","tool_input":{"function":"() => child_process.exec(cmd)"}}'
+
+# The gate has to stay narrow enough to survive contact: denying ordinary
+# analysis code would get it switched off, and a gate nobody keeps guards
+# nothing.
+
+Assert-Silent "ordinary snippet code is not a spawn" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"mcp_pylance_mcp_s_pylanceRunCodeSnippet","tool_input":{"code":"import json; print(json.dumps(rows))"}}'
+
+Assert-Silent "ordinary notebook code is not a spawn" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"run_notebook_cell","tool_input":{"cell":"df = spark.table(name); df.show()"}}'
+
 Assert-Deny "recursive force delete is denied" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./build -Recurse -Force"}}'
@@ -833,17 +901,9 @@ Assert-Deny "bash -c payload is scanned" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"bash -c \"rm -rf /tmp/data\""}}'
 
-Assert-Deny "powershell -Command payload is scanned" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"powershell -Command \"Remove-Item ./build -Recurse -Force\""}}'
-
 Assert-Deny "Invoke-Expression payload is scanned" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"Invoke-Expression \"rm -rf /tmp/data\""}}'
-
-Assert-Deny "Start-Process -ArgumentList payload is scanned" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"Start-Process powershell -ArgumentList \"Remove-Item ./build -Recurse -Force\""}}'
 
 # Quotes stop protecting data the moment the shell interpolates inside them.
 Assert-Deny "subexpression inside a commit message is still executed" `
@@ -897,14 +957,8 @@ Assert-Deny "DROP TABLE passed positionally is still denied" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"sqlite3 app.db \"DROP TABLE users\""}}'
 
 # ── ASK: durable change, confirm (balanced defaults) ─────────────────────
-Assert-Ask "single-file delete asks by default (FS_WRITE opt-in)" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./scratch.tmp"}}'
-
-Assert-Ask "recursive (no force) delete asks" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item ./build -Recurse"}}'
-
+# The two delete-ask cases now run from block-dangerous.cases.tsv, which
+# holds the bash hook to them too.
 # ── ASK reasons are specific and echo the command (issue #78) ────────────
 # One sentence shared by eleven rules told the human neither what fired nor
 # what it fired on, while the deny tier next door has always been specific.
@@ -944,56 +998,26 @@ Assert-True "two different ask rules give two different reasons" `
 #
 # Silence here is deferral, not approval: Assert-Silent asserts '{}', which
 # hands the decision to the user's approval settings -- it never asserts allow.
-
-Assert-Silent "package installs defer to the native assessment" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"pip install requests"}}'
-
-Assert-Silent "conda environment changes defer to the native assessment" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"conda install numpy"}}'
-
-# The operation issue #86 was about: mechanical, repo-local, reversible by git.
-Assert-Silent "a formatter run defers to the native assessment" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"ruff format ."}}'
-
-Assert-Silent "creating a directory defers to the native assessment" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"mkdir build"}}'
-
-Assert-Silent "copying a file defers to the native assessment" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"Copy-Item a.txt b.txt"}}'
+#
+# The deferrals below now run from block-dangerous.cases.tsv, against both
+# hooks -- Copy-Item included. It was held back here on the reasoning that a
+# cmdlet could say nothing about bash; measured (#280), the bash hook defers
+# on the identical string. The hook classifies a command line, so being able
+# to run the command was never what decided whether a case could be shared.
 
 # What we keep, and why we keep it. Deletion is the one durable change whose
-# consequence git cannot undo, so it stays ours regardless of who asks better.
-Assert-Ask "deletion is still ours to ask about" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"rm ./scratch.tmp"}}'
-
-Assert-Ask "tagging is still ours to ask about" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git tag v1.4.0"}}'
-
-Assert-Ask "a cloud resource change is still ours to ask about" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"az group create --name rg-x"}}'
-
-# The path form of checkout discards uncommitted work, and the allow tier
-# deliberately does not cover it. It must not fall through to silence: on this
-# machine 'git checkout' is a prefix in chat.tools.terminal.autoApprove, so
-# deferring would auto-approve the destructive form with no prompt at all.
-Assert-Ask "checkout of a path is still ours to ask about" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git checkout -- src/foo.py"}}'
+# consequence git cannot undo, so it stays ours regardless of who asks better;
+# tagging and cloud resource creation are retained for the same reason. The
+# path form of checkout matters most: it discards uncommitted work, the allow
+# tier deliberately does not cover it, and on this machine 'git checkout' is a
+# prefix in chat.tools.terminal.autoApprove -- so deferring would auto-approve
+# the destructive form with no prompt at all.
+#
+# These four now run from block-dangerous.cases.tsv, which holds the bash hook
+# to them as well. See the shared-table loop further down.
 
 # A deferred rule must not consume the command: the retained rule next to it
 # still has to fire.
-Assert-Ask "a deferred rule does not silence a retained one in the same command" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"mkdir build; Remove-Item ./scratch.tmp"}}'
-
 # The two harnesses must retain the same rules. A rule kept in one and handed
 # back in the other is a confirmation that appears on one platform only.
 $bdPs1Text = Get-Content (Join-Path $scriptDir 'block-dangerous.ps1') -Raw
@@ -1007,16 +1031,8 @@ Assert-True "both harnesses retain the same number of ask rules" `
     "ps1 has $psAskCount ask rules, sh has $shAskCount"
 
 # A reason carrying the command line carries the command's quotes with it.
-Assert-Ask "a command containing quotes still produces parsable JSON" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item \"C:\\tmp\\a b\\file.txt\""}}'
-
 # The task branch quotes the offending task command back into its deny reason,
 # and a task command is a path -- on Windows a backslash path.
-Assert-Deny "a task command with backslashes and quotes still produces parsable JSON" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"x","type":"shell","command":"C:\\evil\\run \"it\".ps1"},"workspaceFolder":"/repo"}}'
-
 # ── The policy is stated, not inherited (issue #108) ─────────────────────
 #
 # The cases above say "by default" and mean the declared default policy set at
@@ -1085,208 +1101,50 @@ Assert-True "a config path that does not exist is reported as absent" `
 Assert-True "a config path that exists is the config in force" `
     ($probePresent -match 'found=True') "got: $probePresent"
 
-# ── ALLOW: safe under balanced defaults ──────────────────────────────────
-Assert-Allow "git status is safe" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git status"}}'
+# ── Shared cases: one table, two dialects ────────────────────────────────
+# These cases are not PowerShell's. They live in block-dangerous.cases.tsv and
+# run here against block-dangerous.ps1 and in test-hooks.sh against
+# block-dangerous.sh. Written out twice instead, the two suites would hold the
+# same string without testing the same thing, and a hook that drifted in one
+# dialect would still be green in the other -- the defect class #313 was about.
+#
+# TSV rather than JSON because this harness's counterpart runs under git-bash,
+# where there is no jq; a JSON table would make the shell suite depend on an
+# interpreter to read its own test data.
+$sharedCasesPath = Join-Path $PSScriptRoot 'block-dangerous.cases.tsv'
+$sharedCases = @()
+foreach ($line in (Get-Content -LiteralPath $sharedCasesPath)) {
+    $row = $line.Trim()
+    if ($row -eq '' -or $row.StartsWith('#')) { continue }
+    $fields = $row -split "`t"
+    if ($fields.Count -ne 4) {
+        throw "block-dangerous.cases.tsv: expected 4 tab-separated fields, got $($fields.Count) in: $row"
+    }
+    $sharedCases += , $fields
+}
 
-Assert-Allow "git diff is safe" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git diff --stat"}}'
+# A table that failed to load is not zero failures, it is zero questions asked.
+# Without this the suite would still print 'All tests passed'.
+Assert-True "the shared block-dangerous case table was read" `
+    ($sharedCases.Count -ge 56) `
+    "rows parsed: $($sharedCases.Count) from $sharedCasesPath (floor 56 -- raise it as the table grows, never lower it)"
 
-Assert-Allow "git add specific file is safe" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git add src/main.py"}}'
+foreach ($case in $sharedCases) {
+    Assert-Decision -TestName $case[0] -Expected $case[2] -Script 'block-dangerous.ps1' `
+        -Json $case[3] -Branch $case[1]
+}
 
-Assert-Allow "git commit is safe" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"fix: typo\""}}'
-
-Assert-Allow "git merge auto-allowed at balanced default" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git merge feature"}}'
-
-# Improvement: git config read (no value) is read-only
-Assert-Allow "git config read is safe" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git config --global user.email"}}'
-
-# Improvement: pip show via call-operator + quoted python path is read-only
-Assert-Allow "pip show via call operator is safe" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"& \".venv/Scripts/python.exe\" -m pip show ruff"}}'
-
-# Improvement: ASK scan ignores quoted literals (no false databricks-export ask)
-Assert-Allow "commit message mentioning databricks export does not false-ask" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"populate databricks.yml from prod job export\""}}'
-
-# Improvement: separators inside quotes do not split the command
-Assert-Allow "separators inside quotes do not split" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"runInTerminal","tool_input":{"command":"git commit -m \"fix: a; b | c\""}}'
-
-Assert-Silent "non-terminal tool ignored" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"read_file","tool_input":{"endLine":40,"filePath":"src/main.py","startLine":1}}'
-
-# ── createAndRunTask shape: hard-deny tier (mirrored from runInTerminal) ───
-# The dangerous commands must also be denied when wrapped in createAndRunTask.
-# Currently these FAIL because block-dangerous returns {} (allow) for non-terminal tools.
-Assert-Deny "createAndRunTask: force push is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"push","type":"shell","command":"git","args":["push","--force","origin","main"]}}}'
-
-Assert-Deny "createAndRunTask: push to protected branch is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"push","type":"shell","command":"git","args":["push","origin","main"]}}}'
-
-Assert-Deny "createAndRunTask: git reset --hard is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"reset","type":"shell","command":"git","args":["reset","--hard","HEAD~1"]}}}'
-
-Assert-Deny "createAndRunTask: git rebase is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"rebase","type":"shell","command":"git","args":["rebase","main"]}}}'
-
-Assert-Deny "createAndRunTask: git branch -D is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"branch-delete","type":"shell","command":"git","args":["branch","-D","old-branch"]}}}'
-
-Assert-Deny "createAndRunTask: rm -rf is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"remove","type":"shell","command":"rm","args":["-rf","/tmp/data"]}}}'
-
-Assert-Deny "createAndRunTask: --no-verify is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"commit","type":"shell","command":"git","args":["commit","--no-verify","-m","test"]}}}'
-
-# ── createAndRunTask shape: bare binary rejection (allowlist enforcement) ──
-# The allowlist policy denies bare binaries.
-Assert-Deny "createAndRunTask: bare git binary is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"git-status","type":"shell","command":"git","args":["status"]}}}'
-
-Assert-Deny "createAndRunTask: bare ruff binary is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"lint","type":"shell","command":"ruff","args":["check","mpusage/"]}}}'
-
-Assert-Deny "createAndRunTask: bare pytest binary is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"test","type":"shell","command":"pytest","args":["tests/"]}}}'
-
-Assert-Deny "createAndRunTask: bare databricks binary is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"db-list","type":"shell","command":"databricks","args":["workspace","list"]}}}'
-
-# ── createAndRunTask shape: powershell -Command inline script denial ───
-# Inline scripts via -Command are denied (must use allowlisted -File path).
-Assert-Deny "createAndRunTask: powershell -Command inline script is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"pwsh-inline","type":"shell","command":"powershell","args":["-NoProfile","-Command","Remove-Item x -Recurse -Force"]}}}'
-
-# ── createAndRunTask shape: -File outside allowlist denial ──────────────────
-# Files outside AF_TASK_SCRIPT_DIRS are denied (path-traversal prevention).
-Assert-Deny "createAndRunTask: -File to %TEMP% script is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"temp-script","type":"shell","command":"powershell","args":["-NoProfile","-File","%TEMP%\\x.ps1"]}}}'
-
-Assert-Deny "createAndRunTask: -File via path traversal is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"traversal","type":"shell","command":"powershell","args":["-NoProfile","-File",".github/scripts/../../../Windows/System32/cmd.exe"]}}}'
-
-# ── createAndRunTask shape: input-variable denial ──────────────────────────
-# Interactive input variables are denied (agents must not block on prompts).
-# Name is single-quoted: a double-quoted name would interpolate the very
-# construct under test and break the parse of everything below it.
-Assert-Deny 'createAndRunTask: interactive input variable is denied' `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"user-input","type":"shell","command":"echo","args":["${input:promptUser}"]}}}'
-
-# ── createAndRunTask shape: regression - legitimate curated invocations ────
-# These four scripts are the framework-approved entry points. The classifier
-# must recognise them and say so; falling through to {} would mean it never
-# reached a verdict on them.
-Assert-Allow "createAndRunTask: .github/scripts/run-tests.ps1 -Scope domain allows" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"test-domain","type":"shell","command":".github/scripts/run-tests.ps1","args":["-Scope","domain"]}}}'
-
-Assert-Allow "createAndRunTask: .github/scripts/run-lint.ps1 -Scope all allows" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"lint-all","type":"shell","command":".github/scripts/run-lint.ps1","args":["-Scope","all"]}}}'
-
-Assert-Allow "createAndRunTask: .github/scripts/run-metrics.ps1 -Metric complexity allows" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"metrics-complexity","type":"shell","command":".github/scripts/run-metrics.ps1","args":["-Metric","complexity"]}}}'
-
-Assert-Allow "createAndRunTask: .github/scripts/run-deps.ps1 -Scope dev allows" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"deps-dev","type":"shell","command":".github/scripts/run-deps.ps1","args":["-Scope","dev"]}}}'
-
-# ── createAndRunTask shape: the effective command is not always `command` ──
-# Per the VS Code task docs, executable content reaches a task through four
-# places, not one. An allowlist that reads only `command` is decorative.
-
-# "Properties defined in an operating system specific scope override
-# properties defined in the task or global scope" -- so `command` is a decoy.
-Assert-Deny "createAndRunTask: OS-specific command override is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"os-override","type":"shell","command":".github/scripts/run-tests.ps1","windows":{"command":"cmd.exe","args":["/c","echo pwned"]}}}}'
-
-# "you can override a task's shell with the options.shell property" -- the
-# payload then rides in the shell's own arguments.
-Assert-Deny "createAndRunTask: options.shell override is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"shell-override","type":"shell","command":".github/scripts/run-tests.ps1","options":{"shell":{"executable":"powershell","args":["-Command","echo pwned"]}}}}}'
-
-# "If a single command is provided, the task system passes the command as is
-# to the underlying shell" -- shell metacharacters survive path normalisation,
-# so a prefix match on the allowlisted script lets the rest ride along.
-Assert-Deny "createAndRunTask: shell metacharacter in command is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"chained","type":"shell","command":".github/scripts/run-tests.ps1; echo pwned"}}}'
-
-Assert-Deny "createAndRunTask: chained command operator is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"chained2","type":"shell","command":".github/scripts/run-tests.ps1 && echo pwned"}}}'
-
-# Indirection variables resolve somewhere the classifier cannot see; the
-# command: form additionally executes a VS Code command to produce its value.
-Assert-Deny "createAndRunTask: command-substitution variable is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"cmdvar","type":"process","command":"${command:python.interpreterPath}","args":["-c","print(1)"]}}}'
-
-Assert-Deny "createAndRunTask: settings-substitution variable is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"cfgvar","type":"process","command":"${config:python.defaultInterpreterPath}","args":["-c","print(1)"]}}}'
-
-# A task registered to run on folder open would execute later, outside any
-# hook's view.
-Assert-Deny "createAndRunTask: runOn folderOpen is denied" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"autorun","type":"shell","command":".github/scripts/run-tests.ps1","runOptions":{"runOn":"folderOpen"}}}}'
-
-# False deny costs as much as a false allow: it pushes agents back to the
-# terminal. The workspace-folder variable is the documented portable form.
-Assert-Allow "createAndRunTask: workspace-folder path variable allows" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"wsvar","type":"shell","command":"${workspaceFolder}/.github/scripts/run-tests.ps1","args":["-Scope","domain"]}}}'
-
-# ── the real creation tool name (issue #74) ────────────────────────────────
-# Every case above uses `createAndRunTask`, a name VS Code never sends: the
-# tool is `create_and_run_task`. The gate above was therefore inert in
-# production -- the same defect as issue #69, in a different gate.
-Assert-Deny "create_and_run_task: force push is denied (real tool name)" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"push","type":"shell","command":"git","args":["push","--force","origin","main"]},"workspaceFolder":"/repo"}}'
-
-Assert-Deny "create_and_run_task: bare binary is denied (real tool name)" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"lint","type":"shell","command":"ruff","args":["check","src/"]},"workspaceFolder":"/repo"}}'
-
-Assert-Allow "create_and_run_task: reviewed script allows (real tool name)" `
-    "block-dangerous.ps1" `
-    '{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"test","type":"shell","command":".github/scripts/run-tests.ps1","args":["-Scope","domain"]},"workspaceFolder":"/repo"}}'
+# ── ALLOW: safe under balanced defaults (PowerShell-specific) ────────────
+# pip show via call-operator + quoted python path is read-only. It now runs
+# from block-dangerous.cases.tsv: the call operator is PowerShell syntax, but
+# the hook reads the line as text, and measured (#280) the bash hook allows
+# the same string.
+# ── task launches: the create_and_run_task shape ──────────────────
+# These 30 cases now run from block-dangerous.cases.tsv, against both hooks.
+# Measured before the move (#280): both hooks reach the same verdict on all 30,
+# and both treat the legacy name `createAndRunTask` exactly like the real
+# `create_and_run_task` -- 27 payloads compared per dialect, 0 differ. The
+# reasoning behind each tier moved into the table with the cases.
 
 # ── run_task: classification at EXECUTION time (issue #74) ─────────────────
 # `run_task` carries only {id, workspaceFolder} -- the command lives in the
@@ -1669,6 +1527,62 @@ Assert-Silent "refactorer can run_task" `
 
 Write-Output ""
 
+# ── 4b. planner-pretooluse.ps1 ───────────────────────────────────────────
+
+Write-Output "## planner-pretooluse.ps1"
+
+# The planner gained `editFiles` so it can answer the plan review by revising
+# its own document (issue #235). This allowlist is the only thing confining
+# that wider write surface, and it shipped with no executing case (#263).
+
+Assert-Silent "planner may create the plan document" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"create_file","tool_input":{"content":"x","filePath":"docs/plans/feat-2026-09-01-x.md"}}'
+
+Assert-Silent "planner may revise the plan document in place" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"replace_string_in_file","tool_input":{"filePath":"docs/plans/feat-2026-09-01-x.md","oldString":"6 subtasks","newString":"7 subtasks"}}'
+
+Assert-Silent "planner may revise the plan in a batch" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"multi_replace_string_in_file","tool_input":{"explanation":"e","replacements":[{"filePath":"docs/plans/feat-2026-09-01-x.md","oldString":"a","newString":"b"},{"filePath":"docs/plans/feat-2026-09-01-x.md","oldString":"c","newString":"d"}]}}'
+
+# The tool applies every replacement, so clearing on the first plan file would
+# approve the rest unexamined.
+Assert-Deny "a batch that also touches source is denied" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"multi_replace_string_in_file","tool_input":{"explanation":"e","replacements":[{"filePath":"docs/plans/feat-2026-09-01-x.md","oldString":"a","newString":"b"},{"filePath":"src/main.py","oldString":"a","newString":"b"}]}}'
+
+Assert-Deny "planner cannot write production code" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"replace_string_in_file","tool_input":{"filePath":"src/main.py","oldString":"a","newString":"b"}}'
+
+Assert-Deny "a non-markdown file in the plans dir is denied" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"create_file","tool_input":{"content":"x","filePath":"docs/plans/notes.txt"}}'
+
+Assert-Silent "a plans directory anywhere satisfies the gate" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"replace_string_in_file","tool_input":{"filePath":"documentation/plans/2026/x.md","oldString":"a","newString":"b"}}'
+
+Assert-Deny "a file named plans.md is not a plans directory" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"create_file","tool_input":{"content":"x","filePath":"plans.md"}}'
+
+Assert-Deny "climbing out of the repository is denied" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"create_file","tool_input":{"content":"x","filePath":"../elsewhere/plans/x.md"}}'
+
+Assert-Deny "a write tool naming no path is denied" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"create_file","tool_input":{"content":"x"}}'
+
+Assert-Silent "planner can read_file" `
+    "planner-pretooluse.ps1" `
+    '{"tool_name":"read_file","tool_input":{"endLine":40,"filePath":"src/main.py","startLine":1}}'
+
+Write-Output ""
+
 # ── 5. researcher-pretooluse.ps1 ─────────────────────────────────────────
 
 Write-Output "## researcher-pretooluse.ps1"
@@ -1741,13 +1655,13 @@ $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "hook-test-$(Get-Random)"
 New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 
 $secretFile = Join-Path $tempDir "secret.py"
-Set-Content -Path $secretFile -Value 'password = "SuperSecret123!"'
+Set-Content -Path $secretFile -Value (Get-AfSecretFixture password)
 
 $cleanFile = Join-Path $tempDir "clean.py"
 
 $secretJson = @{ tool_name = "replace_string_in_file"; tool_input = @{ filePath = $secretFile; oldString = 'a'; newString = 'b' } } | ConvertTo-Json -Compress
-Assert-ExitCode "secret pattern detected (exit 1)" `
-    "scan-secrets.ps1" $secretJson 1
+Assert-Blocked "secret pattern blocks the call" `
+    "scan-secrets.ps1" $secretJson 'secret.py'
 
 # A secret written through a batched edit is the same secret. The scan has to
 # reach into replacements[] or the cheapest way past it is to write in bulk.
@@ -1758,8 +1672,8 @@ $secretBatch = @{
         replacements = @(@{ filePath = $secretFile; oldString = 'a'; newString = 'b' })
     }
 } | ConvertTo-Json -Depth 5 -Compress
-Assert-ExitCode "secret detected in a batched edit (exit 1)" `
-    "scan-secrets.ps1" $secretBatch 1
+Assert-Blocked "secret in a batched edit blocks the call" `
+    "scan-secrets.ps1" $secretBatch 'secret.py'
 
 $cleanJson = @{ tool_name = "replace_string_in_file"; tool_input = @{ filePath = $cleanFile; oldString = 'a'; newString = 'b' } } | ConvertTo-Json -Compress
 Assert-ExitCode "clean file passes (exit 0)" `
@@ -1855,6 +1769,48 @@ Assert-True "a commented-out status line does not count as the status" `
 Assert-True "another workflow's COMPLETED plan does not finalise this one" `
     ((Get-StopDecision @{ 'docs/plans/fix-2026-01-01-other.md' = ($PLAN_DONE -replace '72-x', '99-other') }) -eq 'pass') `
     "the plan must name this branch to speak for this workflow"
+
+# ── the plan is not the only witness (issue #252) ─────────────────────────
+#
+# A real workflow finished, merged, and measured nothing: its plan still read
+# APPROVED, so the gate exited before the schema check, the timestamps, the
+# cost block and the invocation census — while the log had said COMPLETED all
+# along. One hand-maintained word disabled four measurements at once.
+
+$LOG_RUNNING = "workflow_id: `"72-x`"`nstatus: `"IN_PROGRESS`"`n"
+$LOG_INVALID = "workflow_id: `"72-x`"`nstatus: `"COMPLETED-WITH-ISSUES`"`n"
+
+$stalePlan = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_RUNNING
+    '.github/logs/72-x.yaml'         = $LOG_YAML
+    '.github/retros/auto/72-x.md'    = $RETRO_MD
+}
+Assert-True "a log reporting a terminal status finalises even when the plan does not" `
+    ($stalePlan.Output -notmatch 'artifact gate not applied') `
+    "got: $($stalePlan.Output)" -Subject $stalePlan.Output
+
+Assert-True "the plan/log divergence is reported, not resolved in silence" `
+    ($stalePlan.Output -match 'plan status is IN_PROGRESS' -and $stalePlan.Output -match 'COMPLETED') `
+    "got: $($stalePlan.Output)" -Subject $stalePlan.Output
+
+$bothRunning = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_RUNNING
+    '.github/logs/72-x.yaml'         = $LOG_RUNNING
+}
+Assert-True "a log claiming no end still leaves the mid-workflow call alone" `
+    ($bothRunning.Output -match 'artifact gate not applied') `
+    "got: $($bothRunning.Output)" -Subject $bothRunning.Output
+
+# The value is invalid and the schema check exists to say so. Exiting here
+# instead would suppress the report and the measurements together.
+$invalidStatus = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_RUNNING
+    '.github/logs/72-x.yaml'         = $LOG_INVALID
+    '.github/retros/auto/72-x.md'    = $RETRO_MD
+}
+Assert-True "an out-of-schema status reaches the checker instead of exiting the gate" `
+    ($invalidStatus.Output -notmatch 'artifact gate not applied') `
+    "got: $($invalidStatus.Output)" -Subject $invalidStatus.Output
 
 # Unclassifiable is not the same as fine. The gate says which one it is rather
 # than passing in silence -- the failure mode this whole issue family is about.
@@ -2063,6 +2019,27 @@ foreach ($pair in @(@{ n = 'documenter-stop.sh'; t = $docSh }, @{ n = 'stop-test
         "the dual-path condition survives"
 }
 
+# The cost artifacts are the only copy of these rows that outlives the debug
+# log they were read from (#253), and they accumulate across the sessions one
+# workflow can span. So the collector has to run on every finalising call --
+# only the YAML block, which cannot carry a duplicate key, is written once.
+$docPs1Text = Get-Content (Join-Path $scriptDir 'documenter-stop.ps1') -Raw
+foreach ($pair in @(
+        @{ n = 'documenter-stop.sh';  t = $docSh;      call = '"$python_exe" "$collector"' },
+        @{ n = 'documenter-stop.ps1'; t = $docPs1Text; call = '& $python $collector' })) {
+    Assert-True "$($pair.n) asks the collector for the durable fact rows" `
+        ($pair.t -match '--facts-out') `
+        "no --facts-out reaches the collector"
+    Assert-True "$($pair.n) asks the collector for the durable entity rows" `
+        ($pair.t -match '--entities-out') `
+        "no --entities-out reaches the collector"
+    $callAt  = $pair.t.IndexOf($pair.call)
+    $guardAt = $pair.t.IndexOf("'^cost:'")
+    Assert-True "$($pair.n) still collects when the log already carries a cost block" `
+        ($callAt -ge 0 -and $guardAt -gt $callAt) `
+        "the '^cost:' test precedes the collector call, so the artifacts would stop at the first finalising call"
+}
+
 Write-Output ""
 
 # ── The retro destination is configurable (issue #117) ───────────────────
@@ -2097,7 +2074,7 @@ $REAL_CONF = Get-Content $confPath -Raw
 # where that file lives. A consumer's copy is [customizable] and is expected to
 # differ -- asserting the default into it teaches the consumer to ignore red
 # output, which is worse than shipping no test at all (issue #209).
-if (Test-Path (Join-Path $githubDir '../../../.githooks/pre-commit')) {
+if ($inAfSource) {
     Assert-True "the shipped af-env.conf carries RETRO_DIR at the unchanged default" `
         ($REAL_CONF -match '(?m)^RETRO_DIR=\.github/retros/auto\s*$') `
         "an upgrading consumer must not have its retro destination move under it"
@@ -2264,12 +2241,77 @@ Assert-True "completed: is the moment the documenter finished, not a later one" 
 Assert-Contains "started: is stamped too, so the pair comes from one source" `
     $stamped '(?m)^started:\s*"[^"]+"'
 
+# One source is not yet one representation. `started:` came from git's `%cI`,
+# which carries the committer's local offset, while `completed:` was UTC --
+# both valid ISO 8601, and subtracting them gave a workflow that finished
+# before it began (issue #240).
+$startedValue = ([regex]::Match($stamped, '(?m)^started:\s*"([^"]+)"')).Groups[1].Value
+Assert-True "both timestamps are UTC, so subtracting them is meaningful" `
+    ($startedValue -match 'Z$' -and $completedValue -match 'Z$') `
+    "got: started '$startedValue', completed '$completedValue'" -Subject $stamped
+
 # Replacing has to mean replacing. Appending a measured value beside the
 # invented one leaves a duplicate YAML key, and a parser takes whichever it
 # reaches last.
 Assert-True "the log carries each timestamp exactly once" `
     (([regex]::Matches($stamped, '(?m)^completed:')).Count -eq 1 -and ([regex]::Matches($stamped, '(?m)^started:')).Count -eq 1) `
     "got: $stamped" -Subject $stamped
+
+# ── documenter-stop.ps1 stamps af_version too (issue #309) ──────────────
+#
+# The same argument, applied to a field that is not a number. `af_version` was
+# the last header value a model transcribed by hand, out of a file with three
+# lines it had to pick one of. Across 68 logs, 23 carried no value and 7
+# carried something that was not a version -- `n/a`, `not measured`, and in one
+# case the instruction "read from .github/.af-version" written in verbatim.
+
+Write-Output ""
+Write-Output "## documenter-stop.ps1 af_version"
+
+$LOG_BAD_VERSION = "workflow_id: `"72-x`"`naf_version: `"read from .github/.af-version`"`naf_version_note: `"analysis ran against source 1.99.0`"`nstatus: `"COMPLETED`"`n"
+
+function Get-VersionStampedLog {
+    param([hashtable]$Extra = @{})
+    $files = @{
+        'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+        '.github/logs/72-x.yaml'         = $LOG_BAD_VERSION
+        '.github/retros/auto/72-x.md'    = $RETRO_MD
+    }
+    foreach ($k in $Extra.Keys) { $files[$k] = $Extra[$k] }
+    (Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -ReadBack '.github/logs/72-x.yaml' -Files $files).ReadBack
+}
+
+$versioned = Get-VersionStampedLog @{ '.github/.af-version' = "version: 1.23.19`ndeployed: 2026-08-31T10:03:59`nsource: C:\elsewhere`n" }
+
+Assert-Contains "the versioned log comes back before the hook is judged by it" `
+    $versioned 'workflow_id:' "the read-back returned nothing"
+
+Assert-NotContains "the instruction the documenter wrote into the field does not survive" `
+    $versioned 'read from'
+
+Assert-Contains "af_version is the version line of .af-version" `
+    $versioned '(?m)^af_version: "1\.23\.19"\s*$'
+
+# The file has three lines and one of them is the version. A hook that took the
+# whole file, or the wrong line, would still satisfy the assertion above on a
+# one-line fixture -- so the lines it must not have taken are named.
+Assert-NotContains "the source: line is not dragged in with it" `
+    $versioned 'elsewhere'
+
+Assert-True "af_version appears exactly once" `
+    (([regex]::Matches($versioned, '(?m)^af_version:')).Count -eq 1) `
+    "got: $versioned" -Subject $versioned
+
+# The note is the documenter's own field and the only part of this it still
+# writes. Stamping the version must not reach it.
+Assert-Contains "af_version_note survives the stamp" `
+    $versioned 'af_version_note: "analysis ran against source 1\.99\.0"'
+
+# No version file means no deployment to name. An explicit null is analysable;
+# a plausible guess is not.
+$unversioned = Get-VersionStampedLog
+Assert-Contains "no .af-version stamps an explicit null rather than a guess" `
+    $unversioned '(?m)^af_version: null\s*$'
 
 # ── documenter-stop.ps1 — which agents actually ran (issue #173) ─────────
 #
@@ -2355,10 +2397,24 @@ Assert-True "a log without timestamps gets both from the hook" `
 
 # The artifact gate already distinguishes the two documenter lifecycles. A
 # call made while the workflow is still running must not date its completion.
-$midRun = Get-StampedLog $LOG_INVENTED $PLAN_RUNNING
+#
+# "Still running" has to hold in both witnesses. Since #252 a log reporting a
+# terminal status finalises on its own, so a fixture whose log already says
+# COMPLETED is a divergence case and not a mid-workflow one -- the log below
+# says what the plan says.
+$LOG_INVENTED_RUNNING = "workflow_id: `"72-x`"`nstarted: `"2099-01-01T09:00:00Z`"`ncompleted: `"2099-01-01T16:30:00Z`"`nstatus: `"IN_PROGRESS`"`n"
+
+$midRun = Get-StampedLog $LOG_INVENTED_RUNNING $PLAN_RUNNING
 Assert-Contains "a workflow that has not finished is not stamped as finished" `
     $midRun '2099' `
     "the mid-workflow call rewrote a log for a workflow still in progress"
+
+# The other half of the same rule: once the log reports its own end, invented
+# dates are exactly what the hook exists to replace (#173). A stale plan word
+# must not protect them.
+$divergedStamp = Get-StampedLog $LOG_INVENTED $PLAN_RUNNING
+Assert-NotContains "a log that reports its own end has its invented dates replaced" `
+    $divergedStamp '2099'
 
 # The schema is the instruction. Leaving the fields in it and adding prose
 # against them elsewhere is how the fabrication happened in the first place.
@@ -2520,14 +2576,19 @@ Assert-True "a generated-marker still satisfies a generated-marker gate" `
 
 # The detector is only worth anything if the gates ask it. Without these, the
 # behaviour above is a helper nobody calls -- the failure mode of issue #69.
+# scan-secrets is listed by its Python core, not by its two wrappers: the gate
+# moved there in #287 and the wrappers no longer decide anything.
 $provenanceCallSites = @(
-    'implementer-stop.ps1', 'test-writer-stop.ps1', 'scan-secrets.ps1',
-    'implementer-stop.sh', 'test-writer-stop.sh', 'scan-secrets.sh'
+    'implementer-stop.ps1', 'test-writer-stop.ps1',
+    'implementer-stop.sh', 'test-writer-stop.sh',
+    'scan-secrets.py'
 )
 foreach ($site in $provenanceCallSites) {
     $sitePath = Join-Path $scriptDir $site
     $siteText = if (Test-Path $sitePath) { Get-Content $sitePath -Raw } else { '' }
-    $helper = if ($site.EndsWith('.ps1')) { 'Test-AfProvenanceMarker' } else { 'af_has_provenance_marker' }
+    $helper = if ($site.EndsWith('.ps1')) { 'Test-AfProvenanceMarker' }
+        elseif ($site.EndsWith('.py')) { 'has_provenance_marker' }
+        else { 'af_has_provenance_marker' }
 
     Assert-True "$site asks the shared detector" `
         ($siteText -match [regex]::Escape($helper)) `
@@ -2733,14 +2794,54 @@ Assert-True "no log of this agent's own call means nothing measurable" `
 Remove-Item $peerRoot -Recurse -Force -ErrorAction SilentlyContinue
 
 # The wiring. A reader nothing calls protects nothing.
-foreach ($pair in @(
-        @{ n = 'implementer-stop.ps1'; t = $implPs1; c = 'Get-AfPeerEdits' },
-        @{ n = 'refactorer-stop.ps1';  t = $refacPs1; c = 'Get-AfPeerEdits' },
-        @{ n = 'implementer-stop.sh';  t = $implSh;  c = 'af_peer_edits' },
-        @{ n = 'refactorer-stop.sh';   t = $refacSh; c = 'af_peer_edits' })) {
+#
+# Derived, not listed. The literal array this replaced named implementer and
+# refactorer only. test-writer -- a producer by coordinator.agent.md and by
+# this issue's own text -- scoped its provenance gate from `git status` and
+# subtracted nothing, and no assertion went red, because it was never added to
+# the array. The watchdog reproduced the omission it exists to catch.
+$gitScoped = @()
+foreach ($hookFile in Get-ChildItem $scriptDir -File | Where-Object { $_.Name -match '-stop\.(ps1|sh)$' }) {
+    $text = Get-Content $hookFile.FullName -Raw
+    if ($text -notmatch 'status --porcelain' -and $text -notmatch 'diff --name-only') { continue }
+    $gitScoped += @{
+        n = $hookFile.Name
+        t = $text
+        c = if ($hookFile.Name.EndsWith('.ps1')) { 'Get-AfPeerEdits' } else { 'af_peer_edits' }
+    }
+}
+
+# A derived loop over an empty set passes having asserted nothing, which is the
+# same silence it was written to break. Six is what is there today: the three
+# producers, twice.
+Assert-True "the scan finds the stop hooks that scope themselves from git" `
+    ($gitScoped.Count -ge 6) `
+    "only $($gitScoped.Count) git-scoped stop hooks found -- the predicate stopped matching"
+
+foreach ($pair in $gitScoped) {
     Assert-True "$($pair.n) subtracts what a concurrent peer edited" `
         ($pair.t -match [regex]::Escape($pair.c)) `
         "the hook still scopes its gates from shared git state alone"
+}
+
+# Calling the reader is not the same as calling it in time. A subtraction that
+# runs after the gate has already read the file list changes nothing.
+#
+# Indexed over code lines only: both hooks name their provenance helper in the
+# header comment, and a raw string index finds that mention first.
+foreach ($pair in $gitScoped) {
+    $marker = if ($pair.n.EndsWith('.ps1')) { 'Test-AfProvenanceMarker' } else { 'af_has_provenance_marker' }
+    $code = @(($pair.t -split "`r?`n") | Where-Object { $_ -notmatch '^\s*#' })
+    $peerAt = -1
+    $gateAt = -1
+    for ($i = 0; $i -lt $code.Count; $i++) {
+        if ($peerAt -lt 0 -and $code[$i] -match [regex]::Escape($pair.c)) { $peerAt = $i }
+        if ($gateAt -lt 0 -and $code[$i] -match [regex]::Escape($marker)) { $gateAt = $i }
+    }
+    if ($gateAt -lt 0) { continue }
+    Assert-True "$($pair.n) subtracts before the provenance gate reads the file list" `
+        ($peerAt -ge 0 -and $peerAt -lt $gateAt) `
+        "peer subtraction at code line $peerAt, provenance gate at code line $gateAt"
 }
 
 # The boundary #86 drew, restated. Lint is not an authorship question: a ruff
@@ -2756,6 +2857,385 @@ foreach ($pair in @(
         (-not ($lintScope -match 'peer_edits|peerEdits')) `
         "lint scope is filtered by peer authorship: $lintScope"
 }
+
+Write-Output ""
+
+# ── 6c-2. The agent's own return text (issue #285) ───────────────────────
+
+Write-Output "## subagent return reader (issue #285)"
+
+# A Stop hook can read what its agent just said -- the record lands 6 ms before
+# the hook runs (#134). But the editor caps the value at 5000 characters and
+# appends `[truncated]`: measured over 300 real logs, 231 complete against 68
+# truncated. A whole return and a beheaded one are both non-empty strings, so a
+# caller handed a bare string cannot tell them apart, and the mandated
+# `### Gate Summary` sits in exactly the region the cap removes.
+$retScript = Join-Path $scriptDir 'subagent-return.py'
+
+Assert-True "the return reader ships with the hooks" `
+    (Test-Path $retScript) "no subagent-return.py in hooks/scripts"
+
+$retRoot = Join-Path ([IO.Path]::GetTempPath()) "af-285-$(Get-Random)"
+
+function New-ReturnLog {
+    # `attrs.response` is a JSON *string* holding a JSON array, exactly as the
+    # editor writes it -- the double encoding is the thing under test.
+    param([string]$Dir, [string]$Name, [string]$Response, [switch]$NoRecord)
+    New-Item -ItemType Directory -Path $Dir -Force | Out-Null
+    $lines = @((@{ ts = 1000; type = 'llm_request'; name = 'x' } | ConvertTo-Json -Compress))
+    if (-not $NoRecord) {
+        $lines += (@{ ts = 2000; type = 'agent_response'; attrs = @{ response = $Response } } |
+            ConvertTo-Json -Compress -Depth 6)
+    }
+    Set-Content -Path (Join-Path $Dir $Name) -Value ($lines -join "`n") -Encoding UTF8
+}
+
+function Invoke-ReturnReader {
+    param([string]$Dir, [string]$Agent = 'code-critic')
+    $out = & $peerPy $retScript --session-dir $Dir --agent $Agent 2>$null
+    $code = $LASTEXITCODE
+    $lines = @($out)
+    $status = if ($lines.Count -gt 0) { ([string]$lines[0]).Trim() } else { '' }
+    $text = if ($lines.Count -gt 1) { ($lines[1..($lines.Count - 1)] -join "`n") } else { '' }
+    @{ Status = $status; Text = $text; Code = $code }
+}
+
+$retName = 'runSubagent-code-critic-toolu_ret.jsonl'
+
+$dirComplete = Join-Path $retRoot 'complete'
+New-ReturnLog -Dir $dirComplete -Name $retName `
+    -Response '[{"role":"assistant","parts":[{"type":"text","content":"VERDICT APPROVED"}]}]'
+$rComplete = Invoke-ReturnReader -Dir $dirComplete
+Assert-True "a whole return reports complete" `
+    ($rComplete.Status -eq 'complete') "got status '$($rComplete.Status)'"
+Assert-True "a whole return carries its text" `
+    ($rComplete.Text -match 'VERDICT APPROVED') "got text '$($rComplete.Text)'"
+
+# Truncation is detected by the JSON-parse test, not by length 5011 and not by
+# the `[truncated]` marker. All three agreed on 299 of 300 sampled logs, but AF
+# owns none of them: re-tune the cap or re-word the marker and a length test
+# starts calling every return complete.
+$dirTrunc = Join-Path $retRoot 'truncated'
+New-ReturnLog -Dir $dirTrunc -Name $retName `
+    -Response '[{"role":"assistant","parts":[{"type":"text","content":"PARTIAL VERDICT[truncated]'
+$rTrunc = Invoke-ReturnReader -Dir $dirTrunc
+Assert-True "a beheaded return reports truncated rather than complete" `
+    ($rTrunc.Status -eq 'truncated') "got status '$($rTrunc.Status)'"
+Assert-True "a beheaded return still yields the text that survived" `
+    ($rTrunc.Text -match 'PARTIAL VERDICT') "got text '$($rTrunc.Text)'"
+
+# The #123 signature: seven files modified and "nothing at all" returned. The
+# real log's final record holds a tool_call and no text part. This parses
+# cleanly, so the words are absent rather than lost -- a fact about the agent,
+# not about the reader. It reported `unavailable` until #175, which put it in
+# the same bucket as "the reader could not run" and forced every caller to
+# guess which one it held. Measured over 851 logs: 8 of these against 8 damaged
+# values and 1 missing record -- near enough a coin flip that no caller could.
+$dirTool = Join-Path $retRoot 'toolcall'
+New-ReturnLog -Dir $dirTool -Name $retName `
+    -Response '[{"role":"assistant","parts":[{"type":"tool_call","name":"read_file"}]}]'
+$rTool = Invoke-ReturnReader -Dir $dirTool
+Assert-True "a final record with only a tool call reports empty, not unavailable" `
+    ($rTool.Status -eq 'empty') "got status '$($rTool.Status)'"
+Assert-True "an empty return carries no text to mistake for a verdict" `
+    ([string]::IsNullOrEmpty($rTool.Text)) "got text '$($rTool.Text)'"
+
+# The separation only pays if the other cause keeps its own status. A damaged
+# value with nothing salvageable is the reader's blind spot, not the agent's
+# silence, and blocking on it would let a bad log fail a good agent.
+$dirDamaged = Join-Path $retRoot 'damaged'
+New-ReturnLog -Dir $dirDamaged -Name $retName -Response '[{"role":"assistant","parts":[{"typ'
+$rDamaged = Invoke-ReturnReader -Dir $dirDamaged
+Assert-True "a damaged value with nothing salvageable stays unavailable" `
+    ($rDamaged.Status -eq 'unavailable') "got status '$($rDamaged.Status)'"
+Assert-True "silence and unreadability are not the same status" `
+    ($rTool.Status -ne $rDamaged.Status) "both report '$($rTool.Status)'"
+
+$dirNoRec = Join-Path $retRoot 'norecord'
+New-ReturnLog -Dir $dirNoRec -Name $retName -Response 'x' -NoRecord
+$rNoRec = Invoke-ReturnReader -Dir $dirNoRec
+Assert-True "a log without an agent_response record reports unavailable" `
+    ($rNoRec.Status -eq 'unavailable') "got status '$($rNoRec.Status)'"
+
+$dirNoLog = Join-Path $retRoot 'nolog'
+New-Item -ItemType Directory -Path $dirNoLog -Force | Out-Null
+$rNoLog = Invoke-ReturnReader -Dir $dirNoLog
+Assert-True "no log for this agent reports unavailable" `
+    ($rNoLog.Status -eq 'unavailable') "got status '$($rNoLog.Status)'"
+
+# Exit 0 for `unavailable` separates "the reader ran and found nothing
+# readable" from "the reader did not run". A wrapper that had to infer the
+# first from a non-zero exit could not tell them apart either.
+Assert-True "an unavailable verdict is still a successful read" `
+    ($rNoLog.Code -eq 0) "exit $($rNoLog.Code)"
+
+Remove-Item $retRoot -Recurse -Force -ErrorAction SilentlyContinue
+
+# The wrapper's failure direction is inverted from Get-AfPeerEdits: that one
+# stays silent when it cannot measure, this one must say so.
+$retCommonPs = Get-Content (Join-Path $scriptDir '_common.ps1') -Raw -ErrorAction SilentlyContinue
+$retCommonSh = Get-Content (Join-Path $scriptDir '_common.sh') -Raw -ErrorAction SilentlyContinue
+Assert-True "_common.ps1 exposes the return reader" `
+    ($retCommonPs -match 'function Get-AfSubagentReturn') "no Get-AfSubagentReturn wrapper"
+Assert-True "_common.sh exposes the return reader" `
+    ($retCommonSh -match 'af_subagent_return\(\)') "no af_subagent_return wrapper"
+
+# The PowerShell wrapper validates the status against a fixed set and maps
+# anything else to `unavailable`. That is the right shape and the exact place a
+# new state dies quietly: the reader would report `empty`, the allow-list would
+# not recognise it, and the caller would receive the very conflation #175
+# removed -- with every test above still green, because they exercise the
+# reader directly.
+Assert-True "the wrapper's allow-list admits the empty status" `
+    ($retCommonPs -match "'complete',\s*'truncated',\s*'empty',\s*'unavailable'") `
+    "an allow-list without 'empty' folds it back into 'unavailable'"
+
+# Distinct causes are only useful if they produce distinct advice. Both twins
+# must say something different for a silent return than for an unreadable one.
+foreach ($pair in @(
+        @{ n = 'implementer-stop.ps1'; t = $implPs1 },
+        @{ n = 'implementer-stop.sh';  t = $implSh })) {
+    Assert-True "$($pair.n) tells a silent return apart from an unreadable one" `
+        ($pair.t -match 'RETURN EMPTY' -and $pair.t -match 'RETURN UNREADABLE') `
+        "the two causes were split in the reader but collapse again in the message"
+}
+
+# The wiring. A reader nothing calls protects nothing -- #123 direction 5 is an
+# implementer that modified seven files and returned nothing, which passed
+# every gate because no gate looked.
+Assert-True "implementer-stop.ps1 reads its own return" `
+    ($implPs1 -match 'Get-AfSubagentReturn') "the green gate still never looks at what the agent said"
+Assert-True "implementer-stop.sh reads its own return" `
+    ($implSh -match 'af_subagent_return') "the green gate still never looks at what the agent said"
+
+# And it warns rather than blocks. `unavailable` means either "the agent said
+# nothing" or "the reader could not run", and the hook cannot tell which -- so
+# blocking on it would let a missing interpreter shut down every implementer.
+# A watchdog that breaks legitimate work gets switched off (#108).
+foreach ($pair in @(
+        @{ n = 'implementer-stop.ps1'; t = $implPs1; k = 'returnNote|\$ret\.Status' },
+        @{ n = 'implementer-stop.sh';  t = $implSh;  k = 'return_note|ret_status' })) {
+    $retLines = ($pair.t -split "`r?`n") | Where-Object { $_ -match $pair.k }
+    Assert-True "$($pair.n) warns on an unreadable return instead of blocking" `
+        (@($retLines).Count -gt 0 -and -not ($retLines -match 'decision.*block')) `
+        "an unmeasurable return became a blocking verdict: $retLines"
+}
+
+Write-Output ""
+
+# ── 6b-ter. Stop-hook loop guard (issue #298) ────────────────────────────
+
+Write-Output "## stop-hook loop guard (issue #298)"
+
+# implementer-stop.ps1:42 described a loop guard in a comment for a year and no
+# code implemented it, while 31 blocking sites across four stop hooks ran
+# unguarded. A hook that blocks on a condition the forced retry does not clear
+# blocks that retry on the same condition.
+Assert-True "_common.ps1 exposes the stop-hook loop guard" `
+    ($retCommonPs -match 'function Invoke-AfStopLoopGuard') "no Invoke-AfStopLoopGuard wrapper"
+Assert-True "_common.sh exposes the stop-hook loop guard" `
+    ($retCommonSh -match 'af_stop_loop_guard\(\)') "no af_stop_loop_guard wrapper"
+
+# Position is the property, not presence: a block emitted above the call is
+# unguarded however correct the helper is. The floor is the other half -- a loop
+# is also "fixed" by deleting the gates, and that has to fail too.
+$blockSite = 'decision\\?"?\s*[:=]\s*\\?"block'
+foreach ($g in @(
+        @{ n = 'implementer-stop.ps1'; floor = 12 }, @{ n = 'implementer-stop.sh'; floor = 12 },
+        @{ n = 'refactorer-stop.ps1';  floor = 13 }, @{ n = 'refactorer-stop.sh';  floor = 13 },
+        @{ n = 'test-writer-stop.ps1'; floor = 4 },  @{ n = 'test-writer-stop.sh'; floor = 4 },
+        @{ n = 'documenter-stop.ps1';  floor = 2 },  @{ n = 'documenter-stop.sh';  floor = 2 })) {
+    $gCall = if ($g.n -like '*.ps1') { 'Invoke-AfStopLoopGuard' } else { 'af_stop_loop_guard' }
+    $gLines = @(Get-Content (Join-Path $scriptDir $g.n) -ErrorAction SilentlyContinue)
+    $callAt = -1; $blockAt = -1; $blockCount = 0
+    for ($i = 0; $i -lt $gLines.Count; $i++) {
+        if ($gLines[$i] -match '^\s*#') { continue }
+        if ($callAt -lt 0 -and $gLines[$i] -match $gCall) { $callAt = $i }
+        if ($gLines[$i] -match $blockSite) {
+            if ($blockAt -lt 0) { $blockAt = $i }
+            $blockCount++
+        }
+    }
+    Assert-True "$($g.n) calls the loop guard" ($callAt -ge 0) `
+        "every blocking site in it is unguarded"
+    Assert-True "$($g.n) reaches the loop guard before it can block" `
+        ($callAt -ge 0 -and $blockAt -ge 0 -and $callAt -lt $blockAt) `
+        "guard at line $($callAt + 1), first block at line $($blockAt + 1)"
+    Assert-True "$($g.n) still carries its gates" ($blockCount -ge $g.floor) `
+        "$blockCount blocking sites, floor is $($g.floor) -- a loop must not be fixed by removing gates"
+}
+
+Write-Output ""
+
+# ── 6c-bis. Undeclared repo-root creations (issue #123, direction 3) ─────
+
+Write-Output "## undeclared repo-root creations (issue #123)"
+
+# Direction 3 of #123: diff the working tree against the DECLARED scope instead
+# of trusting the agent's self-report. The declared scope is the delegation
+# prompt, which the editor writes verbatim into the subagent log as a
+# `user_message` span.
+#
+# The rule is narrow because the wide one was measured and rejected. Over 815
+# real subagent logs, "wrote a file the prompt never names" fires on 52 of the
+# 334 runs that wrote anything (15.6%), nearly all legitimate -- so it would be
+# switched off (#108). "CREATED, at the repository root, never named" fires 6
+# times with no false positives, and one of the six is `run_wit3103_tests.py`,
+# the file the issue was opened about.
+$usScript = Join-Path $scriptDir 'undeclared-scratch.py'
+
+Assert-True "the undeclared-scratch reader ships with the hooks" `
+    (Test-Path $usScript) "no undeclared-scratch.py in hooks/scripts"
+
+$usRoot = Join-Path ([IO.Path]::GetTempPath()) "af-123-$(Get-Random)"
+$usRepo = Join-Path $usRoot 'repo'
+New-Item -ItemType Directory -Path (Join-Path $usRepo 'tests') -Force | Out-Null
+
+function New-ScratchLog {
+    # Shaped like a real log: a session_start filler, one user_message carrying
+    # the delegation prompt, then one tool_call per write. Written without a
+    # BOM because the editor writes none, and a BOM would make the reader skip
+    # the very first line.
+    param([string]$Dir, [string]$Prompt, [object[]]$Calls, [switch]$NoPrompt)
+    New-Item -ItemType Directory -Path $Dir -Force | Out-Null
+    $lines = @((@{ ts = 1000; type = 'session_start'; name = 'session_start' } | ConvertTo-Json -Compress))
+    if (-not $NoPrompt) {
+        $lines += (@{ ts = 1100; type = 'user_message'; attrs = @{ content = $Prompt } } |
+            ConvertTo-Json -Compress -Depth 5)
+    }
+    foreach ($call in $Calls) {
+        $lines += (@{
+                ts    = 2000
+                type  = 'tool_call'
+                name  = $call.Tool
+                attrs = @{ args = (@{ filePath = $call.Path } | ConvertTo-Json -Compress) }
+            } | ConvertTo-Json -Compress -Depth 5)
+    }
+    [IO.File]::WriteAllLines(
+        (Join-Path $Dir 'runSubagent-test-writer-toolu_us.jsonl'),
+        $lines,
+        (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Invoke-ScratchReader {
+    param([string]$Dir, [string]$Agent = 'test-writer')
+    $out = & $peerPy $usScript --session-dir $Dir --agent $Agent --repo-root $usRepo 2>$null
+    $code = $LASTEXITCODE
+    @{ Files = @($out | Where-Object { $_ -and "$_".Trim() } | ForEach-Object { "$_".Trim() }); Code = $code }
+}
+
+$usPrompt = 'Write failing tests for the alignment bug. You may create tests/test_alignment.py only.'
+
+# The incident itself.
+$usDirScratch = Join-Path $usRoot 'scratch'
+New-ScratchLog -Dir $usDirScratch -Prompt $usPrompt -Calls @(
+    @{ Tool = 'create_file'; Path = (Join-Path $usRepo 'run_wit3103_tests.py') })
+$usScratch = Invoke-ScratchReader -Dir $usDirScratch
+Assert-True "a scratch runner created at the repo root is reported" `
+    ($usScratch.Files -contains 'run_wit3103_tests.py') "got '$($usScratch.Files -join ",")'"
+Assert-True "a measurable run exits 0" `
+    ($usScratch.Code -eq 0) "got exit code $($usScratch.Code)"
+
+# A root file the task actually asked for is not the agent's invention.
+$usDirNamed = Join-Path $usRoot 'named'
+New-ScratchLog -Dir $usDirNamed -Prompt 'Create CHANGELOG.md in the repository root.' -Calls @(
+    @{ Tool = 'create_file'; Path = (Join-Path $usRepo 'CHANGELOG.md') })
+$usNamed = Invoke-ScratchReader -Dir $usDirNamed
+Assert-True "a root file the prompt asked for is not reported" `
+    ($usNamed.Files.Count -eq 0) "got '$($usNamed.Files -join ",")'"
+
+# EDITING an existing root file is how every legitimate case in the sample
+# behaved -- `.gitignore`, `pyproject.toml`, `tox.ini`. This clause is what
+# makes the rule immune to prompt truncation: the prompt is capped at ~5000
+# characters and 342 of 814 sampled prompts end in `[truncated]`, so a name
+# living in the severed tail reads as "never named".
+$usDirEdit = Join-Path $usRoot 'edit'
+New-ScratchLog -Dir $usDirEdit -Prompt $usPrompt -Calls @(
+    @{ Tool = 'replace_string_in_file'; Path = (Join-Path $usRepo 'pyproject.toml') })
+$usEdit = Invoke-ScratchReader -Dir $usDirEdit
+Assert-True "editing an existing root file is not reported however undeclared" `
+    ($usEdit.Files.Count -eq 0) "got '$($usEdit.Files -join ",")'"
+
+$usDirMulti = Join-Path $usRoot 'multi'
+New-ScratchLog -Dir $usDirMulti -Prompt $usPrompt -Calls @(
+    @{ Tool = 'multi_replace_string_in_file'; Path = (Join-Path $usRepo 'tox.ini') })
+$usMulti = Invoke-ScratchReader -Dir $usDirMulti
+Assert-True "a multi-file edit of a root file is not reported either" `
+    ($usMulti.Files.Count -eq 0) "got '$($usMulti.Files -join ",")'"
+
+# Subdirectories are where deliverables live. Reporting an undeclared file in
+# tests/ or docs/ is the 15.6% false positive rate that got the wide rule
+# rejected.
+$usDirSub = Join-Path $usRoot 'subdir'
+New-ScratchLog -Dir $usDirSub -Prompt $usPrompt -Calls @(
+    @{ Tool = 'create_file'; Path = (Join-Path $usRepo 'tests/test_invented_name.py') })
+$usSub = Invoke-ScratchReader -Dir $usDirSub
+Assert-True "an undeclared file created in a subdirectory is not reported" `
+    ($usSub.Files.Count -eq 0) "got '$($usSub.Files -join ",")'"
+
+# Scratch work belongs outside the repository, and that is the remediation the
+# block message offers -- so it must not be flagged in turn.
+$usDirOut = Join-Path $usRoot 'outside'
+New-ScratchLog -Dir $usDirOut -Prompt $usPrompt -Calls @(
+    @{ Tool = 'create_file'; Path = (Join-Path $usRoot 'probe_outside.py') })
+$usOut = Invoke-ScratchReader -Dir $usDirOut
+Assert-True "a file created outside the repository is not reported" `
+    ($usOut.Files.Count -eq 0) "got '$($usOut.Files -join ",")'"
+
+# No prompt means no declared scope. Reporting "nothing found" would be a lie
+# the caller cannot detect, so the reader must say it could not measure.
+$usDirNoPrompt = Join-Path $usRoot 'noprompt'
+New-ScratchLog -Dir $usDirNoPrompt -NoPrompt -Calls @(
+    @{ Tool = 'create_file'; Path = (Join-Path $usRepo 'run_wit3103_tests.py') })
+$usNoPrompt = Invoke-ScratchReader -Dir $usDirNoPrompt
+Assert-True "a log without a delegation prompt reports that it could not measure" `
+    ($usNoPrompt.Code -eq 1) "got exit code $($usNoPrompt.Code)"
+Assert-True "a log without a delegation prompt reports no files" `
+    ($usNoPrompt.Files.Count -eq 0) "got '$($usNoPrompt.Files -join ",")'"
+
+# No log at all is the same answer, not a pass.
+$usDirEmpty = Join-Path $usRoot 'empty'
+New-Item -ItemType Directory -Path $usDirEmpty -Force | Out-Null
+$usEmpty = Invoke-ScratchReader -Dir $usDirEmpty
+Assert-True "an agent with no log of its own reports that it could not measure" `
+    ($usEmpty.Code -eq 1) "got exit code $($usEmpty.Code)"
+
+Remove-Item -Recurse -Force $usRoot -ErrorAction SilentlyContinue
+
+# The wiring. A reader nothing calls protects nothing.
+$usCommonPs = Get-Content (Join-Path $scriptDir '_common.ps1') -Raw -ErrorAction SilentlyContinue
+$usCommonSh = Get-Content (Join-Path $scriptDir '_common.sh') -Raw -ErrorAction SilentlyContinue
+$usTwPs1 = Get-Content (Join-Path $scriptDir 'test-writer-stop.ps1') -Raw -ErrorAction SilentlyContinue
+$usTwSh = Get-Content (Join-Path $scriptDir 'test-writer-stop.sh') -Raw -ErrorAction SilentlyContinue
+
+Assert-True "_common.ps1 exposes the undeclared-scratch reader" `
+    ($usCommonPs -match 'function Get-AfUndeclaredScratch') "no Get-AfUndeclaredScratch wrapper"
+Assert-True "_common.sh exposes the undeclared-scratch reader" `
+    ($usCommonSh -match 'af_undeclared_scratch\(\)') "no af_undeclared_scratch wrapper"
+Assert-True "test-writer-stop.ps1 checks for undeclared root creations" `
+    ($usTwPs1 -match 'Get-AfUndeclaredScratch') "the Red gate still trusts the agent's self-report"
+Assert-True "test-writer-stop.sh checks for undeclared root creations" `
+    ($usTwSh -match 'af_undeclared_scratch') "the Red gate still trusts the agent's self-report"
+
+# Unlike the return reader (#285), this one BLOCKS. It may: it fires only on
+# positive evidence, every unmeasurable case yields an empty list, and the
+# remediation is to delete or move one file.
+Assert-True "test-writer-stop.ps1 blocks on an undeclared root creation" `
+    ($usTwPs1 -match '(?s)Get-AfUndeclaredScratch.{0,900}decision\s*=\s*"block"') `
+    "the finding is reported but nothing stops the agent"
+Assert-True "test-writer-stop.sh blocks on an undeclared root creation" `
+    ($usTwSh -match '(?s)af_undeclared_scratch.{0,900}\\"decision\\": \\"block\\"') `
+    "the finding is reported but nothing stops the agent"
+
+# Gate 0 runs before the Red gate on purpose: every gate below it returns early
+# when pytest is missing or collects nothing, and a scratch file in the root is
+# a mess whether or not the suite ran.
+Assert-True "the PowerShell scratch gate runs before the pytest early-return" `
+    ($usTwPs1.IndexOf('Get-AfUndeclaredScratch') -lt $usTwPs1.IndexOf('Get-Command pytest')) `
+    "a missing pytest lets an undeclared root file through"
+Assert-True "the bash scratch gate runs before the pytest early-return" `
+    ($usTwSh.IndexOf('af_undeclared_scratch') -lt $usTwSh.IndexOf('command -v pytest')) `
+    "a missing pytest lets an undeclared root file through"
 
 Write-Output ""
 
@@ -2878,6 +3358,18 @@ Assert-True "the ephemeral channel is allowed for probing and barred from citati
 Assert-True "durability is stated as a time horizon, not a binary" `
     ($dbxSkill -match '(?i)time horizon' -and $dbxSkill -match '(?i)retention') `
     "retention is still treated as guaranteed"
+
+# The taxonomy defined the gate, but the exit protocol sends an agent to its own
+# Exit Gates table -- and no agent carried a row for it, so it could never fire.
+$implAgent = Get-Content (Join-Path $githubDir 'agents/implementer.agent.md') -Raw
+
+Assert-True "the producer that runs measurements carries the gate in its own table" `
+    ($implAgent -match '(?i)Measured result names an openable artifact') `
+    "the evidence-durability gate is defined in the taxonomy but no agent instantiates it"
+
+Assert-True "the gate says what counts as openable and when to report BLOCKED" `
+    ($implAgent -match '(?i)run id.*table \+ query.*committed output file' -and $implAgent -match 'No durable channel') `
+    "the gate names no acceptable artifact, so it cannot be evaluated"
 
 Assert-True "an absent durable channel is BLOCKED rather than reported anyway" `
     ($dbxSkill -match '(?i)do not fall back to the ephemeral channel and report the number') `
@@ -3048,10 +3540,177 @@ if ((Test-Path $resolveChecker) -and $pyExe) {
     Remove-Item $seed -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# A capability nothing calls is not shipped. #217's durable artifacts passed
+# eleven assertions and were never written, because the only file that ever
+# passed --facts-out was the suite proving it worked (#253).
+$callerChecker = Join-Path $PSScriptRoot 'check-cli-callers.py'
+Assert-True "CLI caller checker present" (Test-Path $callerChecker) "expected $callerChecker"
+
+if ((Test-Path $callerChecker) -and $pyExe) {
+    # deploy.sh/deploy.ps1 live above .github and were never searched, so a CLI
+    # the deploy itself calls still counted as uncalled (#257).
+    $callerRoots = @($githubDir)
+    $payloadRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+    if (Test-Path (Join-Path $payloadRoot 'deploy.sh')) { $callerRoots += $payloadRoot }
+
+    & $pyExe $callerChecker $PSScriptRoot @callerRoots *> $null
+    if ($inAfSource) {
+        Assert-True "every shipped CLI option has a production caller" ($LASTEXITCODE -eq 0) "checker exit $LASTEXITCODE"
+    } else {
+        # Some options are passed only by deploy.ps1, which a project never receives (#349).
+        Write-Output "  SKIP  every shipped CLI option has a production caller -- deploy.ps1 is a caller and does not ship here"
+    }
+
+    $seed = Join-Path ([System.IO.Path]::GetTempPath()) "af-caller-$(Get-Random)"
+    New-Item -ItemType Directory -Path (Join-Path $seed 'scripts') -Force | Out-Null
+    Set-Content -Path (Join-Path $seed 'scripts\seeded-cli.py') -Value @'
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--orphan-out", default=None)
+'@
+    & $pyExe $callerChecker (Join-Path $seed 'scripts') $seed *> $null
+    Assert-True "checker flags an option nothing outside a suite would pass" ($LASTEXITCODE -ne 0) "checker exit $LASTEXITCODE"
+
+    # A suite is exactly what this guard distrusts, so it cannot vouch for the
+    # option -- otherwise the failure mode reappears with a test as its alibi.
+    Set-Content -Path (Join-Path $seed 'test-seeded.sh') -Value 'python seeded-cli.py --orphan-out "$tmp"'
+    & $pyExe $callerChecker (Join-Path $seed 'scripts') $seed *> $null
+    Assert-True "checker does not accept a test file as the caller" ($LASTEXITCODE -ne 0) "checker exit $LASTEXITCODE"
+
+    Set-Content -Path (Join-Path $seed 'seeded-hook.sh') -Value 'python seeded-cli.py --orphan-out "$out"'
+    & $pyExe $callerChecker (Join-Path $seed 'scripts') $seed *> $null
+    Assert-True "checker clears an option a production file passes" ($LASTEXITCODE -eq 0) "checker exit $LASTEXITCODE"
+
+    Remove-Item $seed -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Write-Output ""
 
 # Resolution invariants are done; restore the declared policy for anything after.
 $env:AF_CONF_PATH = $script:savedPolicyPath
+
+# ── 8b. Hooks whose product is their text, not a verdict (issue #263) ────
+#
+# Assert-Deny judges a permission decision and the stop helpers judge a block.
+# The three hooks below answer neither question -- two inject session context
+# and one reports readiness -- and having no helper that fitted them is why
+# none of them was ever executed here. The parse and CR gates walked the files;
+# nothing ran them.
+
+Write-Output "## session-context.ps1"
+
+# Everything this hook produces is prose an agent then acts on, so a stale or
+# invented test summary is not a crash: it is a session that starts on a false
+# premise and never says so.
+$scStart = '{"session_id":"s1","source":"startup","transcript_path":"/none"}'
+$scPassLog = '{"domain": {"passed": 12, "total": 12, "exit_code": 0, "last_run": "2026-01-01T00:00:00"}}'
+# passed < total with exit_code 0 does not occur; the exit code is the verdict
+# and the counts are the detail, so a case has to let the two disagree.
+$scFailLog = '{"domain": {"passed": 9, "total": 12, "exit_code": 1, "last_run": "2026-01-01T00:00:00"}}'
+
+$scBare = Invoke-Hook -Script 'session-context.ps1' -JsonInput $scStart -Branch 'agent/263-x'
+Assert-Contains "session-context announces the event it answers" `
+    $scBare.Output '"hookEventName":"SessionStart"' `
+    "the client routes on the event name; without it the context is dropped"
+
+# Silence about untested code is the honest answer. A summary produced from an
+# absent log would be read as evidence that the suite had run.
+Assert-NotContains "session-context claims no test state when none was recorded" `
+    $scBare.Output 'Tests:' `
+    "an invented summary is worse than none, because it is acted on"
+
+$scPass = Invoke-Hook -Script 'session-context.ps1' -JsonInput $scStart -Branch 'agent/263-x' `
+    -Files @{ '.github/test-log.json' = $scPassLog }
+Assert-Contains "session-context folds the recorded test state into the context" `
+    $scPass.Output 'Tests: domain=12/12\(PASS,' `
+    "the counts and the verdict both come from the log, not from the prompt"
+
+$scFail = Invoke-Hook -Script 'session-context.ps1' -JsonInput $scStart -Branch 'agent/263-x' `
+    -Files @{ '.github/test-log.json' = $scFailLog }
+Assert-Contains "session-context reads the verdict off the exit code" `
+    $scFail.Output 'domain=9/12\(FAIL,' `
+    "a scope whose exit code is non-zero is a failing scope whatever the counts say"
+
+Write-Output ""
+
+Write-Output "## coordinator-postmerge.ps1"
+
+# The gate exists to tell the coordinator what is still checked out. Reporting
+# a clean slate while an agent worktree is live is the one failure that matters,
+# and it is invisible without a case that has one.
+$pmAgent = Invoke-Hook -Script 'coordinator-postmerge.ps1' -JsonInput '{}' -Branch 'agent/263-x'
+Assert-Contains "postmerge attributes its message to the coordinator gate" `
+    $pmAgent.Output 'coordinator:PostMerge' `
+    "the systemMessage is read next to other agents' output and has to be attributable"
+Assert-Contains "postmerge counts a checkout sitting on an agent branch" `
+    $pmAgent.Output 'Active agent worktrees \(1\)' `
+    "a summary that misses the live worktree is the failure the gate exists to prevent"
+Assert-Contains "postmerge names the branch it counted" `
+    $pmAgent.Output 'refs/heads/agent/263-x' `
+    "a count without the name cannot be acted on"
+
+$pmDev = Invoke-Hook -Script 'coordinator-postmerge.ps1' -JsonInput '{}' -Branch 'dev'
+Assert-Contains "postmerge reports nothing to clean up off an agent branch" `
+    $pmDev.Output 'No active agent/\* worktrees' `
+    "only agent/* checkouts are the gate's business"
+
+Write-Output ""
+
+Write-Output "## session-mcp-readiness.ps1"
+
+# The readiness line is the only place a misconfigured capability announces
+# itself before a workflow depends on it. Its whole content is a classification
+# -- READY, DEGRADED, BLOCKED -- derived from af-env.conf, and nothing had ever
+# checked that the classification follows the config.
+#
+# The first line of each fixture config is a comment on purpose: Set-Content
+# -Encoding UTF8 on PowerShell 5.1 writes a BOM, and `<BOM>ADO_CAPABILITY_MODE=`
+# does not match an '^ADO_' pattern. Parking the BOM on a comment keeps the case
+# about the hook rather than about the fixture writer.
+function New-ReadinessConf {
+    param([string]$Body)
+    return "# fixture policy`n$Body"
+}
+
+$mcpOff = Invoke-Hook -Script 'session-mcp-readiness.ps1' -JsonInput '{}' -Branch 'agent/263-x' `
+    -Files @{ '.github/af-env.conf' = (New-ReadinessConf 'ADO_CAPABILITY_MODE=off') }
+Assert-Contains "readiness reports READY when the capability is switched off" `
+    $mcpOff.Output 'ADO MCP readiness: READY \| mode=off' `
+    "off is a configuration, not a fault"
+Assert-Contains "readiness says why nothing is being checked" `
+    $mcpOff.Output 'ADO capability mode is off' `
+    "a silent READY is indistinguishable from a gate that never ran"
+
+$mcpBlocked = Invoke-Hook -Script 'session-mcp-readiness.ps1' -JsonInput '{}' -Branch 'agent/263-x' `
+    -Files @{ '.github/af-env.conf' = (New-ReadinessConf 'ADO_CAPABILITY_MODE=required') }
+Assert-Contains "readiness blocks when a required capability has no project" `
+    $mcpBlocked.Output 'ADO MCP readiness: BLOCKED' `
+    "required means the workflow cannot proceed without it, and the session is where that is cheapest to learn"
+Assert-Contains "readiness names the setting that is missing" `
+    $mcpBlocked.Output 'missing=ADO_PROJECT' `
+    "BLOCKED without the key is a dead end for whoever has to fix it"
+
+# Same missing key, different declared mode: optional degrades to a fallback
+# rather than stopping, and the difference is the point of the setting.
+$mcpOptional = Invoke-Hook -Script 'session-mcp-readiness.ps1' -JsonInput '{}' -Branch 'agent/263-x' `
+    -Files @{ '.github/af-env.conf' = (New-ReadinessConf 'ADO_CAPABILITY_MODE=optional') }
+Assert-NotContains "readiness does not block when the capability is optional" `
+    $mcpOptional.Output 'BLOCKED' `
+    "optional exists precisely so a missing project is not fatal"
+Assert-Contains "readiness names the fallback it will use instead" `
+    $mcpOptional.Output 'fallback traceability' `
+    "a degraded run that does not say what it degraded to cannot be reviewed"
+
+$mcpReady = Invoke-Hook -Script 'session-mcp-readiness.ps1' -JsonInput '{}' -Branch 'agent/263-x' `
+    -Files @{ '.github/af-env.conf' = (New-ReadinessConf "ADO_CAPABILITY_MODE=required`nADO_PROJECT=Contoso") }
+Assert-Contains "readiness reports the resolved project once it is configured" `
+    $mcpReady.Output 'defaults:project=Contoso' `
+    "the value the agents will actually use, echoed back before they use it"
+Assert-NotContains "readiness stops reporting a missing project once it is set" `
+    $mcpReady.Output 'missing=ADO_PROJECT' `
+    "a stale complaint trains the reader to ignore the line"
+
+Write-Output ""
 
 # ── 9. Parse gate ────────────────────────────────────────────────────────
 #
@@ -3110,6 +3769,161 @@ foreach ($f in $shellSources) {
     if ([System.IO.File]::ReadAllBytes($f.FullName) -contains 13) { $crFiles += $f.Name }
 }
 Assert-True "no shipped shell script carries a CR" ($crFiles.Count -eq 0) "CRLF in: $($crFiles -join ', ')"
+
+# --- Coverage inventory gate (issue #263) ----------------------------------
+#
+# The two gates above are the reason a hook can ship untested and still look
+# covered: they walk the whole set, so every file is touched and none is run.
+# Four bash hooks and three PowerShell ones sat that way, coordinator-posttooluse
+# among them -- the hook whose permanent false positive #172 was filed about,
+# whose fix then sat unmerged for eleven days while the tracker said it was
+# implemented. Nothing contradicted the tracker, because nothing executed it.
+#
+# The expected set is therefore derived from the payload directory rather than
+# from a list someone maintains: a hook added without a case fails on the PR
+# that adds it, instead of on the incident that finds it.
+#
+# Exercised means a line that names the hook and is neither a comment nor a
+# section header. The whole-set gates name no hook at all, so they cannot
+# satisfy this; and a `Write-Output "## foo.ps1"` heading must not either, or a
+# title would stand in for a test.
+
+Write-Output "## coverage inventory"
+
+$suitePath = Join-Path $githubDir 'scripts/test-hooks.ps1'
+$suiteBody = @(Get-Content $suitePath | Where-Object {
+    $_ -notmatch '^\s*#' -and $_ -notmatch '^\s*Write-(Output|Host)\s'
+})
+
+# The shared preamble is dot-sourced by every hook, so it is exercised by all
+# of them and named by none.
+$shippedHooks = @(Get-ChildItem -Path $scriptDir -Filter '*.ps1' -File |
+    Where-Object { $_.BaseName -ne '_common' })
+$uncoveredHooks = @($shippedHooks | Where-Object {
+    $name = $_.BaseName
+    -not ($suiteBody | Where-Object { $_ -like "*$name*" })
+} | ForEach-Object { $_.Name })
+
+# Guards the derivation. A filter that matched nothing, or a suite this failed
+# to read, would compare an empty set against an empty set and report full
+# coverage -- the same silent pass the gate exists to end.
+Assert-True "the hook inventory is derived from the payload" `
+    ($shippedHooks.Count -ge 10 -and $suiteBody.Count -ge 100) `
+    "found $($shippedHooks.Count) shipped hooks in $scriptDir and $($suiteBody.Count) readable suite lines"
+
+Assert-True "every shipped PowerShell hook is exercised by a behavioural case" `
+    ($uncoveredHooks.Count -eq 0) `
+    "never executed by any case, only walked by the parse and CR gates: $($uncoveredHooks -join ', ')"
+
+# --- Duplicate definition gate (issue #291) --------------------------------
+#
+# Four readers of the subagent logs had each grown a private copy of the same
+# regex and the same three functions. Three of them said so in a comment; the
+# fourth did not, which is why the copies were found only by accident -- the
+# only detector was a note the copier had to remember to write. `_agentlog.py`
+# now owns that code, and this gate is what stops a fifth copy: it keys on the
+# definition, not on a confession.
+#
+# Two assertions, because the two failures are different. A name `_agentlog.py`
+# owns, redefined anywhere else, is a copy of shared code and is always wrong.
+# A name defined twice elsewhere may be a genuine collision -- `scan` exists in
+# two readers with different return shapes -- so that one is a ratchet at the
+# measured post-extraction figure rather than a demand for zero. The ceiling
+# goes down when duplication is removed and never up.
+#
+# AST, not a regex over the source: the first attempt at this measurement
+# matched docstring lines such as `Usage:` at column 0 and reported two
+# definitions that do not exist.
+
+Write-Output "## duplicate definition inventory"
+
+$dupProgram = @'
+import ast
+import os
+import sys
+
+directory = sys.argv[1]
+owner = "_agentlog.py"
+
+
+def top_level_names(path):
+    with open(path, "r", encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), filename=path)
+    names = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Name):
+                names.add(node.target.id)
+    # Every hook has one; it carries no shared meaning.
+    names.discard("main")
+    return names
+
+
+defined = {}
+for name in sorted(os.listdir(directory)):
+    if name.endswith(".py"):
+        defined[name] = top_level_names(os.path.join(directory, name))
+
+owned = defined.get(owner, set())
+recopied = sorted(
+    "{0}:{1}".format(script, name)
+    for script, names in defined.items()
+    if script != owner
+    for name in sorted(names & owned)
+)
+
+elsewhere = {}
+for script, names in defined.items():
+    if script == owner:
+        continue
+    for name in names:
+        elsewhere.setdefault(name, []).append(script)
+duplicates = sorted(name for name, scripts in elsewhere.items() if len(scripts) > 1)
+
+print("FILES={0}".format(len(defined)))
+print("OWNED={0}".format(len(owned)))
+print("RECOPIED={0}".format(",".join(recopied)))
+print("DUPLICATES={0}".format(len(duplicates)))
+print("NAMES={0}".format(",".join(duplicates)))
+'@
+
+$dupReport = @{}
+# Written to a file rather than passed to `python -c`: PowerShell's native
+# argument encoder strips the embedded double quotes, and the scanner arrived
+# at the interpreter as `name.endswith(.py)` -- a SyntaxError, which the gate
+# would have read as an empty report.
+$dupScript = Join-Path ([System.IO.Path]::GetTempPath()) "af-duplicate-scan-$PID.py"
+Set-Content -LiteralPath $dupScript -Value $dupProgram -Encoding ASCII
+try {
+    foreach ($line in @(& $peerPy $dupScript $scriptDir 2>&1)) {
+        if ("$line" -match '^([A-Z]+)=(.*)$') { $dupReport[$Matches[1]] = $Matches[2] }
+    }
+} finally {
+    Remove-Item -LiteralPath $dupScript -ErrorAction SilentlyContinue
+}
+
+# Guards the derivation, the way the coverage gate above does. A directory this
+# failed to read, or an `_agentlog.py` that had been emptied, would find nothing
+# to compare and pass on silence.
+Assert-True "the duplicate inventory is derived from the payload" `
+    ($dupReport.ContainsKey('FILES') -and [int]$dupReport['FILES'] -ge 10 -and [int]$dupReport['OWNED'] -ge 6) `
+    "scanned $($dupReport['FILES']) scripts in $scriptDir, _agentlog.py defines $($dupReport['OWNED']) shared names"
+
+Assert-True "no hook redefines a name _agentlog.py owns" `
+    ($dupReport['RECOPIED'] -eq '') `
+    "import it from _agentlog instead of copying: $($dupReport['RECOPIED'])"
+
+# 10 is the measurement taken the day #291 landed, not a target. Lower it when
+# a duplicate goes away; never raise it to make a build green.
+Assert-True "duplicate definitions across the Python hooks do not grow" `
+    ([int]$dupReport['DUPLICATES'] -le 10) `
+    "$($dupReport['DUPLICATES']) duplicated top-level names, ceiling 10: $($dupReport['NAMES'])"
 
 # --- Red phase validity (issue #123) ---------------------------------------
 #

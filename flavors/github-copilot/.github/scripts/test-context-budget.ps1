@@ -14,25 +14,8 @@ $scriptDir  = Split-Path -Parent $PSCommandPath
 $repoRootAF = (Resolve-Path (Join-Path $scriptDir '..' | Join-Path -ChildPath '..')).Path
 $checker    = (Resolve-Path (Join-Path $scriptDir 'check-context-budget.py')).Path
 
-# Resolve a real Python interpreter (skip the Windows Store alias by probing
-# --version output).
-function Resolve-Python {
-    $candidates = @(
-        (Join-Path $repoRootAF '.venv/Scripts/python.exe'),
-        (Join-Path $repoRootAF '.venv/bin/python')
-    )
-    foreach ($c in $candidates) { if (Test-Path $c) { return @($c) } }
-    foreach ($name in @('python3', 'python')) {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd) {
-            $v = & $cmd.Source --version 2>&1
-            if ($LASTEXITCODE -eq 0 -and $v -match 'Python 3') { return @($cmd.Source) }
-        }
-    }
-    $py = Get-Command py -ErrorAction SilentlyContinue
-    if ($py) { return @($py.Source, '-3') }
-    return $null
-}
+. (Join-Path $scriptDir '_suite_env.ps1')
+function Resolve-Python { Get-AfSuitePython $scriptDir }
 
 $python = Resolve-Python
 if (-not $python) {
@@ -601,7 +584,7 @@ try {
     #     checked where the deploy scripts live -- a consumer has no copy.
     $deployPs1 = Join-Path $repoRootAF 'deploy.ps1'
     $deploySh = Join-Path $repoRootAF 'deploy.sh'
-    if ((Test-Path $deployPs1) -and (Test-Path $deploySh)) {
+    if (Test-AfSourceTree $scriptDir) {
         $results['SS_deploy_ps1_seeds_project_budget'] =
             ((Get-Content $deployPs1 -Raw) -match '--seed-project-budget')
         $results['SS_deploy_sh_seeds_project_budget'] =
@@ -898,7 +881,7 @@ foreach ($name in $results.Keys) {
     if ($results[$name]) { Write-Host "  PASS: $name" }
     else { Write-Host "  FAIL: $name"; $failed++ }
 }
-foreach ($name in $skipped.Keys) { Write-Host "  SKIP: $name -- $($skipped[$name])" }
+foreach ($name in $skipped.Keys) { Write-Host "  SKIP  $name -- $($skipped[$name])" }
 Write-Host ''
 Write-Host "  Checks passed: $($results.Count - $failed)"
 Write-Host "  Checks failed: $failed"

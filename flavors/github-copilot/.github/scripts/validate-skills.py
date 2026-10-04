@@ -340,6 +340,44 @@ def parse_index_skills(index_path: Path) -> tuple[set[str], set[str]]:
     return active, available
 
 
+# A table header is the separator row plus the header above it. A separator
+# followed by anything that is not a table row is a header introducing nothing.
+TABLE_SEPARATOR = re.compile(r"^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$")
+TABLE_ROW = re.compile(r"^\s*\|")
+
+
+def validate_index_layout(index_path: Path) -> list[str]:
+    """Check the shape of INDEX.md, not just what it lists.
+
+    Everything else here cross-references the index against the directories,
+    which is why #112 survived: the file listed the right skills and was
+    malformed anyway -- a duplicated table header sat above the first heading
+    and rendered as an empty table. Nothing owned the layout, so nothing
+    noticed. Regenerating the file by hand reintroduces it just as easily.
+    """
+    errors: list[str] = []
+    fenced = False
+    lines = index_path.read_text(encoding="utf-8").splitlines()
+
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced or not TABLE_SEPARATOR.match(line):
+            continue
+        following = lines[i + 1] if i + 1 < len(lines) else ""
+        if not TABLE_ROW.match(following):
+            # Line numbers only. Echoing the offending line back would put
+            # arbitrary file content into the message, and this script prints
+            # to a cp1252 console on Windows -- a single "≥" in a skill
+            # heading is enough to turn a reported error into a traceback.
+            errors.append(
+                f"INDEX layout: table header at line {i} introduces no rows (line {i + 2} is not a table row)"
+            )
+
+    return errors
+
+
 def validate_index_consistency(
     skills_root: Path,
     active_dirs: set[str],
@@ -352,6 +390,8 @@ def validate_index_consistency(
     if not index_path.exists():
         errors.append(f"INDEX.md not found at {index_path}")
         return errors
+
+    errors.extend(validate_index_layout(index_path))
 
     idx_active, idx_available = parse_index_skills(index_path)
 

@@ -32,9 +32,33 @@ and items may appear on an unexpected board/team:
 - Set `System.IterationPath` from `ADO_DEFAULT_ITERATION_PATH` when present;
   otherwise inherit from the parent item / project default.
 - Use `ADO_DEFAULT_TEAM` for team-scoped board or query calls when set.
+- Set `System.AssignedTo` from `ADO_DEFAULT_ASSIGNED_TO`. If it is empty, ask
+  the human who owns the item. The PreToolUse hook refuses an ownerless create
+  (#36), so this is not optional.
+- Do not use `action=add_child`: its schema has no assignee field, so every
+  child would be unowned, and the hook refuses it. Create each child with
+  `action=create`, then link it with `wit_work_item_link_write`.
 - Pass these fields explicitly on the create call; never rely on interactive
   prompts. On update, do not overwrite an existing area/iteration unless the
   human explicitly requests a move.
+
+## State on Create
+
+A work item is created in its type's **initial** state and cannot be created
+in the working state. Naming the working state on the create call is rejected,
+so "set the item Active at work start" (`skills/ado-shared/SKILL.md`, Step 0a)
+is two calls, not one:
+
+1. `wit_work_item_write` `action=create` — omit `System.State` and let the
+   type's initial state stand.
+2. `wit_work_item_write` `action=update` — set `System.State` to the working
+   state, optionally with `System.Reason`.
+
+Resolve both state names from the type via `get_type` rather than hardcoding
+them; a process template is free to disagree about what they are called, which
+is the same trap that made items unclosable in #267. Measured on an Agile
+project (#112): create lands in `New`, the update to `Active` carries
+`System.Reason: "Work started"`.
 
 ## Update Strategy
 
@@ -46,6 +70,23 @@ and items may appear on an unexpected board/team:
   probe the equivalent Azure DevOps read behaviour once and record it there
   rather than assuming the answer transfers.
 
+## Read Strategy (long fields)
+
+A result over the spill threshold reaches you only as a file path, and
+`read_file` cuts every line over 2,000 characters there — an HTML description
+is usually one line. Values and sources: `.github/hooks/scripts/tool-limits.json`.
+
+1. **Read narrow.** `wit_work_item` `action=get` with
+   `fields: ["System.Description"]` (or the fields you need) instead of
+   `expand: "All"`; `fields` and `expand` cannot be combined, so fetch
+   relations in a separate `expand: "Relations"` call. A narrow result usually
+   stays inline and complete.
+2. **If it spilled anyway**, the PostToolUse hook names the long fields and a
+   lossless copy with those lines wrapped — read the copy, not the spill file.
+3. **Fallback:** parse the spill file in the terminal (`ConvertFrom-Json`),
+   never trust a `[truncated]` line. Never rewrite a field you could not read
+   in full.
+
 ## Linking Strategy
 
 - Use native artifact links where available.
@@ -55,7 +96,10 @@ and items may appear on an unexpected board/team:
 ## Closure Discipline (two-stage, post-merge)
 
 - Closure is **post-merge**. At finalize the integration PR is not yet merged,
-  so set at most **Resolved** (delivered, pending merge) — never **Closed**.
+  so set at most the type's **delivered** state (pending merge) — never a
+  `Completed`-category state. The delivered state is resolved from the type,
+  not from the name `Resolved`: a Task has none at all. See the
+  State-Applicability Guard in `agents/ado-work-item-manager.agent.md`.
 - Always post an **AC coverage map** (each acceptance criterion -> evidence or
   `UNMET`) before any closure transition. It is the audit trail and the
   checkable artifact.

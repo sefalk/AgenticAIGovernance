@@ -12,23 +12,8 @@ $scriptDir  = Split-Path -Parent $PSCommandPath
 $repoRootAF = (Resolve-Path (Join-Path $scriptDir '..' | Join-Path -ChildPath '..')).Path
 $checker    = (Resolve-Path (Join-Path $scriptDir '..' | Join-Path -ChildPath 'hooks/scripts/check-workflow-log.py')).Path
 
-function Resolve-Python {
-    $candidates = @(
-        (Join-Path $repoRootAF '.venv/Scripts/python.exe'),
-        (Join-Path $repoRootAF '.venv/bin/python')
-    )
-    foreach ($c in $candidates) { if (Test-Path $c) { return @($c) } }
-    foreach ($name in @('python3', 'python')) {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd) {
-            $v = & $cmd.Source --version 2>&1
-            if ($LASTEXITCODE -eq 0 -and $v -match 'Python 3') { return @($cmd.Source) }
-        }
-    }
-    $py = Get-Command py -ErrorAction SilentlyContinue
-    if ($py) { return @($py.Source, '-3') }
-    return $null
-}
+. (Join-Path $scriptDir '_suite_env.ps1')
+function Resolve-Python { Get-AfSuitePython $scriptDir }
 
 $python = Resolve-Python
 if (-not $python) {
@@ -193,6 +178,144 @@ escalation:
     # R: the override is off by default -- otherwise Q would prove nothing.
     $r = Invoke-Checker ($conforming -replace 'status: "COMPLETED"', 'status: "DRAFT"')
     $results['R_override_off_by_default'] = $r.Code -eq 1
+
+    # S: `escalation: null` is how a log states that nothing was escalated. It
+    #    must not be counted as one. Seven of the eight escalation sections in
+    #    the corpus are exactly this, and all seven were being counted.
+    #    The trailing blank line is not decoration -- it is what made the
+    #    section two lines long, and the old rule counted lines.
+    $denied = $conforming + "`r`n`r`nescalation: null`r`n`r`n"
+    $r = Invoke-Checker $denied @('--fix-counters')
+    $results['S_null_block_not_counted'] = $r.Output -notmatch 'summary.escalations'
+    $results['S_null_block_stays_zero']  = ([IO.File]::ReadAllText($r.Path)) -match '(?m)^  escalations: 0\s*$'
+
+    # T: a header with nothing under it is the same denial in another spelling.
+    $empty = $conforming + "`r`n`r`nescalation:`r`n`r`n"
+    $r = Invoke-Checker $empty @('--fix-counters')
+    $results['T_empty_block_not_counted'] = $r.Output -notmatch 'summary.escalations'
+
+    # U: a Stop hook appends comments below the section. A comment is not an
+    #    escalation -- one corpus log is misread on this alone.
+    $commented = $conforming + "`r`n`r`nescalation: null`r`n`r`n# Agent invocation counts appended by Stop hook`r`n"
+    $r = Invoke-Checker $commented @('--fix-counters')
+    $results['U_comment_not_content'] = $r.Output -notmatch 'summary.escalations'
+
+    # V: the watchdog. A stated escalation with no ESCALATE verdict and no
+    #    populated block rests on nothing in the file, which is the shape a
+    #    fabricated counter takes. Audit mode, so nothing repairs it first.
+    $bare = ($conforming -replace 'escalations: 0', 'escalations: 1') + "`r`n`r`nescalation: null`r`n`r`n"
+    $r = Invoke-Checker $bare
+    $results['V_watchdog_exit1'] = $r.Code -eq 1
+    $results['V_watchdog_names_line'] = $r.Output -match 'summary\.escalations is 1'
+
+    # W: it stays silent when a verdict backs the number -- otherwise V would
+    #    only prove the rule fires on everything.
+    $withVerdict = ($conforming -replace 'escalations: 0', 'escalations: 1') `
+        -replace 'verdict: "APPROVED"\r?\n  - step: 2', "verdict: `"ESCALATE`"`r`n  - step: 2"
+    $results['W_watchdog_silent_on_verdict'] = (Invoke-Checker $withVerdict).Code -eq 0
+
+    # X: and silent when a populated block backs it.
+    $withBlock = ($conforming -replace 'escalations: 0', 'escalations: 1') + @"
+
+escalation:
+  trigger: "needs a Databricks run"
+  resolution: "documented in the plan"
+"@
+    $results['X_watchdog_silent_on_block'] = (Invoke-Checker $withBlock).Code -eq 0
+
+    # Y: repair runs before judgement. The same log the watchdog rejects in
+    #    audit mode is repaired and passes when the fix is asked for -- a gate
+    #    must not block on a contradiction its own run has removed.
+    $r = Invoke-Checker $bare @('--fix-counters')
+    $results['Y_repair_before_check'] = ($r.Code -eq 0) -and ($r.Output -match 'summary.escalations: 1 -> 0')
+
+    # Z: the fixtures above must actually reproduce the corpus shape. A section
+    #    that is one line long never triggered the old rule either, so a case
+    #    built without the blank line would pass against the bug it targets.
+    $results['Z_fixture_has_blank_line'] = $denied -match "escalation: null`r`n`r`n"
+
+    # AA-AF: `started:` and `completed:` are written by two producers, so they
+    #    can drift into different representations while each stays valid ISO
+    #    8601 -- the #240 shape, where subtracting them gives -66 minutes. The
+    #    rule compares the two rather than demanding `Z`, so a consistently
+    #    stamped historical log keeps passing.
+    function New-Stamped([string]$started, [string]$completed) {
+        $stamps = "started: `"$started`""
+        if ($completed) { $stamps += "`r`ncompleted: `"$completed`"" }
+        return ($conforming -replace 'git_branch: "agent/clean"', ('git_branch: "agent/clean"' + "`r`n" + $stamps))
+    }
+
+    $mixed = New-Stamped '2026-08-27T09:57:10+02:00' '2026-08-27T08:51:31Z'
+    $r = Invoke-Checker $mixed
+    $results['AA_mixed_rejected']    = $r.Code -eq 1
+    $results['AA_names_both_stamps'] = ($r.Output -match '\+02:00') -and ($r.Output -match 'completed')
+
+    $r = Invoke-Checker (New-Stamped '2026-08-27T07:57:10Z' '2026-08-27T08:51:31Z')
+    $results['AB_both_utc_ok'] = $r.Code -eq 0
+
+    # A historical log stamped consistently in one offset is wrong by today's
+    # convention but not broken for its readers. It is not rewritten, so it
+    # must not be rejected either.
+    $r = Invoke-Checker (New-Stamped '2026-08-27T09:57:10+02:00' '2026-08-27T10:51:31+02:00')
+    $results['AC_same_offset_ok'] = $r.Code -eq 0
+
+    # `null` is absence, not a representation. Four corpus logs end this way.
+    $r = Invoke-Checker (New-Stamped '2026-08-27T07:57:10Z' 'null')
+    $results['AD_absent_completed_ok'] = $r.Code -eq 0
+
+    $r = Invoke-Checker (New-Stamped '2026-08-27T09:57:10+02:00' '')
+    $results['AE_started_alone_ok'] = $r.Code -eq 0
+
+    # Same class, different reference: a workflow spanning a DST change reads
+    # as consistent to a rule that only looks for `Z`.
+    $r = Invoke-Checker (New-Stamped '2026-08-27T09:57:10+02:00' '2026-08-27T09:51:31+01:00')
+    $results['AF_differing_offsets_rejected'] = $r.Code -eq 1
+
+    # The fixture must carry what the cases claim, or AB-AE pass vacuously.
+    $results['AG_fixture_carries_stamps'] = ($mixed -match '(?m)^started: ') -and ($mixed -match '(?m)^completed: ')
+
+    # AH-AN: `af_version` is stamped from `.github/.af-version`, so a value that
+    #    is not a version means it was written by hand -- which is how the field
+    #    came to hold `n/a`, `not measured` and, in one log, the instruction
+    #    itself (#309).
+    function New-Version([string]$block) {
+        return ($conforming -replace 'git_branch: "agent/clean"', ('git_branch: "agent/clean"' + "`r`n" + $block))
+    }
+
+    $r = Invoke-Checker (New-Version 'af_version: "1.23.19"')
+    $results['AH_semver_ok'] = $r.Code -eq 0
+
+    $r = Invoke-Checker (New-Version 'af_version: "n/a"')
+    $results['AI_prose_rejected']     = $r.Code -eq 1
+    $results['AI_says_remove_it']     = ($r.Output -match 'af_version') -and ($r.Output -match 'remove the line')
+
+    # The version genuinely could not be read. A recorded absence is analysable
+    # where a missing key is not, so it is accepted rather than demanded away.
+    $r = Invoke-Checker (New-Version 'af_version: null')
+    $results['AJ_explicit_null_ok'] = $r.Code -eq 0
+
+    # This rule runs before the stamp does, so a log that has not been stamped
+    # yet must not be blocked for a field the hook is about to supply.
+    $r = Invoke-Checker $conforming
+    $results['AK_absent_ok'] = $r.Code -eq 0
+
+    # The `3117-3120` shape: the correct version, then the caveat that had
+    # nowhere else to go. A prefix match would accept it, and the field still
+    # cannot be read as a version.
+    $long = 'af_version: "1.21.43 (deployed 2026-07-31T14:48:01, per .github/.af-version). NOTE: the root-cause analysis in Finding 1 ran against SOURCE 1.21.149, 106 versions ahead of this deployment."'
+    $r = Invoke-Checker (New-Version $long)
+    $results['AL_version_plus_prose_rejected'] = $r.Code -eq 1
+    $results['AL_long_value_truncated']        = $r.Output -match '\.\.\.'
+
+    # That caveat has a field of its own now, and nothing parses it -- including
+    # this rule, which must not mistake the note for the version it qualifies.
+    $withNote = New-Version ('af_version: "1.21.43"' + "`r`n" + 'af_version_note: "analysis ran against source 1.21.149; n/a for this deployment"')
+    $r = Invoke-Checker $withNote
+    $results['AM_note_is_free_text_ok'] = $r.Code -eq 0
+
+    # The fixtures must carry what the cases claim, or AH/AK/AM pass vacuously.
+    $results['AN_base_fixture_has_no_version'] = -not ($conforming -match '(?m)^af_version:')
+    $results['AN_note_fixture_has_both']       = ($withNote -match '(?m)^af_version: ') -and ($withNote -match '(?m)^af_version_note: ')
 }
 finally {
     foreach ($f in $files) { Remove-Item $f -Force -ErrorAction SilentlyContinue }

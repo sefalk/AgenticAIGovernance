@@ -10,7 +10,18 @@ See the [documenter agent](../agents/documenter.agent.md) for the full YAML sche
 
 - **Filename:** `<workflow-id>.yaml`
 - **Format:** YAML with 2-space indentation
-- **Timestamps:** ISO 8601 with timezone (e.g., `2025-01-15T14:30:00Z`)
+- **Timestamps:** ISO 8601 in UTC, `Z` suffix (e.g., `2025-01-15T14:30:00Z`).
+  A local offset is valid ISO 8601 and still wrong here: `started:` and
+  `completed:` are stamped by two producers, and once they disagree a consumer
+  subtracting them reports a workflow that finished before it began (#240).
+  `check-workflow-log.py` rejects a log whose two stamps disagree.
+- **`af_version`:** a semantic version or an explicit `null`, stamped by
+  `documenter-stop` from `.github/.af-version` — never written by hand. It was
+  the last header field a model transcribed, and 23 of 68 logs carried no value
+  while 7 carried something that was not a version, which left the corpus
+  unattributable to a framework release (#309). No version file means `null`: a
+  source checkout is not a deployment. Anything you want to say *about* the
+  version goes in the free-text `af_version_note:`, which nothing parses.
 - **Retention:** 30 days locally, archive if long-term audit needed
 - **Coverage:** `AF_WORKFLOW_LOG_COVERAGE` (`af-env.conf`) decides which
   workflows write one. At the default `all`, every workflow does — Review Only
@@ -27,13 +38,15 @@ the chat debug log of the current session:
 
 ```yaml
 cost:
-  schema_version: 4
-  collector: "collect-session-cost.py@4"
+  schema_version: 6
+  collector: "collect-session-cost.py@6"
   available: true
   coverage: full            # full | partial | truncated
   sessions: ["<session-id>"]
   requests: 205             # billed requests only
   unbilled_requests: 9
+  no_usage_requests: 2      # no tokens and no billing: nothing to account for
+  drift: { records: 1, of: 216, fields: [outputTokens] }   # omitted when none
   tokens: { input_uncached: 1259777, cached: 21963581, output: 234002 }
   credits: 2385.082
   rate_card: "models.json"  # null when the dump is absent or unusable
@@ -73,8 +86,8 @@ cost:
     customizations:
       testing.instructions.md: { applying: 0, skipped: 61, listed: 0, reason: "applyTo '**/test_*.py' did not match any attached files" }
       git-workflow.instructions.md: { applying: 61, skipped: 0, listed: 0 }
-    rows: "<path>"          # null unless --entities-out was passed
-  facts: "<path>"           # null unless --facts-out was passed
+    rows: "<path>"          # .github/logs/cost/{workflow-id}.entities.ndjson
+  facts: "<path>"           # .github/logs/cost/{workflow-id}.facts.ndjson
   environment: { vscode: "1.131.0", copilot_chat: "0.59.0" }
 ```
 
@@ -86,11 +99,26 @@ Reading it:
   gates on it are forbidden.
 - **`available: false` carries a `reason`** (`session_dir_missing`,
   `main_log_missing`, `log_unparseable`, `schema_drift`) and is never an error.
-- **`coverage` qualifies the number.** `truncated` means the log lost its start
-  (the 100 MB cap drops the *oldest* entries, i.e. the plan and Red phases) and
-  no total is emitted at all — a total would look complete while being biased
-  downward. `partial` means the session began after the workflow did, so earlier
-  phases were never logged.
+  `schema_drift` now means *every* request was unreadable. A record that drifts
+  while others parse is subtracted, not fatal: the total stands and `drift`
+  names the field, the log it came from, the count and the base, so the reader
+  can judge the hole. A session is many logs — `main.jsonl` plus one per
+  subagent — so drift confined to a single subagent's log is a different
+  finding from drift in the main one, and `logs` is what tells them apart.
+- **`no_usage_requests` is not `unbilled_requests`.** Unbilled requests spent
+  tokens that were not charged; a no-usage request reported no tokens and no
+  billing at all — an aborted or failed call. Counting the second as the first
+  would put a failure inside a normal category.
+- **`coverage` qualifies the number.** `truncated` means the log lost its own
+  start — the rows begin mid-session, so the plan and Red phases are missing —
+  and no total is emitted at all: a total would look complete while being
+  biased downward. What removes the start is not established. An editor-side
+  100 MB cap was assumed and does not hold: measured across 610 debug logs on
+  one machine, only three exceeded 95 MB (231, 160 and 138 MB) and the 138 MB
+  one still carried its first entry, written four days earlier. The detection
+  does not depend on the mechanism, so the claim is dropped rather than
+  replaced with another guess. `partial` means the session began after the
+  workflow did, so earlier phases were never logged.
 - **The block is a snapshot taken when the documenter finishes.** The
   coordinator's closing turns are not in it.
 - **`requests` counts billed requests only**; requests without the billing
@@ -144,6 +172,12 @@ Reading it:
   measured from the dumps the editor wrote next to the log — not from the
   source files on disk, which is the difference between what shipped and what
   exists.
+- **`classes` is a closed set:** `tool`, `instruction_attached`,
+  `skill`, `agent`, `instruction`. The example above shows only the three a
+  particular session happened to carry; a session with no agent descriptions in
+  its prompt emits no `agent` row. The set is pinned against the collector's
+  own taxonomy by `test-session-cost.ps1`, because this document fell three
+  schema versions behind unnoticed once already (issue #227).
 - **`credits_attributable: false` is rendered in the block, not only here.** An
   entity's tokens are inside a request's `inputTokens`, and a request-level
   billing record cannot be split by which span of the prompt produced it. A
@@ -193,16 +227,32 @@ Reading it:
   rather than materialised as duplicate rows, the header states the grain
   and `credits_attributable: false`, and there is no credit column to sum.
 - **`facts` names the per-request artifact** (`--facts-out`, NDJSON, one row per
-  request). The debug log is capped and expires; a row that was never extracted
-  while it existed answers no question ever again. The aggregates above are
-  computed *from* those rows, so the block cannot disagree with them. The rows
-  carry dimensions the block does not render — request purpose (agent work,
-  compaction, background), the parent span, the prompt and tool payload files,
-  reasoning effort — and contain numbers and identifiers only: no prompt text
-  is ever extracted, which is what makes the file keepable at all. The rows are
+  request). The debug log expires with the session store; a row that was never
+  extracted while it existed answers no question ever again. The aggregates
+  above are computed *from* those rows, so the block cannot disagree with them.
+  The rows carry dimensions the block does not render — request purpose (agent
+  work, compaction, background), the parent span, the prompt and tool payload
+  files, reasoning effort — and contain numbers and identifiers only: no prompt
+  text is ever extracted, which is what makes the file keepable at all. The rows
+  are
   still written under `coverage: truncated`, where the aggregates are withheld:
   each row is individually accurate, only the *set* is incomplete, and the
   header row records the coverage so nobody re-aggregates them as a total.
+- **Both artifacts are written to `.github/logs/cost/`**, named after the
+  workflow, by `documenter-stop` on every finalising call. They sit under this
+  directory's `.gitignore`, whose `*` covers subdirectories, so they are never
+  committed — the same rule, for the same lineage of data, as the workflow logs
+  themselves.
+- **They accumulate; they are never replaced.** A workflow can span several
+  chat sessions while the collector reads one at a time, so a later call adds
+  only the rows the file does not already carry: keyed on the request for
+  facts, on the payload and definition for entities. Overwriting would make the
+  last session the only one that ever existed, and by then the log the earlier
+  rows came from is gone. Each session contributes one header, because the
+  coverage and the rate card the rows were priced under belong to the session,
+  not to the file. Re-running a session already in the file adds nothing, which
+  is why the collector can run on every finalising call while the YAML block —
+  which cannot carry a duplicate key — is still written once.
 - **The numbers never pass through a language model.** The hook appends the
   script's output verbatim; no agent reads the debug log (a session log reaches
   tens of megabytes and contains every prompt verbatim).

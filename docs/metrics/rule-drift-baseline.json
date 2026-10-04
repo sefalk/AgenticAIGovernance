@@ -1,0 +1,227 @@
+{
+  "corpus": {
+    "files": 26,
+    "rules": 228
+  },
+  "similarity": 0.6,
+  "summary": {
+    "clusters": 11,
+    "agree": 6,
+    "diverge": 5
+  },
+  "clusters": [
+    {
+      "decision": "keep",
+      "reason": "Both PR managers run the branch probe themselves and load no shared file; each needs the rule in its own prompt.",
+      "verdict": "agree",
+      "statement": "Never report a probe you could not complete as a branch that does not exist — that states a fact about the remote you did not establish, and it invites a re-push that can orphan an already-merged branch.",
+      "locations": [
+        {
+          "file": "agents/ado-pr-manager.agent.md",
+          "line": 133,
+          "text": "Never report a probe you could not complete as a branch that does not exist — that states a fact about the remote you did not establish, and it invites a re-push that can orphan an already-merged branch."
+        },
+        {
+          "file": "agents/gh-pr-manager.agent.md",
+          "line": 142,
+          "text": "Never report a probe you could not complete as a branch that does not exist — that states a fact about the remote you did not establish, and it invites a re-push that can orphan an already-merged branch."
+        }
+      ]
+    },
+    {
+      "decision": "aligned",
+      "reason": "Was 'Do not' vs 'Never' for the same boundary; ado-pr-manager's non-scope list now uses 'Never' throughout, like gh-pr-manager's (#305). Neither agent has a file-edit tool.",
+      "verdict": "agree",
+      "statement": "- Never edit production code, tests, or docs.",
+      "locations": [
+        {
+          "file": "agents/ado-pr-manager.agent.md",
+          "line": 180,
+          "text": "- Never edit production code, tests, or docs."
+        },
+        {
+          "file": "agents/gh-pr-manager.agent.md",
+          "line": 178,
+          "text": "- Never edit production code, tests, or docs."
+        }
+      ]
+    },
+    {
+      "decision": "keep",
+      "reason": "Enforced by the subagent-return check in _common.ps1/.sh and by check-workflow-log.py; each critic must still be told to emit it, in its own prompt.",
+      "verdict": "agree",
+      "statement": "The verdict header is a HARD gate — emit it exactly, always:",
+      "locations": [
+        {
+          "file": "agents/code-critic.agent.md",
+          "line": 161,
+          "text": "The verdict header is a HARD gate — emit it exactly, always:"
+        },
+        {
+          "file": "agents/test-critic.agent.md",
+          "line": 106,
+          "text": "The verdict header is a HARD gate — emit it exactly, always:"
+        }
+      ]
+    },
+    {
+      "decision": "aligned",
+      "reason": "Was 'validates' vs 'runs ... when you finish'; implementer now carries refactorer's wording (#305). Enforced by the stop hook and coordinator-pretooluse.",
+      "verdict": "agree",
+      "statement": "**Do NOT run `tests: all`** — the stop hook runs the full suite automatically when you finish.",
+      "locations": [
+        {
+          "file": "agents/implementer.agent.md",
+          "line": 159,
+          "text": "**Do NOT run `tests: all`** — the stop hook runs the full suite automatically when you finish."
+        },
+        {
+          "file": "agents/refactorer.agent.md",
+          "line": 135,
+          "text": "**Do NOT run `tests: all`** — the stop hook runs the full suite automatically when you finish."
+        }
+      ]
+    },
+    {
+      "decision": "keep",
+      "reason": "Implementer and refactorer both hold createAndRunTask; enforced by block-dangerous and check-scratch-tasks.py, stated to each holder.",
+      "verdict": "agree",
+      "statement": "`createAndRunTask` is for invocations a fixed label cannot express — not a lighter-scrutiny route around the terminal you do not have.",
+      "locations": [
+        {
+          "file": "agents/implementer.agent.md",
+          "line": 166,
+          "text": "`createAndRunTask` is for invocations a fixed label cannot express — not a lighter-scrutiny route around the terminal you do not have."
+        },
+        {
+          "file": "agents/refactorer.agent.md",
+          "line": 139,
+          "text": "`createAndRunTask` is for invocations a fixed label cannot express — not a lighter-scrutiny route around the terminal you do not have."
+        }
+      ]
+    },
+    {
+      "decision": "keep",
+      "reason": "Same holders as the createAndRunTask rule; AF_TASK_SCRIPT_DIRS is enforced by block-dangerous and check-scratch-tasks.py.",
+      "verdict": "agree",
+      "statement": "The same PreToolUse classifier inspects it, and it may only invoke scripts under `AF_TASK_SCRIPT_DIRS`; a bare binary or an inline `-Command` payload is denied.",
+      "locations": [
+        {
+          "file": "agents/implementer.agent.md",
+          "line": 167,
+          "text": "The same PreToolUse classifier inspects it, and it may only invoke scripts under `AF_TASK_SCRIPT_DIRS`; a bare binary or an inline `-Command` payload is denied."
+        },
+        {
+          "file": "agents/refactorer.agent.md",
+          "line": 140,
+          "text": "The same PreToolUse classifier inspects it, and it may only invoke scripts under `AF_TASK_SCRIPT_DIRS`; a bare binary or an inline `-Command` payload is denied."
+        }
+      ]
+    },
+    {
+      "decision": "keep",
+      "reason": "Intentional divergence: gh-pr-manager holds merge_pull_request and may merge into the allowlisted integration branch, so 'never merge' would contradict its own tool; ado-pr-manager has no merge tool and completes via autocomplete.",
+      "verdict": "diverge",
+      "statement": "Never attempt to push, merge, or mutate refs yourself.",
+      "locations": [
+        {
+          "file": "agents/ado-pr-manager.agent.md",
+          "line": 136,
+          "text": "Never attempt to push, merge, or mutate refs yourself."
+        },
+        {
+          "file": "agents/gh-pr-manager.agent.md",
+          "line": 145,
+          "text": "Never attempt to push or mutate refs yourself."
+        }
+      ]
+    },
+    {
+      "decision": "keep",
+      "reason": "Role boundary of two different agents, each phrased in its own role section; arbiter and researcher have no edit tools.",
+      "verdict": "diverge",
+      "statement": "- **Read-only** — do NOT create, edit, or delete files",
+      "locations": [
+        {
+          "file": "agents/arbiter.agent.md",
+          "line": 87,
+          "text": "- **Read-only** — do NOT create, edit, or delete files"
+        },
+        {
+          "file": "agents/researcher.agent.md",
+          "line": 51,
+          "text": "You are **strictly read-only** — you must NOT create, edit, or delete any files in the workspace."
+        }
+      ]
+    },
+    {
+      "decision": "keep",
+      "reason": "Curated-skill bullet phrased per role: the critic verifies, implementer and refactorer use, the test-writer inspects. The shared part is the skill pointer.",
+      "verdict": "diverge",
+      "statement": "- **notebook-execution** (`skills/notebook-execution/SKILL.md`) — run `.ipynb` cells via the notebook tools to verify, never terminal scripts",
+      "locations": [
+        {
+          "file": "agents/code-critic.agent.md",
+          "line": 49,
+          "text": "- **notebook-execution** (`skills/notebook-execution/SKILL.md`) — run `.ipynb` cells via the notebook tools to verify, never terminal scripts"
+        },
+        {
+          "file": "agents/implementer.agent.md",
+          "line": 61,
+          "text": "- **notebook-execution** (`skills/notebook-execution/SKILL.md`) — use the notebook tools for `.ipynb`, never terminal scripts"
+        },
+        {
+          "file": "agents/refactorer.agent.md",
+          "line": 62,
+          "text": "- **notebook-execution** (`skills/notebook-execution/SKILL.md`) — use the notebook tools for `.ipynb`, never terminal scripts"
+        },
+        {
+          "file": "agents/test-writer.agent.md",
+          "line": 60,
+          "text": "- **notebook-execution** (`skills/notebook-execution/SKILL.md`) — inspect `.ipynb` via the notebook tools, never terminal scripts"
+        }
+      ]
+    },
+    {
+      "decision": "keep",
+      "reason": "Role boundaries of compliance-checker and documenter. test-writer:74 is a narrower, different rule (it writes tests, never production code) caught by word overlap.",
+      "verdict": "diverge",
+      "statement": "- Do NOT modify production code or test code",
+      "locations": [
+        {
+          "file": "agents/compliance-checker.agent.md",
+          "line": 219,
+          "text": "- Do NOT modify production code or test code"
+        },
+        {
+          "file": "agents/documenter.agent.md",
+          "line": 278,
+          "text": "- Do NOT modify production code or test code"
+        },
+        {
+          "file": "agents/test-writer.agent.md",
+          "line": 74,
+          "text": "Do NOT write or modify production code."
+        }
+      ]
+    },
+    {
+      "decision": "keep",
+      "reason": "Role boundaries of compliance-checker and documenter; the documenter's copy adds who does it instead, which the other does not need.",
+      "verdict": "diverge",
+      "statement": "- Do NOT run tests or check coverage",
+      "locations": [
+        {
+          "file": "agents/compliance-checker.agent.md",
+          "line": 223,
+          "text": "- Do NOT run tests or check coverage"
+        },
+        {
+          "file": "agents/documenter.agent.md",
+          "line": 274,
+          "text": "- Do NOT run tests or check coverage (that's the critic's job)"
+        }
+      ]
+    }
+  ]
+}

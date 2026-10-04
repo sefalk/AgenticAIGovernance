@@ -24,8 +24,35 @@ suggestions. You stay in control through mandatory escalation points.
 - Python 3.10+ with `pytest` and `hypothesis` (for property-based tests)
 - `ruff` (required for refactorer linting hard gate)
 - Optional: `radon` (complexity), `mutmut` (mutation testing)
+- Optional: cost tracking — see below
 - Coordinator auto-bootstrap for missing `.venv` is configurable via
   `.github/af-env.conf` (`PY_ENV_BOOTSTRAP=ask|always|off`)
+
+### Cost tracking (optional)
+
+Every workflow log carries a `cost:` block with the tokens and premium requests
+a workflow consumed. It is filled from VS Code's agent debug log, which is off
+by default. Enable it in VS Code settings:
+
+```jsonc
+"github.copilot.chat.agentDebugLog.fileLogging.enabled": true
+```
+
+**What you gain:** per-workflow token and premium-request figures, the
+retry-economy analysis (`analyze-retry-economy.py`), and the usage baseline
+that makes "did this change get cheaper?" an answerable question.
+
+**While it is off:** nothing breaks. Every workflow log simply records
+`cost: available: false`, and no framework check, hook, or suite fails because
+of it — the framework never gates on this setting.
+
+**The honest caveat:** the setting is experiment-flagged and vendor-controlled.
+Microsoft may rename or withdraw it without notice, at which point cost
+collection degrades back to `available: false`.
+
+To see the current state at any time, run
+`.github/scripts/check-cost-source.ps1` (or `check-cost-source.sh`). The deploy
+script reports it too, so a re-deploy tells you whether the source went dark.
 
 ## Quick Setup
 

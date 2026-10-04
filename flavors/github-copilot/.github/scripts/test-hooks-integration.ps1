@@ -15,7 +15,10 @@
 
 param(
     [switch]$All,
-    [switch]$Verbose
+    [switch]$Verbose,
+    # Analyse this file instead of the VS Code logs -- how the attribution suite
+    # drives the parser with fixtures (#326).
+    [string]$LogPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,6 +26,9 @@ $ErrorActionPreference = 'Stop'
 # -- Locate hook log files ------------------------------------------------
 
 $logsRoot = "$env:APPDATA\Code\logs"
+if ($LogPath) {
+    $hookLogs = @(Get-Item -LiteralPath $LogPath)
+} else {
 if (-not (Test-Path $logsRoot)) {
     Write-Output "ERROR: VS Code logs directory not found at $logsRoot"
     exit 2
@@ -43,6 +49,7 @@ if (-not $All) {
     # Only analyse the most recent log
     $hookLogs = @($hookLogs[0])
 }
+}
 
 Write-Output "=== Hook Integration Verification ==="
 Write-Output "  Analysing $($hookLogs.Count) log file(s)"
@@ -58,6 +65,8 @@ $script:failures = 0
 $script:denials = 0
 $script:warnings = @()
 $script:hookCounts = @{}        # EventName -> set of hook counts seen
+$script:unattributed = @()      # Running: lines that named no hook script
+$script:perCall = @{}           # log|event|seq -> script names run in that one invocation
 
 foreach ($logFile in $hookLogs) {
     $sessionDir = $logFile.Directory.Parent.Parent.Parent.Name  # session timestamp
@@ -104,20 +113,25 @@ foreach ($logFile in $hookLogs) {
                 $script:hookCounts[$event]["$hookCount"] = $true
             }
 
-            # Track which scripts are being run
-            if ($message -match '^Running:.*?File\s+[^\s]+\\\\([^\\]+\.ps1)') {
-                $scriptName = $Matches[1]
-                if (-not $script:hookScripts.ContainsKey($scriptName)) {
-                    $script:hookScripts[$scriptName] = 0
+            # Track which scripts are being run. One extraction for every
+            # spelling: agent-hooks.json paths arrive with `\\` or `\\\\`,
+            # .agent.md frontmatter paths with `/` (#326). Only the command is
+            # read -- the cwd beside it is a path too.
+            if ($message -match '^Running:') {
+                $command = if ($message -match '"command":"((?:[^"\\]|\\.)*)"') { $Matches[1] } else { $message }
+                $normalised = $command -replace '\\+', '/'
+                if ($normalised -match 'hooks/scripts/([^/\s"]+\.(?:ps1|sh))') {
+                    $scriptName = $Matches[1]
+                    if (-not $script:hookScripts.ContainsKey($scriptName)) {
+                        $script:hookScripts[$scriptName] = 0
+                    }
+                    $script:hookScripts[$scriptName]++
+                    $callKey = "$($logFile.FullName)|$event|$seqNum"
+                    if (-not $script:perCall.ContainsKey($callKey)) { $script:perCall[$callKey] = @() }
+                    $script:perCall[$callKey] += $scriptName
+                } else {
+                    $script:unattributed += "[$event] #$seqNum $command"
                 }
-                $script:hookScripts[$scriptName]++
-            }
-            elseif ($message -match '^Running:.*?scripts/([^/"]+\.sh)') {
-                $scriptName = $Matches[1]
-                if (-not $script:hookScripts.ContainsKey($scriptName)) {
-                    $script:hookScripts[$scriptName] = 0
-                }
-                $script:hookScripts[$scriptName]++
             }
 
             # Track tool names from Input JSON
@@ -293,6 +307,80 @@ if ($script:toolsSeen.Count -ge 3) {
     $checksPassed++
 } else {
     Write-Output "  WARN  Only $($script:toolsSeen.Count) distinct tool type(s) seen"
+}
+
+# Check 8: the report's own shape assumptions hold. An unattributed run is
+# missing from the script counts AND would reappear as an orphan candidate --
+# the silent failure of #326. So it fails here instead of vanishing.
+if ($script:unattributed.Count -eq 0) {
+    Write-Output "  PASS  Every hook run is attributed to a script"
+    $checksPassed++
+} else {
+    Write-Output "  FAIL  $($script:unattributed.Count) hook run(s) not attributed to any hooks/scripts/ file:"
+    foreach ($u in ($script:unattributed | Select-Object -First 5)) { Write-Output "        $u" }
+    $checksFailed++
+}
+
+# Check 9: one call, one copy of each gate. A multi-root window holding a
+# consumer and the framework repo ran block-dangerous twice per tool call --
+# ~2.5 s extra, judged against a second policy (#345). WARN, not FAIL: the
+# window layout is the user's choice, but it must not stay invisible.
+$dupScripts = @{}
+$dupCalls = 0
+foreach ($names in $script:perCall.Values) {
+    $repeated = @($names | Group-Object | Where-Object { $_.Count -gt 1 })
+    if ($repeated.Count -eq 0) { continue }
+    $dupCalls++
+    foreach ($g in $repeated) {
+        if (-not $dupScripts.ContainsKey($g.Name)) { $dupScripts[$g.Name] = @{ Max = 0; Calls = 0 } }
+        $dupScripts[$g.Name].Calls++
+        if ($g.Count -gt $dupScripts[$g.Name].Max) { $dupScripts[$g.Name].Max = $g.Count }
+    }
+}
+if ($dupCalls -eq 0) {
+    Write-Output "  PASS  No hook script runs twice in one invocation"
+    $checksPassed++
+} else {
+    Write-Output "  WARN  $dupCalls invocation(s) ran the same hook script twice -- usually a multi-root window loading two .github/hooks (see AF #345):"
+    foreach ($name in ($dupScripts.Keys | Sort-Object)) {
+        Write-Output "        $name x$($dupScripts[$name].Max) in $($dupScripts[$name].Calls) call(s)"
+    }
+}
+
+# Check 10: every invocation ran the global hooks of its event. Agents no longer
+# repeat global hooks in their frontmatter (#345), so a global hook that stops
+# loading would leave no second copy behind -- the hole #166 feared. It fails
+# here instead. SessionStart is exempt: a log opened mid-session never holds it.
+$globalByEvent = @{}
+$hooksJson = Join-Path (Split-Path -Parent $PSScriptRoot) 'hooks/agent-hooks.json'
+if (Test-Path $hooksJson) {
+    foreach ($ev in (Get-Content $hooksJson -Raw | ConvertFrom-Json).hooks.PSObject.Properties) {
+        if ($ev.Name -eq 'SessionStart') { continue }
+        $globalByEvent[$ev.Name] = @($ev.Value | ForEach-Object {
+                if (([string]$_.command -replace '\\+', '/') -match 'hooks/scripts/([\w-]+)\.\w+') { $Matches[1] }
+            } | Sort-Object -Unique)
+    }
+}
+$gaps = @()
+foreach ($callKey in $script:perCall.Keys) {
+    $parts = $callKey -split '\|'
+    $ev = $parts[-2]
+    if (-not $globalByEvent.ContainsKey($ev)) { continue }
+    $ran = @($script:perCall[$callKey] | ForEach-Object { $_ -replace '\.\w+$', '' })
+    foreach ($stem in $globalByEvent[$ev]) {
+        if ($ran -notcontains $stem) { $gaps += "$ev #$($parts[-1]): $stem" }
+    }
+}
+if (-not (Test-Path $hooksJson)) {
+    Write-Output "  WARN  agent-hooks.json not found beside this script; global-hook coverage not checked"
+} elseif ($gaps.Count -eq 0) {
+    Write-Output "  PASS  Every invocation ran the global hooks of its event"
+    $checksPassed++
+} else {
+    $gapCalls = @($gaps | ForEach-Object { ($_ -split ':')[0] } | Sort-Object -Unique).Count
+    Write-Output "  FAIL  $gapCalls invocation(s) did not run a global hook registered for their event:"
+    foreach ($g in ($gaps | Select-Object -First 5)) { Write-Output "        $g" }
+    $checksFailed++
 }
 
 Write-Output ""

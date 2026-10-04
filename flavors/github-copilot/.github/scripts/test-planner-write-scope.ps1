@@ -55,6 +55,14 @@ $results['F_script_in_plans_denied'] = Test-Denied (Invoke-Hook (New-Payload 'cr
 $results['G_traversal_denied']  = Test-Denied (Invoke-Hook (New-Payload 'create_file' '../../elsewhere/plans/x.md'))
 $results['G_absolute_denied']   = Test-Denied (Invoke-Hook (New-Payload 'create_file' 'C:/Windows/Temp/plans/x.md'))
 
+# The write tool the planner actually has only accepts absolute paths, so an
+# in-repo absolute path is the ordinary case rather than an exotic one (#232).
+# The denial above proves absolute paths are checked; it cannot prove they are
+# resolved, because a path mangled into nonsense is also denied.
+$repoRoot = Split-Path (Split-Path $scriptDir)
+$results['G_absolute_in_repo_allowed'] = Test-Allowed (Invoke-Hook (New-Payload 'create_file' (Join-Path $repoRoot 'docs/plans/feat-2026-08-27-x.md')))
+$results['G_absolute_in_repo_src_denied'] = Test-Denied (Invoke-Hook (New-Payload 'create_file' (Join-Path $repoRoot 'src/mpusage/helper.py')))
+
 # H: a batch edit is checked path by path. One bad path among good ones is
 #    still a bad write -- and this is the shape that made a gate inert in #64.
 $batch = @{

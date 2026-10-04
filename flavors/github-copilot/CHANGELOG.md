@@ -5,7 +5,1770 @@ All notable changes to the Agent Framework are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Add entries under the **existing** `###` heading for their kind inside
+`[Unreleased]`. A second heading of the same kind is a defect, not a style
+preference: it splits one list into two, and the next author then has two
+equally plausible places to write. `check-changelog-headings.py` fails the
+build for one (#322).
+
 ## [Unreleased]
+
+## [1.24.0] -- 2026-10-02
+
+### Changed
+
+- **Workflow logs record which skills were read, measured rather than declared
+  (#348).** `collect-agent-invocations.py`, which `documenter-stop` already runs
+  in both dialects, now adds `skills_read:` per agent to the `agent_invocations`
+  block: every `read_file` of a `SKILL.md` in the session's debug logs, parent
+  session as `main`. An agent that read nothing is listed with `[]`, so
+  "measured, none" and "not measured" stay distinct. The issue proposed having
+  the documenter copy each producer's `Skills Read:` line instead. Measured over
+  1,315 subagent logs, that line is the weaker signal:
+  - 305 returns hit the editor's 5,000-character cap, and the line survived in
+    only 16 of them;
+  - in 88 of 278 comparable returns (32 %) it named a skill that was never
+    opened.
+
+  The declaration is kept as a cross-check only: `skills_declared_not_read:`
+  lists what a return claimed but the agent never read. New
+  `scripts/report-skill-reads.py` counts per active skill how many workflow
+  logs read it, lists never-read skills as 0, and states how many logs carried
+  no block, so a staleness review like #306 becomes a query. Counts only
+  `read_file` calls, one session per workflow: a lower bound, labelled as one.
+- **Rule duplication is now a gate, not a report (#305).** Every cluster the
+  #304 detector finds must carry a recorded `decision` (`keep` or `aligned`) and
+  a `reason` in `docs/metrics/rule-drift-baseline.json`, or
+  `check-rule-drift.py --baseline` exits 1; `test-rule-drift.ps1` R16 runs that
+  on the shipped payload, so CI fails. Clusters are keyed by file and normalised
+  wording, not line: moving a rule keeps its decision, while a new duplicate --
+  or one reworded member, which is how two copies start to drift -- has none.
+  Resolving a duplicate always passes. All 11 clusters were decided on the
+  evidence the issue asks for -- enforcing hook, the agent's tool list, who reads
+  the rule: 9 kept, 2 aligned (ado-pr-manager's non-scope list now says *Never*
+  like gh-pr-manager's; implementer carries refactorer's `tests: all` wording).
+  No rule removed. Cluster 5 (*push, merge, or mutate refs* vs *push or mutate
+  refs*) is a divergence **kept on purpose**: gh-pr-manager holds
+  `merge_pull_request` and may merge into the allowlisted branch, so aligning
+  it would have made one agent's rule contradict its own tool. Measured: always-on
+  set unchanged (no always-on file in the diff; 3,479/3,500 tok), implementer
+  +15 bytes, ado-pr-manager -4. The committed baseline also carried every dash
+  as cp437 mojibake -- it had been written through a PowerShell pipe -- so the
+  detector now writes it itself (`--write-baseline`, decisions carried over by
+  key) and R17 fails on the mojibake signature.
+- **The CLI caller check (#253) now runs as its own suite, scoped to the scripts
+  it guards.** It lived only inside `test-hooks.ps1`, which `suite-scope.json`
+  selects for `hooks/**` — so the new `--write-baseline` option of #305 passed
+  every locally selected suite and failed only in CI. `test-cli-callers.ps1`
+  runs the same checker in seconds and is selected by `scripts/**`,
+  `hooks/scripts/**` and the deploy scripts. `--write-baseline` itself is a
+  maintainer command and carries the checker's `af-caller-ok` marker with that
+  reason.
+- CHANGELOG sections can no longer repeat a `###` heading kind (#322).
+  `[Unreleased]` had two `### Changed` and two `### Fixed`; `[1.22.0]` had six
+  `### Changed`, five `### Added` and five `### Fixed`. Those are not typos but
+  a loop — a duplicate heading makes "the existing heading" ambiguous, which
+  produces the next duplicate. `check-changelog-headings.py` is strict inside
+  `[Unreleased]`, where all writing happens, and holds released sections to a
+  ceiling that may only shrink. Enforcing only `[Unreleased]` was rejected
+  because `[1.22.0]` accumulated its six *while it was* `[Unreleased]`; under
+  the new rule a section is strict for its whole writable life and enters the
+  ratchet at zero. The rule also covers `###` kinds outside the six Keep a
+  Changelog kinds, of which 19 exist in released sections.
+- The duplicate headings in `[Unreleased]` are merged, which reorders entries
+  within the section but changes no text.
+- The secret-scanning gate is one Python implementation behind two thin
+  wrappers instead of two maintained implementations (#287). The twins had
+  drifted apart in both directions: measured on 2026-09-22 they disagreed on
+  three of four payloads — the Bash side was missing the connection-string
+  rule and the `apikey` alias, the PowerShell side filtered by an extension
+  allowlist that skipped `.conf`. The core takes the union and replaces the
+  allowlist with binary detection, so it is deliberately stricter than either
+  twin was: more files are scanned, and a connection string or a bare `apikey`
+  is now caught on both platforms. `scan-secrets.ps1` and `scan-secrets.sh`
+  are reduced to interpreter resolution and stdin marshalling. When no
+  interpreter is found both now emit a visible `WARN` instead of the Bash
+  side's previous silent pass — the gate still does not block in that state,
+  which is a separate decision and left to a follow-up.
+- `check-dialect-wrappers.py` makes the rule enforceable rather than advisory:
+  it fails when a `.ps1`/`.sh` pair carries logic instead of delegating
+  (`DW001`), when a wrapper never names its core (`DW002`), or when a **new**
+  twin pair ships with no Python core (`DW003`). The fifteen pairs that
+  predate the rule are listed as a baseline that may only shrink, and the
+  ceiling lives in `test-dialect-wrappers.ps1`, so growing it requires editing
+  a test where a reviewer will see it. Wired into `run-all-tests.ps1` by
+  auto-discovery, hence into CI.
+- The provenance-marker detector gained a Python dialect, `_provenance.py`.
+  The guard from #69 requires every gate to ask the shared detector instead of
+  carrying its own `copilot:` regex; moving a gate into Python needed
+  something on that side for the guard to point at, so the check now binds
+  `scan-secrets.py` rather than its two wrappers.
+- A cross-platform trap the migration surfaced, recorded because it will
+  recur: a path that travels **inside** a payload has to be written the way
+  the reader's interpreter will read it. MSYS rewrites POSIX paths to Windows
+  ones only when handing them to a native binary as an *argument*, never
+  inside data — so a `/tmp/...` path embedded in a bash-authored fixture
+  reached the new Python core unresolvable and the gate found nothing to
+  scan. Real payloads never have this shape; VS Code is native and writes
+  native paths.
+- The last nine block-dangerous cases that could be shared now run from
+  `block-dangerous.cases.tsv`, and the coverage gap is 19 → 10 (#280, fourth
+  batch). Four were held back on the reasoning that `Remove-Item`, `Copy-Item`,
+  `Start-Process` and the call operator are PowerShell, so a bash run of them
+  would say nothing about bash. Measured, the bash hook reaches the identical
+  verdict on all nine: the hook classifies a command line as text and never has
+  to be able to run it.
+- A case that cannot be shared is now recorded rather than only counted.
+  `block-dangerous.ps1-only.tsv` gives each of the remaining ten a kind and a
+  reason, so the ratchet has two numbers: cases with no counterpart, and cases
+  with no counterpart and no reason — the second is now zero and capped there.
+  Saying why not has to cost something, so five guards apply: the name must
+  match a real case in `test-hooks.ps1`, the kind must be one of three
+  recognised ones, the reason must actually say something, a reason left behind
+  for a case the table already covers fails as stale, and the number of reasons
+  carries its own ceiling. There is deliberately no "PowerShell syntax" kind:
+  every case that once claimed it was measured and shared instead (#280).
+- **The whole task-launch family is now shared; the coverage gap is 47 → 19
+  (#280, third batch).** All 30 `create_and_run_task` cases moved out of
+  `test-hooks.ps1` and into `block-dangerous.cases.tsv`, so the tiers that
+  matter most about tasks — an OS-specific scope overriding `command`,
+  `options.shell` carrying its own arguments, shell metacharacters surviving
+  in a single command string, substitution variables, and `runOn: folderOpen`
+  — are now proved in both dialects instead of one. Measured before the move:
+  both hooks reach the same verdict on all 30. Measured as well, because 27 of
+  the 30 name the tool `createAndRunTask`, which VS Code never sends: both
+  hooks treat that legacy spelling exactly like the real `create_and_run_task`,
+  27 payloads compared per dialect with no difference, so the legacy rows are a
+  regression guard rather than a second code path. Only `run_task` stays
+  inline, because resolving a task id needs a `tasks.json` fixture and the
+  table has no field for one.
+
+- **The shared hook case table now covers deferrals too; the coverage gap is
+  52 → 47 (#280, second batch).** Four dialect-neutral deferrals and the
+  non-terminal-tool case moved out of `test-hooks.ps1` and into
+  `block-dangerous.cases.tsv`. The table had excluded `silent` outright,
+  because the two harnesses disagree about what silence means. Measured, the
+  disagreement is narrower than that: it is only about *empty* output, where
+  PowerShell says `silent` and bash has no match. Both agree whenever the hook
+  emits exactly `{}` — which is what it emits for all five, measured on the
+  bash hook before the cases were moved. The restriction in the table's header
+  is therefore now stated as the condition it actually is, rather than as a
+  blanket exclusion of a verdict. `Copy-Item` stayed inline: running a
+  PowerShell cmdlet through the bash hook would assert nothing about bash.
+  This batch also corrects a claim made when the first one landed. The
+  remaining cases were reported as partly blocked on missing bash fixtures for
+  policy overrides and ask reasons. They are not — the bash harness has both.
+  Those cases are ordinary missing coverage, not exceptions needing a recorded
+  reason, which makes the remaining 47 a larger piece of real work than the
+  earlier note implied.
+
+- **The two hook suites now share a case table instead of twin strings
+  (#280).** `block-dangerous` was proved 97 cases to 37: 64 cases existed in
+  `test-hooks.ps1` and nowhere else, so 64 rules were verified in PowerShell
+  and merely assumed in bash. The obvious fix — hand-writing 64 twins — would
+  have produced two files containing the same string, which is not the same as
+  two suites testing the same thing; that is the defect class #313 was about.
+
+  Instead there is now `block-dangerous.cases.tsv`, read by both suites. Each
+  row is executed once per dialect against that dialect's own hook, so a hook
+  that drifts in one dialect fails a suite rather than hiding behind its twin.
+  The first batch migrates 12 cases: eight `allow` and four `ask`.
+
+  TSV and not JSON, contrary to the shape first sketched on the issue: there is
+  no `jq` under git-bash (measured), so a JSON table would have made the shell
+  suite depend on a Python interpreter to read its own test data.
+
+  What may enter the table is restricted by measurement, not by taste. The two
+  harnesses resolve a verdict differently — PowerShell parses the hook's output,
+  bash matches substrings — and they agree on `deny`, `allow` and `ask` for any
+  valid single JSON statement. They disagree on empty, whitespace, unparsable
+  and non-zero-exit output, so `silent` and `notdeny` cases stay inline until
+  that difference is closed, as does PowerShell-only syntax such as the call
+  operator. The restriction is written into the table's own header.
+
+  The twin-coverage ratchet was updated in the same commit, because it had to
+  be: it counts `Assert-*` and `run_case` lines, so migrated cases would have
+  dropped out of **both** totals and shrunk the gap without a single case being
+  added. Table rows now count for both dialects, the ceiling drops 64 → 52 by
+  exactly the number migrated, and a third assertion fails if the parser cannot
+  see the table at all.
+
+- **The project template no longer restates records that are generated
+  elsewhere (#126).** `copilot-instructions.md` loads on every chat request in
+  every project scaffolded from it, and it carried a 23-row skills table
+  directly under a line declaring `skills/INDEX.md` canonical. It was the third
+  copy — agents already receive each skill's name and description in the
+  `<skills>` block VS Code assembles from the skill files, which cannot drift.
+  The copy could, and had: it listed 23 of 30 activated skills, so the
+  non-canonical duplicate was also wrong.
+
+  Two smaller restatements went with it. The six MANIFEST principles are now a
+  link to `MANIFEST.md`. The git section is now a pointer to
+  `git-workflow.instructions.md` — and that one was not merely redundant but
+  contradictory: the template taught `[agent:{agent-name}] {action summary}`
+  while the always-on `git-workflow.instructions.md` mandates
+  `[agent:{agent-name}] {phase}: {description}`, and the
+  `coordinator-pretooluse` hook rejects the template's version. Both files load
+  on every request, so an agent was handed a rule and its contradiction at once.
+
+  Measured: 5,641 → 3,706 bytes, roughly 484 tokens off every request.
+
+  Deleting the table would not have kept it gone. **Four** prompts instructed an
+  agent to write it, including `af-setup-project` — which scaffolds every new
+  project — so the instructions were removed alongside the artifact. A new CI
+  gate, `test-always-on-restatement.py`, asserts the property rather than the
+  instance: no always-on file carries a skills catalogue, a format
+  specification has exactly one always-on home, and no prompt instructs writing
+  a catalogue into an always-on file. It takes its definition of "always-on"
+  from `check-context-budget.py` rather than introducing a second one.
+
+  `copilot-instructions.md` is `[customizable]`, so this does not reach existing
+  projects on update. Applying the trim there is a local edit; the token saving
+  is the same.
+
+- **`af-deploy-mcp` runs on mcp 2.x, and the `<2` pin is gone (#274).** The
+  emergency bound from #270 kept a working install but froze the package
+  against a line that stops receiving fixes, and it put a `<2` constraint into
+  every environment that installs it — including ones that had already moved.
+
+  The migration is two lines: `mcp.server.fastmcp.FastMCP` became
+  `mcp.server.mcpserver.MCPServer`, and `FastMCP` appeared exactly twice. The
+  upstream note said "other APIs changed" without enumerating them, so the
+  extent was measured rather than assumed: in a throwaway environment on
+  mcp 2.2.0 the suite returned `109 passed, 13 skipped`, identical to the
+  mcp 1.28.1 baseline down to the skip positions. `MCPServer` carries `tool`,
+  `resource`, `prompt` and `run` with compatible signatures, and the four call
+  shapes `server.py` uses all survived.
+
+  The rename was found by a collection error naming a module, so the suite now
+  asserts the surface it depends on. That includes the identity property the
+  whole test file rests on and nothing asserted — the decorators return the
+  original function, which is what lets the eleven wrapper tests call the
+  functions directly. A release that returned a wrapper instead would have
+  left them testing something else.
+
+- **A release no longer re-attests work it did not do (#234).** A `dev` → `main`
+  promotion contains, by construction, every file the cycle touched, so both
+  declaration gates fired on it and the release author had to sign for changes
+  made in other pull requests weeks earlier. Observed on #230, where the
+  promotion changed exactly two files — `VERSION` and `CHANGELOG.md` — and
+  still had to carry a hook attestation and an environment declaration.
+
+  A contentless mandatory field is how a gate stops being a gate: it teaches
+  the author to fill the box rather than check the thing. Both gates say of
+  themselves *"Recorded, not verified"* and *"Declared, not reviewed"* — their
+  whole value is that a person stated something they believed, and a statement
+  nobody can mean is worth less than none.
+
+  The promotion is now exempt from both, and a new step checks the
+  contributing pull requests instead: it walks the first-parent chain from
+  `main` to `dev`, and for every merge that touched a gated path it reads that
+  pull request's body and confirms the declaration was there. A missing one
+  fails the promotion and names the pull request that owes it, because the
+  release author cannot supply it retroactively — the only useful thing to
+  tell them is which change arrived unattested.
+
+  Exempting the promotion would otherwise have opened a hole, since it is the
+  last point at which something that reached `dev` *without* a gate is still
+  visible. The first-parent walk is what closes it: that chain is one entry
+  per merge and one entry per direct push, so a change that arrived outside a
+  pull request is reported by construction rather than assumed absent. It
+  fails only when such a change touched a gated path, where a declaration is
+  genuinely missing. File lists come from the merge diff rather than the pull
+  request's file list, because what matters is what reached `dev`, and a pull
+  request can be edited after it merges.
+
+  `.github/scripts/test-promotion-gate.py` drives the step against a stubbed
+  `git` and `gh` — twelve cases, including the two that make the exemption
+  safe rather than convenient: a hand-run `git merge` with no pull request
+  number, and a direct push carrying a gated path. It also pins the three
+  gates to the same paths and markers, and pins the exemption to the
+  replacement: they are separate steps that cannot share a variable, and a
+  promotion gate looking for a marker the feature gate no longer demands would
+  pass every release while checking nothing.
+
+  One find worth recording, because the test found it and review would not:
+  PowerShell variable names are case-insensitive, so a stub named `$FILES` and
+  the step's own `$files` are one variable. The stub survived the first loop
+  iteration and failed on the second. `test-env-change-gate.py` carried the
+  same collision and got away with it by reading each stub exactly once; both
+  now prefix stub state with `STUB_`.
+
+- **The retro template no longer offers a status the schema rejects (#252).**
+  `documenter.agent.md` told the documenter that a workflow log's `status:` is
+  one of `COMPLETED`, `FAILED`, `ESCALATED`, and eleven lines later offered
+  `COMPLETED-WITH-ISSUES` as a retro outcome. Two vocabularies for one fact
+  invite the invalid value into the log. The template now uses the same closed
+  set, and says where a run's problems belong: in the sections below the
+  outcome, not in the word.
+
+- **The cost block is at `schema_version: 6`.** It gains `no_usage_requests` on
+  every block, and `drift` on the blocks that lost a record.
+
+### Fixed
+
+- **The CHANGELOG guard's negative control survives a release cut.**
+  `test-changelog-headings.ps1` D4 injected its duplicate before a pinned
+  `## [1.23.0]`, so cutting this release moved the injection into a released
+  section and turned the suite red. It now injects two `### Changed` directly
+  after `## [Unreleased]`, which holds before and after any cut.
+
+- **Global hooks no longer run twice for five agents (#345, cause 2).** The
+  coordinator re-declared four global hooks in its frontmatter
+  (session-context, block-dangerous, scan-secrets, stop-tests), and documenter,
+  implementer, refactorer and test-writer re-declared scan-secrets. The hook
+  then ran once per declaration: `block-dangerous` up to three times per
+  coordinator call in a multi-root window. The copies are removed.
+  Agent-specific hooks stay: they are how a hook runs only for the agents that
+  need it.
+
+  Human decision, recorded on #345. It rests on two measurements:
+  - across 8 hook logs, all 4,951 repeats came from a second declaration and
+    none from one declaration firing twice;
+  - across all 6,415 retained invocations, every global hook ran in every call
+    of its event.
+
+  The old "do not de-duplicate" rule in `hooks/README.md` existed so that a
+  guard could not quietly stop running (#166). That is now enforced instead of
+  hedged: `test-hooks-integration.ps1` Check 10 **fails** when an invocation
+  skips a global hook of its event, and the new `test-hook-declarations.ps1`
+  fails when an agent re-declares one. Cause 1 (this repo's dev hook in a
+  multi-root window) is decided as well and follows separately, because it
+  needs a live window check first.
+- **The hook integration report now shows when one call runs the same hook
+  script twice (#345).** `test-hooks-integration.ps1` Check 9 records the
+  scripts per invocation. It prints a WARN, not a FAIL, naming each repeated
+  script, its maximum repeat and the number of calls. The window layout is
+  the user's choice, but it must not stay invisible. Measured on its first
+  live run (multi-root window, consumer + framework repo): 280 of 435
+  invocations repeated a script. `block-dangerous` ran **three** times in 213
+  calls:
+  - the consumer's global hook;
+  - the framework repo's dev hook;
+  - the coordinator's frontmatter copy of the global hook.
+
+  `scan-secrets` ran twice in 64 calls, via the frontmatter copies in five
+  agents. The duplicate declarations themselves are left alone:
+  `hooks/README.md` forbids de-duplicating them until the unexplained repeats
+  of #166 are accounted for. That decision stays open on #345.
+- **`test-context-budget` was counted as a skipped suite in every consumer
+  (#357).** It printed its three framework-only per-case skips as
+  `  SKIP: <case>`, and `run-all-tests.ps1` reads any `SKIP:` line as "this
+  suite asserted nothing". So 96 real checks were reported as skipped, and a
+  consumer CI running with `-FailOnSkip` would have failed. Found in the
+  1.23.158 deploy sweep in MPUsageXPTP. The per-case form is now
+  `  SKIP  <case> -- <reason>`, as `_suite_env.ps1` documents. New
+  `test-suite-portability.ps1` P4 fails on any `SKIP:` line that is not
+  followed by an `exit` within three lines, so the whole-suite form stays
+  reserved for an early exit. Measured in a consumer-shaped copy:
+  `run-all-tests.ps1 -Filter test-context-budget.ps1 -FailOnSkip` now reports
+  `1 passed, 0 skipped`.
+- **A session without a working Python interpreter is now told once which gates
+  are off (#342).** #331 kept the policy (degrade, do not block), but each hook
+  reported the degradation on its own, per call, where nobody reads it back.
+  The two dialects also do not fail the same way, which nothing stated:
+  - **PowerShell:** 7 hooks run without their Python-backed check.
+  - **Bash:** 8 degrade the same way, and 6 PreToolUse gates (block-dangerous,
+    coordinator, planner, refactorer, researcher, test-writer) **refuse every
+    call they guard** since #251.
+
+  `session-context.{ps1,sh}` now appends one `AF WARNING` to the SessionStart
+  context that names both lists and the fix (install Python 3 or set
+  `AF_PYTHON_OVERRIDE`). The lists are derived at session start from the hook
+  scripts and from the shared helpers that use the interpreter, so a new
+  Python-backed hook is named without a list to maintain. The derivation is pure
+  shell because it has to run exactly when Python is missing.
+
+  Watchdog: `test-python-missing-notice.ps1` hides every interpreter from both
+  dialects. It requires the notice exactly once, requires it to be silent when
+  Python works, and compares both lists against an independent derivation in
+  Python that follows helper calls transitively.
+- **Eight shipped files tripped the secret gate on their own, so every edit to
+  them was refused (#350).** Since #339 the gate blocks, and it reads the whole
+  edited file. Measured with the core's own patterns over the payload: 15 lines
+  in 8 files. Three kinds:
+  - **Test fixtures** in `test-hooks.ps1`, `test-hooks.sh`,
+    `test-hook-decision-contract.ps1` and `test-dialect-wrappers.ps1`. An agent
+    told to "remove the secret" would delete the fixture and disarm the test
+    that proves the gate. They now come from one helper, `Get-AfSecretFixture`
+    in `_suite_env.ps1`, which joins the pieces at run time. The single bash
+    fixture uses the same split through `printf`.
+  - **Self-hits.** `scan-secrets.py` matched its own private-key pattern, and
+    the pattern table in `hooks/README.md` quoted three matching examples. Now
+    written as `-{5}` and as prose.
+  - **False positives on a variable name**: `$token` in `deploy.ps1` and
+    `$secret` in `test-session-cost.ps1`, renamed.
+
+  No allowlist was added to the scanner: an exemption by path would also exempt
+  a real secret committed into a test file. The watchdog is the new
+  `test-secret-fixtures.ps1`, selected for any change under `.github/**`. It
+  runs the core's patterns over every shipped file and fails on a match. It also
+  requires every assembled fixture to still be flagged as its intended kind, so
+  splitting a fixture can never quietly disarm it.
+- **Six shipped suites failed inside every consumer for layout reasons alone
+  (#349).** Measured after deploying 1.23.142 into a consumer: 26 suites, 19
+  passed, 6 failed -- none because a hook misbehaved. They asserted facts about
+  this repository: its `CHANGELOG.md`, `deploy.ps1` as a caller and as a scope
+  pattern, a `.venv` at this repository's depth (the Store `python3` stub then
+  aborted the suite), and a shipped-*empty* owner key that a configured project
+  rightly sets. A suite red for no fault teaches a consumer to ignore red. New
+  `scripts/_suite_env.ps1`: `Test-AfSourceTree` (one marker -- `deploy.ps1`
+  beside `.github` -- replacing three ad-hoc checks) and `Get-AfSuitePython`
+  (probes the venv beside `.github`, then candidates, under `Continue`). Framework-repo
+  facts now print `SKIP <case> -- <reason>` elsewhere and are never counted as
+  passed; W10 asserts in a project that the key is *declared*. New
+  `test-suite-portability.ps1` copies `.github` into a bare directory configured
+  like a project, runs the five affected suites there and requires each to reach
+  its guard -- the check that would have caught all six before release. In this
+  repository every touched suite still runs with zero skips; `test-hooks.ps1`
+  491/0.
+- **Fourteen suites carried their own copy of the Python resolver (#349).** The
+  copies had drifted into three shapes; nine returned `py -3` as a two-element
+  array, which five of them then ran as `& $python` -- a call that fails the
+  moment `py` is the only interpreter. All fourteen now delegate to
+  `Get-AfSuitePython`, and `test-suite-portability.ps1` P3 fails for any suite
+  that probes on its own. The resolver also dropped the repo-root venv it had
+  gained in the same issue: preferring it here picked an interpreter without
+  PyYAML, and two suites went quietly weaker -- one skipped, one failed -- which
+  is how it was found. The hooks keep `Find-AfPython` in `_common.ps1`:
+  dot-sourcing that file into a suite runs its worktree and config
+  initialisation, a cost the suites do not need.
+- **`test-hooks-integration.ps1` never attributed agent-scoped PowerShell hooks,
+  then listed them as orphans (#326).** It matched `Running:` lines with one
+  pattern for backslash `.ps1` paths and one for forward-slash `.sh` paths; a hook
+  declared in `.agent.md` frontmatter is a forward-slash `.ps1` and fell through
+  both. One extraction now reads the `command` field (never the `cwd` beside it),
+  normalises every separator and matches `hooks/scripts/<name>.(ps1|sh)`. Measured
+  on the live log (5,587 invocations): seven hooks that were missing now appear,
+  including `implementer-stop.ps1` (136) and `test-writer-pretooluse.ps1` (504).
+  A new check fails when any `Running:` line names no script, so an unattributed
+  run can no longer vanish into the orphan list. `-LogPath` lets
+  `test-hook-log-attribution.ps1` drive the parser with fixtures in all three
+  spellings -- the first time it runs in CI, which excludes the live-log suite.
+- **PowerShell hooks turned every non-ASCII character into `?` before a Python
+  core saw it (#341).** Windows PowerShell 5.1 reads stdin in the OEM code page
+  and pipes to native commands as ASCII; measured, `Gr` + o-umlaut + sharp-s +
+  `e` arrived as `Gr????e`. Wrappers now read stdin as bytes (`Read-AfStdin`)
+  and cores decode `sys.stdin.buffer` as `utf-8-sig`. The obvious fix --
+  setting `[Console]::InputEncoding` -- was tried first and is **wrong**: it
+  calls `SetConsoleCP` and changes the caller's console (measured 437 -> 65001),
+  whose pipes then carry a BOM, and every later secret scan answered `{}`. The
+  suites caught it before it shipped; `test-long-line-guard.ps1` L11/L12 now
+  forbid it statically and check the caller's code page live.
+- **The secret gate never blocked anything (#339).** On a hit it printed its
+  verdict and exited 1. Every published hook contract -- VS Code Local and
+  GitHub Copilot alike -- treats a non-zero exit other than 2 as a
+  *non-blocking warning* and discards the hook's stdout along with it, so the
+  gate documented as HARD since v1.7.1 was advisory in practice and its verdict
+  was never even read. It now emits `{"decision":"block","reason":...}` at exit
+  0, which is the mechanism `PostToolUse` actually acts on; the `reason` names
+  the offending file. Under GitHub Copilot, whose `postToolUse` offers no block
+  at all, the same payload surfaces as `additionalContext` -- the model sees
+  the finding. The guarantee had lived in the README with no test behind it,
+  which is how it could rot unnoticed: `test-hook-decision-contract.ps1` now
+  drives every gate the hooks README calls **Blocking** with a payload that
+  triggers it and asserts the response in the shape the harness reads, plus a
+  clean payload that must not block. Three suites had been asserting `exit 1`
+  as the gate's signature and now assert the decision instead.
+- An explicit suite mapping in `suite-scope.json` outranks the ignore list
+  (#339). Pattern matching is by suffix, so the blanket `README.md` entry
+  ignored `hooks/README.md` too -- a file the new contract suite reads as its
+  source of truth for which gates claim to block.
+- **A regression suite spent 708 of its 788 seconds running another suite that
+  had already run in the same sweep (#334).** `test-deploy-flags.ps1` asserts
+  that the notebook check is part of the preflight set. To read that one string
+  it invoked `deploy.ps1 -Preflight`, whose first check executes
+  `test-hooks.ps1` in full. The assertion is about what preflight *consists of*,
+  not about what its checks conclude -- during the measurement the preflight
+  actually failed and the assertion still passed, correctly, because it only
+  looks for the name. `deploy.ps1` now takes `-ListPreflightChecks`, which
+  prints the names of the checks the selected profile would run and exits
+  without running any of them and without needing a target. The suite went from
+  **788s to 21s** and gained coverage on the way: the `full` profile's extra
+  check is now asserted too, and two exclusion assertions fail if listing ever
+  starts executing again -- without them the list could quietly go back to
+  running everything and every other assertion would still pass, just slowly.
+
+- **The per-suite test timeout had two values, so the same suite passed in CI
+  and reported `FAILED` locally (#333).** `run-all-tests.ps1` defaulted to 600
+  seconds; `regression.yml` invoked it with 1200. Nothing declared the
+  difference, so a developer watching `test-hooks.ps1` (691s) and
+  `test-deploy-flags.ps1` (788s) get killed had no reason to suspect the budget
+  was the variable rather than the code. The default is now 1800 seconds and is
+  the only place the budget is stated -- the workflow passes nothing. A new
+  `test-suite-timeout.py` asserts the two cannot drift apart again, that the
+  per-suite cap stays below the job's own cap (a kill that never fires names no
+  suite), and -- by driving the runner with a one-second budget -- that the kill
+  path still works, because raising a limit is only safe while it is still
+  enforced.
+
+- **A narrowed test run was filed under the scope key it was narrowed from, so
+  a partial run could close a gate on behalf of the whole suite (#303).**
+  `run-tests.ps1 -File tests/adapters/x.py` wrote the `adapters` entry: eleven
+  green tests in three seconds were indistinguishable from the real scope,
+  which at the time had 289 failures in 954 seconds. Measured while fixing it,
+  `-Filter` is the worse half of the same bug and was not in the report —
+  `-Scope all -Filter x` writes the `all` key, and `all` is the one key the
+  implementer and refactorer stop hooks trust to skip a run entirely. Both
+  runners now treat a run as partial when anything narrows the selection
+  (`-File`/`--file`, `-Filter`/`--filter`, or both), and a partial run never
+  writes a scope key. It is recorded instead under a single `partial` slot
+  carrying `target` and `selector`, so the run is still visible without the log
+  growing one key per file — the issue suggested a `file:<path>` key, but the
+  bash writer merges through a fixed key list that cannot hold dynamic names,
+  and a bounded log was worth more than per-target history in a regenerable
+  cache. In `run-tests.sh` this replaces the old `file` key, which was itself
+  an unlabelled partial record. Every entry now carries `partial` explicitly,
+  including `false` on a full run, because the four stop hooks now *require*
+  `partial == false` rather than inferring completeness from a missing field:
+  every pre-fix log also lacks it, and those are exactly the entries that
+  cannot be trusted, so they fall through to one honest full run. Pinned by
+  seven cases in `test-run-tests.ps1`, one of which is the class rather than
+  the instances — it runs a matrix of invocations and fails if a scope key is
+  written when pytest was pointed anywhere other than that scope's directory or
+  received any argument outside an explicit allowlist, so the next narrowing
+  flag fails the gate until someone consciously classifies it.
+
+- **Stop hooks blocked with no loop guard, and the only mention of one was a
+  comment describing code that did not exist (#298).** `stop_hook_active`
+  appeared exactly four times in the payload, all of them in prose; no line
+  ever read the value, while 31 blocking sites across the four stop hooks and
+  their bash twins ran unguarded. A hook that blocks demands a retry, the
+  editor re-invokes it on that retry with `stop_hook_active: true`, and the
+  same unchanged tree earns the same block — the gate refuses the attempt it
+  asked for. The guard now lives once per dialect, in `_common.ps1` and
+  `_common.sh`, and every stop hook calls it directly after reading stdin. It
+  returns control rather than blocking, and says which gates it skipped: a
+  silent pass cannot be told apart from a gate that ran and found nothing. An
+  absent or unreadable field does **not** guard — only a single explicit `true`
+  does, because a loop is a cost while an unenforced gate is a defect. The
+  watchdog is positional, not textual: the suites assert that the guard call
+  precedes the first blocking site in each of the eight hooks, so a new gate
+  added above it fails rather than shipping unguarded, and a per-hook floor on
+  the number of blocking sites means a loop cannot be "fixed" by deleting the
+  gates instead.
+
+- **The twin-coverage ratchet could not see a case whose name was written in
+  single quotes (#280).** Its parser matched only the double-quoted form, so
+  such a case was invisible to the count rather than visible and uncovered —
+  the gap could be understated by writing a name the other way, and one case
+  had been sitting outside the counts. The parser now reads either quoting
+  style in both dialects. Its floors rose from 80/30 to 95/80 at the same
+  time: at 98 and 83 actual, a parser that silently lost half its cases would
+  still have cleared the old floors, which is the failure the floors exist to
+  catch.
+
+- **`skills/INDEX.md` shipped with an empty table, and the ADO rule to set a
+  work item `Active` was unfollowable as written (#112).** The index carried a
+  duplicated table header above the first heading, which rendered as an empty
+  table and was copied into every project deployed from the payload.
+  `validate-skills.py` had been checking the index all along — but only for
+  *which* skills it named, never for what it looked like, and listing and
+  layout are different properties. It also never ran in CI: it was reachable
+  only by invoking `/af-validate-framework` by hand, so the payload was never
+  checked on the pull request that changed it. Both gaps are closed: the
+  validator gained a layout check, and `test-skill-index-layout.py` runs it in
+  CI, plants a known-bad index so an emptied check cannot pass as a clean one,
+  and asserts the same property over the payload's other records. Templates
+  are excluded, because a template's empty table is a blank form waiting to be
+  filled in — the one place the shape is right. The second defect was prose:
+  Azure DevOps rejects a working state on the create call, so "set the item
+  Active at work start" cost a retry every time an agent believed it. The
+  `ado-workitem` skill now documents the two-step, resolving both state names
+  from the type rather than hardcoding them — hardcoding is what made items
+  unclosable in #267. The API cannot be exercised from CI, so that half is a
+  prose contract, which is precisely why `test-ado-work-item-states.py` now
+  guards it: prose is what quietly disappears.
+
+- **The attestation gate rejected a pull request that had attested, and told
+  its author to add the line they had already written (#313).** The body of
+  #312 carried `local-check: ` + the suite name in backticks — ordinary
+  markdown for a filename. The gate matched a literal substring, so the
+  backtick between `: ` and the name was enough to fail the run, and the error
+  message was the same one an author who had attested to nothing would see.
+  The cost was a full Windows CI run plus a close/reopen cycle, because
+  `on: pull_request` does not fire on body edits.
+
+  Two things were wrong, and only one of them was the regex. The marker was
+  written out twice — once in the per-feature gate, once in the promotion
+  check — so the two had no way to stay agreed on what an attestation looks
+  like. Matching now lives in `.github/scripts/match-local-check.ps1`, which
+  both steps invoke; the drift guard in `test-promotion-gate.py` was changed
+  from "both steps quote the same string" to "both steps call the same code",
+  because quoting the same string is exactly what they were doing while one of
+  them read it more narrowly than authors write it.
+
+  The matcher reports an unreadable attestation separately from a missing one,
+  so a body with a `local-check:` line the gate cannot parse now names
+  formatting as the cause instead of repeating the generic instruction.
+  Backticks are tolerated at the one position that broke rather than stripped
+  from the body at large: HTML comments have to be removed first, or the
+  commented-out marker in the pull request template would satisfy a check
+  about work nobody did (#234), and a normalisation with no boundary is how
+  that protection gets undone by someone who did not know it was load-bearing.
+  That property is asserted against the real template file, not a copy of its
+  text.
+
+- **43 % of workflow logs could not be attributed to a framework version
+  (#309).** `af_version` was the last header field a model transcribed by hand,
+  and the file it transcribes from has three lines it had to pick one of.
+  Measured over 68 logs: 23 carried no value at all and 7 carried something
+  that was not a version — `n/a`, `not measured`, and in one case the
+  instruction *"read from `.github/.af-version`"* written into the data field
+  verbatim. Three of the seven were produced after the defect was reported, so
+  this was still generating instances. Only 37 of 68 (54 %) were usable, which
+  is why "did this defect begin after some release?" was unanswerable over the
+  corpus.
+
+  `documenter-stop` now stamps it, in both the PowerShell and the shell hook,
+  parsing `version:` out of `.github/.af-version`. No readable version file
+  stamps an explicit `null` — a source checkout is not a deployment and has no
+  version to claim, and a recorded absence is analysable where a missing key is
+  not. This is the same move already made for `started:`, `completed:`,
+  `summary.retries` and the `cost:` block: the fix for a value a model can get
+  wrong is to stop asking for it.
+
+  `check-workflow-log.py` constrains the field to a semantic version or an
+  explicit absence, so a producer that stops working becomes visible instead of
+  silently reverting to prose. The rule runs before the stamp does, so a
+  missing key is left alone and the violation message tells the documenter to
+  *remove* the line rather than correct it.
+
+  One log had used the field for something real: it recorded the correct
+  version and then appended a caveat that a root-cause analysis in that
+  workflow had run against a framework source 106 versions ahead of the
+  deployment, so fixes present there must not be assumed present locally. That
+  is a true and specific thing to say with nowhere to say it, so the schema
+  gains an optional free-text `af_version_note:`. It is deliberately a separate
+  field rather than a `findings` entry: the caveat qualifies the version, and
+  findings are about the work.
+
+- **A workflow log could finish 66 minutes before it began (#240).**
+  `documenter-stop` stamps both timestamps, but from two sources: `completed:`
+  came from the clock in UTC, while `started:` came from `git log --format=%cI`,
+  which emits the *committer's local offset*. Each field was valid ISO 8601 on
+  its own, so nothing complained, and any consumer subtracting them read a
+  negative duration. Four logs in the 67-file corpus are affected, two of them
+  across midnight.
+
+  The producers now ask git for `%ct` (epoch seconds) and format it as UTC, in
+  both the PowerShell and the shell hook, so the pair comes from one source
+  *and* one representation.
+
+  A fixed producer is not a guarantee, so `check-workflow-log.py` now compares
+  the two stamps' timezone designators and rejects a log whose fields disagree.
+  It compares them against each other rather than demanding `Z`: a historical
+  log stamped consistently in one offset is not rewritten and keeps passing,
+  while `+02:00` against `+01:00` — the same class, a different reference
+  across a DST boundary — is still caught. An absent `completed:` is absence,
+  not a representation, and is left alone. Measured against the corpus: 4
+  rejected, the four known instances; the other 54 two-stamp logs unaffected.
+
+- **`ruff.toml` declared a lint selection nothing measured (#182).** The root
+  config selects `E, F, W, I, UP, B, SIM` for the whole repository, but CI ran
+  `ruff format --check` only. The selection was therefore a statement of
+  intent: 16 findings had accumulated across five framework scripts without
+  anything noticing, including a mid-file `import stat` and two `zip()` calls
+  whose length invariant was real but unasserted.
+
+  All 16 are resolved in the code rather than suppressed — no `noqa` was
+  added. The mechanical import fixes, the two behaviour-affecting decisions
+  (`strict=True`, the hoisted import) and the readability rewrites landed as
+  separate commits so each judgement call can be reviewed on its own; one
+  ruff `--fix` suggestion was rejected outright, because collapsing a
+  `.format()` call into a single 203-character f-string traded one finding
+  for another.
+
+  The gate is the point. `regression.yml` now runs `ruff check` next to the
+  format step and over the same `git ls-files '*.py'` list, so a new file is
+  linted the moment it is tracked and the two steps cannot drift apart. The
+  empty-list guard is shared with the format step for the same reason: a glob
+  that matches nothing fails loudly instead of passing silently.
+
+- **The only detector for duplicated hook code was a comment the copier had
+  to remember to write (#291).** Four readers of the subagent debug logs —
+  `collect-agent-invocations.py`, `concurrent-agent-edits.py`,
+  `subagent-return.py` and `undeclared-scratch.py` — had each grown a private
+  copy of the same filename regex and the same helpers, on the reasoning that
+  a hyphenated filename cannot be imported. Three carried a note saying so;
+  the fourth did not, so grepping for the note found three copies and missed
+  one. The issue itself recorded three.
+
+  `_agentlog.py` now owns that code and has an importable name: a hook reaches
+  it with a plain `import _agentlog`, because Python puts the script's own
+  directory on `sys.path[0]`. The four readers import instead of copy, which
+  removes 150 lines.
+
+  The mechanism is the gate, not the module. `test-hooks.ps1` parses every
+  Python hook with `ast` and fails if any file other than `_agentlog.py`
+  defines a name it owns — keyed on the definition, so a fifth copy fails on
+  the PR that writes it whether or not its author knew they were copying. A
+  second assertion ratchets the general duplicate count at the measured
+  post-extraction figure of 10, which is a ceiling rather than a demand for
+  zero: `scan` legitimately exists twice with different return shapes.
+
+- **A quarter of the shipped hooks was never executed by the suites that
+  vouch for them (#263).** Every hook was reached by the parse and CR gates,
+  which walk the whole set, so a hook could ship untested and still look
+  covered. Three bash hooks and three PowerShell ones had no behavioural case
+  at all — `coordinator-posttooluse` among them, the hook whose permanent
+  false positive #172 was filed about, and whose anchoring fix then sat
+  unmerged for eleven days while the tracker recorded it as implemented.
+  Nothing contradicted the tracker because nothing ran the hook.
+
+  Both suites now derive the expected set from the payload directory and fail
+  listing any hook that no behavioural case names — a heading or a whole-set
+  loop does not count. A hook added without a test fails on the PR that adds
+  it rather than on the incident that finds it. The six gaps are backfilled in
+  the same change, because the gate is red until they are.
+
+- **The cost collector's drift diagnostic could not say where the drift was
+  (#238).** A session is many logs — `main.jsonl` plus one per subagent — and
+  the collector aggregates all of them. `drift` named the field and the
+  affected-versus-total counts but not the log, so drift confined to a single
+  subagent read exactly like drift in the main log. It now carries `logs`.
+
+  A negative control that attributes every drift to `main.jsonl` fails one
+  assertion by name, which is what separates "the field is present" from "the
+  field discriminates".
+
+- **The documented entity class set could fall behind the collector without
+  anything noticing (#227).** The version scalar has been pinned since the
+  README fell three schema versions behind; the class taxonomy had no such
+  pin, and the documented example was two classes short — `agent` and
+  `instruction`, which a session only emits when its prompt carries them.
+  An example is a snapshot, not a register, so the register is now written
+  out and compared.
+
+  `test-session-cost.ps1` derives the taxonomy from the collector —
+  `PROMPT_ENTITY` keys plus the literal `"class"` values — and compares it
+  against the documented set, rather than carrying a third hand-kept copy.
+  A guard assertion fails when the extraction stops matching, so a reworded
+  bullet cannot silently compare two empty sets.
+
+- **The evidence-durability gate was defined everywhere except where an agent
+  would look for it (#134).** MANIFEST § 7 states the principle, the gate
+  taxonomy defines what counts as a durable artifact, and the Databricks skill
+  classifies the channels. But the exit protocol tells an agent to read the
+  Exit Gates table *in its own file*, and no agent had a row for it. The rule
+  was reachable by a reader and unreachable by the agent it governs, so it
+  could never fire.
+
+  The implementer — the producer that runs measurements — now carries it as a
+  HARD gate: a number obtained from a run rather than read from the repo must
+  name a run id, URL, table + query, or committed output file, and reports
+  BLOCKED when no durable channel exists.
+
+  Measured over the 40 committed planning documents of a real project: twelve
+  claims are measurements over remote data, ten name an artifact, two do not.
+  One of the two predates the rule; the other is from the day before this
+  change and is labelled `(MEASURED)` in the text. Compliance is high and not
+  self-sustaining.
+
+  A detector cannot be built on the shape of the sentence. A first pass keying
+  off `N rows` flagged eight documents; hand-classification showed the bucket
+  was dominated by counts of rows in a committed source registry — facts git
+  already carries. Only the surrounding context separates those from a count
+  over a Delta table, which is why this ships as a gate the agent evaluates
+  rather than as a pattern match over prose.
+
+- **A silent agent and a broken reader reported the same thing (#175).** The
+  return reader's own docstring argued that "the agent said nothing" and "the
+  agent's words could not be recovered" must be different states, because a
+  caller holding one status for both would have to guess which it had. It then
+  returned `unavailable` for both, so the guess it set out to prevent was the
+  one it handed every caller — and `implementer-stop` documented exactly that
+  as its reason for warning rather than blocking. Measured over 851 real
+  subagent logs: 644 complete, 190 truncated, 17 unavailable, and that last
+  bucket splits into 8 records that parse cleanly with no text part, 8 damaged
+  values, and 1 with no record. Five of the 8 silent returns had already made
+  10 to 33 file-editing tool calls — an agent that changed the repository and
+  then said nothing about it. A record that was found and parsed and simply
+  holds no words is now `empty`, which no blind spot in the reader can
+  produce; `unavailable` keeps its original meaning. The suite gained the case
+  that would have caught the conflation from the other end: the PowerShell
+  wrapper validates the status against a fixed list, and a new state that the
+  list does not name dies there silently while every reader test stays green.
+
+- **The watchdog for cross-agent scope creep had the same hole it was built to
+  find (#101).** Producer stop hooks scope their gates from `git diff` or
+  `git status`, which is global to the checkout, so a peer's in-flight edits
+  land in this agent's scope and the provenance gate makes it sign another
+  agent's file. The subtraction that fixes this was wired into the implementer
+  and the refactorer. It was not wired into the test-writer, whose provenance
+  gate reads `git status --porcelain "tests/"` and blocks on a missing
+  `copilot:generated` header — the stronger of the two markers, a claim that
+  this agent produced the entire file. Clearing that block on a peer's new test
+  file means signing it.
+
+  The suite did not see it because the wiring assertion iterated a literal list
+  of two hooks. A producer hook never added to the list was never checked, so
+  the watchdog reproduced the omission it exists to catch. Both twins now
+  derive the list: every `*-stop` hook that scopes itself from git must
+  subtract peer edits, and must do so before the provenance gate reads the file
+  list. A derived loop that matches nothing passes having asserted nothing, so
+  the count is asserted too.
+
+  The lint scope stays unfiltered, unchanged: a ruff violation is real whoever
+  produced it, and the peer's own Stop hook lints the peer's files.
+
+- **The counter built to stop fabricated escalations was fabricating them
+  (#173).** `check-workflow-log.py --fix-counters` derives
+  `summary.escalations` so that no one has to trust a number a language model
+  authored. It decided an escalation had happened by asking whether the
+  `escalation:` section ran to more than one line. A section is never one line
+  long: the blank line that follows it belongs to it. So `escalation: null` —
+  the way a log states that *nothing* was escalated — counted as an escalation,
+  and the tool overwrote a correct `escalations: 0` with `1`.
+
+  Measured over the 63 workflow logs in a real project: eight logs carry an
+  `escalation:` section, **seven of them are `escalation: null`**, and only one
+  describes an actual escalation. Five logs had a correct `0` that the next
+  `--fix-counters` run would have turned into a false `1`; two already carry
+  the false `1` in committed history, two lines above the `escalation: null`
+  that contradicts it.
+
+  The two tools were also already disagreeing. `analyze-retry-economy.py` reads
+  parsed YAML and asks `if doc.get("escalation")`, where `null` is falsy — it
+  never counted these. The checker now asks whether the section carries nested
+  content, which is the same question a parser answers, so the line scanner and
+  the parser give one answer. The one genuine escalation block in the corpus is
+  still counted; the seven denials are not.
+
+  This is the #251 shape again, inverted: not a gate that approves what it
+  cannot classify, but a derivation that manufactures the evidence it exists to
+  demand. A fabricated counter is worse than an unchecked one, because it
+  arrives wearing the authority of having been derived.
+
+- **A stated escalation that nothing in the file supports is now a violation
+  (#173).** The recurrence watchdog for the above. When `summary.escalations`
+  is greater than zero while no step carries an `ESCALATE` verdict and no
+  `escalation:` block is populated, the number rests on nothing the log
+  contains, which is the shape a fabricated counter takes. It fires on exactly
+  the two already-corrupted logs in the 63-log corpus and on nothing else.
+
+  Repair now runs before judgement, so `--fix-counters` cannot be blocked by a
+  contradiction the same invocation has already removed. In audit mode — the
+  checker run without `--fix-counters`, over logs already committed — the rule
+  is what finds them.
+
+- **The always-on git instruction forbade what the framework already allows.**
+  `git-workflow.instructions.md` said "After merge, the human deletes the
+  feature branch. Agents do not delete branches." Three other places say the
+  opposite: `af-env.conf` lists merged non-protected branch deletion under
+  `GIT_FEATURE`, the `block-dangerous` tier description calls safe merged-only
+  `git branch -d` allowed, and the git-workflow skill's autonomy table assigns
+  it to the coordinator. The instruction is the one that is always in context,
+  so it is the one that won — agents left merged branches behind and asked
+  permission for an operation git itself refuses to perform destructively.
+
+  The instruction now matches. `-D`, force deletion and protected branches stay
+  hook-denied, unchanged.
+
+- **Deleting the remote half of a merged feature branch was written down
+  nowhere.** The autonomy table covered `git branch -d` and stopped at the
+  local ref, leaving `git push origin --delete agent/{id}` to be inferred from
+  the push rules. It is now in the table. The commits survive in the branch it
+  merged into, which is what makes it reversible; pushes naming a protected
+  branch remain forbidden and that rule already covers the dangerous case.
+
+- **A denied command could be re-run through a different tool, and the hook
+  approved it silently (#138).** The recorded occurrence: a subagent was denied
+  a CLI call in the terminal, understood the denial, and then made the same
+  call through the Pylance code-execution tool. It self-reported, which is the
+  only reason anyone found out.
+
+  The report assumed the hook was bound to the terminal. It is not — it is
+  registered under `PreToolUse` with no matcher and fires on every tool call.
+  It *did* run on the bypass. It read the tool name, matched nothing in
+  `bd_is_gated_tool`, and printed `{}`, which is consent. This is the #251
+  failure shape in a second place: a gate that cannot classify a call does not
+  abstain visibly, it emits the bytes of approval. An allowlist grants
+  everything it forgot to name.
+
+  It also explains the non-determinism the report found unsettling — two runs
+  of the same agent on the same task, opposite outcomes. Both were unguarded.
+  The difference was the model's disposition, not the gate.
+
+  The code-execution tools are now gated as a class, and on them the rule is
+  narrow: **no spawning a process.** Deliberately not a re-classification of
+  the snippet — reconstructing the command a program will eventually assemble
+  means guessing, and a gate that guesses is worse than none because it
+  produces the appearance of coverage. Whether the code reaches for a
+  subprocess at all is decidable, and here it is never legitimate: a gated
+  terminal exists for exactly that. The rule removes a bypass, not a
+  capability.
+
+  Two counterweights, because a gate that denies ordinary analysis code gets
+  switched off, and a gate nobody keeps guards nothing: strings are collected
+  recursively rather than by field name (the field differs per tool, and
+  naming them is the same allowlist mistake one level down), and both dialects
+  do it the same way — searching the serialised JSON instead would have put a
+  notebook's leading `!` off a line start, so the two would have disagreed
+  about the shell escape from the first commit.
+
+  **Watchdog:** the gated set is written out once per dialect, and #279
+  measured what happens to a list kept in two places — a 64-case divergence
+  nobody had noticed for months. Here drifting means one platform silently
+  reopens the bypass, so the suite parses both lists and fails on any
+  difference, with a floor on the parsed count so a broken parser cannot report
+  agreement by finding nothing.
+
+  **Also added, and not counted as the remedy:** an always-on rule that a hook
+  denial is terminal — report BLOCKED, do not retry through another tool. It
+  is cheap and portable across surfaces. It is not the fix, because the
+  recorded occurrence is exactly an agent that read the denial, understood its
+  purpose, and reasoned past it. An instruction is a request made to the
+  component that already declined one.
+
+- **PCRE syntax handed to a POSIX grep can no longer return unnoticed — and
+  looking for it found a great deal more of it (#194).** The two sites the
+  issue names were already repaired; what was missing was anything to stop the
+  class coming back. `\d` in an ERE is a literal `d`, `grep -P` does not exist
+  on BSD/macOS, and both failures are silent: the empty match reads as "nothing
+  found", and the check the pattern guarded stops existing without a word. A
+  guard that silently stops guarding is indistinguishable from one that passed.
+
+  The suite now scans every shipped `.sh` — itself included, because a
+  portability defect in the instrument is still a portability defect — and
+  refuses `grep -P` and the `\d`/`\w` classes outright. Both are at zero.
+  Comment lines are skipped, since both repairs explain themselves in prose
+  that names the bad idiom, as are the lines holding the scan's own patterns.
+
+  Three details that would each have quietly broken it. The scan asserts that
+  it **reached** the scripts (`scanned >= 20`); without that it passes by
+  examining nothing, which is precisely the failure it was written against. It
+  walks `find` output instead of `grep -r --include`, because a watchdog
+  against non-portable grep that itself needs GNU grep is worth nothing, and
+  because at least one consumer keeps the payload under a path with spaces. And
+  the first draft flagged its own error message, which was fixed by rewording
+  the message rather than weakening the pattern.
+
+  Proved against a directory of deliberately bad files: each check named
+  exactly the offending file and left the innocent one alone, including its
+  comment mentioning both bad idioms.
+
+  **The larger finding.** `block-dangerous.sh` hands 58 patterns to
+  `grep -qEi` that use `\s`, `\S` and `\b` — among them the entire hard-deny
+  tier, `git\s+push\b.*(--force|-f)\b` and its neighbours. Where the GNU
+  extensions are absent those escapes degrade to bare letters, so `git\s+push`
+  reads as `git`, one-or-more `s`, `push`. Simulated by rewriting the escapes
+  the way a POSIX reading takes them: **seven of seven deny patterns went from
+  matching to not matching**. Not measured on BSD — no such host was available,
+  and that missing link is worth closing before anyone rewrites 58 security
+  patterns on the strength of it.
+
+  They are deliberately not rewritten here. `\b` is zero-width and has no POSIX
+  equivalent, so every replacement consumes a character — 58 edits of judgement
+  in the file the whole autonomy boundary rests on, against a bash suite that
+  proves 32 cases of it. The net has to be spanned before the jump. The count
+  is frozen at 60 so the debt cannot grow meanwhile; the ceiling is an
+  admission, not a target. Tracked in #281, with #280 as its prerequisite.
+
+- **The bash hook suite had never executed the deny tier it exists to guard
+  (#122).** The issue was a false deny: `git commit -m "fix(db): drop table
+  handling"` was blocked as if it were SQL. The rule was already scoped
+  correctly in both dialects — but only the PowerShell twin proved it, and the
+  issue's own working state said so for the wrong reason. It recorded criterion
+  5 as partial because "no executing bash suite exists yet (#190)". That
+  justification is stale: `test-hooks.sh` runs several hundred cases locally
+  and in CI. Re-reading it rather than trusting it is what exposed the rest.
+
+  **Coverage of `block-dangerous` was 92 cases in PowerShell against 32 in
+  bash**, and the missing ones were not stragglers. Absent as test input
+  anywhere in the bash suite: `git reset --hard`, `git rebase`, `git branch
+  -D`, `--no-verify`, `git add .`, and pushes to a protected branch. The
+  entire deny tier — the layer the autonomy boundary rests on — existed in
+  `block-dangerous.sh` and nothing ever ran it. The PowerShell suite grew tier
+  by tier; the bash one grew issue by issue, scan units for #62, tasks for
+  #74, so whole classes were skipped without anyone deciding to skip them.
+
+  Nine deny cases were added and **passed on the first run** (`Passed: 242,
+  Failed: 0`). The rules work. That is the good news and the uncomfortable
+  part: it was luck rather than evidence, because a broken pattern there would
+  have left the PowerShell suite entirely green.
+
+  Eight #122 cases are now mirrored name for name. A negative control
+  restoring the pre-fix behaviour — scoping the cross-unit rules to the raw
+  command — produced `Passed: 229, Failed: 4`: exactly the four predicted
+  cases, including the reported false deny reproduced verbatim, with the four
+  deny cases unmoved.
+
+  **A ratchet keeps the two dialects from drifting further apart.** The suite
+  compares case names across both files and fails if the gap exceeds its
+  measured ceiling of 64. Demanding strict symmetry instead would have
+  reported 64 violations on its first run, and a watchdog that opens that way
+  gets switched off rather than obeyed — which is the erosion of gate
+  authority this issue is about. The check also asserts the absolute counts,
+  not only the difference: a parser blinded by a formatting change would
+  otherwise report a gap of zero and read as success, which is precisely the
+  trap #202 caught this suite in. Verified by adding a PowerShell-only case
+  and watching the gap move 64 → 65. Final state: `Passed: 244, Failed: 0`.
+
+  Criterion 1 of the issue stays deliberately partial: SQL keeps its deny
+  outside recognised prose carriers, because `sqlite3 db "DROP TABLE x"` is a
+  real command and not commentary. The remaining ~64 uncovered cases, mostly
+  ask-tier and task classification, are tracked separately; the ratchet holds
+  the line until they are closed.
+
+- **Hook verdicts survive a Windows path, and the harness can finally see when
+  they do not (#202).** Hooks answer in JSON, and their reasons quote tool
+  output back at the reader. On Windows ruff and pytest print backslash paths,
+  and `\U` is not a JSON escape — so a hook that had decided to block emitted
+  an object the client could not parse, and the decision was discarded. The
+  gate failed open while its own text still read `"decision": "block"`.
+
+  Thirteen sites escaped the quote and left the backslash raw:
+  `sed 's/"/\"/g'`. That idiom reads as escaping, which is presumably how it
+  survived across five files — it handles the character an author thinks of
+  first and leaves the one that actually breaks.
+
+  **The issue's premise was wrong, and checking it first changed the work.**
+  It stated that the harness "already rejects unparsable output in
+  `run_case`, so the case is cheap." It did not. `run_case` rejected only
+  *two* statements; an unparsable one fell through to a substring test for
+  `"deny"` — and that word is present in broken JSON too. A stub emitting a
+  correct verdict inside unparsable JSON was certified as denying:
+  `Passed: 219, Failed: 1`, the one failure being the new case reporting
+  `run_case said: pass`. The same block had been copy-pasted into `stop_case`
+  and `gate_case`, so all three were blind in the same way. Verifying the
+  instrument before trusting the measurement is the reason this shipped as a
+  mechanism rather than thirteen edits.
+
+  Judging the verdict now runs through one shared `af_statement_fault` in all
+  three case functions, so **every existing and future case is also a
+  parsability test** — including the nine producer-gate cases nobody wrote for
+  this purpose. `af_json_escape` gained stdin support, so a pipeline that
+  already trims tool output can end in it instead of nesting around it, and it
+  now replaces control characters with spaces rather than deleting them:
+  deletion would run the words on either side of a tab together and misquote
+  the finding it is reporting.
+
+  The issue's "42 sites" turned out to be three different things. Thirteen
+  were the quote-only defect. Three were local re-implementations that escaped
+  both characters correctly but omitted control characters — the same hole
+  reopened by a tab instead of a backslash, and the more dangerous variant
+  because it looks right. The rest interpolate integers or fixed vocabulary,
+  where escaping is moot. Five carry git-relative paths with forward slashes;
+  those were **not** demonstrated defects and were converted only so the rule
+  holds without exception.
+
+  Two watchdogs guard the return. Three runtime cases feed a summary carrying
+  a Windows path, a tab, and an escaped quote through the three producer Stop
+  hooks; a structural check fails if any hook escapes quotes while leaving
+  backslashes raw, and a second if any hook re-implements the shared escaping
+  outside `_common.sh`. The negative control reverted one converted line:
+  `Passed: 223, Failed: 2` — the runtime case and the structural check, one
+  cause, caught at both layers. Restored: `Passed: 225, Failed: 0`.
+
+- **The deploy engine's test suite now runs in CI, and a watchdog keeps every
+  suite reachable (#270).** `mcp-deploy` carries 122 tests over the code that
+  decides whether a consumer project's file is overwritten, preserved, or
+  reported as a conflict. Nothing had ever executed them. The first run was
+  red: `test_expected_agents_carry_exactly_one_empty_region` asserted
+  `with_region == 13` while the repository had grown to 15 such agents — a test
+  pinned to a constant instead of to the set it describes, failing unobserved
+  for however long the count had been wrong. It now asserts against
+  `len(agents) - len(NO_SKILLS_AGENTS)`, so growth cannot break it and a new
+  agent without a region cannot pass quietly.
+
+  Running it in a clean environment then found a second defect that the local
+  checkout had been hiding: `mcp>=1.2` resolves to mcp 2.x, where `FastMCP` was
+  renamed to `MCPServer`, so `server.py` fails to import and the entire suite
+  errors during collection — 122 tests, none of them run. The declared
+  dependency never expressed the API the code actually needs. The bound is now
+  `mcp>=1.2,<2`; migrating to 2.x is tracked separately. The runner now names
+  an exit code 2 as a collection error, because "nothing ran" and "a test
+  failed" are different problems and only one of them looks alarming.
+
+  The step is `run-deploy-suite.py` rather than a `pytest` line, because a skip
+  is the failure mode here: eleven of the thirteen skips are environmental, so
+  a runner missing an interpreter would report success while asserting nothing
+  about `deploy.sh`. Every tolerated skip reason is listed with why it is
+  tolerated, an unlisted one fails the step, and `MIN_PASSED` puts a floor
+  under tests actually executed — reason-matching alone still passes a suite
+  that has quietly shrunk.
+
+  Making those eleven skips *run* was tried and rejected on evidence. Git for
+  Windows ships `bash` and `awk` on every Windows runner but keeps them off
+  PATH; putting them on it turns each skip into a five-minute failure, because
+  `bash deploy.sh --force` under MSYS exceeds the 300s limit the test sets for
+  itself (measured 2026-09-02). On a Windows runner the skip is the correct
+  outcome, and the comment in `test_cross_tool_parity.py` that blamed a missing
+  `bash` has been corrected to say so.
+
+  Naming this one suite in the workflow would have fixed one instance. The gap
+  was structural: the repository runs suites two ways — `run-all-tests.ps1`
+  sweeps a directory, the workflow names Python gates one at a time — and a
+  suite fitting neither falls between them, which is the second time that has
+  happened (#190 was the first). `test-ci-suite-coverage.py` asserts the
+  property instead: every test artifact is reachable from something CI runs,
+  following one level of indirection so swept directories still count. A suite
+  added in a new place now fails on the pull request that adds it. Both
+  directions were verified against a throwaway file — reported by name when
+  uncovered, silent when dropped into a swept directory — and all three failure
+  paths of the runner were provoked deliberately.
+
+  Local runtime: 122 tests in 38.8–60.9s, and 45.6s in a clean environment
+  built the way CI builds one. In CI the first green Regression run took
+  15m25s end to end (run 33628886686, 2026-09-02); the added step's own share
+  of that is not measured separately.
+
+  Two further defects surfaced only once the suite ran on a hosted runner,
+  which is the argument for this change made by the change itself. The first:
+  the parity tests guarded themselves with `shutil.which("bash")`, which
+  answers whether a name resolves, not whether running it does anything. On a
+  GitHub-hosted Windows runner `bash` resolves to
+  `C:\Windows\System32\bash.exe` — the WSL launcher — and a runner with no
+  distribution installed answers every call with "Windows Subsystem for Linux
+  has no installed distributions" and exit 1, which the test faithfully
+  reported as a `deploy.sh` failure. The identical guard skips on a developer
+  machine, where the name does not resolve at all, so the defect was invisible
+  locally in both directions. Availability is now probed rather than looked up
+  (`tests/_probe.py`): the tool is run on something trivial and must exit 0.
+  Probes are explicit per tool, and an unknown tool is refused rather than
+  assumed to accept `--version` — Windows PowerShell 5.1 answers that with a
+  non-zero exit, which would produce precisely the permanent silent skip this
+  gate exists to prevent.
+
+  The second is about diagnosis rather than code. A failing step publishes
+  nothing but "Process completed with exit code 1" to anyone who cannot open
+  the run log, and the log requires sign-in, so the first two failures of this
+  gate were undiagnosable from outside the repository — both had to be found by
+  rebuilding the CI environment locally and guessing what differed. Both new
+  gates now emit their reason as a workflow annotation, which is rendered on
+  the run page itself. The WSL failure above was read straight off the
+  annotation of the following run.
+
+- **Work-item transitions are resolved from the type instead of named (#267).**
+  The ADO sync workflow mandated a post-merge transition to `Resolved`, and the
+  work-item worker's exit gate forbade `Closed` at finalize. In the Agile
+  process template the `Task` type has the states New / Active / Closed /
+  Removed — **no `Resolved`**. A Task-typed item therefore had no reachable
+  post-merge target: it stayed Active, indistinguishable on the board from work
+  nobody had started, and the gate that stranded it read as correct prose.
+  Nothing in the repository could notice the contradiction.
+
+  Measuring the types (`wit_work_item` action `get_type`) turned up a second
+  reason the old contract was unsound even where the name existed: `Resolved`
+  sits in category `Resolved` on `Bug` but in category `InProgress` on
+  `User Story`. Matching either the name or a single category is wrong.
+
+  The worker now runs a **State-Applicability Guard** before any transition —
+  the same shape as the Field-Applicability Guard it already had, using the
+  same `get_type` probe. The target is a *role*: a state in category
+  `Resolved`, else an `InProgress` state that is not the item's current one,
+  else none. Several candidates → `NEEDS_CONFIRMATION` rather than a guess.
+
+  When a type has no delivered state, the item is not left to strand and is not
+  force-closed: it stays Active, carries the tag
+  `delivered-pending-verification`, and the worker returns
+  `BLOCKED_NO_DELIVERED_STATE` naming the type and its actual states. The tag
+  is the mirror — a missing intermediate state is not a grant of closing
+  authority, but it must not be invisible either.
+
+  `skills/ado-shared/SKILL.md` gained the type-selection rule that prevents the
+  situation upstream (structural role, not perceived size — a Task only for
+  leaf work whose closure rides on a parent), and records that ADO's own PR
+  auto-transition fires only for the default branch and so never fires against
+  an integration branch such as `dev`.
+
+  The guard against recurrence is
+  `.github/scripts/test-ado-work-item-states.py` (47 checks, wired into
+  Regression): it fails when a transition names a state again, when the guard
+  loses one of its paths, when the measured evidence is edited out of the
+  agent, or when the skill and the agent drift apart on what the target is.
+
+- **The hard-deny tier no longer disappears on a host without Python (#251).**
+  `block-dangerous.sh` answered a missing interpreter with `echo '{}'` and exit
+  0 — byte for byte the answer it gives to a command it has inspected and found
+  harmless. On a POSIX machine where Python was simply never installed, the
+  tier that refuses force pushes, `reset --hard` and `rm -rf` was not weakened
+  but absent, and nothing on stdout or stderr said so. The PowerShell twin was
+  never affected: it parses JSON natively, so the primary safety guard had a
+  hard Python dependency on one platform and none on the other.
+
+  Measured while fixing it, and the reason the fix is not a patch to one file:
+  **nine shipped hooks carried the same branch**, six of them PreToolUse gates.
+  The defect was a habit, not an oversight.
+
+  Gates now route a missing interpreter through `af_require_python`, which
+  refuses. The refusal is scoped by each gate's own "do I judge this tool"
+  predicate, because these hooks are registered for *every* tool call:
+  refusing blindly would stop reads and searches too and take the session down
+  with the gate. A tool a gate never judges stays allowed — a real verdict
+  rather than a failure to reach one — and a payload whose `tool_name` cannot
+  be read is refused, because unreadable is not harmless.
+
+  Reading that one field without an interpreter is done with shell parameter
+  expansion, no subprocess, since one reason the interpreter can be missing is
+  a PATH that takes every external binary with it. It is defensible only for
+  this field: tool names are bare identifiers and cannot contain an escape. A
+  command string cannot forge the key — JSON requires the quotes inside a
+  string to be escaped, so the real key still wins — and a payload carrying a
+  genuinely nested second key is reported unreadable rather than guessed at.
+
+  The regression suite gains an inventory gate as well as behavioural cases,
+  because the behavioural cases only cover hooks somebody remembered to name,
+  and a hook nobody named was the defect. It asserts that every shipped
+  `*-pretooluse` hook is listed, that each routes through `af_require_python`,
+  and that none has reintroduced a fail-open branch of its own. The
+  no-interpreter state is reproduced by shadowing `python`, `python3` and `py`
+  with executables that resolve but exit non-zero — the App Execution Alias
+  state `af_find_python` already probes for — rather than by a test-only
+  switch inside the guard, since a guard with a bypass is not the guard that
+  ships.
+
+  Not fixed here: the three hooks that observe rather than gate
+  (`scan-secrets`, `coordinator-posttooluse`, `coordinator-postmerge`) still
+  fall silent without an interpreter. A PreToolUse refusal is not available to
+  them and the right answer differs, so they stay with #168, which tracks the
+  undeclared dependency and the fail-open/fail-closed inconsistency across the
+  payload.
+
+- **The planner can revise its own plan, so the review step it is measured
+  against is executable (#235).** The `tdd-orchestration` runbook mandates a
+  plan review whose only remedy is "return the plan to the planner" — but the
+  planner's sole write tool was `createFile`, which refuses to overwrite an
+  existing file. The planner returned BLOCKED, and the one review any plan
+  receives could not be acted on. Observed in a consumer project: the
+  correction was applied eleven minutes later by the **implementer**, which
+  stamped its own provenance marker on a document it does not own. Design
+  authority went to whichever agent happened to hold a write tool, and nobody
+  decided that as policy.
+
+  The planner now carries `edit/editFiles`. Its write surface does not widen:
+  `planner-pretooluse` is an allowlist over the **target path**, not over the
+  tool, so the planner still writes exactly one kind of file — a `.md` inside
+  a `plans` directory — and every other path is denied no matter which tool
+  asks. The runbook now also names the commit for the revision, since the plan
+  is committed before the review and a corrected plan that is never committed
+  leaves the reviewed and the recorded document different.
+
+  The uncomfortable half is that this gate had no executing test in either
+  harness: the only thing confining the planner was itself unverified. It now
+  has 11 cases in `test-hooks.sh` and 11 in `test-hooks.ps1` — including a
+  batch mixing a plan file with a source file, because the tool applies every
+  replacement and clearing on the first path would approve the rest
+  unexamined. The wider absence is #263.
+
+- **A deploy into a directory that is not yet a git repository no longer stops
+  without saying anything (#244).** `git branch --show-current` exits 128
+  outside a repository. `deploy.sh` runs under `set -euo pipefail`, so that
+  status propagated out of the command substitution that captured the branch
+  and terminated the script between the header and the first file — no error,
+  no summary, nothing deployed. Measured before: the run printed its four
+  header lines and exited 128. Measured after: the same run reaches its
+  summary with 213 files planned and exits 0.
+
+  `deploy.ps1` survived the identical situation only because its branch helper
+  happens to sit in a `try/catch`. That accident is the whole reason the two
+  paths disagreed, and it is why the first run of a project — before
+  `git init` — worked on Windows and failed on bash.
+
+  A non-repo target is now treated as what it is: a supported first
+  installation. Both paths ask `rev-parse --is-inside-work-tree` first, skip
+  the branch check when the answer is no, and print the same line saying so.
+  Silence was the defect; the skip itself was never wrong.
+
+  Fixing the PowerShell side surfaced the same class of bug one layer down.
+  `2>$null` on a native command does not suppress anything while
+  `$ErrorActionPreference` is `Stop` — PS 5.1 re-raises redirected native
+  stderr as a `NativeCommandError` — which aborted `test-deploy-flags.ps1`
+  before its first assertion. The redirect is now scoped locally instead of
+  trusted.
+
+  Both behaviours are now executed by tests rather than assumed:
+  `test-deploy-nonrepo.sh` is new (7 assertions across a non-repo target, a
+  repository on an `agent/` branch, and one on `dev`) and runs in CI, and
+  `test-deploy-flags.ps1` gained the matching assertion. Per #190, the two
+  deploy paths are only equivalent if both are executed. Each case stops its
+  deploy once it is provably past the branch check: a full dry run takes over
+  five minutes under Git-for-Windows bash (#260), and waiting it out three
+  times would buy the suite nothing it does not already know.
+
+- **A PR manager that could not see a branch no longer reports it as missing
+  (#245).** The branch probe had two outcomes where the world has three. "The
+  query said the ref is not there" and "the query told me nothing" both
+  collapsed into `BLOCKED (branch not published)`, and the recovery guidance
+  for that verdict was a bare *push and re-invoke*. Re-pushing a branch that
+  was in fact already merged and deleted recreates it as an orphan with no
+  request attached — the commit then sits outside the integration branch with
+  nothing pointing at it.
+
+  Both PR managers now match the ref on its **full path** including the
+  `agent/` prefix, treat a truncated listing as evidence of nothing, and
+  separate `BLOCKED_BRANCH_NOT_PUBLISHED` from
+  `BLOCKED_BRANCH_PROBE_INDETERMINATE`. Either way they report the raw query
+  and its response, so the coordinator sees the measurement and not only the
+  verdict. On the receiving side, `skills/git-workflow` and `skills/ado-shared`
+  now require `git ls-remote --heads origin agent/{id}` before a second push:
+  the probe belongs to the agent, the ref belongs to the remote, and only one
+  of those is authoritative.
+
+  The same report named a second habit worth closing. A plan reference in a
+  traceability thread may now come only from the coordinator's prompt or from
+  a verified remote read; reconstructing a plausible filename from the naming
+  convention is forbidden outright. An invented path is worse than an absent
+  one, because it is exactly the artifact a later auditor trusts without
+  re-checking. Where neither source yields a path, the answer is `none`.
+
+- **The durable cost artifacts are now actually written (#253, #217).** The
+  per-request facts file and the per-entity file were built, documented and
+  covered by eleven assertions — and no shipped file ever passed
+  `--facts-out` or `--entities-out`. The only caller was the suite proving the
+  feature worked. Every workflow rendered its `cost:` block from rows that were
+  then discarded, and the debug log they came from expires, so the dimensions
+  the block does not render were lost for every run since #217 landed.
+
+  `documenter-stop` (both twins) now passes both flags on every finalising
+  call, writing to `.github/logs/cost/{workflow-id}.{facts,entities}.ndjson`.
+  The location is deliberate: this directory's `.gitignore` matches `*`, which
+  covers subdirectories, so the artifacts are never committed — the same rule,
+  for the same lineage of data, as the workflow logs beside them.
+
+  The writers changed from overwrite to append with dedup, because a workflow
+  can span several chat sessions while the collector reads one at a time.
+  Overwriting would have made the last session the only one that ever existed,
+  and by the time the second session finalises, the log the first one's rows
+  came from is gone. Rows are keyed on the request — `(session, span, ts,
+  response_id)`, and `(session, payload, kind, name)` for entities; each
+  session contributes its own header, since coverage and rate card belong to
+  the session rather than to the file. Re-running a session already in the file
+  adds nothing, which is what lets the collector run on every finalising call
+  while the YAML block — a duplicate key would be invalid — is still written
+  once. Entity rows now carry the session they came from, so both artifact
+  schema versions move to 2.
+
+  The collector's claim that the debug log is "capped at 100 MB" and that
+  truncation "drops the oldest entries" is removed from its docstring and from
+  `logs/README.md`. It was never measured. Across 610 debug logs on one
+  machine, three exceeded 95 MB — 231, 160 and 138 MB — and the 138 MB one
+  still carried its first entry, written four days earlier. `coverage:
+  truncated` detects a log that starts mid-session; what removes the start is
+  not established, and the guess is dropped rather than replaced with another.
+
+- **One stale word no longer switches off four measurements (#252).** The
+  documenter's stop hook decided whether a workflow had ended by reading
+  `**Status:**` out of the plan file. Anything other than `COMPLETED` was read
+  as a mid-workflow call and the hook exited at its first gate — before the log
+  schema check, the timestamp check, the cost block and the invocation census.
+  The plan status is a word an agent maintains by hand, so forgetting to write
+  it disabled every measurement behind it silently, and the run reported green.
+  Observed twice, both times on workflows that had finished and merged while
+  their log said `COMPLETED` all along.
+
+  The hook now finalises when *either* the plan says `COMPLETED` or the
+  workflow log reports a terminal status, and it names the disagreement in its
+  output instead of resolving it in silence. The log match is deliberately
+  looser than the schema's closed set: an invalid value such as
+  `COMPLETED-WITH-ISSUES` must reach the schema checker that reports it, not
+  exit the gate and take the measurements with it. A log that claims no end
+  still leaves a genuine mid-workflow call alone. Both hook twins changed;
+  four assertions were added to each suite.
+
+- **The bash hook suite no longer runs its fixtures in the real repository
+  (#248).** Five fixture helpers guarded their working directory with
+  `cd "$fixture" || exit 1`. That stops a *wrong* path and not an *empty* one:
+  `cd ""` succeeds in bash and stays where it was. With the current directory
+  still at the repository root, the fixture's `git init` and
+  `git checkout -b agent/72-x` ran against the checkout itself — measured, not
+  theorised: a suite run created `agent/72-x` in a maintainer's repository and
+  two later commits landed on it.
+
+  Fixture creation now fails loudly instead of continuing with nothing, and the
+  guards use `${fixture:?}`, which refuses an empty value. Why `mktemp -d`
+  returned nothing is not established; the fix does not depend on knowing,
+  because a harness must not be able to write into the repository it is
+  testing whatever the reason.
+
+- **A request that consumed nothing no longer voids the session's cost (#238).**
+  The collector required four attributes on every `llm_request` and read a
+  missing one as a changed log schema. A failed compaction reports none of the
+  three token counts and no billing attribute — it consumed nothing, so there
+  is nothing to account for — and reading that absence as drift returned
+  `available: false, reason: schema_drift` for the whole session.
+
+  Measured across 25 session directories: 10,734 requests, 51 of them shaped
+  that way, every one an aborted compaction. They are not spread evenly. 39 of
+  the 51 sit in a single 231 MB session, 4 in another, 8 in a third, and the
+  remaining 22 sessions have none — compaction only happens once a session has
+  grown long, so the cost data died in exactly the sessions worth measuring. A
+  consumer project's workflow logs had been emitting an empty cost block on
+  that account, and the session that previously reported `schema_drift` now
+  reports 306 requests and 2327 credits.
+
+  The test is "reported no usage", not "said it failed". Of the 51 records, 50
+  carried `status: error` and one carried `status: ok`; a status-based check
+  would have let that one through and voided its session anyway. These requests
+  are counted as `no_usage_requests`, held apart from `unbilled_requests`,
+  which counts requests that did spend tokens without being charged — folding
+  the two together would file a failure inside a normal category.
+
+  Genuine drift is now subtracted instead of fatal. A *billed* request missing
+  its token fields is still drift, but it costs that one record: the rest are
+  still priced, and `drift: { records, of, fields }` names the field, the loss
+  and the base, so a reader can judge whether the total is still worth reading.
+  `schema_drift` survives and now means what it says — every request was
+  unreadable.
+
+- **The documented cost block had fallen two versions behind (#227, partly).**
+  The example in `logs/README.md` announced `schema_version: 4` against a
+  collector emitting 5. A hand-kept example is documentation only for as long
+  as something compares it to the code, so the suite now does: the version and
+  the collector tag in the README are checked against `SCHEMA_VERSION`, and the
+  check was confirmed to fail against the stale text before it was refreshed.
+  #227's wider ask — that the block's *content* and its documentation cannot
+  diverge — is untouched.
+
+### Added
+
+- **The rule-duplication inventory is derived, not written (#304).** A
+  hand-written inventory for #30 was stale before anyone acted on it: the files
+  it covered grew by a third to double while the issue sat open.
+  `check-rule-drift.py` extracts every sentence carrying a modal (*must*,
+  *never*, *always*, *do not*, *may only*, *shall*) from `MANIFEST.md`,
+  `copilot-instructions.md`, `instructions/` and `agents/` -- skipping
+  frontmatter, fenced code, tables and comments, and joining wrapped lines so a
+  rule is compared as a sentence -- clusters near-duplicates across files and
+  labels each cluster `agree` or `diverge`. Deterministic, offline, no model in
+  the path; on its own it only reports and exits 0 (the gate followed in #305). Baseline on the shipped payload:
+  228 rules, 11 clusters (4 agree, 7 diverge), committed as
+  `docs/metrics/rule-drift-baseline.json`. False positives, judged over all 11
+  clusters by the agent (not a human): 0 of 11 clusters, 1 of 25 locations
+  (4 %). Recall is not measured; a rule without a modal ("Only the coordinator
+  runs git.") is invisible to it by definition. No rule text was edited.
+- **Long lines in a spilled tool result are announced, with a lossless copy
+  (#341).** Work-item descriptions arrived cut mid-sentence. Not the ADO MCP
+  (2.10.0 has no cap): Copilot Chat writes a text result over
+  `github.copilot.chat.agent.largeToolResultsToDisk.thresholdBytes` (8192,
+  undocumented) to a file, and `read_file` cuts every line over 2,000
+  characters -- hardcoded, and paging cannot recover a line. `read_file` itself
+  cannot be watched (its `tool_response` reaches hooks empty), so the PostToolUse
+  process checks the tool that produced the result, which still holds it in
+  full. It answers with `additionalContext` naming the long fields and writes a
+  copy with those lines wrapped. The limits are a structured record,
+  `hooks/scripts/tool-limits.json`; the ADO skills point at it and prescribe a
+  `fields`-scoped read, which usually keeps the result inline. D1 checks the
+  record against the installed extension and says so where none is installed.
+- **An agent can no longer create an unowned ADO work item (#36).** Unowned
+  items fall off the board, and they kept appearing -- 6 of 7 in one run --
+  because the assignee was neither configurable nor checked: it depended on
+  the agent remembering. New `ADO_DEFAULT_ASSIGNED_TO` in `af-env.conf`
+  (shipped empty, per project). The PreToolUse hook now refuses a
+  `wit_work_item_write` `create` without a non-empty `System.AssignedTo`, and
+  refuses `add_child` outright: its MCP schema has no assignee field, so every
+  child it creates is unowned by construction -- which is the likeliest source
+  of the recurrence. The refusal names the value to pass, or tells the agent
+  to ask when the key is empty. The check is a Python core
+  (`work-item-owner.py`) behind both `block-dangerous` dialects rather than a
+  new registered hook, because the Local harness ignores matchers and would
+  start another shell on every tool call. `test-work-item-owner.ps1` drives
+  both dialects; the hooks README marks the gate **Blocking**, so the #339
+  contract suite drives it too.
+- **Every regression suite now declares what it is allowed to cost, and the
+  runner fails the sweep when one exceeds it (#334).** The nested re-run fixed
+  above was green for as long as it existed: `test-deploy-flags.ps1` asserted
+  everything it meant to assert while spending 708 of its 788 seconds running
+  another suite. Correctness gates cannot see that class of defect, because
+  nothing is incorrect — only expensive. A static "no suite may execute another
+  suite" check was written first and discarded: `deploy.ps1` must keep
+  *mentioning* `test-hooks.ps1` in its check list, so a filename scan flags the
+  caller even after it stopped executing anything, and telling a mention from a
+  call would need real PowerShell call-graph analysis. Runtime is the honest
+  signal. `suite-budgets.json` holds a ceiling per suite, roughly twice the
+  measured local runtime with a 30s floor, and `run-all-tests.ps1` reports a
+  suite over its ceiling as `SLOW` and exits non-zero. Ceilings come from the
+  slower environment — this developer machine runs the full sweep in ~2209s
+  against ~1204s in CI — so a CI-derived number would fail locally for no
+  reason. The margin is deliberately loose because the defect class is a ~30x
+  event, not a 20% one. `test-suite-budgets.ps1` requires every suite to have
+  an explicit entry, rejects entries for suites that no longer exist, rejects
+  ceilings at or above the kill timeout where they could never fire, and drives
+  the runner against a one-second fixture budget to prove the ceiling is
+  enforced rather than merely declared. Raising a ceiling stays possible and
+  stays a visible diff that needs a reason; mechanically forbidding it against
+  git history was not attempted.
+
+- **A local regression run can be scoped to the suites the diff actually
+  requires (#334).** `regression.yml` has no `paths:` filter and the runner
+  sweeps every `test-*.ps1`, so a developer ran all 20 suites and the pull
+  request then ran the identical 20. The second run is the one that gates the
+  merge, which makes the first the redundant half. `suite-scope.json` maps each
+  suite to the paths that require it and `run-all-tests.ps1 -Changed` runs only
+  those; `-ListSelection` shows the choice without running anything. **CI is
+  deliberately unchanged and keeps sweeping everything** — the saving is taken
+  where the result is advisory, not where it is the gate. Three properties make
+  an incomplete map survivable rather than dangerous: a changed path that no
+  pattern covers widens the run to the full sweep instead of narrowing it to
+  nothing, an unreadable map or an unanswerable `git diff` does the same, and
+  editing a suite always selects that suite without the map having to say so.
+  Patterns are a concrete path or a directory ending in `/**` and are matched
+  by suffix, so the same file works in this repository and in a project the
+  payload was deployed into, and there is no second glob implementation to
+  drift (#287). `VERSION` is on the ignore list for a specific reason: the
+  pre-commit hook bumps it on every commit, so without that entry every scoped
+  run would hit the fallback and degrade straight back to a full sweep.
+  `test-suite-scope.ps1` holds the map honest — every suite mapped, no mapping
+  pointing at a file that no longer exists, and the fallback, the ignore list
+  and the self-selection rule each driven through the real runner.
+
+- **A stop hook now diffs what the agent created against what the task asked
+  for, instead of trusting the agent's self-report (#123, direction 3).** The
+  incident that opened the issue was a test-writer that dropped
+  `run_wit3103_tests.py` into the repository root — a throwaway runner, never
+  requested, never mentioned in its return, and caught only because the
+  coordinator happened to run `git status` by hand.
+
+  The declared scope was available all along: the editor writes the delegation
+  prompt verbatim into the subagent log as a `user_message` span. That is the
+  coordinator's own words, machine-recorded, never round-tripped through a
+  model — the same channel and the same principle as `concurrent-agent-edits`
+  (#101) and `collect-agent-invocations` (#173). `undeclared-scratch.py` reads
+  it, harvests the files the agent created from its own `tool_call` records,
+  and reports the ones that sit directly in the repository root and appear
+  nowhere in the prompt. `test-writer-stop` blocks on a non-empty result.
+
+  The rule is narrow because the obvious wide one was measured and rejected.
+  Across 815 real subagent logs, 334 of which wrote files at all, "wrote a
+  file the prompt never names" fires on 52 runs — 15.6% — and nearly all of
+  them are legitimate: documenter plan and retro files whose names it derives,
+  new test files, `.vscode/tasks.json`. A gate with that false positive rate
+  gets switched off, and a hook nobody runs protects nothing (#108).
+  "*Created*, directly at the repository root, and never named" fires 6 times
+  with no false positives, and every one of the six is the pathology —
+  `run_wit3103_tests.py` itself, plus `.verify_assertions.py`,
+  `.verify_test_file.py`, `check_unit_values.py`, `test_syntax_check.py` and
+  `verify_mask_fix.py`.
+
+  Both clauses are load-bearing, and deliberately redundant. The *created*
+  clause carries the rule alone: all five legitimate root writes in the sample
+  (`.gitignore`, `azure-pipelines.yml`, `databricks.yml`, `pyproject.toml`,
+  `tox.ini`) arrived through `replace_string_in_file` against a file that
+  already existed. That matters more than it looks, because the delegation
+  prompt is capped the same way returns are — 342 of 814 sampled prompts (42%)
+  end in `[truncated]`, so a name living only in the severed tail reads as
+  "never named". Truncation can therefore produce false positives but never
+  false negatives, and the *created* clause is immune to it. The *unnamed*
+  clause keeps a genuinely requested new root file out of the report.
+
+  Unlike the return reader, this gate blocks. It may: it fires only on positive
+  evidence, every way of failing to measure — no session directory, no log, no
+  interpreter, a log with no prompt — yields an empty list and changes nothing,
+  and the remediation is to delete or move a single file. A file created in a
+  subdirectory is never reported however undeclared, because subdirectories are
+  where deliverables live and the measurement says so.
+
+- **A hook can now read what its own agent just said, and can tell a whole
+  return from a beheaded one (#285, split out of #134).** Every subagent turn
+  writes an `agent_response` record about 6 ms before the Stop hook fires, so
+  the text is there — but nothing read it. #123 records the consequence: an
+  implementer modified seven files and "returned nothing at all", and every
+  gate passed, because no gate looked at the return.
+
+  `subagent-return.py` reads it and answers with a status, not a string, since
+  a bare string is exactly what cannot be judged. The editor caps the value at
+  5000 characters and appends `[truncated]`; measured across 300 real logs,
+  231 were complete and 68 truncated. Roughly a quarter of returns lose their
+  tail, and the tail is where the mandated `### Gate Summary` sits — one
+  sampled log ends literally `### Gate Summary\n[truncated]`. A whole return
+  and a beheaded one are both non-empty and both look fine.
+
+  Truncation is detected by trying to parse the value, not by testing for
+  length 5011 and not by looking for the marker. All three agreed on 299 of
+  300 sampled logs, but the framework owns none of them: re-tune the cap or
+  re-word the marker in an editor release and a length test starts calling
+  every return complete. A value that does not parse is structurally
+  incomplete whatever the cap is called.
+
+  `unavailable` is a third state rather than an empty string. "The agent said
+  nothing" and "the agent's words could not be recovered" are different facts,
+  and a gate handed the empty string for both would have to guess which one it
+  was holding — so `complete` and `truncated` never come back empty.
+
+  Wrapped as `af_subagent_return` and `Get-AfSubagentReturn`, whose failure
+  direction is inverted from `af_peer_edits`: that one stays silent when it
+  cannot measure, because subtracting nothing is the existing behaviour. This
+  one must say so, because a caller reading silence as "the agent returned
+  nothing" would fail the agent for the hook's own blind spot.
+
+  First consumer is the implementer's green gate, which now appends a note
+  when its own return is truncated or unreadable. It warns rather than blocks,
+  deliberately: `unavailable` also covers "no interpreter, no session dir", and
+  blocking on that would let a missing python shut down every implementer. A
+  watchdog that breaks legitimate work gets switched off (#108), which costs
+  more than the case it was meant to catch.
+
+- **The framework's delivery paths are a skill now, and each one ends in a
+  verification (#236).** Delivery was documented in `docs/wiki/12-deployment.md`,
+  which is not part of the payload — an agent working inside a consumer project
+  could not read the instructions for the operation it was performing. One path
+  was missing entirely: carrying a hotfix into a project that is already
+  mid-task. And no path ended in a check on the artifact.
+
+  That last gap produced a specific failure worth recording. A `git checkout`
+  after a deploy reverts the deployed files while `.af-hashes` already holds the
+  new hash, so the next apply reports `Updated: 0` and the fix is gone. The same
+  checkout reverted the test file, so the suite printed `RESULT: ALL GREEN` with
+  the relevant cases absent. And the MCP server serves a payload copied into its
+  wheel at build time, so `af_status` reported `up-to-date` about a version that
+  no longer existed. Three green signals, one wrong artifact.
+
+  `skills/deployment/SKILL.md` carries a decision table over four paths —
+  release cut, routine upgrade, hotfix into a running project, conflict
+  resolution — and ends each in an assertion that names something the change
+  introduced. The hotfix path is ordered, because order is the whole difficulty:
+  it records the operator's branch before anything is touched, deploys onto the
+  branch the project is already on, and says why returning to that branch
+  silently un-deploys the fix. The skill links the wiki for merge classification
+  and managed regions rather than copying it, and it is a skill rather than an
+  instruction file so it costs nothing on requests that are not about delivery.
+
+  `af_status` gained `payload_origin` and `payload_state`. When the served
+  payload is the bundled copy and a checkout is visible, it now compares the two
+  and reports `behind-repository` with both versions — the case where the tool
+  would otherwise cheerfully deploy a version older than the fix it was run to
+  deliver. When no checkout is visible it reports `unverifiable` rather than
+  staying silent, because an installed wheel genuinely cannot know and silence
+  reads as "fine".
+
+  `.github/scripts/test-deployment-skill.py` (33 checks, in CI) fails when a
+  path is added without a verification, when the hotfix path stops naming the
+  checkout trap, when the release cut stops rebuilding the wheel, or when the
+  staleness states the skill tells readers to trust disappear from
+  `deploy_core`. Verified by removing exactly one verification block: 31/33, and
+  the two failures named the path that lost it.
+
+- **Curated skill state is now reconciled instead of assumed (#257).** Curation
+  writes the same fact into three records — `skills/curated-assignments.json`,
+  the `AF:MANAGED:curated-skills` region in each agent file, and
+  `.af-skills-curated` plus `skills/INDEX.md` — and nothing compared them. When
+  they disagreed, nothing said so: `--reapply` iterates `assignments`, so an
+  agent missing from that one file is simply never visited, and the agent runs
+  without the skill it was assigned. There is no error, no empty section, no
+  symptom to notice.
+
+  Measured in a real consumer project while building this: two of the three
+  records assign `python-dev` to `refactorer`, and `assignments` has no
+  `refactorer` key at all. The drift was already there, unnoticed, in the
+  project the framework is developed against.
+
+  `.github/scripts/check-curation-consistency.py` compares all four
+  relationships the records must satisfy and names each disagreement by agent
+  and skill rather than reporting a count. It knows that a curated skill which
+  already exists as a base bullet outside the region is deliberately dropped
+  from both the region and `assignments` (Step 7.3), so the deduplication that
+  curation performs on purpose is not reported as damage.
+
+  Two call sites. The end of a deploy previously printed a reminder whenever
+  `curated-assignments.json` existed — advice that could not know whether
+  anything was wrong, and whose stated reason ("a deploy resets curated skill
+  assignments") stopped being true when managed regions arrived. It is now
+  content-triggered: silent when the records agree, and the actual
+  disagreement when they do not. It remains advisory and never fails a deploy.
+  `/af-curate-skills` runs the same check over its own output, in both curation
+  and reapply, so a run cannot report success having produced records that
+  disagree.
+
+  `test-curation-consistency.ps1` covers eight scenarios: 8 passed, 0 failed in
+  2.9s. Half of them assert that the checker stays *silent* — a consistency
+  check that cries wolf gets ignored, and then it is worth nothing.
+
+  Building it surfaced a blind spot in the CLI caller guard (#253): it searched
+  `.github` only, while `deploy.sh` and `deploy.ps1` sit one level above it. A
+  CLI invoked by the deploy itself therefore counted as *uncalled*, and this
+  was simply the first such CLI to arrive — the next one would have hit the
+  same wall. The suite now passes the payload root as a second caller root when
+  a `deploy.sh` is present there, so the guard can see the framework's most
+  central production caller. Consumer projects carry no `deploy.sh`, so nothing
+  changes for them and their trees are not walked.
+
+- **The formatting verdict is now available at commit time (#242).** CI checks
+  `ruff format` over every tracked `.py`, and it was the *only* place that
+  check existed. A one-character slip in a file the commit already touched
+  therefore cost a full push-fail-fix-push round trip — twice in the last two
+  pull requests alone (#241, #255), both times on code that `ruff check` was
+  perfectly happy with.
+
+  `.githooks/pre-commit` now runs `ruff format --check` over the staged Python
+  before it bumps `VERSION`, prints the offending paths and the one-line
+  remedy, and stops. It does not reformat: a hook that edits the files it was
+  asked to commit changes what the author reviewed after they reviewed it.
+
+  The verdict belongs to CI, so it is only cast with CI's ruff — the pinned
+  version is read out of `regression.yml` rather than repeated in the hook,
+  because two copies of a version number is how the next disagreement starts.
+  When that version is not the one on `PATH`, the hook says which it found,
+  which CI uses, and how to close the gap, then stands aside. It does not
+  block on a verdict CI might not share, and it does not skip in silence
+  either: an unannounced skip is indistinguishable from a pass (#224).
+
+  This is the AF repository's own hook, so the payload sweep never reaches it.
+  `.github/scripts/test-precommit-format-gate.py` copies the real hook into a
+  throwaway repository and drives it through eight cases in both directions —
+  including a staged path containing a space, an unstaged offender that must
+  be ignored, a deletion that must not be checked, and both stand-aside
+  branches. **8/8 passed.**
+
+- **A capability only the tests use is now a failure (#253).**
+  `scripts/check-cli-callers.py` reads the long options every shipped Python
+  CLI defines and requires at least one production file — a hook, a workflow,
+  another script — to name each of them. Test harnesses do not count: they are
+  the thing being distrusted, since a suite vouching for its own flag is
+  exactly how #217's artifacts passed eleven assertions while being written by
+  nobody.
+
+  This is #61 in a third place: reading was doing the work that running was
+  believed to do. The guard runs inside `test-hooks.ps1`, with seeded cases in
+  both directions — an option no production file passes fails, one a test file
+  passes still fails, one a hook passes clears. A CLI that no hook is meant to
+  invoke declares itself with `af-caller-ok` in its module docstring, and a
+  single option can do the same on the line above it; both existing analysis
+  tools and one test-only override are now declared rather than silently
+  tolerated.
+
+- **The shipped bash hook suite is now executed (#190, #183).**
+  `run-all-tests.ps1` sweeps `test-*.ps1`, so `test-hooks.sh` — the only
+  executing coverage the `.sh` hooks have — was committed, maintained, and run
+  by nothing. Reading was doing the work that running was believed to do,
+  which is #61 in the other half of the payload.
+
+  A CI step runs it on the Windows runner through the bash that Git for
+  Windows installs at `C:\Program Files\Git\bin\bash.exe`. The suite exits 0
+  when it finds no usable Python interpreter, so the step also fails on a
+  `SKIP:` line and on a missing pass count — a suite that skipped itself must
+  not report green.
+
+  First measured run: **187 assertions, 0 failures.** Five are new. The cases
+  the #183 fix was written against existed only in the PowerShell harness, so
+  the `.sh` copy of that fix had been reviewed and never measured; it holds.
+
+  `hooks/README.md` now says where that interpreter is and how to invoke the
+  suite by hand, because "not on `PATH`" had been indistinguishable from "not
+  installed" for as long as nobody ran it.
+
+- **A switched-off cost source now announces itself (#228).** Cost collection
+  depends on a VS Code setting that is off by default. When it is off the
+  collector correctly writes `cost: available: false` into a workflow log —
+  a file nobody opens unless they already suspect something is wrong. A
+  consumer could therefore run for months with an empty cost series and no way
+  to discover why short of reading framework source.
+
+  `scripts/check-cost-source.ps1` (and its `.sh` twin) probes the effect rather
+  than the configuration: it counts session logs on disk. Reading the setting
+  is unreliable — it may live in user, workspace, or profile settings, and
+  those files are JSONC, which no JSON parser accepts. A session log that
+  exists is proof the source is live.
+
+  The advisory is emitted by the deploy summary, which is the only channel that
+  reaches **existing** installs: the `.vscode/settings.json` that would carry
+  the key is PRESERVE'd on update, so shipping the key upstream would reach new
+  consumers only. It names the setting, what is lost while it is off, and the
+  caveat that the setting is experiment-flagged and the vendor may withdraw it.
+
+  Nothing gates on it. The probe always exits 0, and a dark source fails no
+  workflow, hook, or suite. This generalises the #224 principle — a check that
+  does not run must announce itself — to the data source behind it.
 
 ## [1.23.0] -- 2026-08-26
 
@@ -1133,12 +2896,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   positive, the absence of the destructive advice, tool scoping, and the
   PreToolUse write. Suite: **279 passed, 0 failed**.
 
-  The bash twin carries the same logic **and one further fix**. It used
-  `[ -z "$X" ] && echo '{}' && exit 0`, which evaluates to 1 whenever `$X` is
-  non-empty and so aborted the hook under `set -euo pipefail` — the exact
-  failure mode its own header comment warns about twenty lines above. Both
-  occurrences are now `if` blocks. **This was not executed:** the authoring host
-  has no bash, so every bash change here is reviewed, not measured (#168).
+  The bash twins are no longer a review-only artifact. The host was believed to
+  have no bash; it has one (Git for Windows ships GNU bash 5.2.37, merely absent
+  from `PATH`), so both hooks were run in a real git fixture for the first time:
+  **10 assertions, 0 failures**, covering the same six behaviours plus snapshot
+  consumption. Two defects surfaced that a review had not. The snapshot calls
+  resolved git from the **current working directory** while the PowerShell twin
+  anchors on `AF_CODE_ROOT` — a hook runs from wherever the agent sits, so Pre
+  and Post could address different repositories and the guard would then simply
+  never fire. Both are now `git -C "$AF_CODE_ROOT"`.
+
+  The second is a correction to this repository's own claim. Three hooks carried
+  the comment *"`A && B && exit` returns 1 when A is false, which under `set -e`
+  aborts the hook"*. **Measured: it does not.** `set -e` exempts every command in
+  an `&&` list except the one after the final `&&`, so the failing test is
+  ignored and the script falls through as intended. The real cost of the pattern
+  is a non-zero `$?` when the guard does not fire — which becomes the hook's exit
+  status if the list is ever the last statement — plus opaque control flow. The
+  `if` form is still correct and is now used consistently; the comments state
+  what was measured rather than what was assumed.
 
 - **The test guard denied reading, not running (#183).** `coordinator-pretooluse`
   decided "this is a test run" with `$command -match '\bpytest\b'`. A `.` counts

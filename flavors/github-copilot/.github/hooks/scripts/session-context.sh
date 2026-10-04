@@ -57,8 +57,38 @@ if [[ -f "$test_log_path" ]]; then
     fi
 fi
 
-context="Project: ${project} | Branch: ${branch} | Last commit: ${commit} | ${py_ver}${test_log_summary}"
+# Without an interpreter most gates degrade quietly, per call; say which, once (#342).
+# Derived from the hooks themselves, so a new Python-backed hook is named without a list to maintain.
+python_notice=""
+if [ -z "$AF_PYTHON" ]; then
+    _hook_dir=$(dirname -- "${BASH_SOURCE[0]}")
+    _helpers=$(awk '
+        /^[a-z_]+\(\) *\{/ { name = $1; sub(/\(\).*/, "", name); body = ""; infn = 1; next }
+        infn && /^\}/ {
+            if (body ~ /AF_PYTHON/ && name != "af_require_python" && name != "af_deny_no_python") print name
+            infn = 0; next
+        }
+        infn { body = body "\n" $0 }
+    ' "$_hook_dir/_common.sh")
+    _refused=""
+    _degraded=""
+    for _f in "$_hook_dir"/*.sh; do
+        _n=$(basename "$_f" .sh)
+        case "$_n" in _*|session-context) continue ;; esac
+        if grep -qw 'af_require_python' "$_f"; then
+            _refused="${_refused:+$_refused, }$_n"
+            continue
+        fi
+        _dep=""
+        grep -q 'AF_PYTHON' "$_f" && _dep=1
+        for _h in $_helpers; do grep -qw "$_h" "$_f" && _dep=1; done
+        [ -n "$_dep" ] && _degraded="${_degraded:+$_degraded, }$_n"
+    done
+    python_notice=" | AF WARNING: no working Python interpreter (tried AF_PYTHON_OVERRIDE, python3, python, py). Running without their Python-backed check: ${_degraded:-none}. Refusing every call they guard: ${_refused:-none}. Install Python 3 or set AF_PYTHON_OVERRIDE (#342)."
+fi
+
+context="Project: ${project} | Branch: ${branch} | Last commit: ${commit} | ${py_ver}${test_log_summary}${python_notice}"
 
 # Return JSON — escape double quotes in context for safety
-context_escaped=$(echo "$context" | sed 's/"/\\"/g')
+context_escaped=$(echo "$context" | af_json_escape)
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$context_escaped"

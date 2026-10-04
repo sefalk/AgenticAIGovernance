@@ -19,8 +19,23 @@ set -uo pipefail
 # marker" -- Gate 2 flagged every new test file, marked or not (issue #175).
 . "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 
-# Read stdin (hook input JSON — required by protocol)
-cat > /dev/null
+# Read stdin (hook input JSON — required by protocol, and Gate 0 needs it)
+stdin_raw=$(cat)
+
+# Before Gate 0, because Gate 0 blocks too (issue #298).
+af_stop_loop_guard "$stdin_raw" test-writer 'undeclared root files, red phase, provenance, no production code'
+
+# ---------- Gate 0: no undeclared files at the repository root (#123) ----------
+#
+# Runs before the Red gate on purpose. Every gate below returns early when
+# pytest is missing or collects nothing, and a scratch file left in the root is
+# a mess whether or not the suite ran.
+scratch=$(af_undeclared_scratch "$stdin_raw" test-writer | sed '/^[[:space:]]*$/d')
+if [ -n "$scratch" ]; then
+    scratch_list=$(printf '%s' "$scratch" | tr '\n' ',' | sed 's/,$//; s/,/, /g')
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Undeclared files at the repository root: ${scratch_list}. You created these, and the task you were given never mentions them. Throwaway runners and verification scripts do not belong in the repository -- delete them, or put them under the system temp directory. If one of them really is a requested deliverable, it belongs in the directory its kind lives in (tests/ for tests, docs/ for documents), not the root.\"}}"
+    exit 0
+fi
 
 if ! command -v pytest &>/dev/null; then
     echo '{"systemMessage": "test-writer:Stop — pytest not found, Red gate skipped"}'
@@ -64,7 +79,7 @@ fi
 # by exit code alone. Measured 2026-08-24.
 summary_line=$(printf '%s' "$output" | grep -v '^[[:space:]]*$' | tail -1)
 if [ "$exit_code" -eq 2 ] || printf '%s' "$summary_line" | grep -qE '[0-9]+ error'; then
-    detail=$(printf '%s' "$summary_line" | sed 's/"/\\"/g')
+    detail=$(af_json_escape "$summary_line")
     echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Red phase invalid: the suite reported collection or setup ERRORS, not test failures. A test that cannot be collected or set up never reaches the behaviour it claims to guard, and it stays red after a correct implementation. Fix the test construction — imports, syntax, fixtures, schema-less DataFrames — so the red comes from an assertion. Summary: ${detail}\"}}"
     exit 0
 fi
@@ -73,10 +88,20 @@ fi
 
 # ---------- Gate 2: Provenance markers on new test files (H5) ----------
 
+# `git status` is global to the checkout, so a producer running alongside this
+# one puts its new test files in this scope. Clearing the block below means
+# writing `copilot:generated` -- "this agent produced the whole file" -- into a
+# file this agent never opened (issue #101). Same subtraction the implementer
+# and refactorer already make; the marker is the stronger claim of the two.
+peer_edits=$(af_peer_edits "$stdin_raw" test-writer)
+
 missing=""
 while IFS= read -r line; do
     # Extract filename from git status (untracked ?? or added A)
     file=$(echo "$line" | sed 's/^.. //' | tr -d '"')
+    if [ -n "$peer_edits" ] && printf '%s\n' "$peer_edits" | grep -qxF "$file"; then
+        continue
+    fi
     if [[ "$file" == *.py ]] && [ -f "$file" ]; then
         if ! af_has_provenance_marker "$file" generated; then
             missing="${missing}${file}, "
@@ -86,7 +111,7 @@ done < <(git status --porcelain "tests/" 2>/dev/null | grep -E '^\?\? |^A ')
 
 if [ -n "$missing" ]; then
     missing="${missing%, }"  # trim trailing comma
-    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Provenance violation: these new test files carry no copilot:generated marker anywhere: ${missing}. See instructions/provenance.instructions.md for where to put it.\"}}"
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Provenance violation: these new test files carry no copilot:generated marker anywhere: $(af_json_escape "$missing"). See instructions/provenance.instructions.md for where to put it.\"}}"
     exit 0
 fi
 

@@ -28,6 +28,11 @@ $ErrorActionPreference = 'SilentlyContinue'
 # (measured 2026-08-03), so no session has to be guessed.
 $stdinRaw = [Console]::In.ReadToEnd()
 
+# The artifact gates below block, and re-running them on an unchanged tree
+# reaches the same verdict (issue #298).
+Invoke-AfStopLoopGuard -StdinRaw $stdinRaw -Agent 'documenter' `
+    -Gates 'workflow artifacts, retro'
+
 # Derive workflow-id from current branch
 $branch = & git branch --show-current 2>$null
 if (-not $branch -or $branch -notmatch '^agent/(.+)$') {
@@ -52,9 +57,9 @@ $BASE_BRANCH = Get-AfConfig -Key 'BASE_BRANCH' -Default 'dev'
 # workflow still running -- the hook mechanically compelled the false artifact
 # it existed to guarantee (issue #72).
 #
-# Intent is not on stdin, so it is read off the plan file: a plan marked
-# COMPLETED is the documenter's own claim that it finalised, and that claim is
-# what this gate holds it to.
+# Intent is not on stdin, so it is read off the artifacts: a plan marked
+# COMPLETED is the documenter's own claim that it finalised, and a workflow log
+# reporting a terminal status is the same claim in the other file.
 
 $plan = Get-AfPlanLifecycle -WorkflowId $workflowId -Root $AfCodeRoot
 
@@ -81,13 +86,36 @@ if (-not $plan.Found) {
     exit 0
 }
 
+# The plan status is a word an agent maintains by hand; the workflow log is an
+# artifact the run produced. Requiring the plan alone let one unset word silence
+# the schema check, the timestamps, the cost block and the invocation census at
+# once -- the gate's own failure disabled every measurement behind it (issue
+# #252). Either source asserting an end is now enough.
+#
+# The match is deliberately looser than the schema's closed set: a status of
+# COMPLETED-WITH-ISSUES is invalid and must reach the checker that says so,
+# rather than exit here and take the measurements with it.
+
+$lifecycleNote = ''
+
 if ($plan.Status -ne 'COMPLETED') {
+    $logStatus = ''
+    foreach ($candidate in @(".github/logs/$workflowId.yaml", ".github/logs/$workflowId.yml")) {
+        if (Test-Path $candidate) {
+            $m = [regex]::Match((Get-Content $candidate -Raw),
+                                '(?m)^status:[^A-Za-z\r\n]*([A-Za-z][A-Za-z0-9_-]*)')
+            if ($m.Success) { $logStatus = $m.Groups[1].Value.ToUpperInvariant(); break }
+        }
+    }
     $seen = if ($plan.Status) { $plan.Status } else { 'unset' }
-    $output = @{
-        systemMessage = "documenter:Stop -- plan status is $seen, not COMPLETED: treated as a mid-workflow documenter call, artifact gate not applied."
-    } | ConvertTo-Json -Compress
-    Write-Output $output
-    exit 0
+    if ($logStatus -notmatch '^(COMPLETED|FAILED|ESCALATED)') {
+        $output = @{
+            systemMessage = "documenter:Stop -- plan status is $seen, not COMPLETED: treated as a mid-workflow documenter call, artifact gate not applied."
+        } | ConvertTo-Json -Compress
+        Write-Output $output
+        exit 0
+    }
+    $lifecycleNote = " -- NOTE: plan status is $seen but the workflow log reports $logStatus, so this call was treated as finalisation; one of the two is wrong and should be corrected"
 }
 
 # ---------- Gate 1: Workflow log YAML ----------
@@ -139,7 +167,7 @@ if ($missing.Count -gt 0) {
         hookSpecificOutput = @{
             hookEventName = "Stop"
             decision = "block"
-            reason = "Documentation phase violation: required artifacts missing for workflow '$workflowId': $list. Create these files before completing."
+            reason = "Documentation phase violation: required artifacts missing for workflow '$workflowId': $list. Create these files before completing.$lifecycleNote"
         }
     } | ConvertTo-Json -Compress -Depth 3
     Write-Output $output
@@ -196,7 +224,7 @@ catch {
     $schemaNote = ''
 }
 
-# ---------- Timestamps (ADVISORY -- never blocks, never fails the hook) ----------
+# ---------- Stamped header fields (ADVISORY -- never blocks, never fails the hook) ----------
 #
 # Stamped here rather than written by the documenter so the values never pass
 # through a language model. Measured: a documenter wrote a `completed:` six and
@@ -209,6 +237,20 @@ catch {
 # already uses for --workflow-start. Anything the documenter left behind is
 # replaced rather than joined -- two `completed:` keys is a YAML file whose
 # meaning depends on which one the parser reaches last.
+#
+# Both are UTC. `%ct` is asked for rather than `%cI` because `%cI` carries the
+# committer's local offset, so the two fields arrived in different
+# representations and a reader subtracting them got a negative duration
+# (issue #240).
+#
+# `af_version:` joined them for the same reason (issue #309). It was the last
+# header field a model transcribed by hand, out of a file with three lines it
+# had to pick one of, and across 68 logs 23 carried no value and 7 carried
+# something that was not a version -- `n/a`, `not measured`, and in one case the
+# instruction "read from .github/.af-version" written into the field verbatim.
+# No readable version file stamps `null`: a source checkout is not a deployment
+# and has no version to claim, and a recorded absence is analysable where a
+# missing key is not.
 
 $stampNote = ''
 try {
@@ -217,13 +259,25 @@ try {
     $completedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     $startedAt = $completedAt
     $base = if ($BASE_BRANCH) { $BASE_BRANCH } else { 'dev' }
-    $isoStamps = & git log --format=%cI "$base..HEAD" 2>$null
-    if ($isoStamps) { $startedAt = @($isoStamps)[-1] }
+    $epochs = & git log --format=%ct "$base..HEAD" 2>$null
+    if ($epochs) {
+        $oldest = @($epochs)[-1]
+        $startedAt = [DateTimeOffset]::FromUnixTimeSeconds([int64]$oldest).UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ')
+    }
+
+    $afVersion = 'null'
+    if (Test-Path '.github/.af-version') {
+        foreach ($versionLine in (Get-Content '.github/.af-version')) {
+            $m = [regex]::Match($versionLine, '^\s*version:\s*(\d+\.\d+\.\d+)\s*$')
+            if ($m.Success) { $afVersion = '"' + $m.Groups[1].Value + '"'; break }
+        }
+    }
 
     # Top-level keys only: a `started:` indented inside a step belongs to that
-    # step and is none of this hook's business.
-    $kept = @(Get-Content $logPath | Where-Object { $_ -notmatch '^(started|completed):' })
-    $stampLines = @("started: `"$startedAt`"", "completed: `"$completedAt`"")
+    # step and is none of this hook's business. `af_version_note:` is the
+    # documenter's own field and is deliberately not matched here.
+    $kept = @(Get-Content $logPath | Where-Object { $_ -notmatch '^(started|completed|af_version):' })
+    $stampLines = @("started: `"$startedAt`"", "completed: `"$completedAt`"", "af_version: $afVersion")
 
     $anchor = -1
     for ($i = 0; $i -lt $kept.Count; $i++) {
@@ -238,7 +292,7 @@ try {
     }
 
     Set-Content -Path $logPath -Value $kept -Encoding UTF8
-    $stampNote = ' + timestamps measured'
+    $stampNote = ' + header fields stamped'
 }
 catch {
     $stampNote = ''
@@ -254,45 +308,57 @@ $costNote = ''
 try {
     $logPath = if (Test-Path $logPath1) { $logPath1 } else { $logPath2 }
 
-    # Appending twice would produce a duplicate YAML key; first write wins.
-    if ((Select-String -Path $logPath -Pattern '^cost:' -Quiet) -ne $true) {
-        $hookInput = $null
-        if ($stdinRaw) { $hookInput = $stdinRaw | ConvertFrom-Json }
-        $sid = $hookInput.session_id
-        $transcript = $hookInput.transcript_path
+    $hookInput = $null
+    if ($stdinRaw) { $hookInput = $stdinRaw | ConvertFrom-Json }
+    $sid = $hookInput.session_id
+    $transcript = $hookInput.transcript_path
 
-        if ($sid -and $transcript) {
-            # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
-            $chatDir = Split-Path -Parent (Split-Path -Parent $transcript)
-            $sessionDir = Join-Path (Join-Path $chatDir 'debug-logs') $sid
+    if ($sid -and $transcript) {
+        # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
+        $chatDir = Split-Path -Parent (Split-Path -Parent $transcript)
+        $sessionDir = Join-Path (Join-Path $chatDir 'debug-logs') $sid
 
-            $collector = '.github/scripts/collect-session-cost.py'
-            $python = $null
-            foreach ($c in @('.venv/Scripts/python.exe', '.venv/bin/python')) {
-                if (Test-Path $c) { $python = $c; break }
+        $collector = '.github/scripts/collect-session-cost.py'
+        $python = $null
+        foreach ($c in @('.venv/Scripts/python.exe', '.venv/bin/python')) {
+            if (Test-Path $c) { $python = $c; break }
+        }
+        if (-not $python) {
+            # The shared preamble already validated the interpreter by
+            # running it -- a resolvable-but-dead stub never gets here.
+            $python = $AfPython
+        }
+
+        if ($python -and (Test-Path $collector)) {
+            # Oldest commit on the branch approximates the workflow start;
+            # a session that began later means earlier phases are unlogged.
+            $collectorArgs = @('--session-dir', $sessionDir)
+            $base = if ($BASE_BRANCH) { $BASE_BRANCH } else { 'dev' }
+            $stamps = & git log --format=%ct "$base..HEAD" 2>$null
+            if ($stamps) {
+                $oldest = @($stamps)[-1]
+                $collectorArgs += @('--workflow-start', ([string]([int64]$oldest * 1000)))
             }
-            if (-not $python) {
-                # The shared preamble already validated the interpreter by
-                # running it -- a resolvable-but-dead stub never gets here.
-                $python = $AfPython
-            }
 
-            if ($python -and (Test-Path $collector)) {
-                # Oldest commit on the branch approximates the workflow start;
-                # a session that began later means earlier phases are unlogged.
-                $collectorArgs = @('--session-dir', $sessionDir)
-                $base = if ($BASE_BRANCH) { $BASE_BRANCH } else { 'dev' }
-                $stamps = & git log --format=%ct "$base..HEAD" 2>$null
-                if ($stamps) {
-                    $oldest = @($stamps)[-1]
-                    $collectorArgs += @('--workflow-start', ([string]([int64]$oldest * 1000)))
-                }
+            # The debug log the numbers come from expires; these rows do not.
+            # They sit beside the workflow log, under the same .gitignore that
+            # keeps verbatim prompts out of the repository (#253).
+            $costDir = Join-Path (Split-Path -Parent $logPath) 'cost'
+            $collectorArgs += @('--facts-out', (Join-Path $costDir "$workflowId.facts.ndjson"))
+            $collectorArgs += @('--entities-out', (Join-Path $costDir "$workflowId.entities.ndjson"))
 
-                $block = & $python $collector @collectorArgs 2>$null
-                if ($LASTEXITCODE -eq 0 -and $block) {
+            $block = & $python $collector @collectorArgs 2>$null
+            if ($LASTEXITCODE -eq 0 -and $block) {
+                # Appending twice would produce a duplicate YAML key; first
+                # write wins. The artifacts above have no such constraint --
+                # they accumulate and dedup, which is why the collector runs
+                # on every finalising call and not only the first.
+                if ((Select-String -Path $logPath -Pattern '^cost:' -Quiet) -ne $true) {
                     Add-Content -Path $logPath -Value ''
                     Add-Content -Path $logPath -Value $block
                     $costNote = ' + cost block appended'
+                } else {
+                    $costNote = ' + cost artifacts updated'
                 }
             }
         }
@@ -387,7 +453,7 @@ catch {
 }
 
 $output = @{
-    systemMessage = "documenter:Stop -- artifact gate PASS for '$workflowId'$retroNote$schemaNote$stampNote$costNote$invocationNote$scratchNote"
+    systemMessage = "documenter:Stop -- artifact gate PASS for '$workflowId'$lifecycleNote$retroNote$schemaNote$stampNote$costNote$invocationNote$scratchNote"
 } | ConvertTo-Json -Compress
 Write-Output $output
 exit 0

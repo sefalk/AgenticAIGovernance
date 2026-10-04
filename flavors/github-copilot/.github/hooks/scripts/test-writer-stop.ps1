@@ -19,9 +19,33 @@ $ErrorActionPreference = 'SilentlyContinue'
 # error, so Gate 2 silently never fired (issue #175).
 . "$PSScriptRoot/_common.ps1"
 $codeRoot = $AfCodeRoot
+$mainRoot = $AfMainRoot
 
-# Read stdin (hook input JSON -- required by protocol)
-$null = [Console]::In.ReadToEnd()
+# Read stdin (hook input JSON -- required by protocol, and Gate 0 needs it)
+$stdinRaw = [Console]::In.ReadToEnd()
+
+# Before Gate 0, because Gate 0 blocks too (issue #298).
+Invoke-AfStopLoopGuard -StdinRaw $stdinRaw -Agent 'test-writer' `
+    -Gates 'undeclared root files, red phase, provenance, no production code'
+
+# ---------- Gate 0: no undeclared files at the repository root (#123) ----------
+#
+# Runs before the Red gate on purpose. Every gate below returns early when
+# pytest is missing or collects nothing, and a scratch file left in the root is
+# a mess whether or not the suite ran.
+$scratch = @(Get-AfUndeclaredScratch -StdinRaw $stdinRaw -Agent 'test-writer' -CodeRoot $codeRoot -MainRoot $mainRoot)
+if ($scratch.Count -gt 0) {
+    $list = $scratch -join ', '
+    $output = @{
+        hookSpecificOutput = @{
+            hookEventName = "Stop"
+            decision      = "block"
+            reason        = "Undeclared files at the repository root: $list. You created these, and the task you were given never mentions them. Throwaway runners and verification scripts do not belong in the repository -- delete them, or put them under the system temp directory. If one of them really is a requested deliverable, it belongs in the directory its kind lives in (tests/ for tests, docs/ for documents), not the root."
+        }
+    } | ConvertTo-Json -Compress -Depth 3
+    Write-Output $output
+    exit 0
+}
 
 $pytest = Get-Command pytest -ErrorAction SilentlyContinue
 if (-not $pytest) {
@@ -100,6 +124,14 @@ $newTestFiles = & git -C $codeRoot status --porcelain "tests/" 2>$null |
     Where-Object { $_ -match '^\?\? ' -or $_ -match '^A ' } |
     ForEach-Object { ($_ -replace '^.. ', '').Trim('"') } |
     Where-Object { $_ -match '\.py$' }
+
+# `git status` is global to the checkout, so a producer running alongside this
+# one puts its new test files in this scope. Clearing the block below means
+# writing `copilot:generated` -- "this agent produced the whole file" -- into a
+# file this agent never opened (issue #101). Same subtraction the implementer
+# and refactorer already make; the marker is the stronger claim of the two.
+$peerEdits = @(Get-AfPeerEdits -StdinRaw $stdinRaw -Agent 'test-writer' -CodeRoot $codeRoot -MainRoot $mainRoot)
+$newTestFiles = @($newTestFiles | Where-Object { $_ -and ($peerEdits -notcontains $_) })
 
 $missingMarkers = @()
 foreach ($f in $newTestFiles) {

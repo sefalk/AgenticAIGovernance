@@ -28,6 +28,10 @@ set -uo pipefail
 # (measured 2026-08-03), so no session has to be guessed.
 stdin_raw=$(cat)
 
+# The artifact gates below block, and re-running them on an unchanged tree
+# reaches the same verdict (issue #298).
+af_stop_loop_guard "$stdin_raw" documenter 'workflow artifacts, retro'
+
 # Derive workflow-id from current branch
 branch=$(git branch --show-current 2>/dev/null || echo "")
 if [[ ! "$branch" =~ ^agent/(.+)$ ]]; then
@@ -48,9 +52,9 @@ BASE_BRANCH=$(af_conf_get BASE_BRANCH dev)
 # workflow still running — the hook mechanically compelled the false artifact
 # it existed to guarantee (issue #72).
 #
-# Intent is not on stdin, so it is read off the plan file: a plan marked
-# COMPLETED is the documenter's own claim that it finalised, and that claim is
-# what this gate holds it to.
+# Intent is not on stdin, so it is read off the artifacts: a plan marked
+# COMPLETED is the documenter's own claim that it finalised, and a workflow log
+# reporting a terminal status is the same claim in the other file.
 
 plan_info=$(af_plan_lifecycle "$workflow_id" "$AF_CODE_ROOT")
 plan_found="${plan_info%%|*}"
@@ -77,9 +81,35 @@ if [ "$plan_found" != "1" ]; then
     exit 0
 fi
 
+# The plan status is a word an agent maintains by hand; the workflow log is an
+# artifact the run produced. Requiring the plan alone let one unset word silence
+# the schema check, the timestamps, the cost block and the invocation census at
+# once — the gate's own failure disabled every measurement behind it (issue
+# #252). Either source asserting an end is now enough.
+#
+# The match is deliberately looser than the schema's closed set: a status of
+# COMPLETED-WITH-ISSUES is invalid and must reach the checker that says so,
+# rather than exit here and take the measurements with it.
+
+lifecycle_note=""
+
 if [ "$plan_status" != "COMPLETED" ]; then
-    echo "{\"systemMessage\": \"documenter:Stop — plan status is ${plan_status:-unset}, not COMPLETED: treated as a mid-workflow documenter call, artifact gate not applied.\"}"
-    exit 0
+    log_status=""
+    for candidate in ".github/logs/${workflow_id}.yaml" ".github/logs/${workflow_id}.yml"; do
+        [ -f "$candidate" ] || continue
+        log_status=$(sed -n 's/^status:[^A-Za-z]*\([A-Za-z][A-Za-z0-9_-]*\).*/\1/p' "$candidate" |
+                     head -n 1 | tr '[:lower:]' '[:upper:]')
+        [ -n "$log_status" ] && break
+    done
+    case "$log_status" in
+        COMPLETED*|FAILED*|ESCALATED*)
+            lifecycle_note=" — NOTE: plan status is ${plan_status:-unset} but the workflow log reports ${log_status}, so this call was treated as finalisation; one of the two is wrong and should be corrected"
+            ;;
+        *)
+            echo "{\"systemMessage\": \"documenter:Stop — plan status is ${plan_status:-unset}, not COMPLETED: treated as a mid-workflow documenter call, artifact gate not applied.\"}"
+            exit 0
+            ;;
+    esac
 fi
 
 # ---------- Gate 1: Workflow log YAML ----------
@@ -120,7 +150,7 @@ fi
 
 if [ ${#missing[@]} -gt 0 ]; then
     list=$(IFS='; '; echo "${missing[*]}")
-    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Documentation phase violation: required artifacts missing for workflow '${workflow_id}': ${list}. Create these files before completing.\"}}"
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Documentation phase violation: required artifacts missing for workflow '${workflow_id}': $(af_json_escape "$list"). Create these files before completing.${lifecycle_note}\"}}"
     exit 0
 fi
 
@@ -154,14 +184,14 @@ if [ -f "$schema_checker" ]; then
             schema_note=" + counters derived from steps"
         fi
         if [ "$schema_code" -eq 1 ]; then
-            detail=$(echo "$schema_out" | grep -v 'derived ' | tr '\n' ' ' | sed 's/"/\\"/g')
+            detail=$(echo "$schema_out" | grep -v 'derived ' | af_json_escape)
             echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Workflow log schema violation for '${workflow_id}': ${detail}. Fix the log, then finish. Use the vocabulary in your Workflow Log Schema: status is COMPLETED, FAILED or ESCALATED; a step verdict is APPROVED, REJECTED, ESCALATE, RESOLVED, COMPROMISE or null. Do not invent a value to describe a state the schema has no word for — say it in 'action:' instead.\"}}"
             exit 0
         fi
     fi
 fi
 
-# ---------- Timestamps (ADVISORY — never blocks, never fails the hook) ----------
+# ---------- Stamped header fields (ADVISORY — never blocks, never fails the hook) ----------
 #
 # Stamped here rather than written by the documenter so the values never pass
 # through a language model. Measured: a documenter wrote a `completed:` six and
@@ -174,6 +204,20 @@ fi
 # already uses for --workflow-start. Anything the documenter left behind is
 # replaced rather than joined — two `completed:` keys is a YAML file whose
 # meaning depends on which one the parser reaches last.
+#
+# Both are UTC. `%ct` is asked for rather than `%cI` because `%cI` carries the
+# committer's local offset, so the two fields arrived in different
+# representations and a reader subtracting them got a negative duration
+# (issue #240).
+#
+# `af_version:` joined them for the same reason (issue #309). It was the last
+# header field a model transcribed by hand, out of a file with three lines it
+# had to pick one of, and across 68 logs 23 carried no value and 7 carried
+# something that was not a version — `n/a`, `not measured`, and in one case the
+# instruction "read from .github/.af-version" written into the field verbatim.
+# No readable version file stamps `null`: a source checkout is not a deployment
+# and has no version to claim, and a recorded absence is analysable where a
+# missing key is not.
 
 stamp_note=""
 log_path=".github/logs/${workflow_id}.yaml"
@@ -181,20 +225,34 @@ log_path=".github/logs/${workflow_id}.yaml"
 
 if [ -f "$log_path" ]; then
     completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    started_at=$(git log --format=%cI "${BASE_BRANCH}..HEAD" 2>/dev/null | tail -1)
+    started_epoch=$(git log --format=%ct "${BASE_BRANCH}..HEAD" 2>/dev/null | tail -1)
+    started_at=""
+    if [ -n "$started_epoch" ]; then
+        # GNU date takes @epoch, BSD/macOS date takes -r epoch.
+        started_at=$(date -u -d "@${started_epoch}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+            || date -u -r "${started_epoch}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
+    fi
     [ -n "$started_at" ] || started_at="$completed_at"
+
+    af_version="null"
+    if [ -f ".github/.af-version" ]; then
+        version_value=$(sed -n 's/^[[:space:]]*version:[[:space:]]*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)[[:space:]]*$/\1/p' \
+            ".github/.af-version" 2>/dev/null | head -1)
+        [ -n "$version_value" ] && af_version="\"${version_value}\""
+    fi
 
     stamp_tmp=$(mktemp)
     # Top-level keys only: a `started:` indented inside a step belongs to that
-    # step and is none of this hook's business.
-    if awk -v s="started: \"${started_at}\"" -v c="completed: \"${completed_at}\"" '
-        /^(started|completed):/ { next }
+    # step and is none of this hook's business. `af_version_note:` is the
+    # documenter's own field and is deliberately not matched here.
+    if awk -v s="started: \"${started_at}\"" -v c="completed: \"${completed_at}\"" -v v="af_version: ${af_version}" '
+        /^(started|completed|af_version):/ { next }
         { print }
-        /^workflow_id:/ && !ins { print s; print c; ins = 1 }
-        END { if (!ins) { print s; print c } }
+        /^workflow_id:/ && !ins { print s; print c; print v; ins = 1 }
+        END { if (!ins) { print s; print c; print v } }
     ' "$log_path" > "$stamp_tmp" 2>/dev/null && [ -s "$stamp_tmp" ]; then
         mv "$stamp_tmp" "$log_path"
-        stamp_note=" + timestamps measured"
+        stamp_note=" + header fields stamped"
     else
         rm -f "$stamp_tmp"
     fi
@@ -210,37 +268,49 @@ cost_note=""
 log_path=".github/logs/${workflow_id}.yaml"
 [ -f "$log_path" ] || log_path=".github/logs/${workflow_id}.yml"
 
-# Appending twice would produce a duplicate YAML key; first write wins.
-if ! grep -q '^cost:' "$log_path" 2>/dev/null; then
-    sid=$(printf '%s' "$stdin_raw" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
-    transcript=$(printf '%s' "$stdin_raw" | grep -o '"transcript_path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+sid=$(printf '%s' "$stdin_raw" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+transcript=$(printf '%s' "$stdin_raw" | grep -o '"transcript_path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
 
-    if [ -n "$sid" ] && [ -n "$transcript" ]; then
-        # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
-        chat_dir=$(dirname "$(dirname "$transcript")")
-        session_dir="${chat_dir}/debug-logs/${sid}"
+if [ -n "$sid" ] && [ -n "$transcript" ]; then
+    # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
+    chat_dir=$(dirname "$(dirname "$transcript")")
+    session_dir="${chat_dir}/debug-logs/${sid}"
 
-        collector=".github/scripts/collect-session-cost.py"
-        python_exe=""
-        for c in .venv/bin/python .venv/Scripts/python.exe; do
-            [ -x "$c" ] && python_exe="$c" && break
-        done
-        if [ -z "$python_exe" ]; then
-            # AF_PYTHON is already validated, not merely resolved: on Windows
-            # `python3` is the Store stub -- present on PATH, executes nothing.
-            python_exe="$AF_PYTHON"
+    collector=".github/scripts/collect-session-cost.py"
+    python_exe=""
+    for c in .venv/bin/python .venv/Scripts/python.exe; do
+        [ -x "$c" ] && python_exe="$c" && break
+    done
+    if [ -z "$python_exe" ]; then
+        # AF_PYTHON is already validated, not merely resolved: on Windows
+        # `python3` is the Store stub -- present on PATH, executes nothing.
+        python_exe="$AF_PYTHON"
+    fi
+
+    if [ -n "$python_exe" ] && [ -f "$collector" ]; then
+        # Oldest commit on the branch approximates the workflow start;
+        # a session that began later means earlier phases are unlogged.
+        args=(--session-dir "$session_dir")
+        oldest=$(git log --format=%ct "${BASE_BRANCH}..HEAD" 2>/dev/null | tail -1)
+        if [ -n "$oldest" ]; then
+            args+=(--workflow-start "$((oldest * 1000))")
         fi
 
-        if [ -n "$python_exe" ] && [ -f "$collector" ]; then
-            # Oldest commit on the branch approximates the workflow start;
-            # a session that began later means earlier phases are unlogged.
-            args=(--session-dir "$session_dir")
-            oldest=$(git log --format=%ct "${BASE_BRANCH}..HEAD" 2>/dev/null | tail -1)
-            if [ -n "$oldest" ]; then
-                args+=(--workflow-start "$((oldest * 1000))")
-            fi
+        # The debug log the numbers come from expires; these rows do not. They
+        # sit beside the workflow log, under the same .gitignore that keeps
+        # verbatim prompts out of the repository (#253).
+        cost_dir="$(dirname "$log_path")/cost"
+        args+=(--facts-out "${cost_dir}/${workflow_id}.facts.ndjson")
+        args+=(--entities-out "${cost_dir}/${workflow_id}.entities.ndjson")
 
-            if block=$("$python_exe" "$collector" "${args[@]}" 2>/dev/null) && [ -n "$block" ]; then
+        if block=$("$python_exe" "$collector" "${args[@]}" 2>/dev/null) && [ -n "$block" ]; then
+            # Appending twice would produce a duplicate YAML key; first write
+            # wins. The artifacts above have no such constraint -- they
+            # accumulate and dedup, which is why the collector runs on every
+            # finalising call and not only the first.
+            if grep -q '^cost:' "$log_path" 2>/dev/null; then
+                cost_note=" + cost artifacts updated"
+            else
                 printf '\n%s\n' "$block" >> "$log_path"
                 cost_note=" + cost block appended"
             fi
@@ -323,5 +393,5 @@ if [ -f "$checker" ] && [ -f ".vscode/tasks.json" ]; then
     fi
 fi
 
-echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS for '${workflow_id}'${retro_note}${schema_note}${stamp_note}${cost_note}${invocation_note}${scratch_note}\"}"
+echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS for '${workflow_id}'${lifecycle_note}${retro_note}${schema_note}${stamp_note}${cost_note}${invocation_note}${scratch_note}\"}"
 exit 0

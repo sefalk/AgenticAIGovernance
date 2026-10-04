@@ -55,6 +55,10 @@
     - quick: test-hooks + validate-skills + audit-tools
     - full:  quick + test-worktree-scripts
 
+.PARAMETER ListPreflightChecks
+    Print the names of the checks the selected profile would run, then exit
+    without running any of them and without touching a target.
+
 .PARAMETER BackupPruneDays
     Automatically delete stale .af-backup-* folders in the target root that
     are older than this many days.
@@ -100,6 +104,7 @@ param(
     [switch]$RequirePreflight,
     [ValidateSet('quick', 'full')]
     [string]$PreflightMode = 'quick',
+    [switch]$ListPreflightChecks,
     [int]$BackupPruneDays = -1
 )
 
@@ -168,8 +173,8 @@ function Get-TierModels([string]$Tier) {
 function Resolve-TierTokens([string]$Text) {
     $nl = if ($Text.Contains("`r`n")) { "`r`n" } else { "`n" }
     foreach ($tier in 'PREMIUM', 'BALANCED', 'EFFICIENT') {
-        $token = "__AF_TIER_${tier}__"
-        if ($Text -notmatch [regex]::Escape($token)) { continue }
+        $placeholder = "__AF_TIER_${tier}__"
+        if ($Text -notmatch [regex]::Escape($placeholder)) { continue }
         $models = Get-TierModels $tier
         if ($models.Count -le 1) {
             $repl = "model: $($models[0])"
@@ -179,7 +184,7 @@ function Resolve-TierTokens([string]$Text) {
         # Match the whole `model: <token>` line without consuming the line break
         # (lookahead), so CRLF/LF endings are preserved. Model names contain no
         # '$', so a literal replacement string is safe.
-        $pattern = '(?m)^model:[ \t]*' + [regex]::Escape($token) + '[ \t]*(?=\r?\n|$)'
+        $pattern = '(?m)^model:[ \t]*' + [regex]::Escape($placeholder) + '[ \t]*(?=\r?\n|$)'
         $Text = [regex]::Replace($Text, $pattern, $repl)
     }
     return $Text
@@ -303,6 +308,17 @@ function Resolve-BackupPruneDays {
     }
 
     return $defaultDays
+}
+
+function Test-TargetIsGitRepo {
+    param([string]$RepoDir)
+
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $false }
+    # Outside a repo git reports on stderr, and PS 5.1 raises redirected native
+    # stderr as a NativeCommandError while EAP is 'Stop'. Contain it to this scope.
+    $ErrorActionPreference = 'Continue'
+    & git -C $RepoDir rev-parse --is-inside-work-tree 2>&1 | Out-Null
+    return ($LASTEXITCODE -eq 0)
 }
 
 function Get-CurrentGitBranch {
@@ -627,14 +643,13 @@ function Find-PythonCommand {
     return @()
 }
 
-function Invoke-IntegrityPreflight {
+# Building the check list is separate from running it, so that a caller can ask
+# what preflight consists of without paying for its execution (#334).
+function Get-IntegrityPreflightChecks {
     param(
         [ValidateSet('quick', 'full')]
-        [string]$Mode,
-        [switch]$Required
+        [string]$Mode
     )
-
-    Write-Host "=== AF Preflight ($Mode) ===" -ForegroundColor Cyan
 
     $checks = @(
         [PSCustomObject]@{
@@ -688,6 +703,20 @@ function Invoke-IntegrityPreflight {
         }
     }
 
+    return $checks
+}
+
+function Invoke-IntegrityPreflight {
+    param(
+        [ValidateSet('quick', 'full')]
+        [string]$Mode,
+        [switch]$Required
+    )
+
+    Write-Host "=== AF Preflight ($Mode) ===" -ForegroundColor Cyan
+
+    $checks = @(Get-IntegrityPreflightChecks -Mode $Mode)
+
     $failed = @()
     foreach ($check in $checks) {
         Write-Host "  RUN     $($check.Name)"
@@ -718,6 +747,19 @@ function Invoke-IntegrityPreflight {
     Write-Host "Preflight failed, but deployment will continue (optional mode)." -ForegroundColor Yellow
     Write-Host ""
     return $false
+}
+
+# ── ListPreflightChecks mode ──────────────────────────────────────────────
+# Answers "what does preflight consist of" without running it and without a
+# target. The regression suite asserting that composition used to execute every
+# check, which re-ran test-hooks.ps1 inside another suite: 708 of that suite's
+# 788 seconds, for a string comparison whose result it never read (#334).
+if ($ListPreflightChecks) {
+    Write-Host "=== AF Preflight checks ($PreflightMode) ==="
+    foreach ($check in (Get-IntegrityPreflightChecks -Mode $PreflightMode)) {
+        Write-Host "  CHECK   $($check.Name)"
+    }
+    exit 0
 }
 
 # ── UpdateHashes mode ─────────────────────────────────────────────────────
@@ -986,9 +1028,13 @@ if ($resolvedBackupPruneDays -gt 0) {
 } else {
     Write-Host "  Backup prune: disabled"
 }
-$currentBranch = Get-CurrentGitBranch -RepoDir $TargetDir
-if ($currentBranch -like 'agent/*') {
-    Write-Host "  WARNING: Target repo is on '$currentBranch'. Prefer running framework rollouts on dev/main." -ForegroundColor Yellow
+if (Test-TargetIsGitRepo -RepoDir $TargetDir) {
+    $currentBranch = Get-CurrentGitBranch -RepoDir $TargetDir
+    if ($currentBranch -like 'agent/*') {
+        Write-Host "  WARNING: Target repo is on '$currentBranch'. Prefer running framework rollouts on dev/main." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host '  Note: Target is not a git repository -- branch checks skipped.'
 }
 if ($DryRun) { Write-Host '  [DRY RUN -- no changes will be made]' -ForegroundColor Yellow }
 Write-Host ""
@@ -1166,15 +1212,40 @@ if ($retroIgnoreMissing) {
     Write-Host "  -> Copy .github/retros/auto/.gitignore from the AF payload, or re-run deploy with retros/ enabled." -ForegroundColor Yellow
 }
 
-# ── Curated skills reminder ────────────────────────────────────────────────
-# If the project has a curated-assignments.json, remind the user to reapply
-# curated skill state after deploy (agent sections, activated/deactivated folders).
+# ── Curated skills consistency ─────────────────────────────────────────────
+# Curated state lives in three records (curated-assignments.json, the agent
+# regions, .af-skills-curated/INDEX.md) and nothing used to compare them, so a
+# lost assignment was silent (#257). Report the actual disagreement; say
+# nothing when they agree. Advisory only -- never fails the deploy.
 $curatedJsonPath = Join-Path $TargetGitHub 'skills\curated-assignments.json'
 if (Test-Path $curatedJsonPath) {
-    Write-Host ""
-    Write-Host "  Post-deploy step: curated skills detected." -ForegroundColor Cyan
-    Write-Host "  A deploy overwrites AF-owned files (agents) and resets curated skill assignments." -ForegroundColor Cyan
-    Write-Host "  -> Run /af-curate-skills --reapply to restore them (the MCP af_deploy prompt does this automatically)." -ForegroundColor Cyan
+    $curationProbe = Join-Path $SourceGitHub 'scripts\check-curation-consistency.py'
+    $curationLines = @()
+    $probeRan = $false
+    if (Test-Path $curationProbe) {
+        $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+        if (-not $pythonCmd) { $pythonCmd = Get-Command python3 -ErrorAction SilentlyContinue }
+        if ($pythonCmd) {
+            try {
+                $curationLines = @(& $pythonCmd.Source $curationProbe --project-dir $TargetDir --brief 2>&1 |
+                    ForEach-Object { $_.ToString() })
+                $probeRan = $true
+            } catch { $probeRan = $false }
+        }
+    }
+
+    if ($probeRan) {
+        if ($curationLines.Count -gt 0) {
+            Write-Host ""
+            foreach ($line in $curationLines) { Write-Host $line -ForegroundColor Yellow }
+        }
+    } else {
+        # No Python: fall back to the reminder, minus the claim that a deploy
+        # resets assignments -- managed regions made that false.
+        Write-Host ""
+        Write-Host "  Curated skills detected; consistency was not checked (no Python interpreter)." -ForegroundColor Cyan
+        Write-Host "  -> Run /af-curate-skills --reapply if agent skill sections look wrong." -ForegroundColor Cyan
+    }
 }
 
 # ── Version-stale detection ────────────────────────────────────────────────
@@ -1190,6 +1261,24 @@ if ($filesChanged -gt 0 -and $DeployedInfo) {
             Write-Host "  WARNING: VERSION is still $AFVersion but $filesChanged file(s) changed." -ForegroundColor Red
             Write-Host "  Did you forget to bump VERSION and update CHANGELOG.md?" -ForegroundColor Red
         }
+    }
+}
+
+# ── Cost tracking source ───────────────────────────────────────────────────
+# A workflow log records `cost: available: false` when VS Code's agent debug
+# log is off, and that file is not one anybody opens unprompted. A deploy is
+# the one moment an existing consumer is already reading framework output, and
+# it is the only channel that reaches installs predating the setting -- the
+# .vscode/settings.json that would carry the key is PRESERVE'd on update.
+# Advisory only: never fatal, never gating (issue #228).
+$costProbe = Join-Path $SourceGitHub 'scripts\check-cost-source.ps1'
+if (Test-Path $costProbe) {
+    $costLines = @()
+    try { $costLines = @(& $costProbe -Brief 2>&1 | ForEach-Object { $_.ToString() }) } catch { $costLines = @() }
+    if ($costLines.Count -gt 0) {
+        $costColor = if (($costLines -join ' ') -match 'ADVISORY') { 'Yellow' } else { 'DarkGray' }
+        Write-Host ""
+        foreach ($costLine in $costLines) { Write-Host $costLine -ForegroundColor $costColor }
     }
 }
 

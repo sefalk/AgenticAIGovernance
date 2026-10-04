@@ -118,6 +118,91 @@ af_find_python() {
 
 AF_PYTHON=$(af_find_python "${AF_PYTHON_OVERRIDE:-}" python3 python py)
 
+# af_tool_name_from_json RAW
+#
+# Prints the payload's tool_name. Returns 1 when it cannot be read with
+# confidence -- "unreadable" is an answer callers must be able to act on,
+# which is why it is not conflated with the empty string.
+#
+# Parameter expansion only: no cat, no grep, no interpreter. That is the
+# entire point. This function exists to answer when the interpreter is gone,
+# and one reason it can be gone is a PATH that takes every external binary
+# with it.
+#
+# Parsing JSON by string surgery is normally a mistake, and it is defensible
+# here only because of the single field it reads: tool names are bare
+# identifiers, so the value cannot contain an escape or an embedded quote.
+# Nothing else may be read this way -- tool_input.command certainly cannot.
+#
+# A command string cannot forge the key, because JSON requires the quotes
+# inside a string to be escaped: `\"tool_name\"` in a command is not the token
+# searched for here. A nested second key is possible, though, and that is
+# reported unreadable rather than guessed at.
+af_tool_name_from_json() {
+    _tn_rest="$1"
+    case "$_tn_rest" in
+        *'"tool_name"'*) ;;
+        *) return 1 ;;
+    esac
+    _tn_rest="${_tn_rest#*\"tool_name\"}"
+    case "$_tn_rest" in
+        *'"tool_name"'*) return 1 ;;
+    esac
+    _tn_rest="${_tn_rest#*:}"
+    case "$_tn_rest" in
+        *\"*) ;;
+        *) return 1 ;;
+    esac
+    _tn_rest="${_tn_rest#*\"}"
+    _tn_rest="${_tn_rest%%\"*}"
+    [ -n "$_tn_rest" ] || return 1
+    printf '%s\n' "$_tn_rest"
+    return 0
+}
+
+# af_require_python RAW PREDICATE GATE
+#
+# The single answer every PreToolUse gate gives when it has no interpreter.
+# Returns normally when one is available, so the caller's happy path is
+# unchanged; otherwise it emits a verdict and exits.
+#
+# A missing interpreter used to mean `echo '{}'; exit 0` -- byte for byte the
+# answer a gate gives to a call it has inspected and approved. The gate
+# vanished and said nothing about it (issue #251). It refuses instead.
+#
+# The refusal is scoped by PREDICATE, the caller's own "do I judge this tool"
+# test, because these hooks are registered for every tool call: refusing
+# blindly would stop reads and edits too and take the session down with the
+# gate. A tool the gate never judges is still allowed, which is a real
+# verdict rather than a failure to reach one. A payload whose tool_name
+# cannot be read is refused, because unreadable is not harmless.
+#
+# GATE names the gate in the refusal and must be a plain literal -- see
+# af_deny_no_python.
+af_require_python() {
+    [ -n "${AF_PYTHON:-}" ] && return 0
+    if _rq_tool=$(af_tool_name_from_json "$1"); then
+        if ! "$2" "$_rq_tool"; then
+            printf '{}\n'
+            exit 0
+        fi
+    fi
+    af_deny_no_python "$3"
+}
+
+# af_deny_no_python GATE
+#
+# Emits the PreToolUse refusal for a missing interpreter, then exits 0.
+#
+# The reason is fixed text and GATE must be a plain literal: this runs
+# precisely when nothing can be trusted to escape anything correctly, and an
+# unparsable verdict is indistinguishable from no verdict at all -- the gate
+# would disarm itself exactly when it had something to say.
+af_deny_no_python() {
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Policy hard-deny: the %s gate found no working Python interpreter (tried AF_PYTHON_OVERRIDE, python3, python, py) and cannot read the payload it exists to judge. A guard that cannot read its input refuses rather than waves through (issue #251). Install Python 3, or set AF_PYTHON_OVERRIDE to an interpreter that runs."}}\n' "$1"
+    exit 0
+}
+
 # af_plan_lifecycle WORKFLOW_ID [ROOT]
 #
 # Prints "FOUND|STATUS|PATH" for the plan file belonging to this workflow:
@@ -342,10 +427,16 @@ af_has_provenance_marker() {
 # Escaping quotes alone, as several call sites do, does not cover this.
 #
 # Backslash must be replaced first, or it would double the backslashes this
-# function itself introduces. Control characters are dropped rather than
-# encoded: these values are single-line human-readable reasons.
+# function itself introduces. Control characters become spaces rather than
+# JSON escapes: these values are single-line human-readable reasons, and
+# deleting the character instead would run the words on either side together,
+# turning a tab in tool output into a misquoted finding.
+#
+# Reads stdin when called with no argument, so a pipeline that already trims
+# tool output can end in this function instead of nesting around it.
 af_json_escape() {
-    printf '%s' "${1:-}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\000-\037'
+    if [ $# -eq 0 ]; then cat; else printf '%s' "$1"; fi \
+        | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr '\000-\037' ' '
 }
 
 # ── Files a concurrent peer agent edited (issue #101) ──────────────────
@@ -392,6 +483,108 @@ af_peer_edits() {
         --agent "$_pe_agent" --repo-root "${AF_CODE_ROOT:-.}" 2>/dev/null || return 0
 }
 
+# ── This agent's own final return text (issue #285) ────────────────────
+#
+# Echoes the status on line 1 -- `complete`, `truncated`, `empty` or
+# `unavailable` -- and the recovered text from line 2 on.
+#
+# Note the inverted failure direction versus af_peer_edits above. That one
+# stays silent when it cannot measure, because subtracting nothing is today's
+# behaviour. This one must SAY it could not measure: a caller deciding on the
+# absence of text would read silence as "the agent returned nothing" and fail
+# the agent for the hook's own blind spot. Every failure path therefore prints
+# `unavailable`, which callers report as BLOCKED rather than as a verdict.
+#
+# `empty` is the opposite case and never a failure path: the reader found the
+# log, the record parsed, and there were no words in it (issue #175). It is
+# passed through from the reader, so no failure path here can produce it.
+#
+# Usage: af_subagent_return "$stdin_raw" implementer
+af_subagent_return() {
+    _sr_stdin="${1:-}"
+    _sr_agent="${2:-}"
+    if [ -z "$_sr_stdin" ] || [ -z "$_sr_agent" ]; then
+        printf 'unavailable\n'
+        return 0
+    fi
+
+    _sr_sid=$(printf '%s' "$_sr_stdin" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    _sr_transcript=$(printf '%s' "$_sr_stdin" | grep -o '"transcript_path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    if [ -z "$_sr_sid" ] || [ -z "$_sr_transcript" ]; then
+        printf 'unavailable\n'
+        return 0
+    fi
+
+    # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
+    _sr_chat_dir=$(dirname "$(dirname "$_sr_transcript")")
+    _sr_session_dir="${_sr_chat_dir}/debug-logs/${_sr_sid}"
+    _sr_reader="${AF_MAIN_ROOT:-.}/.github/hooks/scripts/subagent-return.py"
+    if [ ! -d "$_sr_session_dir" ] || [ ! -f "$_sr_reader" ]; then
+        printf 'unavailable\n'
+        return 0
+    fi
+
+    _sr_python=""
+    for _sr_c in .venv/bin/python .venv/Scripts/python.exe; do
+        [ -x "$_sr_c" ] && _sr_python="$_sr_c" && break
+    done
+    [ -n "$_sr_python" ] || _sr_python="${AF_PYTHON:-}"
+    if [ -z "$_sr_python" ]; then
+        printf 'unavailable\n'
+        return 0
+    fi
+
+    _sr_out=$("$_sr_python" "$_sr_reader" --session-dir "$_sr_session_dir" \
+        --agent "$_sr_agent" 2>/dev/null)
+    if [ $? -ne 0 ] || [ -z "$_sr_out" ]; then
+        printf 'unavailable\n'
+        return 0
+    fi
+    printf '%s\n' "$_sr_out"
+}
+
+# ── Undeclared files created at the repository root (issue #123) ───────
+#
+# Echoes the names of files this agent CREATED directly in the repository root
+# that its own delegation prompt never mentions, one per line. Empty output
+# means either "nothing to report" or "could not measure", and the caller must
+# treat both as no finding.
+#
+# The failure direction is af_peer_edits', not af_subagent_return's: the caller
+# blocks on positive output, so staying silent when the measurement is
+# impossible leaves today's behaviour in place. A missing interpreter must
+# never become an outage -- a watchdog that fails a legitimate workflow gets
+# switched off (issue #108).
+#
+# Usage: af_undeclared_scratch "$stdin_raw" test-writer
+af_undeclared_scratch() {
+    _us_stdin="${1:-}"
+    _us_agent="${2:-}"
+    [ -n "$_us_stdin" ] && [ -n "$_us_agent" ] || return 0
+
+    _us_sid=$(printf '%s' "$_us_stdin" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    _us_transcript=$(printf '%s' "$_us_stdin" | grep -o '"transcript_path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    [ -n "$_us_sid" ] && [ -n "$_us_transcript" ] || return 0
+
+    # <ws>/GitHub.copilot-chat/transcripts/<sid>.jsonl -> .../debug-logs/<sid>
+    _us_chat_dir=$(dirname "$(dirname "$_us_transcript")")
+    _us_session_dir="${_us_chat_dir}/debug-logs/${_us_sid}"
+    [ -d "$_us_session_dir" ] || return 0
+
+    _us_reader="${AF_MAIN_ROOT:-.}/.github/hooks/scripts/undeclared-scratch.py"
+    [ -f "$_us_reader" ] || return 0
+
+    _us_python=""
+    for _us_c in .venv/bin/python .venv/Scripts/python.exe; do
+        [ -x "$_us_c" ] && _us_python="$_us_c" && break
+    done
+    [ -n "$_us_python" ] || _us_python="${AF_PYTHON:-}"
+    [ -n "$_us_python" ] || return 0
+
+    "$_us_python" "$_us_reader" --session-dir "$_us_session_dir" \
+        --agent "$_us_agent" --repo-root "${AF_CODE_ROOT:-.}" 2>/dev/null || return 0
+}
+
 # Remove from a newline-separated list ($1) every line present in a second
 # list ($2). Used to drop a concurrent peer's files from a gate scope (#101).
 #
@@ -407,4 +600,56 @@ af_strip_lines() {
         return 0
     fi
     printf '%s\n' "$_sl_list" | grep -vxF "$_sl_drop" || true
+}
+
+# af_stop_hook_active RAW
+#
+# Returns 0 when the hook input carries exactly one `stop_hook_active` set to
+# `true`, 1 in every other case -- absent, false, unreadable.
+#
+# Read by string surgery, like af_tool_name_from_json, and for a stronger
+# reason than there: the value is a JSON boolean literal, `true` or `false`,
+# never a string, so no escape, quote or nesting can appear inside it. Parsing
+# properly would mean an interpreter, and making Python a hard dependency of
+# every stop hook is the defect #168 is already open about.
+#
+# Two occurrences mean a nested object carries the key as well, and this cannot
+# say which one the editor meant -- unreadable, not guessed at.
+af_stop_hook_active() {
+    _sha_hits=$(printf '%s' "${1:-}" | grep -o '"stop_hook_active"[[:space:]]*:[[:space:]]*\(true\|false\)' || true)
+    [ "$(printf '%s\n' "$_sha_hits" | grep -c .)" -eq 1 ] || return 1
+    case "$_sha_hits" in
+        *true) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# af_stop_loop_guard RAW AGENT GATES
+#
+# Returns control to the agent when a stop hook is already active, otherwise
+# returns normally so the caller's gates run. Same contract as
+# af_require_python: the happy path is a plain return, the unhappy path emits
+# the verdict and exits.
+#
+# A blocking stop hook forces the agent to try again, and the editor re-invokes
+# the hook on that attempt with `stop_hook_active: true`. Nothing read that
+# field: implementer-stop.ps1 carried a comment describing this guard while 31
+# blocking sites across four stop hooks ran without one, so a gate the retry
+# cannot clear blocks the very retry it demanded.
+#
+# Two decisions worth stating, because neither is obvious:
+#
+#   * It speaks. A silent pass is indistinguishable from a gate that ran and
+#     found nothing, and the only thing worse than a skipped gate is a skipped
+#     gate nobody can see.
+#   * An unreadable or absent field does NOT guard. The gates run exactly as
+#     they do today. A loop is a cost; an unenforced gate is a defect, and the
+#     rule here is to fail rather than pass on an unanswered question. Only a
+#     single, explicit `true` turns the gates off.
+#
+# AGENT and GATES must be plain literals, for af_deny_no_python's reason.
+af_stop_loop_guard() {
+    af_stop_hook_active "${1:-}" || return 0
+    printf '{"systemMessage":"%s:Stop -- gates NOT run: the input carries stop_hook_active true, so this is a re-invocation after a block and blocking again would loop. Skipped: %s. The verdict from the previous invocation stands -- act on it."}\n' "$2" "$3"
+    exit 0
 }

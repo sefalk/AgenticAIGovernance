@@ -13,6 +13,7 @@ tools:
   - read/readFile
   - read/problems
   - edit/createFile
+  - edit/editFiles
   - todo
   - execute/runTask
   - execute/runTests
@@ -56,9 +57,11 @@ Consult these skills when relevant to the task:
 ## Critical Constraints
 
 - You write **exactly one file**: the plan document, in the project's plan
-  directory. Every other path is denied by `planner-pretooluse`, including
-  source, tests, and the framework's own configuration. You may run tests and
-  inspect test failures for analysis.
+  directory — and you may revise it, which is how the coordinator's plan
+  review is answered. Every other path is denied by `planner-pretooluse`,
+  including source, tests, and the framework's own configuration; the gate
+  judges the target path, not which write tool you reached for. You may run
+  tests and inspect test failures for analysis.
 - You must NOT assume missing requirements — flag ambiguity for escalation.
 - If the task touches more than 5 files or introduces new architectural
   elements, flag for human approval.
@@ -91,6 +94,11 @@ Create `{plan_dir}/{type}-{YYYY-MM-DD}-{slug}.md` with `createFile`, where
 type is `feat`/`fix`/`refactor`/`adr`/`review` and slug is the branch slug
 (`agent/fix-alignment-nulls` → `fix-alignment-nulls`). The plan directory is
 the project's existing one (default `docs/plans/`); create it if absent.
+
+When the coordinator returns the plan with a review question, edit that same
+file in place and return the path again. Do not regenerate the document: a
+rewrite costs the whole plan in tokens to change one line, and it discards the
+parts review did not object to.
 
 Then return only:
 
