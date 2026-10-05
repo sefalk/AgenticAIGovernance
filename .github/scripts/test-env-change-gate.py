@@ -122,6 +122,7 @@ def main() -> int:
             # away with it; the promotion gate loops, and did not.
             prelude = (
                 "$ErrorActionPreference = 'Stop'\n"
+                f"$env:GITHUB_WORKSPACE = '{REPO}'\n"
                 "$env:REPO = 'sefalk/AgenticAIGovernance'\n"
                 "$env:PR_NUMBER = '999'\n"
                 f"$STUB_FILES = {ps_array(files)}\n"

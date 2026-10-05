@@ -74,12 +74,11 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           $marker = 'local-check: test-hooks-integration.ps1'
+          $ghApi = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/gh-api.ps1'
 
-          $files = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER/files" --paginate --jq '.[].filename'
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::Could not list the changed files. Failing rather than passing on an unanswered question."
-            exit 1
-          }
+          $files = & $ghApi -Step 'Attestation gate: list changed files' -Mode Read `
+            -Arguments @("repos/$env:REPO/pulls/$env:PR_NUMBER/files", '--paginate', '--jq', '.[].filename')
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
           $hookFiles = @($files | Where-Object { $_ -like 'flavors/github-copilot/.github/hooks/*' })
           if ($hookFiles.Count -eq 0) {
@@ -91,11 +90,9 @@ jobs:
           # adding the marker and re-running this job is enough to clear the
           # check. A re-run replays the original payload, which would still
           # carry the body as it was when the run was triggered.
-          $body = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER" --jq '.body'
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::Could not read the pull request body. Failing rather than passing on an unanswered question."
-            exit 1
-          }
+          $body = & $ghApi -Step 'Attestation gate: read the pull request body' -Mode Read `
+            -Arguments @("repos/$env:REPO/pulls/$env:PR_NUMBER", '--jq', '.body')
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
           # Matching lives in match-local-check.ps1, invoked by this gate and
           # by the promotion check below. It strips HTML comments before it
@@ -148,12 +145,11 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           $prefixes = @('.vscode/', '.githooks/', '.github/')
+          $ghApi = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/gh-api.ps1'
 
-          $files = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER/files" --paginate --jq '.[].filename'
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::Could not list the changed files. Failing rather than passing on an unanswered question."
-            exit 1
-          }
+          $files = & $ghApi -Step 'Env-change gate: list changed files' -Mode Read `
+            -Arguments @("repos/$env:REPO/pulls/$env:PR_NUMBER/files", '--paginate', '--jq', '.[].filename')
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
           $envFiles = @($files | Where-Object {
             $path = $_
@@ -167,11 +163,9 @@ jobs:
           # Read the body from the API rather than the event payload, so that
           # adding the line and re-running this job is enough to clear the
           # check. A re-run replays the payload as it was when triggered.
-          $bodyLines = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER" --jq '.body'
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::Could not read the pull request body. Failing rather than passing on an unanswered question."
-            exit 1
-          }
+          $bodyLines = & $ghApi -Step 'Env-change gate: read the pull request body' -Mode Read `
+            -Arguments @("repos/$env:REPO/pulls/$env:PR_NUMBER", '--jq', '.body')
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
           # PowerShell hands back a native command's multi-line output as an
           # array of lines, and casting that array to a string joins it with
@@ -246,6 +240,7 @@ jobs:
           # that the two checks cannot drift into separate notions of what an
           # attestation looks like, which is how #313 happened.
           $matcher = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/match-local-check.ps1'
+          $ghApi = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/gh-api.ps1'
 
           foreach ($ref in @($env:BASE_SHA, $env:HEAD_SHA)) {
             git cat-file -e "$ref^{commit}" 2>$null
@@ -269,11 +264,9 @@ jobs:
           $bodyCache = @{}
           function Get-PrBody($number) {
             if ($bodyCache.ContainsKey($number)) { return $bodyCache[$number] }
-            $raw = gh api "repos/$env:REPO/pulls/$number" --jq '.body'
-            if ($LASTEXITCODE -ne 0) {
-              Write-Host "::error::Could not read the body of pull request #$number. Failing rather than passing on an unanswered question."
-              exit 1
-            }
+            $raw = & $ghApi -Step "Promotion check: read the body of pull request #$number" -Mode Read `
+              -Arguments @("repos/$env:REPO/pulls/$number", '--jq', '.body')
+            if ($LASTEXITCODE -ne 0) { exit 1 }
             # Out-String restores the newlines a native command's line array
             # loses when cast to a string; without it every line anchor below
             # matches nothing (measured on #165).

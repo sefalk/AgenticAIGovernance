@@ -120,6 +120,57 @@ def report(name: str, ok: bool, detail: str) -> int:
     return 0 if ok else 1
 
 
+PRUNE_STEP = "Delete agent branches fully contained in dev"
+
+# name, ahead_by answer per branch, DELETE fails?, expected exit, expected DELETE calls, expected text
+PRUNE_CASES: list[tuple[str, dict[str, str], bool, int, int, str]] = [
+    ("deletes_a_merged_branch_and_keeps_the_rest", {"agent/a": "0", "agent/b": "2"}, False, 0, 1, "kept 1"),
+    ("a_non_numeric_answer_deletes_nothing", {"agent/a": ""}, False, 1, 0, "Nothing deleted"),
+    ("a_failed_delete_is_not_retried", {"agent/a": "0"}, True, 1, 1, "writes are never retried"),
+]
+
+
+def run_prune_case(work: Path, name: str, ahead: dict[str, str], delete_fails: bool, step: str) -> tuple[int, str]:
+    branches = "@(" + ", ".join(ps_single(f"{b} sha{i}") for i, b in enumerate(ahead)) + ")"
+    pairs = "; ".join(f"{ps_single(f'sha{i}')} = {ps_single(v)}" for i, v in enumerate(ahead.values()))
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$env:GITHUB_WORKSPACE = {ps_single(str(REPO))}\n"
+        "$env:REPO = 'o/r'\n"
+        "$env:GH_API_BACKOFF_SECONDS = '0'\n"
+        f"$global:STUB_BRANCHES = {branches}\n"
+        f"$global:STUB_AHEAD = @{{{pairs}}}\n"
+        f"$global:STUB_DELETE_FAILS = {'$true' if delete_fails else '$false'}\n"
+        "$global:STUB_DELETES = 0\n"
+        "function gh {\n"
+        "    $joined = $args -join ' '\n"
+        "    $global:LASTEXITCODE = 0\n"
+        "    if ($joined -like '*-X DELETE*') {\n"
+        "        $global:STUB_DELETES++\n"
+        "        if ($global:STUB_DELETE_FAILS) {\n"
+        "            $global:LASTEXITCODE = 1; Write-Error 'gh: Server Error (HTTP 500)'\n"
+        "        }\n"
+        "        return\n"
+        "    }\n"
+        "    if ($joined -like '*/branches*') { return $global:STUB_BRANCHES }\n"
+        "    if ($joined -match 'compare/dev\\.\\.\\.(\\S+)') { return $global:STUB_AHEAD[$Matches[1]] }\n"
+        "}\n"
+        "try {\n"
+        f"{step}\n"
+        '} finally { Write-Output "DELETES=$global:STUB_DELETES" }\n'
+        "exit 0\n"
+    )
+    case_file = work / f"prune_{name}.ps1"
+    case_file.write_text(script, encoding="utf-8")
+    proc = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(case_file)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.returncode, proc.stdout + proc.stderr
+
+
 def direct_calls() -> list[str]:
     found = []
     for wf in sorted(WORKFLOWS.glob("*.y*ml")):
@@ -166,6 +217,21 @@ def main() -> int:
             total += len(CASES) + 1
             failures += len(CASES) + 1
             print(f"[FAIL] {len(CASES) + 1} decision-table cases: helper missing")
+
+        # The prune job runs only from the default branch, so CI never executes it before release.
+        prune = yaml.safe_load((WORKFLOWS / "prune-merged-branches.yml").read_text(encoding="utf-8"))
+        step = next((s.get("run") for s in prune["jobs"]["prune"]["steps"] if s.get("name") == PRUNE_STEP), None)
+        for name, ahead, delete_fails, want_exit, want_deletes, want_text in PRUNE_CASES:
+            total += 1
+            if step is None:
+                failures += report(f"prune_{name}", False, f"no step named '{PRUNE_STEP}'")
+                continue
+            code, out = run_prune_case(work, name, ahead, delete_fails, step)
+            deletes = field(out, "DELETES")
+            ok = code == want_exit and deletes == str(want_deletes) and want_text in out
+            failures += report(f"prune_{name}", ok, f"exit={code} deletes={deletes} want={want_exit}/{want_deletes}")
+            if not ok:
+                print("      " + out.strip().replace("\n", "\n      "))
 
     total += 1
     hits = direct_calls()
