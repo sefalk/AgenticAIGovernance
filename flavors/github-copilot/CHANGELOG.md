@@ -41,7 +41,8 @@ build for one (#322).
 ### Fixed
 
 - **`test-cli-callers.ps1` no longer goes SLOW under ordinary machine load
-  (#370).** Its ceiling was 30 s, the #334 floor, taken from a ~15 s measurement.
+  (#370).** Its ceiling was 30 s, the #334 floor, set when the suite was split
+  out (6961185) with no recorded measurement.
   Twelve local timings since then range from 19.4 s to 86.1 s (median of five
   consecutive runs: 39.5 s). The suite launches one Python checker, so the spread is
   contention from other work on the machine, not cost. The ceiling is now 120 s,
