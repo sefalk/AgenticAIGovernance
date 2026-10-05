@@ -113,7 +113,8 @@
       ".github/hooks/scripts/check-plan-budget.py"
     ],
     "test-python-missing-notice.ps1": [
-      ".github/hooks/scripts/**"
+      ".github/hooks/scripts/**",
+      ".github/hooks/git/**"
     ],
     "test-quality-gate.ps1": [
       ".github/scripts/check-python-quality.py",
