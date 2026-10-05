@@ -42,36 +42,54 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # gh-api.ps1 lives in the workspace, so the checkout comes first (#327).
+      - name: Check out
+        uses: actions/checkout@v4
+
       - name: Delete agent branches fully contained in dev
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          set -euo pipefail
-
-          kept=0
-          deleted=0
+          # Every call goes through gh-api.ps1 (#323): reads are retried on a
+          # transient answer, the DELETE is a write and never is.
+          $ghApi = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/gh-api.ps1'
+          $kept = 0
+          $deleted = 0
 
           # The branch list already carries the head sha, and comparing against
           # a sha keeps the slash in `agent/...` out of the compare URL, where
           # its encoding is one more thing that could quietly misbehave.
-          gh api "repos/$REPO/branches" --paginate \
-            --jq '.[] | select(.name | startswith("agent/")) | "\(.name) \(.commit.sha)"' > branches.txt
+          $branches = & $ghApi -Step 'Prune: list agent branches' -Mode Read `
+            -Arguments @("repos/$env:REPO/branches", '--paginate', '--jq', '.[] | select(.name | startswith("agent/")) | "\(.name) \(.commit.sha)"')
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
           # `ahead_by` counts commits the head has and dev does not. Zero means
           # dev already contains all of them -- what a merged pull request
           # leaves behind, and what unfinished work never is.
-          while read -r branch sha; do
-            [ -n "$branch" ] || continue
-            ahead=$(gh api "repos/$REPO/compare/dev...$sha" --jq '.ahead_by')
-            if [ "$ahead" -eq 0 ]; then
-              gh api -X DELETE "repos/$REPO/git/refs/heads/$branch"
-              echo "deleted  $branch"
-              deleted=$((deleted + 1))
-            else
-              echo "kept     $branch ($ahead commit(s) not in dev)"
-              kept=$((kept + 1))
-            fi
-          done < branches.txt
+          foreach ($line in @($branches)) {
+            if (-not "$line".Trim()) { continue }
+            $branch, $sha = "$line".Trim() -split ' ', 2
+            $ahead = & $ghApi -Step "Prune: compare $branch with dev" -Mode Read `
+              -Arguments @("repos/$env:REPO/compare/dev...$sha", '--jq', '.ahead_by')
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+            # An empty or non-numeric answer must not read as zero: that would delete unmerged work.
+            $ahead = "$ahead".Trim()
+            if ($ahead -notmatch '^\d+$') {
+              Write-Host "::error::Prune: compare $branch with dev returned '$ahead', not a commit count. Nothing deleted."
+              exit 1
+            }
+            if ([int]$ahead -eq 0) {
+              & $ghApi -Step "Prune: delete $branch" -Mode Write `
+                -Arguments @('-X', 'DELETE', "repos/$env:REPO/git/refs/heads/$branch") | Out-Null
+              if ($LASTEXITCODE -ne 0) { exit 1 }
+              Write-Host "deleted  $branch"
+              $deleted++
+            } else {
+              Write-Host "kept     $branch ($ahead commit(s) not in dev)"
+              $kept++
+            }
+          }
 
-          echo "::notice::deleted $deleted branch(es), kept $kept"
+          Write-Host "::notice::deleted $deleted branch(es), kept $kept"
