@@ -21,7 +21,16 @@ suggestions. You stay in control through mandatory escalation points.
 ## Prerequisites
 
 - VS Code with GitHub Copilot extension (agent mode enabled)
-- Python 3.10+ with `pytest` and `hypothesis` (for property-based tests)
+- **Python 3.10+, required by the hooks.** Gate logic lives in Python cores
+  behind thin `.ps1`/`.sh` wrappers (#287): secret scan, quality and lint
+  gates, plan and context-budget checks, the work-item owner gate and the
+  commit guards. Without a working interpreter the framework degrades
+  rather than blocks (#331), and says so:
+  - PreToolUse gates refuse the calls they guard (#251)
+  - the other Python-backed hooks run without their check
+  - SessionStart names both groups once per session (#342)
+  - the git pre-commit commits unchecked and lists every guard it skipped (#168)
+- `pytest` and `hypothesis` (for property-based tests)
 - `ruff` (required for refactorer linting hard gate)
 - Optional: `radon` (complexity), `mutmut` (mutation testing)
 - Optional: cost tracking — see below

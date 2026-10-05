@@ -49,6 +49,21 @@ build for one (#322).
   the runner's default. That clears every measured run and still catches the
   roughly 30-fold jump the budgets exist for (#334).
 
+- **Python is declared, and the commit hook names what it skips without it
+  (#168).** The README listed Python 3.10+ only "for property-based tests",
+  while every gate core has been Python since #287. Prerequisites now say it is
+  required by the hooks, and list what each kind of hook does without it.
+
+  The git `pre-commit` still lets the commit through when no interpreter works
+  (#331: degrade, do not block). But it no longer prints a one-line "skipping
+  guards". It names each commit guard that did not run and states that the
+  commit was not checked. The list comes from the hook's own dispatch loop, so
+  the warning and the guards cannot drift apart.
+
+  `test-python-missing-notice.ps1` N6 runs the hook under a PATH with git and
+  no Python and checks both properties. `suite-scope.json` maps
+  `.github/hooks/git/**` to that suite.
+
 ## [1.24.0] -- 2026-10-02
 
 ### Changed
