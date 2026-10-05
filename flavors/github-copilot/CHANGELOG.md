@@ -38,6 +38,16 @@ build for one (#322).
   #354's premise, a rule living only where its consumer does not load it (e.g.
   the `metrics` thresholds), is not duplication and moved to #369.
 
+### Fixed
+
+- **`test-cli-callers.ps1` no longer goes SLOW under ordinary machine load
+  (#370).** Its ceiling was 30 s, the #334 floor, taken from a ~15 s measurement.
+  Twelve local timings since then range from 19.4 s to 86.1 s (median of five
+  consecutive runs: 39.5 s). The suite launches one Python checker, so the spread is
+  contention from other work on the machine, not cost. The ceiling is now 120 s,
+  the runner's default. That clears every measured run and still catches the
+  roughly 30-fold jump the budgets exist for (#334).
+
 ## [1.24.0] -- 2026-10-02
 
 ### Changed
