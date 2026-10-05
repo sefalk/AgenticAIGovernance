@@ -30,6 +30,8 @@ function Add-Result([string]$Name, [bool]$Ok, [string]$Detail) {
 $root = Join-Path ([IO.Path]::GetTempPath()) ("af304-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Path (Join-Path $root 'agents') -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $root 'instructions') -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $root 'skills/demo-skill') -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $root 'skills/_available/parked') -Force | Out-Null
 function Write-Fixture([string]$Rel, [string[]]$Lines) {
     [IO.File]::WriteAllText((Join-Path $root $Rel), (($Lines -join "`n") + "`n"))
 }
@@ -71,6 +73,21 @@ Write-Fixture 'agents/demo.agent.md' @(
     '',
     'Tests must always pass before a commit.'
 )
+# #354: an active skill restating a MANIFEST rule, and a parked skill that is not loaded anywhere.
+Write-Fixture 'skills/demo-skill/SKILL.md' @(
+    '---',
+    'name: demo-skill',
+    "description: 'Every commit message must name the agent that wrote it.'",
+    '---',
+    '# Demo skill',
+    '',
+    'Every commit message must name the agent that wrote it.'
+)
+Write-Fixture 'skills/_available/parked/SKILL.md' @(
+    '# Parked skill',
+    '',
+    'Workers never run git commands.'
+)
 
 function Invoke-Detector([string[]]$Extra) {
     $ErrorActionPreference = 'Continue'
@@ -104,6 +121,11 @@ try {
     Add-Result 'R5_a_statement_without_a_modal_is_not_a_rule' (-not ($allLocs -match 'copilot-instructions\.md:4$')) "locations=$($allLocs -join ', ')"
 
     Add-Result 'R6_a_rule_found_only_once_forms_no_cluster' (-not ($allLocs -match 'demo\.agent\.md')) "locations=$($allLocs -join ', ')"
+
+    Add-Result 'R18_an_active_skill_restating_a_rule_joins_its_cluster' `
+        (($allLocs -contains 'MANIFEST.md:5') -and ($allLocs -contains 'skills/demo-skill/SKILL.md:7')) "locations=$($allLocs -join ', ')"
+
+    Add-Result 'R19_a_skill_under__available_is_not_in_the_corpus' (-not ($allLocs -match '^skills/_available/')) "locations=$($allLocs -join ', ')"
 
     $a = (Invoke-Detector @()).Out
     $b = (Invoke-Detector @()).Out

@@ -209,10 +209,8 @@ Establish the work item before any branch exists, so code and tracker stay
 aligned from the start (this prevents reactive, mis-attributed, or WIT-less work):
 
 1. Invoke **ado-work-item-manager** (`mode=resolve`) to find or create the work
-   item for **this specific task**. One unit of work → one work item; do not
-   reuse an unrelated open item — infra/dependency bumps, tooling fixes, and
-   analysis tasks each get their own item. If the task spans several concerns,
-   split them.
+   item for **this specific task**. One work item per unit of work is
+   **git-workflow** skill § 3, rule 2.
 2. Ensure the item is set to **Active** at work start. This is a second call,
    not a field on the create call — `skills/ado-workitem/SKILL.md` § State on
    Create.

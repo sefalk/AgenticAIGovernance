@@ -414,7 +414,6 @@ Three things happen on every return — full protocols in
    REJECTED, check the critic gave actionable findings; if not, re-ask the same
    critic — that does not consume a retry.
 2. **Narrate** one line: `[Step {N}/{total}] {emoji} {agent} — {outcome} | Next → {next}`.
-   Never skip this — it is the user's only visibility into a multi-step workflow.
 3. **Self-assess context budget.** ≥ 7 subagent calls → 🟡 YELLOW (compress prior
    summaries); ≥ 10 calls or context-confusion errors → 🔴 RED, which is a **HARD
    gate**: checkpoint to `WIP.md`, report, and stop.

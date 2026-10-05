@@ -38,7 +38,6 @@ implement request-based integration. Implements the provider-agnostic
   with the PR id so the `ado-work-item-manager` adds the PR artifact link
   (`wit_work_item_link_write` action `add_artifact_link`, or action
   `link_to_pull_request`) afterward.
-- Always report which linkage path was used.
 - **Autocomplete depends on the link:** with a `linked work items = Required`
   policy, do not set autocomplete until the work item is linked. If the link
   is deferred, return `NEEDS_WORKITEM_LINK` first; set autocomplete only after
@@ -71,13 +70,10 @@ The completion behavior is determined by the PR **target branch**:
   `transitionWorkItems: false` (the MCP default is `true` — always set it
   explicitly in the same call) so the platform merges it once branch policies
   pass without auto-transitioning linked work items.
-- **Merge strategy (Mandatory):** always pass `mergeStrategy` from
-  `ADO_PR_MERGE_STRATEGY` (default `noFastForward`). Never use `squash` for
-  `agent/*` branches: squash creates a new commit that does not contain the
-  feature-branch tip, so the coordinator's post-merge `git branch -d agent/*`
-  fails as "not fully merged" and the only cleanup left is a policy-denied
-  force-delete. `noFastForward` keeps the branch tip reachable and lets safe
-  deletion succeed.
+- **Merge strategy:** the mandatory rule, including why `squash` breaks the
+  `agent/*` branch cleanup, lives in
+  [ado-pr-manager.agent.md](../../agents/ado-pr-manager.agent.md), the one
+  agent that sets autocomplete.
 - **Human-only branches** (`ADO_PR_HUMAN_ONLY_BRANCHES`, default `main`):
   human mode (A1). Create/update the PR only; never set `autoComplete`/`status`.
 - **Unresolved / other targets:** safe default is human-only.
