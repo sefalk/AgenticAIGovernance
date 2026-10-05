@@ -13,6 +13,31 @@ build for one (#322).
 
 ## [Unreleased]
 
+### Changed
+
+- **The rule-duplication gate now reads the skills too (#354).**
+  `check-rule-drift.py` adds every active `skills/*/SKILL.md` to its corpus
+  (`skills/_available/` stays out, since nothing loads a parked skill). Measured
+  on the shipped payload: 9 new clusters, 0 false positives. The commonest case
+  was an agent restating its own skill. Each one was resolved by the rule the
+  human set on #354: agents stay lean, skills carry what several agents share,
+  and the skill is favoured unless that costs reliability.
+  - `ado-pr`, `ado-wiki` and `ado-workitem` are each read by one agent, as
+    "consult when relevant". So their safety rules stay in that agent (merge
+    strategy and squash ban, linkage-path report, wiki branch policy, per-item
+    closure), and the skill now points there.
+  - The coordinator drops its copy of the narration rule, because
+    `tdd-orchestration` is a mandatory pre-read and owns it.
+  - `ado-shared` points to `git-workflow` § 3 for one work item per unit of work.
+  - Two clusters stay, with reasons recorded in the baseline: R-SD-04 cited by
+    ID in two Governance References lists, and the bare-`except` rule in the
+    project-owned always-on template next to the `error-handling` skill.
+
+  Gate: 13 clusters, 0 undecided. `test-rule-drift.ps1` gains R18 (an active
+  skill joins its cluster) and R19 (a parked skill does not). The other half of
+  #354's premise, a rule living only where its consumer does not load it (e.g.
+  the `metrics` thresholds), is not duplication and moved to #369.
+
 ## [1.24.0] -- 2026-10-02
 
 ### Changed
