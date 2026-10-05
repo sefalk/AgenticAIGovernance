@@ -106,7 +106,9 @@ is usually one line. Values and sources: `.github/hooks/scripts/tool-limits.json
 - Move to **Closed** only after the PR is merged and every AC maps to merged
   evidence; otherwise report `CLOSE_PENDING_MERGE` (deferred) or
   `BLOCKED_CLOSURE` (unmet AC).
-- **Never bulk-close** linked items — verify AC per item.
+- Closure is per item: the rule lives in
+  [ado-work-item-manager.agent.md](../../agents/ado-work-item-manager.agent.md)
+  (closure step 4).
 
 ## Multi-Phase Specs
 
