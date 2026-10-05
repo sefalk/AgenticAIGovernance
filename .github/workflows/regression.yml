@@ -399,6 +399,14 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-env-change-gate.py
 
+      # Every gate above reads the pull request through gh-api.ps1, which asks
+      # again on a transient answer and fails at once on a real one. A single
+      # 5xx used to fail the build with a sentence two gates shared (#323). The
+      # suite also fails when any workflow calls `gh api` around the helper.
+      - name: Test the gh api helper and that no workflow bypasses it
+        shell: powershell
+        run: python .github\scripts\test-gh-api.py
+
       # The promotion gate decides whether a release may merge, and it is the
       # only gate that runs on no ordinary pull request -- so without this it
       # would first execute on the release it is supposed to protect. The
