@@ -20,6 +20,7 @@ the exit code is not the lever it looks like (#339).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -30,6 +31,7 @@ import sys
 # Both sit next to this file; Python puts a script's own directory on
 # sys.path[0], which is how every hook here is invoked.
 from _agentlog import PATH_KEYS
+from _field_guard import record as record_work_item_read
 from _long_lines import respond as long_line_notice
 from _provenance import DETAIL as PROVENANCE_DETAIL
 from _provenance import has_provenance_marker
@@ -188,8 +190,12 @@ def main() -> int:
         return emit(None, 0)
 
     # The only PostToolUse process, so it also carries the long-line notice
-    # rather than costing every tool call a second interpreter start.
+    # and the work-item read cache (#197) rather than costing every tool call
+    # a second interpreter start.
     if not is_write_tool(str(payload.get("tool_name") or "")):
+        # A failed cache write only makes the field guard ask for a re-read.
+        with contextlib.suppress(Exception):
+            record_work_item_read(payload)
         return emit(long_line_notice(payload), 0)
 
     paths = [p for p in write_paths(payload.get("tool_input")) if os.path.isfile(p)]

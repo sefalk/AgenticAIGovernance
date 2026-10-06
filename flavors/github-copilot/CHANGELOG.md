@@ -13,6 +13,30 @@ build for one (#322).
 
 ## [Unreleased]
 
+### Added
+
+- **A hook now stops work-item updates that silently shorten a long field
+  (#197).** The incident behind #197 replaced a description with a shorter
+  rewrite and lost a third of it; the worker's "non-destructive" gate was a
+  self-report. The PostToolUse hook now caches, per session and revision, the
+  length and headings of every field a work-item read returned. The PreToolUse
+  hook compares each `update` / `update_batch` against it:
+  - an unread long field, a guarded field without `test /rev`, or a stale
+    revision is denied;
+  - a shrink over `WI_FIELD_SHRINK_PCT` (10 %) and `WI_FIELD_SHRINK_CHARS`
+    (200), or any lost heading, gets `WI_FIELD_SHRINK_POLICY`: `ask`
+    (default), `declared`, `declared-strict` or `deny`.
+
+  A shrink may be declared in the same call as a `System.History` line,
+  `af-shrink: <field>; remove: <heading>, ...; expect: <length>`, which is
+  checked against the diff. A declaration written after a verdict counts only
+  from the next revision, so it cannot be copied from the refusal. Fields up
+  to `WI_FIELD_GUARD_MIN_CHARS` (500) are not guarded.
+  `ado-work-item-manager` gains the read-then-`test /rev` rule and a HARD gate
+  row pointing at the hook. `test-field-shrink-guard.ps1` (G1-G23) covers the
+  table, the bash twins and the shipped keys. GitHub issue and PR bodies follow
+  in a separate issue.
+
 ### Changed
 
 - **The rule-duplication gate now reads the skills too (#354).**

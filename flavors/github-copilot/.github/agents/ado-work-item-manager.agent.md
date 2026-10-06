@@ -40,7 +40,16 @@ Consult these skills when relevant to the task:
    `ADO_DEFAULT_ASSIGNED_TO` — see the **ado-workitem** skill (Work Item Routing).
    Never use `add_child`; create each child and link it.
 2. Apply confidence policy and clarification loop by work item type.
-3. Update items non-destructively.
+3. Update items non-destructively. For a long field (`System.Description`,
+   acceptance criteria, repro steps): read the item with `wit_work_item`
+   `get` first, build the new value from the text you read, change only what
+   was asked, and send `{"op": "test", "path": "/rev", "value": <read rev>}`
+   in the same update. The PreToolUse hook refuses the update otherwise, and
+   asks or refuses on a shrink (`WI_FIELD_SHRINK_POLICY`, #197). If removing
+   text is the task, declare it in the same call as a `System.History` line,
+   `af-shrink: <field>; remove: <heading>, ...; expect: <new length>`. The hook
+   checks it against the diff, so declare exact numbers; never declare after
+   a refusal.
 4. Add branch/plan/reference links where available.
 5. Report degraded mode when capability is optional and unavailable.
 6. For Databricks evidence runs, require explicit profile traceability in comments.
@@ -260,6 +269,7 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Owner set on create | HARD | Every created item carries a non-empty `System.AssignedTo` (default `ADO_DEFAULT_ASSIGNED_TO`); if unset, the run asks. Enforced by the PreToolUse hook, which refuses an ownerless `create` and every `add_child` | Standard+ |
 | Type-specific field applicability checked before write | HARD | Before writing a type-specific field (e.g. `AcceptanceCriteria`), the field is confirmed present in the target type's `wit_work_item` (action `get_type`) fields; an absent field is not written silently (a type carrying it is chosen, or the content is mirrored to `System.Description` and the path is reported) | Standard+ |
 | Non-destructive update policy followed | SOFT | Reviewer checks append/targeted update behavior | Standard+ |
+| Long field not shrunk unannounced | HARD | Every update of a long field follows a read and carries `test /rev`; a shrink or lost heading gets the `WI_FIELD_SHRINK_POLICY` verdict. Enforced by the PreToolUse hook against the cached read, not by this agent's self-report (#197) | Standard+ |
 | No Close at finalize (delivered state only, pre-merge) | HARD | Finalize never sets a `Completed`-category state; the item is in its type's delivered state, or Active — and Active is never a silent outcome (see the row below) | Standard+ |
 | Transition target resolved from the type, not assumed | HARD | Before any state transition, `wit_work_item` (action `get_type`) supplied the type's states and the target was resolved from them, never from the literal string `Resolved`. A type with no delivered state yields `BLOCKED_NO_DELIVERED_STATE` + the `delivered-pending-verification` tag, never a substituted state | Standard+ |
 | AC coverage map posted before any closure transition | HARD | Verify an AC->evidence map comment exists for the item | Standard+ |
