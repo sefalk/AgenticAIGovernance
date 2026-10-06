@@ -78,6 +78,19 @@
       ".github/af-env.conf",
       ".github/agents/ado-work-item-manager.agent.md"
     ],
+    "test-body-shrink-guard.ps1": [
+      ".github/hooks/scripts/_body_guard.py",
+      ".github/hooks/scripts/_field_guard.py",
+      ".github/hooks/scripts/work-item-owner.py",
+      ".github/hooks/scripts/scan-secrets.py",
+      ".github/hooks/scripts/scan-secrets.ps1",
+      ".github/hooks/scripts/scan-secrets.sh",
+      ".github/hooks/scripts/block-dangerous.ps1",
+      ".github/hooks/scripts/block-dangerous.sh",
+      ".github/af-env.conf",
+      ".github/agents/gh-issue-manager.agent.md",
+      ".github/agents/gh-pr-manager.agent.md"
+    ],
     "test-field-shrink-guard.ps1": [
       ".github/hooks/scripts/_field_guard.py",
       ".github/hooks/scripts/work-item-owner.py",
