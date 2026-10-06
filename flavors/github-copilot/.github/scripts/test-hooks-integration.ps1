@@ -67,6 +67,7 @@ $script:warnings = @()
 $script:hookCounts = @{}        # EventName -> set of hook counts seen
 $script:unattributed = @()      # Running: lines that named no hook script
 $script:perCall = @{}           # log|event|seq -> script names run in that one invocation
+$script:begun = @{}             # log|event|seq -> invocation whose Executing line is in the log
 
 foreach ($logFile in $hookLogs) {
     $sessionDir = $logFile.Directory.Parent.Parent.Parent.Name  # session timestamp
@@ -103,6 +104,7 @@ foreach ($logFile in $hookLogs) {
             if ($message -match '^Executing (\d+) hook\(s\)') {
                 $hookCount = [int]$Matches[1]
                 $script:totalInvocations++
+                $script:begun["$($logFile.FullName)|$event|$seqNum"] = $true
                 if (-not $script:totalEvents.ContainsKey($event)) {
                     $script:totalEvents[$event] = 0
                 }
@@ -351,6 +353,8 @@ if ($dupCalls -eq 0) {
 # repeat global hooks in their frontmatter (#345), so a global hook that stops
 # loading would leave no second copy behind -- the hole #166 feared. It fails
 # here instead. SessionStart is exempt: a log opened mid-session never holds it.
+# An invocation without its Executing line was cut off by log rotation: the
+# hooks that ran before the cut are not in this log, so it is skipped (#378).
 $globalByEvent = @{}
 $hooksJson = Join-Path (Split-Path -Parent $PSScriptRoot) 'hooks/agent-hooks.json'
 if (Test-Path $hooksJson) {
@@ -362,10 +366,12 @@ if (Test-Path $hooksJson) {
     }
 }
 $gaps = @()
+$truncated = @()
 foreach ($callKey in $script:perCall.Keys) {
     $parts = $callKey -split '\|'
     $ev = $parts[-2]
     if (-not $globalByEvent.ContainsKey($ev)) { continue }
+    if (-not $script:begun.ContainsKey($callKey)) { $truncated += "$ev #$($parts[-1])"; continue }
     $ran = @($script:perCall[$callKey] | ForEach-Object { $_ -replace '\.\w+$', '' })
     foreach ($stem in $globalByEvent[$ev]) {
         if ($ran -notcontains $stem) { $gaps += "$ev #$($parts[-1]): $stem" }
@@ -381,6 +387,9 @@ if (-not (Test-Path $hooksJson)) {
     Write-Output "  FAIL  $gapCalls invocation(s) did not run a global hook registered for their event:"
     foreach ($g in ($gaps | Select-Object -First 5)) { Write-Output "        $g" }
     $checksFailed++
+}
+if ((Test-Path $hooksJson) -and $truncated.Count -gt 0) {
+    Write-Output "  INFO  $($truncated.Count) invocation(s) skipped, truncated at log start (no Executing line): $($truncated -join ', ')"
 }
 
 Write-Output ""
