@@ -10,11 +10,17 @@ fail when it does.
 from __future__ import annotations
 
 import re
+import shlex
+import subprocess
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 PAYLOAD = REPO / "flavors" / "github-copilot" / ".github"
+MCP_DEPLOY = REPO / "flavors" / "github-copilot" / "mcp-deploy"
+FLAVOR_VERSION = REPO / "flavors" / "github-copilot" / "VERSION"
 SKILL = PAYLOAD / "skills" / "deployment" / "SKILL.md"
 INDEX = PAYLOAD / "skills" / "INDEX.md"
 COORDINATOR = PAYLOAD / "agents" / "coordinator.agent.md"
@@ -47,6 +53,42 @@ def sections(text: str) -> dict[str, str]:
         end = marks[i + 1].start() if i + 1 < len(marks) else len(text)
         out[m.group(2).strip()] = text[m.start() : end]
     return out
+
+
+def run_documented_build(release: str) -> None:
+    """Run the release cut's build command as written and inspect the wheel (#368).
+
+    The command went stale unnoticed because nothing executed it: a bare
+    `-m build` goes through the sdist, which lacks the force-included payload.
+    """
+    line = next((ln.strip() for ln in release.splitlines() if "-m build" in ln), "")
+    args = shlex.split(line.split("-m build", 1)[1]) if line else []
+    with tempfile.TemporaryDirectory(prefix="af-wheel-") as out:
+        proc = subprocess.run(
+            [sys.executable, "-m", "build", *args, "--outdir", out],
+            cwd=MCP_DEPLOY,
+            capture_output=True,
+            text=True,
+        )
+        tail = (proc.stdout + proc.stderr).strip().splitlines()[-3:]
+        check("the documented build command succeeds", proc.returncode == 0, " | ".join(tail))
+        wheels = sorted(Path(out).glob("*.whl"))
+        check("the documented build command yields exactly one wheel", len(wheels) == 1, str(wheels))
+        if len(wheels) != 1:
+            return
+        with zipfile.ZipFile(wheels[0]) as whl:
+            names = whl.namelist()
+            bundled = (
+                whl.read("af_deploy_mcp/payload/VERSION").decode().strip()
+                if "af_deploy_mcp/payload/VERSION" in names
+                else ""
+            )
+        expected = FLAVOR_VERSION.read_text(encoding="utf-8").strip()
+        check("the wheel bundles the flavor VERSION", bundled == expected, f"{bundled!r} != {expected!r}")
+        check(
+            "the wheel bundles the payload .github",
+            any(n.startswith("af_deploy_mcp/payload/.github/") for n in names),
+        )
 
 
 def main() -> int:
@@ -100,6 +142,11 @@ def main() -> int:
     release = paths.get("Release cut", "")
     check("release cut rebuilds the wheel", "-m build" in release)
     check("release cut reinstalls it", "--force-reinstall" in release)
+    check("release cut builds the wheel from the source tree, not via the sdist", "-m build --wheel" in release)
+    verify = release.split(VERIFICATION, 1)[1] if VERIFICATION in release else ""
+    check("release verification expects unverifiable for a bundled install", "unverifiable" in verify)
+    check("release verification reads the payload VERSION in the installed wheel", "payload/VERSION" in verify)
+    run_documented_build(release)
 
     # AC 4 — the staleness signal the skill tells the reader to trust must exist.
     core = (REPO / "flavors" / "github-copilot" / "mcp-deploy" / "af_deploy_mcp" / "deploy_core.py").read_text(
