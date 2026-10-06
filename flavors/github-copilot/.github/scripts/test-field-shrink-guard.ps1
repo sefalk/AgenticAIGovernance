@@ -165,33 +165,37 @@ try {
     Add-Result 'G7_a_field_under_the_guard_size_may_shrink' ($r.Decision -eq '') "decision='$($r.Decision)' cached=$(($short * 6).Length) out=$($r.Out)"
 
     # -- the #197 replay and the policy table -----------------------------------
-    $r = Write-Item $s @((Rev 3), (Desc $withoutTestsAndQuestions)) $ask
+    # Each case reads into a fresh session: a verdict marks the item, and a
+    # marked item ignores later declarations (G23), so cases must not share one.
+    function Fresh { $n = New-Session; Read-Item $n (New-Item7 3 @{ 'System.Description' = $fullDesc }); return $n }
+
+    $r = Write-Item (Fresh) @((Rev 3), (Desc $withoutTestsAndQuestions)) $ask
     Add-Result 'G8_the_197_replay_asks_and_names_the_loss' ($r.Decision -eq 'ask' -and $r.Reason -match 'Key Tests' -and $r.Reason -match 'Open Questions') "decision='$($r.Decision)' reason='$($r.Reason)'"
 
-    $r = Write-Item $s @((Rev 3), (Desc $noHeadings)) $ask
+    $r = Write-Item (Fresh) @((Rev 3), (Desc $noHeadings)) $ask
     Add-Result 'G9_a_lost_heading_asks_even_without_a_length_drop' ($r.Decision -eq 'ask') "decision='$($r.Decision)' old=$($fullDesc.Length) new=$($noHeadings.Length)"
 
-    $r = Write-Item $s @((Rev 3), (Desc $withoutTests), (Hist $declTests)) $ask
+    $r = Write-Item (Fresh) @((Rev 3), (Desc $withoutTests), (Hist $declTests)) $ask
     Add-Result 'G10_ask_policy_asks_and_shows_a_matching_declaration' ($r.Decision -eq 'ask' -and $r.Reason -match '(?i)declar') "decision='$($r.Decision)' reason='$($r.Reason)'"
 
     $declared = New-Conf 'declared'
-    $r = Write-Item $s @((Rev 3), (Desc $withoutTests), (Hist $declTests)) $declared
+    $r = Write-Item (Fresh) @((Rev 3), (Desc $withoutTests), (Hist $declTests)) $declared
     Add-Result 'G11_declared_policy_allows_a_matching_declaration' ($r.Decision -eq '') "decision='$($r.Decision)' reason='$($r.Reason)'"
 
-    $r = Write-Item $s @((Rev 3), (Desc $withoutTestsAndQuestions), (Hist $declTests)) $declared
+    $r = Write-Item (Fresh) @((Rev 3), (Desc $withoutTestsAndQuestions), (Hist $declTests)) $declared
     Add-Result 'G12_a_declaration_the_diff_contradicts_counts_as_none' ($r.Decision -eq 'ask') "decision='$($r.Decision)' reason='$($r.Reason)'"
 
     $wrongLen = "af-shrink: System.Description; remove: Key Tests; expect: $([int]($withoutTests.Length * 0.5))"
-    $r = Write-Item $s @((Rev 3), (Desc $withoutTests), (Hist $wrongLen)) $declared
+    $r = Write-Item (Fresh) @((Rev 3), (Desc $withoutTests), (Hist $wrongLen)) $declared
     Add-Result 'G13_a_declared_length_off_by_more_than_10pct_counts_as_none' ($r.Decision -eq 'ask') "decision='$($r.Decision)' reason='$($r.Reason)'"
 
     $strict = New-Conf 'declared-strict'
-    $r = Write-Item $s @((Rev 3), (Desc $withoutTests)) $strict
-    $r2 = Write-Item $s @((Rev 3), (Desc $withoutTests), (Hist $declTests)) $strict
+    $r = Write-Item (Fresh) @((Rev 3), (Desc $withoutTests)) $strict
+    $r2 = Write-Item (Fresh) @((Rev 3), (Desc $withoutTests), (Hist $declTests)) $strict
     Add-Result 'G14_declared_strict_denies_undeclared_and_allows_declared' ($r.Decision -eq 'deny' -and $r2.Decision -eq '') "undeclared='$($r.Decision)' declared='$($r2.Decision)'"
 
     $deny = New-Conf 'deny'
-    $r = Write-Item $s @((Rev 3), (Desc $withoutTests), (Hist $declTests)) $deny
+    $r = Write-Item (Fresh) @((Rev 3), (Desc $withoutTests), (Hist $declTests)) $deny
     Add-Result 'G15_deny_policy_denies_even_a_matching_declaration' ($r.Decision -eq 'deny') "decision='$($r.Decision)' reason='$($r.Reason)'"
 
     $loose = New-Conf 'deny' '60' '200'
@@ -201,11 +205,22 @@ try {
     Add-Result 'G16_the_percentage_threshold_comes_from_the_config' ($r.Decision -eq '') "decision='$($r.Decision)' reason='$($r.Reason)'"
 
     # -- bypasses ---------------------------------------------------------------
-    $r = Write-Item $s @((Rev 3), (Desc $withoutTestsAndQuestions)) $ask 'update_batch'
+    $r = Write-Item (Fresh) @((Rev 3), (Desc $withoutTestsAndQuestions)) $ask 'update_batch'
     Add-Result 'G17_update_batch_is_judged_too' ($r.Decision -eq 'ask') "decision='$($r.Decision)' reason='$($r.Reason)'"
 
-    $r = Write-Item $s @((Rev 3), @{ op = 'remove'; path = '/fields/System.Description' }) $ask
+    $r = Write-Item (Fresh) @((Rev 3), @{ op = 'remove'; path = '/fields/System.Description' }) $ask
     Add-Result 'G18_removing_a_guarded_field_is_a_shrink' ($r.Decision -eq 'ask') "decision='$($r.Decision)' reason='$($r.Reason)'"
+
+    # The verdict names the loss, so a declaration written after it could be copied
+    # from the reason -- the #197 agent would then pass on its second attempt.
+    $sMark = Fresh
+    $first = Write-Item $sMark @((Rev 3), (Desc $withoutTests)) $declared
+    $copied = Write-Item $sMark @((Rev 3), (Desc $withoutTests), (Hist $declTests)) $declared
+    Read-Item $sMark (New-Item7 4 @{ 'System.Description' = $fullDesc })
+    $fresh = Write-Item $sMark @((Rev 4), (Desc $withoutTests), (Hist $declTests)) $declared
+    Add-Result 'G23_a_declaration_after_a_verdict_is_ignored_until_a_new_revision' `
+        ($first.Decision -eq 'ask' -and $copied.Decision -eq 'ask' -and $fresh.Decision -eq '') `
+        "first='$($first.Decision)' copied='$($copied.Decision)' after-new-rev='$($fresh.Decision)' reason='$($copied.Reason)'"
 
     # -- the write's own response refreshes the cache --------------------------
     $s4 = New-Session
@@ -223,7 +238,9 @@ try {
         $s5 = New-Session
         Read-Item $s5 (New-Item7 3 @{ 'System.Description' = $fullDesc }) 'get' 'sh'
         $a = Write-Item $s5 @((Rev 3), (Desc $withoutTestsAndQuestions)) $ask 'update' 'sh'
-        $b = Write-Item $s5 @((Rev 3), (Desc $withoutTests), (Hist $declTests)) $declared 'update' 'sh'
+        $s6 = New-Session
+        Read-Item $s6 (New-Item7 3 @{ 'System.Description' = $fullDesc }) 'get' 'sh'
+        $b = Write-Item $s6 @((Rev 3), (Desc $withoutTests), (Hist $declTests)) $declared 'update' 'sh'
         $c = Write-Item (New-Session) @((Rev 3), (Desc $withoutTests)) $ask 'update' 'sh'
         Add-Result 'G20_the_bash_twins_give_the_same_verdicts' ($a.Decision -eq 'ask' -and $b.Decision -eq '' -and $c.Decision -eq 'deny') "ask='$($a.Decision)' declared='$($b.Decision)' unread='$($c.Decision)'"
     } else {
