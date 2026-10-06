@@ -148,7 +148,10 @@ At the start of each invocation:
 
 1. Check for an existing open pull request for the head branch with
    `pull_request_read` before creating one — update it rather than opening a
-   duplicate.
+   duplicate. `update_pull_request` replaces the body: build the new one from
+   that read, change only what was asked, and never send `body` with `state`.
+   The PreToolUse hook refuses an unread or stale target and asks on a shrink
+   (#376).
 2. Resolve the base from `GH_PR_DEFAULT_TARGET_BRANCH` unless the coordinator
    states one.
 3. Build the title and body from the workflow artifacts: the plan, the issue
@@ -227,6 +230,7 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Capability probe outcome recorded | HARD | `get_me` result reported as READY/DEGRADED/BLOCKED | Trivial+ |
 | Remote head branch probe conclusive | HARD | Ref matched on its full path, or `BLOCKED_BRANCH_NOT_PUBLISHED` from a complete listing, or `BLOCKED_BRANCH_PROBE_INDETERMINATE` — with the raw query and response reported | Standard+ |
 | No duplicate pull request | HARD | Existing open PR for the head branch was searched before creating | Standard+ |
+| PR body not shrunk unannounced | HARD | Every `update_pull_request` with a body follows a fresh `pull_request_read`; a shrink or lost heading gets the `WI_FIELD_SHRINK_POLICY` verdict; `body` + `state` is refused. Enforced by the PreToolUse hook, not by this agent's self-report (#376) | Trivial+ |
 | Merge attempted only for an allowlisted base | HARD | `merge_pull_request` was called only when the base is in `GH_PR_AUTOMERGE_BRANCHES` | Trivial+ |
 | Default branch never merged | HARD | The base was not the repository default branch; if it was allowlisted, `BLOCKED` was returned instead | Trivial+ |
 | Merge method is `merge` | HARD | Never `squash`, never `rebase` | Trivial+ |

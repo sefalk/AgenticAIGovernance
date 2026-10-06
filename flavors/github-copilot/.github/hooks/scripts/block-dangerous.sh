@@ -61,6 +61,8 @@ bd_is_gated_tool() {
         create_and_run_task|createAndRunTask) return 0 ;;
         run_task|runTask) return 0 ;;
         *wit_work_item_write) return 0 ;;
+        *sub_issue_write) return 1 ;;
+        *issue_write|*update_pull_request|*update_issue_comment) return 0 ;;
     esac
     bd_is_exec_surface "$1" && return 0
     return 1
@@ -78,9 +80,11 @@ if ! bd_is_gated_tool "$tool_name"; then
     exit 0
 fi
 
-# Ownership of created ADO work items (#36); the check lives in the shared core.
+# Work-item writes: ADO owner (#36) and field shrink (#197), GitHub body shrink
+# (#376); the checks live in the shared core. bd_is_gated_tool has already
+# turned sub_issue_write away.
 case "$tool_name" in
-    *wit_work_item_write)
+    *wit_work_item_write|*issue_write|*update_pull_request|*update_issue_comment)
         _bd_conf=""
         [ "$AF_CONF_FOUND" = 1 ] && _bd_conf="$AF_CONF"
         if [ ! -f "$AF_SCRIPT_DIR/work-item-owner.py" ]; then

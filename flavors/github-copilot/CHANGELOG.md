@@ -37,6 +37,30 @@ build for one (#322).
   table, the bash twins and the shipped keys. GitHub issue and PR bodies follow
   in a separate issue.
 
+- **The same guard now covers GitHub issue and PR bodies and comments (#376).**
+  `issue_write update`, `update_pull_request` and `update_issue_comment`
+  replace the text, and nothing checked them. The design follows the decisions
+  on #376 (comment 6011491704):
+  - `_body_guard.py` caches every body a read returned (`issue_read`,
+    `pull_request_read`, `get_comments`, search and list results) and every
+    body a successful write stored. So a write is compared with the session's
+    own last write, not with an older read (K1).
+  - An unread target is denied. GitHub has no `If-Match`, so a read older than
+    the new `WI_FIELD_READ_MAX_AGE_MIN` (10) is denied too (K2).
+  - `body` + `state` in one call is denied.
+  - A shrink or a lost heading gets `WI_FIELD_SHRINK_POLICY`.
+  - A shrink is declared in a preceding comment (`af-shrink: body; remove: ...;
+    expect: ...`) that the diff must confirm. A declaration posted after a
+    verdict counts only once the text has changed.
+  - Text from the last `## Working state` heading on is not guarded.
+  - `sub_issue_write` is not routed.
+
+  `gh-issue-manager` and `gh-pr-manager` gain a HARD row pointing at the hook.
+  `test-body-shrink-guard.ps1` (B1-B25) covers the table. Negative controls
+  confirm that the working-state exemption, the marks and the write refresh
+  each change a verdict when switched off. Requires github-mcp-server 1.12.0
+  or later, whose reads are verbatim.
+
 ### Changed
 
 - **The rule-duplication gate now reads the skills too (#354).**

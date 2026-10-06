@@ -460,6 +460,35 @@ revision — the verdict names the loss, and copying it back is not consent.
 The read cache lives under the temp directory (`AF_FIELD_CACHE_DIR` overrides)
 and expires after 24 hours. The `System.History` field itself is never judged.
 
+#### PreToolUse: GitHub Body Shrink Guard
+
+**Scripts:** `scripts/work-item-owner.py` (judges, PreToolUse) and
+`scripts/scan-secrets.py` (records, PostToolUse), both through
+`scripts/_body_guard.py`
+
+The #197 guard for GitHub (#376). `issue_write update`, `update_pull_request`
+and `update_issue_comment` replace the text. The PostToolUse side caches length,
+headings and a hash of every body a read returned (any object with a `body` and
+a github.com `html_url`: issue/PR `get`, `get_comments`, search and list
+results). It also caches what a successful write or create stored, so the next
+write is compared with the session's own last write.
+
+| Situation | Verdict |
+|---|---|
+| `body` and `state` in one update | deny: comment first, then a state-only change |
+| Target never read in this session | deny: read first |
+| Read older than `WI_FIELD_READ_MAX_AGE_MIN` (10) | deny: re-read (GitHub has no `If-Match`) |
+| Shrink over `WI_FIELD_SHRINK_PCT` % and `WI_FIELD_SHRINK_CHARS`, or a lost heading | `WI_FIELD_SHRINK_POLICY` |
+
+The declaration is a comment posted before the write on the same issue or PR:
+`af-shrink: body; remove: <heading>, ...; expect: <new body length>`, or
+`af-shrink: comment <id>; ...` for a comment. It is checked against the diff
+like the ADO declaration. It does not count once a verdict has named the loss
+for that text, until the text changes. Issue and PR text from the last
+`## Working state` heading on is not guarded: `work-item-state` sanctions that
+block as the one replaceable part. Reads are taken as verbatim, which holds
+from github-mcp-server 1.12.0 on.
+
 #### PostToolUse: Secret Detection Scan
 
 **Scripts:** `scripts/scan-secrets.ps1` (Windows) / `scripts/scan-secrets.sh` (Unix)

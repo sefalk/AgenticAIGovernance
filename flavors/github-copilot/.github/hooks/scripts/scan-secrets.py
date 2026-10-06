@@ -31,6 +31,7 @@ import sys
 # Both sit next to this file; Python puts a script's own directory on
 # sys.path[0], which is how every hook here is invoked.
 from _agentlog import PATH_KEYS
+from _body_guard import record_body as record_github_read
 from _field_guard import record as record_work_item_read
 from _long_lines import respond as long_line_notice
 from _provenance import DETAIL as PROVENANCE_DETAIL
@@ -196,6 +197,8 @@ def main() -> int:
         # A failed cache write only makes the field guard ask for a re-read.
         with contextlib.suppress(Exception):
             record_work_item_read(payload)
+        with contextlib.suppress(Exception):
+            record_github_read(payload)
         return emit(long_line_notice(payload), 0)
 
     paths = [p for p in write_paths(payload.get("tool_input")) if os.path.isfile(p)]
