@@ -119,14 +119,13 @@ Rules:
    read.
 
 **Why a visible heading and not an HTML comment.** A marker pair such as
-`<!-- af:working-state:START -->` is the better anchor when it survives, and the
-first version of this skill used one. It does not survive: a body written with
-that pair read back without it, the surrounding blank lines left in place.
-Whether the markers are stripped on write or only hidden on read cannot be
-distinguished with these tools — and it makes no difference, because an agent
-working through this surface cannot see them either way, so it cannot splice on
-them. A heading every reader can see is the anchor that actually works, and its
-visibility to humans is not a cost for a section humans are meant to read.
+`<!-- af:working-state:START -->` was the first version's anchor. It read back
+missing: github-mcp-server before 1.12.0 stripped HTML comments from bodies on
+the read path, although they stayed stored. Since 1.12.0 (upstream PR 3177)
+bodies read back verbatim, comments included (#376). The heading stays the
+anchor anyway: a read through an older server still loses a comment anchor, and
+a heading every reader can see costs nothing in a section humans are meant to
+read.
 
 ## 3. Decision records as comments
 
@@ -184,18 +183,15 @@ Therefore, always:
 2. Splice: replace everything from the `## Working state` heading to the end, or
    append a whole block if that heading is absent.
 3. `issue_write` `method: update` with the complete new body.
-4. **Re-read and check what landed.** Steps 1–3 have two measured ways to go
-   wrong, below.
+4. **Re-read and check what landed.**
 
-Step 1 is not a formality — two platform behaviours turn a naive round trip into
-corruption:
-
-- **Apostrophes come back escaped.** A stored `agent's` reads back as
-  `agent&#39;s`. Write that back verbatim and the literal entity is what every
-  human then sees on the issue. Decode `&#39;`, `&amp;`, `&quot;`, `&lt;` and
-  `&gt;` before writing, and confirm on the re-read.
-- **HTML comments do not survive the round trip** (§ 2), which is why the anchor
-  is a heading.
+The body from step 1 is the stored text, byte for byte (measured on #376 against
+the REST raw body). Write it back as read: **do not decode entities.** A
+literal `&#39;` or `&amp;` in a read body is content, and decoding it corrupts
+the issue. The opposite symptom, `&#39;` where the rendered issue shows `'`, or
+an HTML comment missing that the rendered source has, means a github-mcp-server
+older than 1.12.0. Stop and report it; hand-decoding guesses which entities were
+text.
 
 Writing a body you have not just read overwrites whatever changed in between.
 This is the existing non-destructive rule in `skills/gh-issue/SKILL.md` § 5, and

@@ -88,6 +88,15 @@ build for one (#322).
 
 ### Fixed
 
+- **`work-item-state` no longer tells agents to decode entities in GitHub
+  bodies (#376).** The instruction was written for the lossy read path of
+  github-mcp-server before 1.12.0. Upstream PR 3177 (release 1.12.0) fixed that
+  path. Re-measured on #376, #313 and PR #366: the MCP body equals the REST raw
+  body byte for byte, `<`, `'`, `&` and `<!-- -->` included. So the instruction
+  had become the corruption: decoding a literal `&#39;` rewrites content.
+  § 6 now says to write back what was read and to stop on signs of an older
+  server; § 2 states the measured cause of the old comment-anchor loss.
+
 - **`test-cli-callers.ps1` no longer goes SLOW under ordinary machine load
   (#370).** Its ceiling was 30 s, the #334 floor, set when the suite was split
   out (6961185) with no recorded measurement.
