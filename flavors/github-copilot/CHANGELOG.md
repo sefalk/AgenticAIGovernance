@@ -88,6 +88,15 @@ build for one (#322).
 
 ### Fixed
 
+- **`test-hooks-integration.ps1` no longer fails an invocation cut off by log
+  rotation (#378).** When the hooks log rotates in the middle of an invocation,
+  only its tail stays in the file: no `Executing` line, and none of the hooks
+  that ran before the cut. The global-hook coverage check counted that as a
+  missing `block-dangerous` run and turned the suite red. This happened live
+  with #5045 on line 1. An invocation without its `Executing` line is now
+  skipped and named in an `INFO` line. A complete invocation that misses a
+  global hook still fails (fixture cases G3/G4).
+
 - **`work-item-state` no longer tells agents to decode entities in GitHub
   bodies (#376).** The instruction was written for the lossy read path of
   github-mcp-server before 1.12.0. Upstream PR 3177 (release 1.12.0) fixed that

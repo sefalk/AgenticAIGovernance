@@ -62,6 +62,20 @@ $gap = $good + (New-Invocation 8 'PreToolUse' @(($ps + '.github/hooks/scripts/te
 $gapLog = Join-Path $fixtureDir 'gap.log'
 [IO.File]::WriteAllLines($gapLog, $gap)
 
+# The live log rotated inside an invocation: its Executing line and its block-dangerous
+# run were cut, only the tail of the agent hook survived as line 1 (#378, replay of #5045).
+$tsCut = '2026-10-06 08:38:52.298 [info]'
+$cutHead = @(
+    "$tsCut [#9] [PreToolUse] Completed (Success) in 2221ms, no output",
+    "$tsCut [#9] [PreToolUse] Running: {`"command`":`"$($ps + '.github\\hooks\\scripts\\coordinator-pretooluse.ps1')`",$cwd}",
+    "$tsCut [#9] [PreToolUse] Input: {`"tool_name`":`"get_terminal_output`"}",
+    "$tsCut [#9] [PreToolUse] Completed (Success) in 2040ms, no output"
+)
+$cutLog = Join-Path $fixtureDir 'cut.log'
+[IO.File]::WriteAllLines($cutLog, $cutHead + $good)
+$cutGapLog = Join-Path $fixtureDir 'cut-gap.log'
+[IO.File]::WriteAllLines($cutGapLog, $cutHead + $gap)
+
 function Invoke-Subject([string]$Log) {
     $ErrorActionPreference = 'Continue'
     $out = & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $subject -LogPath $Log 2>&1 | Out-String
@@ -95,6 +109,15 @@ try {
     $r = Invoke-Subject $gapLog
     Add-Result 'G2_an_invocation_missing_its_global_gate_fails_and_is_named' `
         ($r.Exit -eq 1 -and $r.Out -match 'FAIL\s+1 invocation\(s\) did not run a global hook' -and $r.Out -match 'PreToolUse #8: block-dangerous') `
+        "exit=$($r.Exit) out=$($r.Out.Substring([Math]::Max(0, $r.Out.IndexOf('## Integration Checks'))))"
+
+    $r = Invoke-Subject $cutLog
+    Add-Result 'G3_an_invocation_cut_off_by_log_rotation_is_skipped_not_failed' `
+        ($r.Exit -eq 0 -and $r.Out -match 'PASS\s+Every invocation ran the global hooks of its event' -and $r.Out -match '(?i)1 invocation\(s\) .*truncated') `
+        "exit=$($r.Exit) out=$($r.Out.Substring([Math]::Max(0, $r.Out.IndexOf('## Integration Checks'))))"
+    $r = Invoke-Subject $cutGapLog
+    Add-Result 'G4_a_complete_invocation_missing_its_gate_still_fails_beside_a_cut_one' `
+        ($r.Exit -eq 1 -and $r.Out -match 'FAIL\s+1 invocation\(s\) did not run a global hook' -and $r.Out -match 'PreToolUse #8: block-dangerous' -and $r.Out -notmatch 'PreToolUse #9:') `
         "exit=$($r.Exit) out=$($r.Out.Substring([Math]::Max(0, $r.Out.IndexOf('## Integration Checks'))))"
 
     $r = Invoke-Subject $badLog
