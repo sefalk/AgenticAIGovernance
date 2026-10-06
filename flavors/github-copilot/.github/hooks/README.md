@@ -419,13 +419,46 @@ Refuses any `*wit_work_item_write` call that would create an unowned ADO work
 item (#36): `action=create` without a non-empty `System.AssignedTo`, and every
 `action=add_child`, whose schema has no assignee field at all. The reason names
 the fix — the `ADO_DEFAULT_ASSIGNED_TO` value to pass, or, when that key is
-empty, that the agent must ask the human. Updates are not judged.
+empty, that the agent must ask the human. Updates go to the field shrink guard
+below.
 
 **Blocking** — answers `hookSpecificOutput.permissionDecision: "deny"` at exit
 0\. `PreToolUse` is the one event both VS Code Local and GitHub Copilot let a
 hook refuse. It rides in the existing hook rather than registering its own:
 Local ignores matchers, so a separate hook would start another shell on every
 tool call. Without a Python interpreter it refuses the call (#251).
+
+#### PreToolUse: Work Item Field Shrink Guard
+
+**Scripts:** `scripts/work-item-owner.py` (judges, PreToolUse) and
+`scripts/scan-secrets.py` (records reads, PostToolUse), both through
+`scripts/_field_guard.py`
+
+Stops an `update` / `update_batch` from silently shortening a long text field
+(#197, which lost a third of a description that way). The PostToolUse side
+caches, per session, the length and headings of every field a `wit_work_item`
+`get`/`get_batch` or a write response returned, keyed by revision. The
+PreToolUse side compares each field op against that cache:
+
+| Situation | Verdict |
+|---|---|
+| Long field, item never read in this session | deny — read first |
+| Guarded field (read value > `WI_FIELD_GUARD_MIN_CHARS`) without `test /rev` | deny |
+| `test /rev` differs from the cached revision | deny — re-read |
+| Shrink over `WI_FIELD_SHRINK_PCT` % and `WI_FIELD_SHRINK_CHARS`, or a lost heading | `WI_FIELD_SHRINK_POLICY` |
+
+`WI_FIELD_SHRINK_POLICY`: `ask` (default) asks the human; `declared` allows a
+shrink declared in the same call and asks otherwise; `declared-strict` allows a
+declared shrink and denies otherwise; `deny` denies every shrink. The
+declaration is a `System.History` line,
+`af-shrink: <field>; remove: <heading>, ...; expect: <new length>`, checked
+against the diff: the lost headings must equal the declared ones and the new
+length must be within 10 % of `expect`. A declaration written after the hook
+has judged that field at that revision does not count until the item has a new
+revision — the verdict names the loss, and copying it back is not consent.
+
+The read cache lives under the temp directory (`AF_FIELD_CACHE_DIR` overrides)
+and expires after 24 hours. The `System.History` field itself is never judged.
 
 #### PostToolUse: Secret Detection Scan
 
