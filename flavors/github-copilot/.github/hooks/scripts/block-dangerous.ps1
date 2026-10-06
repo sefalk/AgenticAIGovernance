@@ -65,13 +65,14 @@ $execSurfacePattern = 'runCodeSnippet|run_notebook_cell|runNotebookCell|run_play
 
 $toolName = $inputData.tool_name
 
-# Ownership of created ADO work items (#36). Matched by suffix: the hook-side
-# spelling of an MCP tool id has not been captured.
-if ([string]$toolName -match 'wit_work_item_write$') {
+# Work-item writes: ADO owner (#36) and field shrink (#197), GitHub body shrink
+# (#376). Matched by suffix: the hook-side spelling of an MCP tool id has not
+# been captured. sub_issue_write only links issues and is not a body write.
+if ([string]$toolName -match '(wit_work_item_write|(?<!sub_)issue_write|update_pull_request|update_issue_comment)$') {
     $ownerCore = Join-Path $PSScriptRoot 'work-item-owner.py'
     if (-not $AfPython -or -not (Test-Path $ownerCore)) {
         @{ hookSpecificOutput = @{ hookEventName = 'PreToolUse'; permissionDecision = 'deny'
-                permissionDecisionReason = 'Policy hard-deny: the work-item-owner gate found no working Python interpreter (tried AF_PYTHON_OVERRIDE, python3, python, py) or work-item-owner.py is missing, and cannot check that the item gets an owner (#36, #251). Install Python 3, or set AF_PYTHON_OVERRIDE.' }
+                permissionDecisionReason = 'Policy hard-deny: the work-item gates found no working Python interpreter (tried AF_PYTHON_OVERRIDE, python3, python, py) or work-item-owner.py is missing, and cannot check this write for an owner or for lost text (#36, #197, #376, #251). Install Python 3, or set AF_PYTHON_OVERRIDE.' }
         } | ConvertTo-Json -Depth 3 -Compress
         exit 0
     }

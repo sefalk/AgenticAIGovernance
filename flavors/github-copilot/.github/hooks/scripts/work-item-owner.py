@@ -1,9 +1,10 @@
-"""PreToolUse gate for ``*wit_work_item_write``: owner on create (#36), field shrink on update (#197).
+"""PreToolUse gate for work-item writes: ADO owner (#36) and field shrink (#197), GitHub body shrink (#376).
 
-Called by both block-dangerous wrappers for ``*wit_work_item_write`` calls only.
+Called by both block-dangerous wrappers for ``*wit_work_item_write`` and the
+GitHub ``issue_write`` / ``update_pull_request`` / ``update_issue_comment`` calls.
 Reads the payload on stdin and the resolved config path from ``AF_CONF_RESOLVED``;
-writes one PreToolUse verdict to stdout and always exits 0. The update half lives
-in ``_field_guard.py``.
+writes one PreToolUse verdict to stdout and always exits 0. The shrink checks live
+in ``_field_guard.py`` (ADO) and ``_body_guard.py`` (GitHub).
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import json
 import os
 import sys
 
+from _body_guard import check_body as body_guard
 from _field_guard import check as field_guard
 
 OWNER_KEY = "ADO_DEFAULT_ASSIGNED_TO"
@@ -84,6 +86,13 @@ def main() -> int:
         except json.JSONDecodeError:
             tool_input = None
     if not isinstance(tool_input, dict):
+        return defer()
+
+    if not str(payload.get("tool_name") or "").endswith("wit_work_item_write"):
+        verdict = body_guard({**payload, "tool_input": tool_input}, os.environ.get("AF_CONF_RESOLVED", ""))
+        if verdict:
+            print(json.dumps(verdict, separators=(",", ":")))
+            return 0
         return defer()
 
     action = str(tool_input.get("action", "")).lower()
