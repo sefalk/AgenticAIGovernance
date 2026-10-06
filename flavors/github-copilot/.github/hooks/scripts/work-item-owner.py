@@ -1,8 +1,9 @@
-"""PreToolUse gate: an ADO work item is never created without an owner (#36).
+"""PreToolUse gate for ``*wit_work_item_write``: owner on create (#36), field shrink on update (#197).
 
 Called by both block-dangerous wrappers for ``*wit_work_item_write`` calls only.
 Reads the payload on stdin and the resolved config path from ``AF_CONF_RESOLVED``;
-writes one PreToolUse verdict to stdout and always exits 0.
+writes one PreToolUse verdict to stdout and always exits 0. The update half lives
+in ``_field_guard.py``.
 """
 
 from __future__ import annotations
@@ -10,6 +11,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+
+from _field_guard import check as field_guard
 
 OWNER_KEY = "ADO_DEFAULT_ASSIGNED_TO"
 OWNER_FIELD = "System.AssignedTo"
@@ -100,6 +103,12 @@ def main() -> int:
             f"Policy hard-deny: a work item is never created without {OWNER_FIELD}; "
             "unowned items fall off the board (#36). " + owner_hint(owner)
         )
+
+    if action in ("update", "update_batch") and isinstance(payload, dict):
+        verdict = field_guard({**payload, "tool_input": tool_input}, os.environ.get("AF_CONF_RESOLVED", ""))
+        if verdict:
+            print(json.dumps(verdict, separators=(",", ":")))
+            return 0
 
     return defer()
 
