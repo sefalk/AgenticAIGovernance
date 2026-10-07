@@ -7,8 +7,12 @@
 # the agent happens to run in (issue #54).
 . "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 
-# Consume stdin (required even if unused)
-cat > /dev/null
+# The session id keys the foreign-work baseline (#120).
+stdin_raw=$(cat)
+session_id=""
+if [ -n "$AF_PYTHON" ]; then
+    session_id=$(printf '%s' "$stdin_raw" | "$AF_PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
+fi
 
 # Gather context
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -87,7 +91,15 @@ if [ -z "$AF_PYTHON" ]; then
     python_notice=" | AF WARNING: no working Python interpreter (tried AF_PYTHON_OVERRIDE, python3, python, py). Running without their Python-backed check: ${_degraded:-none}. Refusing every call they guard: ${_refused:-none}. Install Python 3 or set AF_PYTHON_OVERRIDE (#342)."
 fi
 
-context="Project: ${project} | Branch: ${branch} | Last commit: ${commit} | ${py_ver}${test_log_summary}${python_notice}"
+# Paths dirty now were authored by no agent of this session; block-dangerous asks before discarding them (#120).
+foreign_notice=""
+fg_core="$(dirname -- "${BASH_SOURCE[0]}")/_foreign_guard.py"
+if [ -n "$AF_PYTHON" ] && [ -n "$AF_CODE_ROOT" ] && [ -f "$fg_core" ]; then
+    _fg=$(AF_FG_SESSION="$session_id" "$AF_PYTHON" "$fg_core" record "$AF_CODE_ROOT" 2>/dev/null)
+    [ -n "$_fg" ] && foreign_notice=" | ${_fg}"
+fi
+
+context="Project: ${project} | Branch: ${branch} | Last commit: ${commit} | ${py_ver}${test_log_summary}${python_notice}${foreign_notice}"
 
 # Return JSON — escape double quotes in context for safety
 context_escaped=$(echo "$context" | af_json_escape)

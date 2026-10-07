@@ -691,6 +691,19 @@ if [ "$cat_databricks" = "deny" ] && matches_unit '\bdatabricks\b'; then
     emit deny "$deny_msg"
 fi
 
+# ===================== Foreign work (#120) =====================
+# Ask before a git command discards a path that was already uncommitted when
+# this session started. Ahead of TIER 2, which auto-allows `git restore`.
+# No interpreter or no baseline: no opinion here. POSIX classes only (#194).
+if printf '%s' "$command_str" | grep -qE 'git[[:space:]].*(checkout|restore|stash|clean|switch)'; then
+    fg_core="$(dirname -- "${BASH_SOURCE[0]}")/_foreign_guard.py"
+    if [ -n "$PYTHON" ] && [ -n "$AF_CODE_ROOT" ] && [ -f "$fg_core" ]; then
+        fg_sid=$(printf '%s' "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
+        fg_out=$(AF_FG_COMMAND="$command_str" AF_FG_SESSION="$fg_sid" "$PYTHON" "$fg_core" check "$AF_CODE_ROOT" 2>/dev/null)
+        if [ -n "$fg_out" ]; then printf '%s\n' "$fg_out"; exit 0; fi
+    fi
+fi
+
 # ===================== TIER 2 -- ALLOW (segment-based) =====================
 # The command is split into segments on ; && || | and auto-approved only when
 # EVERY segment is individually safe. This lets common composites through
