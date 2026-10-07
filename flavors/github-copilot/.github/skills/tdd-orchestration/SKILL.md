@@ -316,6 +316,14 @@ If a HARD gate claim cannot be corroborated, downgrade to **BLOCKED** and
 narrate: `⚠️ Step {N}: gate claim '{gate}' unverifiable — treating as BLOCKED`.
 SOFT enforcement for Standard tier, HARD for Deep tier.
 
+**Measured claims (#273, #175).** A mechanical claim (moved, removed, marker
+added, advisory resolved) without its measurement is unverifiable: treat it as
+above. A measurement that contradicts the delegation's own criterion (a move
+that grew the file by 153 lines) is a REJECTED, whatever the Gate Summary says.
+The documenter has no critic, so for its content edits
+re-measure one claimed quantity yourself (line count, occurrence count) before
+accepting them.
+
 ---
 
 ## 10. Step 7: Document
@@ -439,6 +447,12 @@ Parse critic/arbiter verdicts defensively: search case-insensitively for
 `ESCALATE`, `RESOLVED`, `COMPROMISE`. If no verdict found → treat as
 **BLOCKED** (never default to APPROVED). Missing Gate Summary → warn but
 proceed. Missing metrics → record `N/A`.
+
+A producer that returns no text is BLOCKED, not done (#175). Its Stop hook
+only warns (`RETURN EMPTY`), so the decision is yours. Run
+`git status --porcelain` to see what it touched, then re-invoke the same agent
+once, asking only for its return. That does not count as a retry. A second
+empty return → escalate with the file list.
 
 ### Rejection Feedback Validation
 

@@ -413,7 +413,8 @@ Three things happen on every return — full protocols in
 `skills/tdd-orchestration/SKILL.md` § 13:
 
 1. **Parse the verdict** defensively (case-insensitive search for `verdict:`).
-   **No verdict found → BLOCKED. Never default to APPROVED.** Before retrying a
+   **No verdict found → BLOCKED. Never default to APPROVED.**
+   An empty producer return is BLOCKED too (§ 13). Before retrying a
    REJECTED, check the critic gave actionable findings; if not, re-ask the same
    critic — that does not consume a retry.
 2. **Narrate** one line: `[Step {N}/{total}] {emoji} {agent} — {outcome} | Next → {next}`.
