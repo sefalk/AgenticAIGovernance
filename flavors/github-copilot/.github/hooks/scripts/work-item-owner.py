@@ -1,4 +1,7 @@
-"""PreToolUse gate for work-item writes: ADO owner (#36) and field shrink (#197), GitHub body shrink (#376).
+"""PreToolUse gate for work-item writes.
+
+Covers the ADO owner (#36), Bug body placement (#289), field shrink (#197) and
+GitHub body shrink (#376).
 
 Called by both block-dangerous wrappers for ``*wit_work_item_write`` and the
 GitHub ``issue_write`` / ``update_pull_request`` / ``update_issue_comment`` calls.
@@ -11,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 
 from _body_guard import check_body as body_guard
@@ -18,6 +22,16 @@ from _field_guard import check as field_guard
 
 OWNER_KEY = "ADO_DEFAULT_ASSIGNED_TO"
 OWNER_FIELD = "System.AssignedTo"
+DESCRIPTION = "System.Description"
+REPRO_STEPS = "Microsoft.VSTS.TCM.ReproSteps"
+LONG_TEXT = (
+    DESCRIPTION,
+    REPRO_STEPS,
+    "Microsoft.VSTS.TCM.SystemInfo",
+    "Microsoft.VSTS.Common.AcceptanceCriteria",
+)
+# ADO stores an unformatted value as HTML, so these render as literal text.
+MARKDOWN_SIGNS = re.compile(r"^(#{1,6} |```|\|.*\|\s*$)", re.MULTILINE)
 
 
 def configured_owner(conf_path: str) -> str:
@@ -53,15 +67,42 @@ def defer() -> int:
 
 
 def has_owner(fields: object) -> bool:
-    if not isinstance(fields, list):
-        return False
-    for field in fields:
-        if not isinstance(field, dict):
-            continue
+    return bool(field_value(fields, OWNER_FIELD).strip())
+
+
+def field_entries(fields: object) -> list[dict]:
+    return [f for f in fields if isinstance(f, dict)] if isinstance(fields, list) else []
+
+
+def field_value(fields: object, name: str) -> str:
+    for field in field_entries(fields):
+        if str(field.get("name", "")).removeprefix("/fields/").lower() == name.lower():
+            return str(field.get("value") or "")
+    return ""
+
+
+def body_problem(work_item_type: str, fields: object) -> str:
+    """Name why a create would store its body where no one reads it (#289), or ''."""
+    if (
+        work_item_type.strip().lower() == "bug"
+        and field_value(fields, DESCRIPTION).strip()
+        and not field_value(fields, REPRO_STEPS).strip()
+    ):
+        return (
+            f"Policy hard-deny: the stock Bug form renders Repro Steps and System Info, not {DESCRIPTION}, "
+            "so a Bug body written there is stored but never seen (#289). "
+            f"Put the body in {REPRO_STEPS} instead, with format Markdown if it is Markdown."
+        )
+    for field in field_entries(fields):
         name = str(field.get("name", "")).removeprefix("/fields/")
-        if name.lower() == OWNER_FIELD.lower() and str(field.get("value") or "").strip():
-            return True
-    return False
+        if name.lower() not in (n.lower() for n in LONG_TEXT) or field.get("format"):
+            continue
+        if MARKDOWN_SIGNS.search(str(field.get("value") or "")):
+            return (
+                f"Policy hard-deny: {name} holds Markdown but sets no format, so ADO stores it as HTML "
+                'and headings render as literal "##" (#289). Add "format": "Markdown" to that field and retry.'
+            )
+    return ""
 
 
 def owner_hint(owner: str) -> str:
@@ -112,6 +153,11 @@ def main() -> int:
             f"Policy hard-deny: a work item is never created without {OWNER_FIELD}; "
             "unowned items fall off the board (#36). " + owner_hint(owner)
         )
+
+    if action == "create":
+        problem = body_problem(str(tool_input.get("workItemType") or ""), tool_input.get("fields"))
+        if problem:
+            return deny(problem)
 
     if action in ("update", "update_batch") and isinstance(payload, dict):
         verdict = field_guard({**payload, "tool_input": tool_input}, os.environ.get("AF_CONF_RESOLVED", ""))
