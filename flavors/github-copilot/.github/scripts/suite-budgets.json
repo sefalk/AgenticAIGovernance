@@ -11,6 +11,7 @@
     "test-deploy-flags.ps1": 60,
     "test-dialect-wrappers.ps1": 170,
     "test-body-shrink-guard.ps1": 240,
+    "test-foreign-guard.ps1": 360,
     "test-field-shrink-guard.ps1": 240,
     "test-hook-decision-contract.ps1": 30,
     "test-hook-declarations.ps1": 30,

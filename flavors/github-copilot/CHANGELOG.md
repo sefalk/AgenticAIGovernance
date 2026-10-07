@@ -15,6 +15,25 @@ build for one (#322).
 
 ### Added
 
+- **A session can no longer silently discard work that was uncommitted when it
+  started (#120).** Git keeps no copy of uncommitted changes. #120 lost a
+  correct fix to a later session's checkout, and nothing announced it.
+
+  `session-context` now records every path that is dirty at session start, per
+  `session_id`, under `.github/logs/`. Before a git command could discard one of
+  those paths, `block-dangerous` asks and names the files. The covered commands
+  are `restore`, `checkout --`/`-f`, `stash`, `clean` and
+  `switch --discard-changes`. Before this, `git restore` was auto-allowed under
+  `GIT_FEATURE=auto`.
+
+  Exempt are paths the session dirtied itself, `--staged`-only restores,
+  `stash list`/`pop` and `clean -n`. A session without a baseline falls back to
+  the existing classifier unchanged. The next session start also reports
+  baseline paths that went clean without any commit touching them.
+
+  Both dialects share one Python core, `_foreign_guard.py`, and
+  `test-foreign-guard.ps1` runs every case in both dialects.
+
 - **Issues delivered to `dev` are now closed automatically (#160).**
   `Closes #N` fires only on the default branch, so delivered work looked
   unfinished until a release, and closing by hand was forgotten: the 2026-10-07

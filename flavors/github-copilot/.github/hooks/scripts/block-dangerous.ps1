@@ -621,6 +621,21 @@ if ($catDatabricks -eq 'deny' -and (Test-AnyUnit '(?i)\bdatabricks\b')) {
 }
 
 # ===========================================================================
+# Foreign work (#120) -- ask before a git command discards a path that was
+# already uncommitted when this session started. Ahead of TIER 2, which
+# auto-allows `git restore`. No interpreter or no baseline: no opinion here.
+# ===========================================================================
+if ($command -match 'git\s.*\b(checkout|restore|stash|clean|switch)\b') {
+    $fgCore = Join-Path $PSScriptRoot '_foreign_guard.py'
+    if ($AfPython -and $AfCodeRoot -and (Test-Path $fgCore)) {
+        $env:AF_FG_COMMAND = $command
+        $env:AF_FG_SESSION = [string]$inputData.session_id
+        $fg = (& $AfPython $fgCore check $AfCodeRoot 2>$null | Out-String).Trim()
+        if ($fg) { Write-Output $fg; exit 0 }
+    }
+}
+
+# ===========================================================================
 # TIER 2 -- ALLOW (auto-approve safe commands), segment-based & category gated.
 #
 # The command is split into segments on ; && || | and auto-approved only when
