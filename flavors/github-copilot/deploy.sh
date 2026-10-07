@@ -831,6 +831,9 @@ deploy_file() {
         if is_deactivated_skill_unit "$hash_key"; then
             echo "  DEACTIVATED $display  (skill moved to _available/)"
             ((STAT_DEACTIVATED++)) || true
+            # Keep the _available/ copy current, or re-activation restores a stale skill (#384).
+            local avail_key="skills/_available/${hash_key#skills/}"
+            deploy_file "$src" "$TARGET_GITHUB/$avail_key" ".github/$avail_key" "$avail_key"
             return
         fi
         echo "  CREATE  $display"

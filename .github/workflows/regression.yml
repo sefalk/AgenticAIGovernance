@@ -615,3 +615,29 @@ jobs:
             exit 1
           }
           Write-Host "Bash deploy non-repo suite: $($passed.Groups[1].Value) assertions passed."
+
+      # The pytest parity cases for deploy.sh skip on Windows (a full deploy
+      # outlasts their 300s limit, #260), so the bash half of #384 -- keeping a
+      # deactivated skill's _available/ copy current -- runs here against a
+      # minimal one-skill source instead.
+      - name: Run the bash deactivated-skill sync suite
+        shell: powershell
+        run: |
+          $bash = 'C:\Program Files\Git\bin\bash.exe'
+          if (-not (Test-Path $bash)) {
+            Write-Error "No bash at $bash -- this step would prove nothing."
+            exit 1
+          }
+          $out = & $bash -c 'bash flavors/github-copilot/.github/scripts/test-deploy-available-sync.sh 2>&1' | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $out
+          if ($code -ne 0) {
+            Write-Error "The bash deactivated-skill sync suite failed (exit $code)."
+            exit 1
+          }
+          $passed = [regex]::Match($out, 'Passed:\s*(\d+)')
+          if (-not $passed.Success -or [int]$passed.Groups[1].Value -lt 7) {
+            Write-Error 'Fewer than 7 passing assertions reported -- the suite did not run in full.'
+            exit 1
+          }
+          Write-Host "Bash deactivated-skill sync suite: $($passed.Groups[1].Value) assertions passed."

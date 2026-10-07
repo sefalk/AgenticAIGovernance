@@ -88,6 +88,17 @@ build for one (#322).
 
 ### Fixed
 
+- **Deploy keeps the `_available/` copy of a deactivated skill current
+  (#384).** A default skill the project moved to `skills/_available/{name}/`
+  was skipped as `DEACTIVATED` on every deploy, so its copy froze at the version
+  it was moved in. MP's `git-worktrees` copy had 229 lines, the source 318.
+  Re-activating such a skill restored the stale copy without notice. All three
+  engines (`deploy.ps1`, `deploy.sh`, `deploy_core`) still report the skill as
+  `DEACTIVATED` and still never re-create `skills/{name}/`. They now also
+  classify the `_available/` copy like any other file, under its own baseline
+  key: an unedited copy is updated, a project-edited one is a `CONFLICT`, and an
+  identical one is `UNCHANGED`.
+
 - **Coordinator Step 0d no longer points at a skill the project curated out
   (#380).** With `WORKTREE_ENABLED=true` and `skills/git-worktrees/` moved to
   `_available/`, the bootstrap named a runbook that was not deployed. It now

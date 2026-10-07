@@ -497,6 +497,22 @@ def _is_deactivated_skill_unit(hash_key: str, target_github: Path) -> bool:
     return (target_github / "skills" / "_available" / parts[1]).is_dir()
 
 
+def _available_unit(u: Unit, target_github: Path) -> Unit:
+    """The ``skills/_available/{name}/`` copy a deactivated skill unit is deployed to.
+
+    Skipping it froze the copy at the version it was moved in, so re-activation
+    restored a stale skill (#384). It is classified like any other file instead.
+    """
+    rel = "skills/_available/" + _norm(u.hash_key)[len("skills/") :]
+    return Unit(
+        source=u.source, target=target_github / rel, hash_key=rel, display=f".github/{rel}", is_custom=u.is_custom
+    )
+
+
+def _target_hash(target: Path) -> str | None:
+    return _target_classify_hash(target) if target.is_file() else None
+
+
 def dry_run(source_root: Path, target_dir: Path) -> dict:
     """Classify every deployable file (read-only). Mirrors the deploy dry-run."""
     target_github = target_dir / ".github"
@@ -510,10 +526,12 @@ def dry_run(source_root: Path, target_dir: Path) -> dict:
     counts: dict[str, int] = {}
     for u in units:
         src_h = source_hash_resolved(u.source, target_af_env)
-        tgt_h = _target_classify_hash(u.target) if u.target.is_file() else None
-        cls = _classify(u.is_custom, src_h, tgt_h, baseline.get(u.hash_key), has_baseline)
+        cls = _classify(u.is_custom, src_h, _target_hash(u.target), baseline.get(u.hash_key), has_baseline)
         if cls == "CREATE" and _is_deactivated_skill_unit(u.hash_key, target_github):
-            cls = "DEACTIVATED"
+            counts["DEACTIVATED"] = counts.get("DEACTIVATED", 0) + 1
+            results.append({"path": u.display, "classification": "DEACTIVATED", "customizable": u.is_custom})
+            u = _available_unit(u, target_github)
+            cls = _classify(u.is_custom, src_h, _target_hash(u.target), baseline.get(u.hash_key), has_baseline)
         counts[cls] = counts.get(cls, 0) + 1
         results.append({"path": u.display, "classification": cls, "customizable": u.is_custom})
 
@@ -584,10 +602,11 @@ def apply(source_root: Path, target_dir: Path) -> dict:
     for u in collect_units(source_root, target_dir, manifest):
         data = resolved_source_bytes(u.source, target_af_env)
         src_h = _sha256_upper_bytes(_strip_bytes(data))
-        tgt_h = _target_classify_hash(u.target) if u.target.is_file() else None
-        cls = _classify(u.is_custom, src_h, tgt_h, baseline.get(u.hash_key), has_baseline)
+        cls = _classify(u.is_custom, src_h, _target_hash(u.target), baseline.get(u.hash_key), has_baseline)
         if cls == "CREATE" and _is_deactivated_skill_unit(u.hash_key, target_github):
-            cls = "DEACTIVATED"
+            skipped.append({"path": u.display, "classification": "DEACTIVATED"})
+            u = _available_unit(u, target_github)
+            cls = _classify(u.is_custom, src_h, _target_hash(u.target), baseline.get(u.hash_key), has_baseline)
         if cls in ("CREATE", "UPDATE"):
             if u.target.is_file():
                 bpath = backup_dir / u.display
