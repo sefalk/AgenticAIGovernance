@@ -339,6 +339,9 @@ When it applies, follow `skills/git-worktrees/SKILL.md` § 2 — `WORKTREE_DIR`
 resolution, the stale-worktree check, creation, the `.github/.active-worktree`
 sentinel that redirects hook quality gates to the worktree, the
 `WORKTREE_VENV_MODE` interpreter decision, and the VS Code workspace entry.
+If that file is absent (curated to `skills/_available/`), halt and ask the
+human to activate the skill or set `WORKTREE_ENABLED=false` — never improvise
+the runbook or run from the `_available/` copy, which deploy does not refresh (#384).
 Record `worktree: {absolute_path}` in the plan metadata; every subsequent
 subagent call carries the path — see Subagent Context Injection.
 
