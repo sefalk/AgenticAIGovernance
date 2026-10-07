@@ -88,6 +88,13 @@ build for one (#322).
 
 ### Fixed
 
+- **Coordinator Step 0d no longer points at a skill the project curated out
+  (#380).** With `WORKTREE_ENABLED=true` and `skills/git-worktrees/` moved to
+  `_available/`, the bootstrap named a runbook that was not deployed. It now
+  halts and asks the human to activate the skill or set
+  `WORKTREE_ENABLED=false`. It never runs from the `_available/` copy, which
+  deploy does not refresh (#384).
+
 - **The deployment skill's release step 5 can succeed again (#368).** Its
   `python -m build` built the wheel from the sdist. That sdist cannot carry the
   force-included payload from outside `mcp-deploy/`, so the step failed with
