@@ -135,6 +135,21 @@ build for one (#322).
   - Existing Bugs are not migrated. A backfill must not read and re-post them:
     the MCP read truncates `System.Description` at about 2000 characters.
 
+- **Producer claims now carry their measurement; an empty return is BLOCKED
+  (#273, #175).** A documenter asked to move 157 lines copied them (505 → 658
+  lines, every marker twice) and reported its own check as a passed HARD gate.
+  A refactorer claimed markers it never wrote. A test-writer called an advisory
+  resolved with 3 of 4 duplicates left.
+  - A delegation criterion a producer checked itself is SOFT, reported with
+    its count (`quality-gates`, `documenter`).
+  - The documenter measures a content edit before and after, and changes
+    nothing it was not asked to change.
+  - The implementer, refactorer and test-writer back a mechanical claim with
+    the command and count that prove it.
+  - The coordinator treats an empty producer return as BLOCKED, with one
+    re-ask, and re-measures documenter content edits itself because no critic
+    reviews them.
+
 - **`block-dangerous` no longer denies a single-quoted pattern as
   pipe-to-shell when the command interpolates elsewhere (#122).** When the
   command contained `$(` or a backtick anywhere, the raw pipe-to-shell scan read

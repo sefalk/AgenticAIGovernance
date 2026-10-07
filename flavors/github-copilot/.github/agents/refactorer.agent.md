@@ -182,6 +182,10 @@ complete structure below.
 A skipped refactoring is never omitted — it is the record of a structural
 problem someone still has to decide about.
 
+A claim of a mechanical change (marker added, occurrence removed, advisory
+resolved) carries the measurement that proves it, taken after the edit: the
+command and its count. Without one it is unverified (#175).
+
 ## Exit Gates
 
 Verify these before returning. Gate types, complexity tiers, and the Gate

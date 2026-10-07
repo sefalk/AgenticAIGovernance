@@ -3406,6 +3406,51 @@ foreach ($worker in @('ado-work-item-manager', 'ado-pipeline-manager', 'gh-issue
 
 Write-Output ""
 
+# ── 6f. Producer claims carry their measurement (issues #273, #175) ──────
+
+Write-Output "## Measured producer claims (issues #273, #175)"
+
+# A documenter asked to MOVE 157 lines copied them (505 -> 658 lines, every
+# marker twice) and reported "HARD gates: all met" for a check it ran on itself.
+# A refactorer claimed markers it never wrote; a test-writer called an advisory
+# resolved with 3 of 4 duplicates left. Each claim fell to one count.
+$docAgent = Get-Content (Join-Path $githubDir 'agents/documenter.agent.md') -Raw
+$tddSkill = Get-Content (Join-Path $githubDir 'skills/tdd-orchestration/SKILL.md') -Raw
+$coordAgent = Get-Content (Join-Path $githubDir 'agents/coordinator.agent.md') -Raw
+
+Assert-True "a delegation criterion checked by the producer itself is SOFT" `
+    ($gatesInstr -match '(?i)delegation criterion you checked yourself is SOFT') `
+    "the maker-checker rule still leaves ad-hoc criteria free to be reported as HARD"
+
+Assert-True "the documenter reports self-checked criteria as evaluated, never as passed" `
+    ($docAgent -match '(?i)never as passed') `
+    "the documenter may still count its own checks as HARD passes"
+
+Assert-True "the documenter measures a content edit before and after" `
+    ($docAgent -match '(?m)^## Content Edits' -and $docAgent -match '(?i)exactly one occurrence') `
+    "a move can still be reported as done without a count that would disprove it"
+
+Assert-True "the documenter changes nothing it was not asked to change" `
+    ($docAgent -match '(?i)Change nothing you were not asked to change') `
+    "an unrequested date edit is still within the documenter's remit"
+
+foreach ($producer in @('implementer', 'refactorer', 'test-writer')) {
+    $text = Get-Content (Join-Path $githubDir "agents/$producer.agent.md") -Raw
+    Assert-True "$producer return backs a mechanical claim with its measurement" `
+        ($text -match '(?i)carries the measurement that proves it') `
+        "$producer can still report a marker or a resolved advisory without the count"
+}
+
+Assert-True "the coordinator treats an empty producer return as BLOCKED" `
+    ($tddSkill -match '(?i)returns no text is BLOCKED' -and $coordAgent -match '(?i)empty producer return is BLOCKED') `
+    "an empty return is still 'warn but proceed'"
+
+Assert-True "the coordinator re-measures the documenter, which no critic reviews" `
+    ($tddSkill -match '(?i)re-measure one claimed quantity yourself') `
+    "a documenter content edit still reaches the human on its own word"
+
+Write-Output ""
+
 # ── 7. Edge cases ────────────────────────────────────────────────────────
 
 Write-Output "## Edge cases"
