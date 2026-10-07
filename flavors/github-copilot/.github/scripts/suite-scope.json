@@ -78,6 +78,13 @@
       ".github/af-env.conf",
       ".github/agents/ado-work-item-manager.agent.md"
     ],
+    "test-foreign-guard.ps1": [
+      ".github/hooks/scripts/_foreign_guard.py",
+      ".github/hooks/scripts/block-dangerous.ps1",
+      ".github/hooks/scripts/block-dangerous.sh",
+      ".github/hooks/scripts/session-context.ps1",
+      ".github/hooks/scripts/session-context.sh"
+    ],
     "test-body-shrink-guard.ps1": [
       ".github/hooks/scripts/_body_guard.py",
       ".github/hooks/scripts/_field_guard.py",
