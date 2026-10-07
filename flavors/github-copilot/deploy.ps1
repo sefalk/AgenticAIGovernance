@@ -812,6 +812,9 @@ function Publish-SingleFile {
         if (Test-DeactivatedSkillUnit $HashKey) {
             Write-Host "  DEACTIVATED $DisplayPath  (skill moved to _available/)" -ForegroundColor DarkGray
             $script:Stats.Deactivated++
+            # Keep the _available/ copy current, or re-activation restores a stale skill (#384).
+            $availKey = 'skills/_available/' + $HashKey.Substring('skills/'.Length)
+            Publish-SingleFile -Source $Source -Target (Join-Path $TargetGitHub $availKey) -DisplayPath ".github/$availKey" -HashKey $availKey
             return
         }
         Write-Host "  CREATE  $DisplayPath" -ForegroundColor Green
