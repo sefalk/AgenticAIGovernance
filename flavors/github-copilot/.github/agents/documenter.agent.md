@@ -288,6 +288,20 @@ one, and the series is being built precisely to be read later. Set
 `workflow_type` to the workflow that ran and record what the single agent
 returned.
 
+## Content Edits
+
+When asked to move, relocate, deduplicate or reword existing content, the claim
+"moved" is checked by a count, not by your re-read (#273):
+
+1. **Before editing**, measure with a tool: the file's line count and the
+   occurrence count of each heading or marker you will touch.
+2. **After editing**, measure the same quantities again.
+3. Return both sets of numbers. A move leaves every moved marker at
+   exactly one occurrence and a net line change near zero. If your numbers say otherwise,
+   the edit is not done: fix it, or return FAILED with the numbers.
+4. Change nothing you were not asked to change. Dates, numbers and identifiers
+   are facts, not style.
+
 ## Return Format
 
 ### On success (all artifacts written)
@@ -346,3 +360,7 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Provenance markers verified on all AI-touched files | HARD | Scan changed files for markers | Standard+ |
 | Retro snippet in `RETRO_DIR` when the run had something to teach | HARD | Verify file created with required fields | Standard+ |
 | Architecture docs updated (if new modules/ports) | SOFT | Self-check: applicable only if new elements | Deep |
+
+Only the rows above count toward `HARD gates: {passed}/{total}`. A criterion
+from the delegation prompt is one you checked yourself: list it as SOFT with
+its measured count, evaluated, never as passed.

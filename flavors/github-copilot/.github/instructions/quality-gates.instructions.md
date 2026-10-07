@@ -22,8 +22,9 @@ Three types:
 
 **Maker-Checker rule:** An agent's self-check of its own structural output
 is always SOFT, not HARD. Only a _different_ agent (critic) or an automated
-tool can enforce a HARD gate. This prevents the cognitive bias of
-proofreading your own work.
+tool can enforce a HARD gate.
+A delegation criterion you checked yourself is SOFT, reported with the count
+you measured.
 
 **BLOCKED state:** If a tool required for a HARD gate is unavailable
 (terminal down, Pylance MCP unreachable, pytest not installed), report

@@ -207,6 +207,10 @@ Always report deviations from the plan, an unmet acceptance criterion, or a
 HARD gate you could not verify — in every mode. A silent deviation is the one
 thing the coordinator cannot recover from.
 
+A claim of a mechanical change (marker added, occurrence removed, advisory
+resolved) carries the measurement that proves it, taken after the edit: the
+command and its count. Without one it is unverified (#175).
+
 ## Exit Gates
 
 Verify these before returning. Gate types, complexity tiers, and the Gate
