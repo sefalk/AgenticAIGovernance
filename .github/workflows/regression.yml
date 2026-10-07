@@ -468,6 +468,13 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-deployment-skill.py
 
+      # Closing an issue that was left open on purpose hides work, so the
+      # sweep that closes issues delivered to dev (#160) is driven against a
+      # stubbed gh: what must close, and everything that must not.
+      - name: Test closing issues delivered to dev
+        shell: powershell
+        run: python .github\scripts\test-close-delivered-issues.py
+
       # The framework mandated a transition to `Resolved`, the ADO `Task` type
       # has no such state, and nothing could notice -- items were unclosable by
       # construction while the gate that caused it read as correct prose
