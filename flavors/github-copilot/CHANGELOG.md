@@ -102,6 +102,18 @@ build for one (#322).
 
 ### Fixed
 
+- **`block-dangerous` no longer denies a single-quoted pattern as
+  pipe-to-shell when the command interpolates elsewhere (#122).** When the
+  command contained `$(` or a backtick anywhere, the raw pipe-to-shell scan read
+  every quoted literal as a command. That included single-quoted literals,
+  which never interpolate. A read-only `-match 'scripts/(ps1|sh)'` was
+  therefore hard-denied (live, 2026-09-29).
+
+  Both dialects now treat single-quoted literals as data. A double-quoted
+  string is kept for the scan only if it interpolates itself, so
+  `Write-Host "$(…) | bash"` and interpreter payloads such as `bash -c "… | sh"`
+  are still denied.
+
 - **Deploy keeps the `_available/` copy of a deactivated skill current
   (#384).** A default skill the project moved to `skills/_available/{name}/`
   was skipped as `DEACTIVATED` on every deploy, so its copy froze at the version

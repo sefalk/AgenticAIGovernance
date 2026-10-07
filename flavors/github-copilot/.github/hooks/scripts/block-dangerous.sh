@@ -572,14 +572,18 @@ def payloads_of(text):
 # statement positionally as well as behind a flag.
 def build_raw(strength):
     pls = payloads_of(s)
-    if "$(" in s or "`" in s:
-        return [s] + pls
     if strength == "exec":
         t = s
         for p in pls:
             t = t.replace("\"" + p + "\"", " ").replace("\x27" + p + "\x27", " ")
-        t = re.sub(r"\x27[^\x27]*\x27", "", re.sub(r"\"[^\"]*\"", "", t))
+        # An interpolation elsewhere no longer makes every literal a command (#122, 2026-09-29):
+        # single quotes never interpolate; a double-quoted string executes only via $( or a backtick.
+        t = re.sub(r"\"[^\"]*\"|\x27[^\x27]*\x27",
+                   lambda m: m.group(0) if m.group(0).startswith("\"") and ("$(" in m.group(0) or "`" in m.group(0)) else "",
+                   t)
         return [t] + pls
+    if "$(" in s or "`" in s:
+        return [s] + pls
     parts = [strip_quoted(seg) if (BARE.match(seg) or DATA.search(seg)) else seg for seg in segs]
     return [" ; ".join(parts)] + pls
 
