@@ -121,6 +121,20 @@ build for one (#322).
 
 ### Fixed
 
+- **A Bug's body now lands in the field the Bug form shows (#289).** Bug bodies
+  were written to `System.Description`, which the stock Bug form never renders,
+  so five measured Bugs carried 2–4.4 KB bodies that no one saw. Two of three
+  sampled bodies were raw Markdown without a format and rendered `##` literally.
+  - The PreToolUse work-item gate denies a Bug `create` with its body in
+    `System.Description` and none in `Microsoft.VSTS.TCM.ReproSteps`.
+  - It also denies a long-text field that holds Markdown without
+    `"format": "Markdown"`.
+  - `ado-work-item-manager` routes the body by type, runs its applicability
+    guard for the body write too, and no longer offers `System.Description` as
+    the fallback on a Bug.
+  - Existing Bugs are not migrated. A backfill must not read and re-post them:
+    the MCP read truncates `System.Description` at about 2000 characters.
+
 - **Producer claims now carry their measurement; an empty return is BLOCKED
   (#273, #175).** A documenter asked to move 157 lines copied them (505 → 658
   lines, every marker twice) and reported its own check as a passed HARD gate.

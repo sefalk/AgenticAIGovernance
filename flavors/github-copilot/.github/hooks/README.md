@@ -422,6 +422,13 @@ the fix — the `ADO_DEFAULT_ASSIGNED_TO` value to pass, or, when that key is
 empty, that the agent must ask the human. Updates go to the field shrink guard
 below.
 
+A `create` is also refused when its body would be stored where no one reads it
+(#289): a `Bug` whose body is in `System.Description` and not in
+`Microsoft.VSTS.TCM.ReproSteps` (the stock Bug form renders only the latter), or
+a long-text field holding Markdown without `"format": "Markdown"` (ADO stores it
+as HTML, so `##` renders literally). An `update` carries no type, so it is not
+judged for this.
+
 **Blocking** — answers `hookSpecificOutput.permissionDecision: "deny"` at exit
 0\. `PreToolUse` is the one event both VS Code Local and GitHub Copilot let a
 hook refuse. It rides in the existing hook rather than registering its own:
