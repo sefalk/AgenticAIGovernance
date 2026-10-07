@@ -15,6 +15,20 @@ build for one (#322).
 
 ### Added
 
+- **Issues delivered to `dev` are now closed automatically (#160).**
+  `Closes #N` fires only on the default branch, so delivered work looked
+  unfinished until a release, and closing by hand was forgotten: the 2026-10-07
+  triage found three such issues.
+
+  `close-delivered-issues.yml` runs `close-delivered-issues.ps1`. It reads the
+  pull requests merged into `dev` since a cutoff, posts a delivery note on each
+  open issue named by a `Closes/Fixes/Resolves #N` line, and then closes it.
+  Keywords inside HTML comments, code fences or mid-sentence are ignored.
+
+  The workflow sweeps on every pull request to `dev` rather than reacting to
+  merges, because merges done with `GITHUB_TOKEN` trigger no workflow. The
+  decision table `test-close-delivered-issues.py` runs in CI.
+
 - **A hook now stops work-item updates that silently shorten a long field
   (#197).** The incident behind #197 replaced a description with a shorter
   rewrite and lost a third of it; the worker's "non-destructive" gate was a

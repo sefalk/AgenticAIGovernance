@@ -64,6 +64,17 @@ CASES: list[tuple[str, list[dict], dict[int, dict], list[str], bool, int, list[i
     ),
     ("a_keyword_in_a_code_fence_is_ignored", [pr(506, "```\nCloses #17\n```")], {17: OPEN}, [], False, 0, [], ""),
     (
+        "a_keyword_in_a_multiline_template_comment_is_ignored",
+        [pr(513, "## Closes\n\n<!--\nCloses #25\n-->\n")],
+        {25: OPEN},
+        [],
+        False,
+        0,
+        [],
+        "",
+    ),
+    ("a_failed_close_fails_the_run", [pr(514, "Closes #26")], {26: OPEN}, [], True, 1, [26], "::error::"),
+    (
         "a_keyword_mid_sentence_is_ignored",
         [pr(507, "This PR never closes #18 by design.")],
         {18: OPEN},
@@ -90,22 +101,30 @@ CASES: list[tuple[str, list[dict], dict[int, dict], list[str], bool, int, list[i
 ]
 
 
-def stub(pulls: list[dict], issues: dict[int, dict], log: Path, fail_writes: bool) -> str:
+# Cases whose stub fails only the close, so a note-then-failed-close is caught too.
+FAIL_CLOSE_ONLY = {"a_failed_close_fails_the_run"}
+
+
+def stub(pulls: list[dict], issues: dict[int, dict], log: Path, fail_writes: bool, close_only: bool = False) -> str:
     """A `gh` function answering the three reads and recording every call."""
     pull_lines = "\n".join(json.dumps(p) for p in pulls)
-    issue_map = "; ".join(f"'{n}' = '{s['state']}`t{str(s['is_pr']).lower()}'" for n, s in issues.items())
+    issue_map = "; ".join(f"'{n}' = \"{s['state']}`t{str(s['is_pr']).lower()}\"" for n, s in issues.items())
     return (
         "$ErrorActionPreference = 'Stop'\n"
         f"$STUB_LOG = '{log}'\n"
         "$STUB_PULLS = @'\n" + pull_lines + "\n'@\n"
         f"$STUB_ISSUES = @{{ {issue_map} }}\n"
         f"$STUB_FAIL = ${str(fail_writes).lower()}\n"
+        f"$STUB_CLOSE_ONLY = ${str(close_only).lower()}\n"
         "function gh {\n"
         "    $joined = $args -join ' '\n"
         "    Add-Content -Path $STUB_LOG -Value $joined -Encoding UTF8\n"
         "    $global:LASTEXITCODE = 0\n"
         "    if ($joined -match '-X (POST|PATCH)') {\n"
-        "        if ($STUB_FAIL) { Write-Error 'HTTP 403: Resource not accessible by integration'; $global:LASTEXITCODE = 1; return }\n"
+        "        if ($STUB_FAIL -and -not ($STUB_CLOSE_ONLY -and $joined -match '-X POST')) {\n"
+        "            Write-Error 'HTTP 403: Resource not accessible by integration'\n"
+        "            $global:LASTEXITCODE = 1; return\n"
+        "        }\n"
         "        return '{}'\n"
         "    }\n"
         "    if ($joined -match '/pulls\\?') { return $STUB_PULLS -split \"`n\" | Where-Object { $_ } }\n"
@@ -126,9 +145,10 @@ def main() -> int:
         for name, pulls, issues, extra, fail_writes, want_exit, want_closed, want_text in CASES:
             log = work / f"{name}.log"
             log.write_text("", encoding="utf-8")
-            call = f"& '{SCRIPT}' -Repo 'sefalk/AgenticAIGovernance' -Since '{SINCE}' {' '.join(extra)}\nexit $LASTEXITCODE\n"
+            args = f"-Repo 'sefalk/AgenticAIGovernance' -Since '{SINCE}' {' '.join(extra)}"
+            call = f"& '{SCRIPT}' {args}\nexit $LASTEXITCODE\n"
             case = work / f"case_{name}.ps1"
-            case.write_text(stub(pulls, issues, log, fail_writes) + call, encoding="utf-8")
+            case.write_text(stub(pulls, issues, log, fail_writes, name in FAIL_CLOSE_ONLY) + call, encoding="utf-8")
             proc = subprocess.run(
                 ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(case)],
                 capture_output=True,
