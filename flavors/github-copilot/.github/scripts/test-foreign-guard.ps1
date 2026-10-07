@@ -99,7 +99,10 @@ function Reset-Fixture {
     Write-Text 'src/own.py' "y = 1`n"
     Write-Text '.gitignore' ".github/hooks/`n.github/af-env.conf`n"
     Invoke-FixtureGit @('add', '--', 'src/foreign.py', 'src/own.py', '.gitignore')
-    Invoke-FixtureGit @('commit', '-q', '-m', 'base')
+    # Dated ahead of the baseline: CI committed within the baseline's second, and a
+    # timestamp test read that commit as "after the session started" (PR #389 run).
+    $env:GIT_COMMITTER_DATE = (Get-Date).AddHours(1).ToString('o'); $env:GIT_AUTHOR_DATE = $env:GIT_COMMITTER_DATE
+    try { Invoke-FixtureGit @('commit', '-q', '-m', 'base') } finally { $env:GIT_COMMITTER_DATE = $null; $env:GIT_AUTHOR_DATE = $null }
     Write-Text 'src/foreign.py' "x = 2  # someone else's fix`n"
     Write-Text 'notes-wip.txt' "untracked foreign notes`n"
 }
