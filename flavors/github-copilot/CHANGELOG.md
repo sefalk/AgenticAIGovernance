@@ -88,6 +88,20 @@ build for one (#322).
 
 ### Fixed
 
+- **The deployment skill's release step 5 can succeed again (#368).** Its
+  `python -m build` built the wheel from the sdist. That sdist cannot carry the
+  force-included payload from outside `mcp-deploy/`, so the step failed with
+  `Forced include not found`; `dist/` held a wheel from 2026-07. The step now
+  uses `-m build --wheel`.
+
+  The verification demanded `payload_state: current`, which an installed wheel
+  never reports. It now checks that the installed `payload/VERSION` equals the
+  flavor `VERSION`, and it names `unverifiable` as the expected state.
+
+  `test-deployment-skill.py` now runs the documented command and inspects the
+  wheel it produces. A command nothing executes cannot go stale unnoticed
+  again. `build` joins the `mcp-deploy` dev extras so that CI can run it.
+
 - **`test-hooks-integration.ps1` no longer fails an invocation cut off by log
   rotation (#378).** When the hooks log rotates in the middle of an invocation,
   only its tail stays in the file: no `Executing` line, and none of the hooks
