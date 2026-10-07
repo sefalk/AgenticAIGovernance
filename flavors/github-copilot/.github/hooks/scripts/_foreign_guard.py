@@ -69,15 +69,26 @@ def fg_safe_id(session: str) -> str:
     return "".join(c for c in session if c.isalnum() or c in "-_")[:80] or "shared"
 
 
-def fg_read(path: Path) -> tuple[str, list[tuple[str, str]]]:
-    created, rows = "", []
+def fg_read(path: Path) -> tuple[str, str, list[tuple[str, str]]]:
+    created, head, rows = "", "", []
     for line in path.read_text(encoding="utf-8").splitlines():
         if line.startswith("# created "):
             created = line[len("# created ") :].strip()
+        elif line.startswith("# head "):
+            head = line[len("# head ") :].strip()
         elif "\t" in line:
             status, p = line.split("\t", 1)
             rows.append((status, p))
-    return created, rows
+    return created, head, rows
+
+
+def fg_committed_since(root: Path, created: str, head: str, path: str) -> bool:
+    # By commit range, not by time: a commit made in the baseline's own second read as later (PR #389 CI).
+    if head and fg_git(root, "cat-file", "-t", head).strip() == "commit":
+        return bool(fg_git(root, "log", "--format=%H", f"{head}..HEAD", "--", path).strip())
+    if head == "none":
+        return bool(fg_git(root, "log", "--format=%H", "HEAD", "--", path).strip())
+    return bool(created and fg_git(root, "log", f"--since={created}", "--format=%H", "--", path).strip())
 
 
 def fg_record(root: Path, session: str) -> str:
@@ -85,15 +96,9 @@ def fg_record(root: Path, session: str) -> str:
     previous = sorted(logs.glob(FG_PREFIX + "*"), key=lambda p: p.stat().st_mtime)
     report = ""
     if previous:
-        created, rows = fg_read(previous[-1])
+        created, head, rows = fg_read(previous[-1])
         now_dirty = {p for _, p in fg_dirty(root)}
-        lost = []
-        for _, p in rows:
-            if p in now_dirty:
-                continue
-            if created and fg_git(root, "log", f"--since={created}", "--format=%H", "--", p).strip():
-                continue
-            lost.append(p)
+        lost = [p for _, p in rows if p not in now_dirty and not fg_committed_since(root, created, head, p)]
         if lost:
             shown = ", ".join(lost[:FG_SHOWN]) + (f" (+{len(lost) - FG_SHOWN} more)" if len(lost) > FG_SHOWN else "")
             report = (
@@ -102,7 +107,8 @@ def fg_record(root: Path, session: str) -> str:
                 f"discarded: {shown}. Check with the human before assuming they were intended (#120)."
             )
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    lines = [f"# created {stamp}"] + [f"{s}\t{p}" for s, p in fg_dirty(root)]
+    head = fg_git(root, "rev-parse", "--verify", "-q", "HEAD").strip() or "none"
+    lines = [f"# created {stamp}", f"# head {head}"] + [f"{s}\t{p}" for s, p in fg_dirty(root)]
     target = logs / (FG_PREFIX + fg_safe_id(session))
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
     for old in sorted(logs.glob(FG_PREFIX + "*"), key=lambda p: p.stat().st_mtime)[:-FG_KEEP]:
@@ -226,7 +232,7 @@ def fg_check(root: Path, session: str, command: str) -> str:
     baseline = root / ".github" / "logs" / (FG_PREFIX + fg_safe_id(session))
     if not baseline.is_file():
         return ""
-    _, rows = fg_read(baseline)
+    _, _, rows = fg_read(baseline)
     if not rows:
         return ""
     found: list[str] = []
