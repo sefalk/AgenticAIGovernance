@@ -45,11 +45,16 @@ foreach ($b in @('C:\Program Files\Git\bin\bash.exe', '/bin/bash')) {
 }
 
 function New-WritePayload {
-    param([string]$Action, [hashtable]$Fields, [string]$ToolName = 'mcp_azure_devops__wit_work_item_write')
+    param([string]$Action, [hashtable]$Fields, [string]$ToolName = 'mcp_azure_devops__wit_work_item_write',
+          [string]$WorkItemType = 'Task', [string]$Format = '')
     $ti = @{ action = $Action; project = 'P' }
     if ($Action -eq 'create') {
-        $ti.workItemType = 'Task'
-        $ti.fields = @($Fields.GetEnumerator() | ForEach-Object { @{ name = $_.Key; value = $_.Value } })
+        $ti.workItemType = $WorkItemType
+        $ti.fields = @($Fields.GetEnumerator() | ForEach-Object {
+            $f = @{ name = $_.Key; value = $_.Value }
+            if ($Format -and $_.Key -ne 'System.Title' -and $_.Key -ne 'System.AssignedTo') { $f.format = $Format }
+            $f
+        })
     }
     if ($Action -eq 'add_child') {
         $ti.parentId = 7
@@ -155,11 +160,57 @@ try {
     $agentText = if (Test-Path $agentFile) { Get-Content $agentFile -Raw } else { '' }
     Add-Result 'W11_the_worker_gate_table_carries_a_hard_owner_row' `
         ($agentText -match '(?m)^\|\s*Owner set on create\s*\|\s*HARD\s*\|') 'ado-work-item-manager Exit Gates needs the row'
+
+    # #289: five Bugs carried 2-4.4 KB bodies in System.Description, which the
+    # stock Bug form never renders; Repro Steps and System Info sat empty.
+    $html = '<p>Steps</p>'
+    $bugInDescription = @{ 'System.Title' = 'x'; 'System.AssignedTo' = $owner; 'System.Description' = $html }
+    $bugInRepro = @{ 'System.Title' = 'x'; 'System.AssignedTo' = $owner; 'Microsoft.VSTS.TCM.ReproSteps' = $html }
+    $taskInDescription = @{ 'System.Title' = 'x'; 'System.AssignedTo' = $owner; 'System.Description' = $html }
+
+    $r = Invoke-Gate (New-WritePayload 'create' $bugInDescription -WorkItemType 'Bug') $confWithOwner
+    Add-Result 'W12_a_bug_body_in_description_is_denied_naming_repro_steps' `
+        ($r.Decision -eq 'deny' -and $r.Reason.Contains('Microsoft.VSTS.TCM.ReproSteps') -and $r.Reason.Contains('#289')) `
+        "decision='$($r.Decision)' reason=$($r.Reason)"
+
+    $r = Invoke-Gate (New-WritePayload 'create' $bugInRepro -WorkItemType 'bug') $confWithOwner
+    Add-Result 'W13_a_bug_body_in_repro_steps_is_not_denied' `
+        ($r.Decision -ne 'deny' -and $r.Decision -ne '<unparsable>') "decision='$($r.Decision)' out=$($r.Out)"
+
+    $r = Invoke-Gate (New-WritePayload 'create' $taskInDescription) $confWithOwner
+    Add-Result 'W14_a_task_body_in_description_is_not_denied' `
+        ($r.Decision -ne 'deny' -and $r.Decision -ne '<unparsable>') "decision='$($r.Decision)' out=$($r.Out)"
+
+    # Two of three sampled Bugs held raw Markdown with no format, so `## Problem`
+    # rendered as literal text.
+    $markdown = @{ 'System.Title' = 'x'; 'System.AssignedTo' = $owner; 'System.Description' = "## Problem`nIt breaks." }
+    $r = Invoke-Gate (New-WritePayload 'create' $markdown) $confWithOwner
+    Add-Result 'W15_markdown_without_a_format_is_denied_naming_format' `
+        ($r.Decision -eq 'deny' -and $r.Reason.Contains('Markdown') -and $r.Reason.Contains('format')) `
+        "decision='$($r.Decision)' reason=$($r.Reason)"
+
+    $r = Invoke-Gate (New-WritePayload 'create' $markdown -Format 'Markdown') $confWithOwner
+    Add-Result 'W16_markdown_declared_as_markdown_is_not_denied' `
+        ($r.Decision -ne 'deny' -and $r.Decision -ne '<unparsable>') "decision='$($r.Decision)' out=$($r.Out)"
+
+    if ($bashExe) {
+        $a = Invoke-Gate (New-WritePayload 'create' $bugInDescription -WorkItemType 'Bug') $confWithOwner 'sh'
+        $c = Invoke-Gate (New-WritePayload 'create' $bugInRepro -WorkItemType 'Bug') $confWithOwner 'sh'
+        Add-Result 'W17_the_bash_twin_routes_bug_bodies_the_same_way' `
+            ($a.Decision -eq 'deny' -and $a.Reason.Contains('Microsoft.VSTS.TCM.ReproSteps') -and $c.Decision -ne 'deny' -and $c.Decision -ne '<unparsable>') `
+            "bug-description='$($a.Decision)' bug-repro='$($c.Decision)'"
+    } else {
+        Add-Result 'W17_the_bash_twin_routes_bug_bodies_the_same_way' $false 'no bash found -- this case would prove nothing'
+    }
+
+    Add-Result 'W18_the_worker_routes_the_body_by_type' `
+        ($agentText -match '(?i)the body of a Bug goes to `Microsoft\.VSTS\.TCM\.ReproSteps`' -and $agentText -match '(?i)never mirror a Bug body into `System\.Description`') `
+        'ado-work-item-manager must name the Bug narrative field and drop System.Description as its fallback'
 } finally {
     Remove-Item $fixture -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Write-Output '===== work item owner gate tests (issue #36) ====='
+Write-Output '===== work item owner gate tests (issues #36, #289) ====='
 $failed = 0
 foreach ($k in $results.Keys) {
     if ($results[$k]) {
