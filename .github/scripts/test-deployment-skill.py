@@ -61,7 +61,7 @@ def run_documented_build(release: str) -> None:
     The command went stale unnoticed because nothing executed it: a bare
     `-m build` goes through the sdist, which lacks the force-included payload.
     """
-    line = next((ln.strip() for ln in release.splitlines() if "-m build" in ln), "")
+    line = next((ln.strip() for ln in release.splitlines() if re.search(r"python(\.exe)? -m build", ln)), "")
     args = shlex.split(line.split("-m build", 1)[1]) if line else []
     with tempfile.TemporaryDirectory(prefix="af-wheel-") as out:
         proc = subprocess.run(

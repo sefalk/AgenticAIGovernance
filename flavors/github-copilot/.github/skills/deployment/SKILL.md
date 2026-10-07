@@ -67,18 +67,22 @@ In the framework repository.
    instead (#234).
 5. **Rebuild and reinstall the MCP wheel.** The payload is copied in at build
    time; skipping this ships the previous version from every `af_apply` until
-   someone notices.
+   someone notices. Build with `--wheel`: a bare `-m build` goes through the
+   sdist, which cannot carry the payload from outside `mcp-deploy/` (#368).
 
    ```powershell
    cd flavors/github-copilot/mcp-deploy
-   .\.venv\Scripts\python.exe -m build
+   .\.venv\Scripts\python.exe -m build --wheel
    .\.venv\Scripts\python.exe -m pip install --force-reinstall (Get-ChildItem dist\*.whl | Sort-Object LastWriteTime | Select-Object -Last 1).FullName
    ```
 
-**Verification.** `af_status` on any project must report the new number as
-`source_version` and `payload_state` as `current`. If it reports
-`behind-repository`, step 5 did not take effect — the wheel in the environment
-the MCP server actually launches from is not the one you just built.
+**Verification.** In the environment the MCP server launches from, the
+installed `af_deploy_mcp/payload/VERSION` must equal
+`flavors/github-copilot/VERSION`, and `af_status` must report that number as
+`source_version`. `payload_state` reads `unverifiable` for an installed wheel —
+expected, since no checkout is visible from `site-packages`. It reads `current`
+only for an editable install or a run from source, and `behind-repository`
+there means step 5 did not take effect.
 
 ## 2 · Routine upgrade
 
