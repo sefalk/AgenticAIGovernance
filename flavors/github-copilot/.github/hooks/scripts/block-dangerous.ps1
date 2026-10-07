@@ -544,16 +544,19 @@ function Get-InterpreterPayloads([string]$cmd) {
 #            behind a flag, so blanket stripping would launder the real case.
 function Get-RawTargets([string]$cmd, [string]$Strength) {
     $payloads = Get-InterpreterPayloads $cmd
-    if ($cmd -match '\$\(' -or $cmd -match '`') { return , (@($cmd) + $payloads) }
-    $stripped = if ($Strength -eq 'prose') {
-        ((Split-TopLevel $cmd | ForEach-Object {
-            if ($_ -match $dataCarrierRe -or $_ -match '^\s*("[^"]*"|''[^'']*'')\s*$') { Remove-QuotedData $_ } else { $_ }
-        }) -join ' ; ')
-    } else {
+    if ($Strength -eq 'exec') {
         $t = $cmd
         foreach ($pl in $payloads) { $t = $t.Replace('"' + $pl + '"', ' ').Replace("'" + $pl + "'", ' ') }
-        ($t -replace '"[^"]*"', '' -replace "'[^']*'", '')
+        # An interpolation elsewhere no longer makes every literal a command (#122, 2026-09-29):
+        # single quotes never interpolate; a double-quoted string executes only via $( or a backtick.
+        $t = [regex]::Replace($t, '"[^"]*"|''[^'']*''', {
+                param($m) if ($m.Value.StartsWith('"') -and $m.Value -match '\$\(|`') { $m.Value } else { '' } })
+        return , (@($t) + $payloads)
     }
+    if ($cmd -match '\$\(' -or $cmd -match '`') { return , (@($cmd) + $payloads) }
+    $stripped = ((Split-TopLevel $cmd | ForEach-Object {
+                if ($_ -match $dataCarrierRe -or $_ -match '^\s*("[^"]*"|''[^'']*'')\s*$') { Remove-QuotedData $_ } else { $_ }
+            }) -join ' ; ')
     return , (@($stripped) + $payloads)
 }
 
