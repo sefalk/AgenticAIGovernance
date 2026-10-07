@@ -11,8 +11,11 @@ $ErrorActionPreference = 'SilentlyContinue'
 # the agent happens to run in (issue #54).
 . "$PSScriptRoot/_common.ps1"
 
-# Consume stdin (required even if we don't use the input)
-try { [Console]::In.ReadToEnd() | Out-Null } catch {}
+# The session id keys the foreign-work baseline (#120).
+$stdinRaw = ''
+try { $stdinRaw = [Console]::In.ReadToEnd() } catch {}
+$sessionId = ''
+try { $sessionId = [string]($stdinRaw | ConvertFrom-Json).session_id } catch {}
 
 # Gather context
 $branch  = (git rev-parse --abbrev-ref HEAD 2>$null)
@@ -74,8 +77,17 @@ if (-not $AfPython) {
         "Running without their Python-backed check: $offList. Install Python 3 or set AF_PYTHON_OVERRIDE (#342)."
 }
 
+# Paths dirty now were authored by no agent of this session; block-dangerous asks before discarding them (#120).
+$foreignNotice = ''
+$fgCore = Join-Path $PSScriptRoot '_foreign_guard.py'
+if ($AfPython -and $AfCodeRoot -and (Test-Path $fgCore)) {
+    $env:AF_FG_SESSION = $sessionId
+    $fg = (& $AfPython $fgCore record $AfCodeRoot 2>$null | Out-String).Trim()
+    if ($fg) { $foreignNotice = " | $fg" }
+}
+
 # Build context string
-$context = "Project: $project | Branch: $branch | Last commit: $commit | $pyVer$testLogSummary$pythonNotice"
+$context = "Project: $project | Branch: $branch | Last commit: $commit | $pyVer$testLogSummary$pythonNotice$foreignNotice"
 
 # Return JSON
 @{
