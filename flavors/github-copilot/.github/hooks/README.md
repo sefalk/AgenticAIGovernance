@@ -410,6 +410,17 @@ hidden dangerous segment (`… ; rm -rf /`, `Write-Host (git push --force)`) is
 blocked even inside a composite. On any parse ambiguity the hook returns `{}`
 (prompt) — it never accidentally auto-approves.
 
+**Task creation reuses an existing task (#396).** VS Code always asks before
+`createAndRunTask` runs, and the tool refuses a label that already exists, so
+re-running an invocation used to mint a new label every time. When a payload
+would duplicate the `command` and `args` of a task already in
+`.vscode/tasks.json` (with `powershell -File X` treated as `X`), the hook
+denies it and names that task, so the agent runs it with `runTask` instead.
+Both dialects delegate the comparison to `scripts/task-duplicate.py`. A
+missing or unparsable `tasks.json` gives no opinion. To clear what earlier
+sessions minted, run `python .github/scripts/prune-tasks.py` as a dry run,
+then with `--apply`. It removes tasks without `detail` and keeps a backup.
+
 #### PreToolUse: Work Item Owner Gate
 
 **Scripts:** `scripts/block-dangerous.ps1` (Windows) / `scripts/block-dangerous.sh`

@@ -313,9 +313,14 @@ print("ALLOW|Safe: every task scope resolves to a reviewed script under AF_TASK_
     decision_reason="${decision#*|}"
     if [ "$decision_word" = "DENY" ]; then
         emit_task deny "$decision_reason"
-    else
-        emit_task allow "$decision_reason"
     fi
+    # An identical invocation already has a label, and runTask runs it without
+    # the creation prompt createAndRunTask can never skip (#396).
+    dup_label=$(printf '%s' "$raw" | "$PYTHON" "$AF_SCRIPT_DIR/task-duplicate.py" "$task_repo" 2>/dev/null | head -n 1)
+    if [ -n "$dup_label" ]; then
+        emit_task deny "Policy deny: this invocation already exists as the task '$dup_label'. Run it with runTask (id 'shell: $dup_label'): it needs no creation prompt and can be auto-approved, while createAndRunTask would append a duplicate to tasks.json (#396)."
+    fi
+    emit_task allow "$decision_reason"
 fi
 
 command_str=$(echo "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_input',{}).get('command',''))" 2>/dev/null)
