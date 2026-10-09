@@ -92,7 +92,9 @@ In the consumer project.
    `behind-repository`; upgrading to a stale payload is a downgrade in
    disguise.
 2. `af_dry_run` — read the classification. `PRESERVE` and `CONFLICT` entries
-   are the only ones that need a decision.
+   are the only ones that need a decision. `MERGE` needs none: both sides
+   changed the file without overlapping, and `af_apply` writes the merge with a
+   backup. Read the merged file in the diff before committing.
 3. `af_apply`.
 4. Commit the framework files as their own commit, separate from project work.
 

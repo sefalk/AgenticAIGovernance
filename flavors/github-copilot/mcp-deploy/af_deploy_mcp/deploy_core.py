@@ -19,6 +19,8 @@ import hashlib
 import os
 import re
 import shutil
+import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -513,6 +515,88 @@ def _target_hash(target: Path) -> str | None:
     return _target_classify_hash(target) if target.is_file() else None
 
 
+# ── Baseline content store and 3-way merge (#105) ───────────────────────────────
+# ``.af-hashes`` records only hashes, so a file both sides changed was withheld
+# whole: the common ancestor a merge needs was gone. The store keeps the bytes
+# behind each recorded hash, named by that hash, so an object is verified before
+# it is trusted. It is gitignored; without it a file stays CONFLICT, as before.
+
+_STORE = ".af-baseline"
+
+
+def _store_put(target_github: Path, data: bytes) -> None:
+    store = target_github / _STORE
+    obj = store / _sha256_upper_bytes(data)
+    if not obj.is_file():
+        _write_bytes(obj, data)
+    ignore = store / ".gitignore"
+    if not ignore.is_file():
+        ignore.write_bytes(b"*\n")
+
+
+def _store_get(target_github: Path, digest: str) -> bytes | None:
+    obj = target_github / _STORE / digest
+    if not obj.is_file():
+        return None
+    data = obj.read_bytes()
+    return data if _sha256_upper_bytes(data) == digest else None
+
+
+def _store_prune(target_github: Path, hashes: dict[str, str]) -> None:
+    store = target_github / _STORE
+    if not store.is_dir():
+        return
+    keep = set(hashes.values())
+    for obj in store.iterdir():
+        if obj.is_file() and obj.name != ".gitignore" and obj.name not in keep:
+            obj.unlink()
+
+
+def _git_merge(base: bytes, ours: bytes, theirs: bytes) -> bytes | None:
+    """A clean ``git merge-file`` of three UTF-8 texts, or None on overlap, binary or no git."""
+    git = shutil.which("git")
+    if git is None:
+        return None
+    try:
+        for data in (base, ours, theirs):
+            data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        paths = []
+        for name, data in (("ours", ours), ("base", base), ("theirs", theirs)):
+            path = Path(tmp) / name
+            path.write_bytes(data)
+            paths.append(str(path))
+        try:
+            proc = subprocess.run([git, "merge-file", "-p", *paths], capture_output=True, timeout=30, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def _three_way(u: Unit, data: bytes, baseline_h: str | None, target_github: Path) -> bytes | None:
+    """The bytes to deploy for a both-sides change that merges cleanly, else None.
+
+    All three inputs are canonical LF with managed regions emptied, the form the
+    hashes are taken over: a CRLF target fed in as-is conflicts on every line
+    (#105). The project's region bodies are transplanted back afterwards.
+    """
+    if u.is_custom or not baseline_h or not u.target.is_file():
+        return None
+    base = _store_get(target_github, baseline_h)
+    if base is None:
+        return None
+    try:
+        ours = _canonicalize_text(u.target.read_bytes().decode("utf-8"))
+    except UnicodeDecodeError:
+        return None
+    merged = _git_merge(base, _strip_bytes(ours.encode("utf-8")), _strip_bytes(data))
+    if merged is None:
+        return None
+    return merge_managed_regions(merged.decode("utf-8"), ours).encode("utf-8")
+
+
 def dry_run(source_root: Path, target_dir: Path) -> dict:
     """Classify every deployable file (read-only). Mirrors the deploy dry-run."""
     target_github = target_dir / ".github"
@@ -525,13 +609,16 @@ def dry_run(source_root: Path, target_dir: Path) -> dict:
     results: list[dict] = []
     counts: dict[str, int] = {}
     for u in units:
-        src_h = source_hash_resolved(u.source, target_af_env)
+        data = resolved_source_bytes(u.source, target_af_env)
+        src_h = _sha256_upper_bytes(_strip_bytes(data))
         cls = _classify(u.is_custom, src_h, _target_hash(u.target), baseline.get(u.hash_key), has_baseline)
         if cls == "CREATE" and _is_deactivated_skill_unit(u.hash_key, target_github):
             counts["DEACTIVATED"] = counts.get("DEACTIVATED", 0) + 1
             results.append({"path": u.display, "classification": "DEACTIVATED", "customizable": u.is_custom})
             u = _available_unit(u, target_github)
             cls = _classify(u.is_custom, src_h, _target_hash(u.target), baseline.get(u.hash_key), has_baseline)
+        if cls == "CONFLICT" and _three_way(u, data, baseline.get(u.hash_key), target_github) is not None:
+            cls = "MERGE"
         counts[cls] = counts.get(cls, 0) + 1
         results.append({"path": u.display, "classification": cls, "customizable": u.is_custom})
 
@@ -580,10 +667,10 @@ def _safe_join(base: Path, rel: str) -> Path:
 
 
 def apply(source_root: Path, target_dir: Path) -> dict:
-    """Apply CREATE/UPDATE files only. Backs up first; skips everything else.
+    """Apply CREATE/UPDATE/MERGE files only. Backs up first; skips everything else.
 
     Read-only classes (CONFLICT / PROTECT / PRESERVE / [customizable] / UNCHANGED)
-    are never written. Returns applied/skipped lists and the backup directory.
+    are never written. Returns applied/merged/skipped lists and the backup directory.
     """
     source_github = source_root / ".github"
     target_github = target_dir / ".github"
@@ -596,6 +683,7 @@ def apply(source_root: Path, target_dir: Path) -> dict:
 
     backup_dir = target_dir / f".af-backup-{datetime.now():%Y%m%d%H%M%S}"
     applied: list[str] = []
+    merged: list[str] = []
     skipped: list[dict] = []
     made_backup = False
 
@@ -607,26 +695,35 @@ def apply(source_root: Path, target_dir: Path) -> dict:
             skipped.append({"path": u.display, "classification": "DEACTIVATED"})
             u = _available_unit(u, target_github)
             cls = _classify(u.is_custom, src_h, _target_hash(u.target), baseline.get(u.hash_key), has_baseline)
-        if cls in ("CREATE", "UPDATE"):
+        merge = _three_way(u, data, baseline.get(u.hash_key), target_github) if cls == "CONFLICT" else None
+        if merge is not None:
+            cls = "MERGE"
+        if cls in ("CREATE", "UPDATE", "MERGE"):
             if u.target.is_file():
                 bpath = backup_dir / u.display
                 bpath.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(u.target, bpath)
                 made_backup = True
-            _write_bytes(u.target, _merge_target_regions(data, u.target))
+            _write_bytes(u.target, merge if merge is not None else _merge_target_regions(data, u.target))
             deployed[u.hash_key] = src_h
+            _store_put(target_github, _strip_bytes(data))
             applied.append(u.display)
+            if merge is not None:
+                merged.append(u.display)
         elif cls == "UNCHANGED":
             deployed[u.hash_key] = src_h
+            _store_put(target_github, _strip_bytes(data))
         else:
             skipped.append({"path": u.display, "classification": cls})
 
     _write_hashes(target_github, deployed, version)
+    _store_prune(target_github, deployed)
     _write_version(target_dir, version)
     return {
         "version": version,
         "applied_count": len(applied),
         "applied": applied,
+        "merged": merged,
         "skipped": skipped,
         "backup_dir": str(backup_dir) if made_backup else None,
     }
@@ -638,11 +735,13 @@ def update_hashes(source_root: Path, target_dir: Path) -> dict:
     target_af_env = target_github / "af-env.conf"
     manifest = parse_manifest(source_root / ".github" / ".af-manifest")
     version = read_version(source_root)
-    hashes = {
-        u.hash_key: source_hash_resolved(u.source, target_af_env)
-        for u in collect_units(source_root, target_dir, manifest)
-    }
+    hashes: dict[str, str] = {}
+    for u in collect_units(source_root, target_dir, manifest):
+        stripped = _strip_bytes(resolved_source_bytes(u.source, target_af_env))
+        hashes[u.hash_key] = _sha256_upper_bytes(stripped)
+        _store_put(target_github, stripped)
     _write_hashes(target_github, hashes, version)
+    _store_prune(target_github, hashes)
     return {"entries": len(hashes), "version": version}
 
 

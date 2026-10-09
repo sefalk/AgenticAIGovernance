@@ -34,7 +34,7 @@ cloning the AF repository next to the target project**.
 | Tool (R) | `status(workspace_root)` | Bundled framework version vs. the version deployed in the target repo. |
 | Tool (R) | `dry_run(workspace_root)` | Classify every deployable file (3-way), read-only. |
 | Tool (R) | `conflict_diff(workspace_root, path)` | Unified diff between a deployed file and the resolved source. |
-| Tool (W) | `apply(workspace_root, confirm)` | Apply CREATE/UPDATE files; back up first; skip conflicts/customizable. |
+| Tool (W) | `apply(workspace_root, confirm)` | Apply CREATE/UPDATE files and clean 3-way MERGEs; back up first; skip conflicts/customizable. |
 | Tool (W) | `write_resolved(workspace_root, path, content, confirm)` | Write an agent-merged file (conflict resolution). |
 | Tool (W) | `update_hashes(workspace_root, confirm)` | Re-baseline `.af-hashes` after resolving conflicts. |
 | Tool (R) | `list_orphans(workspace_root)` | List baselined framework files a rename/manifest change left behind, read-only. |
@@ -153,6 +153,12 @@ pytest            # unit tests for the read-only deploy logic (no MCP needed)
   overwrite; CONFLICT / PROTECT / PRESERVE / `[customizable]` files are never
   written by `apply`. The terminal `block-dangerous` hook does **not** see MCP
   tool calls, so these guards *are* the safety boundary (see the spec).
+- **3-way merge (#105).** A non-customizable file both sides changed is merged
+  with `git merge-file` against the content stored in `.github/.af-baseline/`
+  (gitignored, one object per recorded hash, verified before use). A clean merge
+  is `MERGE` and is applied with a backup. Overlap, a missing or tampered object,
+  a binary file, or no `git` on `PATH` keep it `CONFLICT`. `deploy.ps1` /
+  `deploy.sh` do not merge yet and report such files as `CONFLICT`.
 - **Full payload.** Both the `.github/` tree and manifest `[vscode]` files
   (deployed to `.vscode/`) are covered.
 - **Payload parity.** Tier resolution and hashing match `deploy.ps1`; keys are

@@ -54,7 +54,8 @@ def _make_source(root: Path) -> Path:
     _write(gh / "agents" / "planner.agent.md", "# planner\n")
     _write(gh / "af-env.conf", "SRC_DIR=src\n")
     _write(gh / "MANIFEST.md", _text(LINES))
-    _write(gh / "DOC.md", _text(LINES))
+    # Distinct content: equal files share one store object, which pruning must keep.
+    _write(gh / "DOC.md", _text([*LINES, "doc"]))
     return root
 
 
@@ -70,9 +71,13 @@ def _classes(src: Path, target: Path) -> dict[str, str]:
 
 
 def _diverge(src: Path, target: Path, name: str, af_index: int, project_index: int) -> None:
-    """The framework edits one line, the project another."""
-    _write(src / ".github" / name, _text(_with(af_index, "line AF")))
-    _write(target / ".github" / name, _text(_with(project_index, "line PROJECT")))
+    """The framework edits one line of the deployed base, the project another."""
+    base = (src / ".github" / name).read_text(encoding="utf-8").splitlines()
+    af, project = list(base), list(base)
+    af[af_index] = "line AF"
+    project[project_index] = "line PROJECT"
+    _write(src / ".github" / name, _text(af))
+    _write(target / ".github" / name, _text(project))
 
 
 def _store(target: Path) -> Path:
