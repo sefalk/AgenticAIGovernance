@@ -15,6 +15,23 @@ build for one (#322).
 
 ### Added
 
+- **The MCP deploy merges a file both sides changed instead of withholding it
+  (#105).** `CONFLICT` was a hash verdict. In a measured upgrade, 4 of 7
+  conflicts merged cleanly, and two of them carried the fixes the upgrade was
+  for, blocked by a one-line provenance comment.
+  - Each apply and re-baseline now stores the content behind every recorded
+    hash in `.github/.af-baseline/<HASH>`. The store is gitignored, and an
+    object is verified against its name before use.
+  - For a non-customizable file, `deploy_core` runs `git merge-file` over the
+    stored base, the project file and the new source. All three are LF with
+    managed regions emptied, so a CRLF target does not conflict on every line.
+  - A clean merge is reported as `MERGE` and applied with a backup; the
+    project's region bodies are kept. Overlap, a missing or tampered object, a
+    binary file or no `git` keep it `CONFLICT`.
+  - `[customizable]` files are never merged.
+  - `deploy.ps1` and `deploy.sh` still report `CONFLICT` for these files; their
+    parity is a follow-up.
+
 - **A session can no longer silently discard work that was uncommitted when it
   started (#120).** Git keeps no copy of uncommitted changes. #120 lost a
   correct fix to a later session's checkout, and nothing announced it.

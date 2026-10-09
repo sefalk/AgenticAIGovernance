@@ -94,9 +94,10 @@ def dry_run(workspace_root: str) -> dict:
     Args:
         workspace_root: Absolute path to the target project (``${workspaceFolder}``).
 
-    Returns per-file classifications (UPDATE / CONFLICT / PRESERVE / PROTECT /
+    Returns per-file classifications (UPDATE / MERGE / CONFLICT / PRESERVE / PROTECT /
     UNCHANGED / CREATE) plus summary counts — the same decisions the deploy
-    script would make, computed read-only.
+    script would make, computed read-only. MERGE is a both-sides change that
+    merges without overlap; the scripts still report it as CONFLICT (#105).
     """
     src = _source_root()
     if err := _validate_source(src):
@@ -127,7 +128,7 @@ def conflict_diff(workspace_root: str, path: str) -> dict:
 
 @mcp.tool()
 def apply(workspace_root: str, confirm: bool = False) -> dict:
-    """Apply the pending CREATE/UPDATE files (backs up first).
+    """Apply the pending CREATE/UPDATE files and clean MERGEs (backs up first).
 
     With ``confirm=False`` (default) this returns the dry-run preview and writes
     nothing — re-call with ``confirm=True`` to apply. CONFLICT / PROTECT /
