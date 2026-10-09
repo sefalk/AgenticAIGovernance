@@ -7,7 +7,7 @@
 # This manifest enables safe updates: only listed paths are touched.
 #
 # Annotation syntax: path  [annotation1, annotation2]
-#   [customizable] — project may modify; protected on update
+#   [customizable] — project may modify; protected once the project changes it
 #   [optional]     — may not exist in AF source; no warning if missing
 #   [vscode]       — deployed to .vscode/ instead of .github/
 

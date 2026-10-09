@@ -21,7 +21,8 @@ two workflow prompts (``deploy``, ``resolve_conflicts``) that surface as
 not see MCP tool calls):** write tools require ``confirm=True`` (a production
 server would use MCP *elicitation* instead), all writes stay under the target's
 ``.github/``, existing files are backed up before overwrite, and CONFLICT /
-PROTECT / PRESERVE / ``[customizable]`` files are never written by ``apply``.
+PROTECT / PRESERVE files are never written by ``apply`` (a ``[customizable]``
+file is written only while it still equals its baseline, #106).
 
 The framework payload is resolved from ``AF_SOURCE_ROOT`` if set, else from the
 in-repo flavor directory (dev mode). A packaged build would bundle the payload
@@ -132,7 +133,8 @@ def apply(workspace_root: str, confirm: bool = False) -> dict:
 
     With ``confirm=False`` (default) this returns the dry-run preview and writes
     nothing — re-call with ``confirm=True`` to apply. CONFLICT / PROTECT /
-    PRESERVE / ``[customizable]`` files are never written.
+    PRESERVE files are never written; a ``[customizable]`` file only while it
+    still equals its baseline.
     """
     src, target, err = _prep(workspace_root)
     if err:

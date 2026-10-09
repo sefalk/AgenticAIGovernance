@@ -138,6 +138,19 @@ build for one (#322).
 
 ### Fixed
 
+- **A customizable file the project never changed now takes the framework
+  update (#106).** `PROTECT` fired whenever AF changed a `[customizable]` file,
+  without checking whether the project had changed it. In the measured upgrade
+  both `PROTECT` files were byte-identical to their baseline. That meant review
+  work with nothing to review, and a fix withheld from every project that never
+  touched the file.
+
+  A customizable file still equal to its baseline is now `UPDATE`, applied with
+  a backup, in `deploy_core`, `deploy.ps1` and `deploy.sh` alike. A customized
+  file stays `PRESERVE`, or `CONFLICT` if AF changed it too. A customizable file
+  with no baseline entry, or a bootstrap run without `.af-hashes`, stays
+  `PROTECT`.
+
 - **A Bug's body now lands in the field the Bug form shows (#289).** Bug bodies
   were written to `System.Description`, which the stock Bug form never renders,
   so five measured Bugs carried 2–4.4 KB bodies that no one saw. Two of three

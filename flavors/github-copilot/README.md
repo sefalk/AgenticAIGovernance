@@ -99,8 +99,9 @@ If you prefer running each phase separately:
 ### Updating the AF
 
 Re-run the deploy script after pulling AF updates. Customizable files
-(`copilot-instructions.md`, `architecture.instructions.md`) are protected —
-they won't be overwritten unless you use `-Force` / `--force`.
+(`copilot-instructions.md`, `architecture.instructions.md`) are protected once
+you change them — they won't be overwritten unless you use `-Force` / `--force`.
+One you never changed takes the framework update like any other file.
 
 Use `-Diff` / `--diff` to compare source vs deployed before updating:
 ```powershell
