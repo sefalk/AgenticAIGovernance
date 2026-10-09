@@ -295,6 +295,15 @@ if ($isTaskShaped) {
             Emit-Task 'deny' $reason
         }
     }
+    # An identical invocation already has a label, and runTask runs it without
+    # the creation prompt createAndRunTask can never skip (#396).
+    $dupHelper = Join-Path $PSScriptRoot 'task-duplicate.py'
+    if ($AfPython -and (Test-Path $dupHelper)) {
+        $dupLabel = @($raw | & $AfPython $dupHelper $AfCodeRoot 2>$null) | Select-Object -First 1
+        if ($dupLabel) {
+            Emit-Task 'deny' ("Policy deny: this invocation already exists as the task '$dupLabel'. Run it with runTask (id 'shell: $dupLabel'): it needs no creation prompt and can be auto-approved, while createAndRunTask would append a duplicate to tasks.json (#396).")
+        }
+    }
     Emit-Task 'allow' 'Safe: every task scope resolves to a reviewed script under AF_TASK_SCRIPT_DIRS.'
 }
 
