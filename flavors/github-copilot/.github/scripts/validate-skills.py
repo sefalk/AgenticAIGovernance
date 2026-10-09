@@ -489,6 +489,10 @@ def main(argv: list[str] | None = None) -> int:
     errors: list[str] = []
     warnings: list[str] = []
 
+    # Activation is a move, so an activated skill lives only in skills/ (#110).
+    for name in sorted(active_dirs & available_dirs):
+        warnings.append(f"skill '{name}' is active and also in _available/ -- remove the _available/ copy (#110)")
+
     # --- Validate active skills (deep) ---
     for name in sorted(active_dirs):
         skill_dir = skills_root / name

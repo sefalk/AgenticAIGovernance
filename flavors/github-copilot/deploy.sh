@@ -282,6 +282,7 @@ STAT_PROTECTED=0
 STAT_CONFLICT=0
 STAT_PRESERVED=0
 STAT_DEACTIVATED=0
+STAT_ACTIVATED=0
 BACKUP_DIR=""
 BACKUP_COUNT=0
 
@@ -540,6 +541,21 @@ is_deactivated_skill_unit() {
         skills/*/*)
             name="${key#skills/}"; name="${name%%/*}"
             [[ -d "$TARGET_GITHUB/skills/_available/$name" ]] && return 0 || return 1 ;;
+        *) return 1 ;;
+    esac
+}
+
+activated_skill_key() {
+    # #110: an optional skill the project activated by *moving* it from
+    # skills/_available/{name}/ to skills/{name}/. Prints the active key so the
+    # deploy updates that copy instead of re-creating the library one. Parity with
+    # deploy_core _activated_unit and deploy.ps1 Get-ActivatedSkillKey.
+    local key="${1//\\//}" rest name
+    case "$key" in
+        skills/_available/*/*)
+            rest="${key#skills/_available/}"; name="${rest%%/*}"
+            [[ -d "$TARGET_GITHUB/skills/$name" ]] || return 1
+            printf 'skills/%s' "$rest" ;;
         *) return 1 ;;
     esac
 }
@@ -816,9 +832,24 @@ fi
 
 # ── Deploy a single file ──────────────────────────────────────────────────
 deploy_file() {
-    local src="$1" tgt="$2" display="$3" hash_key="${4:-}"
+    local src="$1" tgt="$2" display="$3" hash_key="${4:-}" moved_from="${5:-}"
     if [[ -z "$hash_key" ]]; then
         hash_key="${display#.github/}"
+    fi
+    local active_key
+    if [[ -z "$moved_from" ]] && active_key="$(activated_skill_key "$hash_key")"; then
+        echo "  ACTIVATED $display  (skill moved to skills/)"
+        ((STAT_ACTIVATED++)) || true
+        deploy_file "$src" "$TARGET_GITHUB/$active_key" ".github/$active_key" "$active_key" "$hash_key"
+        # The moved-from key outlives the move only while a stale duplicate is on
+        # disk; its baseline moves to the active key, or a skipped CONFLICT reads as
+        # new-in-AF next run. Parity with deploy_core apply.
+        if [[ ! -f "$tgt" && -n "${DEPLOYED_HASHES[$hash_key]+x}" ]]; then
+            local carried="${DEPLOYED_HASHES[$hash_key]}"
+            unset 'DEPLOYED_HASHES[$hash_key]'
+            [[ -n "${DEPLOYED_HASHES[$active_key]+x}" ]] || DEPLOYED_HASHES["$active_key"]="$carried"
+        fi
+        return
     fi
     local is_custom=false
     if is_customizable "$hash_key"; then
@@ -853,6 +884,9 @@ deploy_file() {
 
         # ── 3-way merge detection ──
         local baseline_hash="${BASELINE_HASHES[$hash_key]:-}"
+        if [[ -z "$baseline_hash" && -n "$moved_from" ]]; then
+            baseline_hash="${BASELINE_HASHES[$moved_from]:-}"
+        fi
 
         if [[ -n "$baseline_hash" ]]; then
             local af_changed=false proj_changed=false
@@ -1159,6 +1193,9 @@ if [[ "$STAT_PRESERVED" -gt 0 ]]; then
 fi
 if [[ "$STAT_DEACTIVATED" -gt 0 ]]; then
     echo "  Deactivated: $STAT_DEACTIVATED -- skills moved to _available/, not deployed"
+fi
+if [[ "$STAT_ACTIVATED" -gt 0 ]]; then
+    echo "  Activated: $STAT_ACTIVATED -- library skills deployed to the active copy in skills/"
 fi
 if [[ "$STAT_CONFLICT" -gt 0 ]]; then
     echo "  Conflict:  $STAT_CONFLICT -- both sides changed, use agent to merge"
