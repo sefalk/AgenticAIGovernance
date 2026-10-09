@@ -125,6 +125,11 @@ bash "$SRC/deploy.sh" -t "$WORK/f" </dev/null >"$WORK/f.log" 2>&1
 assert_contains "$WORK/f.log" "CONFLICT .github/$OPT_ACTIVE" "The edited active copy is classified CONFLICT"
 assert_contains "$WORK/f/.github/$OPT_ACTIVE" "project edit" "The edited active copy is left as it was"
 
+echo "== G: the unresolved conflict survives a second deploy (#110) =="
+bash "$SRC/deploy.sh" -t "$WORK/f" </dev/null >"$WORK/g.log" 2>&1
+assert_contains "$WORK/g.log" "CONFLICT .github/$OPT_ACTIVE" "The second run still reports CONFLICT"
+assert_contains "$WORK/f/.github/$OPT_ACTIVE" "project edit" "The second run leaves the edit alone"
+
 echo ""
 echo "=== Summary ==="
 echo "  Passed: $passed"
@@ -136,6 +141,7 @@ if [[ "$failed" -gt 0 ]]; then
     echo "--- deploy output D ---"; cat "$WORK/d.log"
     echo "--- deploy output E ---"; cat "$WORK/e.log"
     echo "--- deploy output F ---"; cat "$WORK/f.log"
+    echo "--- deploy output G ---"; cat "$WORK/g.log"
     exit 1
 fi
 echo "  All deploy.sh minimal-source tests passed."

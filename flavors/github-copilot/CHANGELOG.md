@@ -138,6 +138,22 @@ build for one (#322).
 
 ### Fixed
 
+- **An activated optional skill now receives framework updates where the
+  project moved it (#110).** Activating a library skill means moving
+  `skills/_available/{name}/` to `skills/{name}/`. The deploy did not know that.
+  It re-created the `_available/` copy beside the active one and never updated
+  the active copy. Every activated skill therefore froze at its activation
+  version, and the project carried a duplicate.
+
+  `deploy_core`, `deploy.ps1` and `deploy.sh` now report the library path as
+  `ACTIVATED` and deploy onto `skills/{name}/`. The three-way verdict uses the
+  baseline recorded under the old `_available/` key. An untouched active copy
+  is `UPDATE`. An edited one stays `PRESERVE`, or `CONFLICT` if AF changed it
+  too, and keeps that verdict on the next run. Once the duplicate is gone, the
+  baseline moves to the active key. A leftover duplicate shows up as an orphan.
+  `validate-skills.py` and the deploy summary name every skill that is both
+  active and in `_available/`.
+
 - **A customizable file the project never changed now takes the framework
   update (#106).** `PROTECT` fired whenever AF changed a `[customizable]` file,
   without checking whether the project had changed it. In the measured upgrade

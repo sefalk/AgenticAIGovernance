@@ -515,6 +515,29 @@ def _target_hash(target: Path) -> str | None:
     return _target_classify_hash(target) if target.is_file() else None
 
 
+def _activated_unit(u: Unit, target_github: Path) -> Unit | None:
+    """The ``skills/{name}/`` copy an activated library skill is deployed to, or None.
+
+    Activation moves a skill out of ``skills/_available/``, and recreating it there
+    left every activated skill twice while the active copy never got a fix (#110).
+    The mirror of ``_available_unit`` (#384).
+    """
+    parts = _norm(u.hash_key).split("/")
+    if len(parts) < 4 or parts[0] != "skills" or parts[1] != "_available":
+        return None
+    if not (target_github / "skills" / parts[2]).is_dir():
+        return None
+    rel = "skills/" + "/".join(parts[2:])
+    return Unit(
+        source=u.source, target=target_github / rel, hash_key=rel, display=f".github/{rel}", is_custom=u.is_custom
+    )
+
+
+def _effective_key(u: Unit, target_github: Path) -> str:
+    active = _activated_unit(u, target_github)
+    return active.hash_key if active is not None else u.hash_key
+
+
 # ── Baseline content store and 3-way merge (#105) ───────────────────────────────
 # ``.af-hashes`` records only hashes, so a file both sides changed was withheld
 # whole: the common ancestor a merge needs was gone. The store keeps the bytes
@@ -611,13 +634,22 @@ def dry_run(source_root: Path, target_dir: Path) -> dict:
     for u in units:
         data = resolved_source_bytes(u.source, target_af_env)
         src_h = _sha256_upper_bytes(_strip_bytes(data))
-        cls = _classify(u.is_custom, src_h, _target_hash(u.target), baseline.get(u.hash_key), has_baseline)
+        moved_from = None
+        active = _activated_unit(u, target_github)
+        if active is not None:
+            counts["ACTIVATED"] = counts.get("ACTIVATED", 0) + 1
+            results.append({"path": u.display, "classification": "ACTIVATED", "customizable": u.is_custom})
+            moved_from, u = u.hash_key, active
+        # A moved file keeps the baseline of the key it was moved from.
+        base_h = baseline.get(u.hash_key) or (baseline.get(moved_from) if moved_from else None)
+        cls = _classify(u.is_custom, src_h, _target_hash(u.target), base_h, has_baseline)
         if cls == "CREATE" and _is_deactivated_skill_unit(u.hash_key, target_github):
             counts["DEACTIVATED"] = counts.get("DEACTIVATED", 0) + 1
             results.append({"path": u.display, "classification": "DEACTIVATED", "customizable": u.is_custom})
             u = _available_unit(u, target_github)
-            cls = _classify(u.is_custom, src_h, _target_hash(u.target), baseline.get(u.hash_key), has_baseline)
-        if cls == "CONFLICT" and _three_way(u, data, baseline.get(u.hash_key), target_github) is not None:
+            base_h = baseline.get(u.hash_key)
+            cls = _classify(u.is_custom, src_h, _target_hash(u.target), base_h, has_baseline)
+        if cls == "CONFLICT" and _three_way(u, data, base_h, target_github) is not None:
             cls = "MERGE"
         counts[cls] = counts.get(cls, 0) + 1
         results.append({"path": u.display, "classification": cls, "customizable": u.is_custom})
@@ -690,12 +722,19 @@ def apply(source_root: Path, target_dir: Path) -> dict:
     for u in collect_units(source_root, target_dir, manifest):
         data = resolved_source_bytes(u.source, target_af_env)
         src_h = _sha256_upper_bytes(_strip_bytes(data))
-        cls = _classify(u.is_custom, src_h, _target_hash(u.target), baseline.get(u.hash_key), has_baseline)
+        moved_from = None
+        active = _activated_unit(u, target_github)
+        if active is not None:
+            skipped.append({"path": u.display, "classification": "ACTIVATED"})
+            moved_from, u = u.hash_key, active
+        base_h = baseline.get(u.hash_key) or (baseline.get(moved_from) if moved_from else None)
+        cls = _classify(u.is_custom, src_h, _target_hash(u.target), base_h, has_baseline)
         if cls == "CREATE" and _is_deactivated_skill_unit(u.hash_key, target_github):
             skipped.append({"path": u.display, "classification": "DEACTIVATED"})
             u = _available_unit(u, target_github)
-            cls = _classify(u.is_custom, src_h, _target_hash(u.target), baseline.get(u.hash_key), has_baseline)
-        merge = _three_way(u, data, baseline.get(u.hash_key), target_github) if cls == "CONFLICT" else None
+            base_h = baseline.get(u.hash_key)
+            cls = _classify(u.is_custom, src_h, _target_hash(u.target), base_h, has_baseline)
+        merge = _three_way(u, data, base_h, target_github) if cls == "CONFLICT" else None
         if merge is not None:
             cls = "MERGE"
         if cls in ("CREATE", "UPDATE", "MERGE"):
@@ -715,6 +754,13 @@ def apply(source_root: Path, target_dir: Path) -> dict:
             _store_put(target_github, _strip_bytes(data))
         else:
             skipped.append({"path": u.display, "classification": cls})
+        # The moved-from key outlives the move only while a stale duplicate is on
+        # disk, so that list_orphans can still find and prune it. Its baseline moves
+        # to the active key, or a skipped CONFLICT reads as new-in-AF next run.
+        if moved_from and not (target_github / moved_from).is_file():
+            carried = deployed.pop(moved_from, None)
+            if carried and u.hash_key not in deployed:
+                deployed[u.hash_key] = carried
 
     _write_hashes(target_github, deployed, version)
     _store_prune(target_github, deployed)
@@ -828,7 +874,7 @@ def list_orphans(source_root: Path, target_dir: Path) -> list[dict]:
     """List baselined framework files that are no longer deployable and still on disk."""
     target_github = target_dir / ".github"
     manifest = parse_manifest(source_root / ".github" / ".af-manifest")
-    current = {u.hash_key for u in collect_units(source_root, target_dir, manifest)}
+    current = {_effective_key(u, target_github) for u in collect_units(source_root, target_dir, manifest)}
     baseline = read_baseline_hashes(target_github)
     orphans: list[dict] = []
     for key in sorted(baseline):

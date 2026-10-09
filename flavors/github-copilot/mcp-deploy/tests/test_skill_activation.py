@@ -98,6 +98,17 @@ def test_an_edited_active_copy_is_a_conflict_not_an_overwrite(tmp_path: Path) ->
     assert {"path": f".github/{ACTIVE}", "classification": "CONFLICT"} in report["skipped"]
 
 
+def test_an_unresolved_conflict_is_still_a_conflict_on_the_next_deploy(tmp_path: Path) -> None:
+    # Dropping the moved-from key without carrying its baseline over would turn the
+    # second run into "new in AF" -> UPDATE, overwriting the project's edit.
+    src = _source(tmp_path / "src")
+    target = _activated(tmp_path / "proj", OURS)
+    deploy_core.apply(src, target)
+    report = deploy_core.apply(src, target)
+    assert (target / ".github" / ACTIVE).read_text(encoding="utf-8") == OURS
+    assert {"path": f".github/{ACTIVE}", "classification": "CONFLICT"} in report["skipped"]
+
+
 def test_an_edited_active_copy_without_a_framework_change_is_preserved(tmp_path: Path) -> None:
     src = _source(tmp_path / "src", content=OLD)
     target = _activated(tmp_path / "proj", OURS)
@@ -155,7 +166,31 @@ def test_deploy_ps1_agrees(tmp_path: Path, project_content: str, verdict: str, w
     target = _activated(tmp_path / "proj", project_content)
     subprocess.run(["git", "init", "-q", str(target)], check=True)
 
-    res = subprocess.run(
+    res = _run_ps1(src, target)
+
+    lines = res.stdout.splitlines()
+    assert any(line.strip().startswith(verdict) and ACTIVE in line for line in lines), res.stdout + res.stderr
+    assert (target / ".github" / ACTIVE).read_text(encoding="utf-8") == written
+    assert not (target / ".github" / AVAIL).exists()
+
+
+@pytest.mark.skipif(_powershell() is None, reason="PowerShell not available")
+def test_deploy_ps1_keeps_an_unresolved_conflict_on_the_next_run(tmp_path: Path) -> None:
+    src = _source(tmp_path / "src")
+    shutil.copy2(AF_ROOT / "deploy.ps1", src / "deploy.ps1")
+    target = _activated(tmp_path / "proj", OURS)
+    subprocess.run(["git", "init", "-q", str(target)], check=True)
+
+    _run_ps1(src, target)
+    res = _run_ps1(src, target)
+
+    lines = res.stdout.splitlines()
+    assert any(line.strip().startswith("CONFLICT") and ACTIVE in line for line in lines), res.stdout + res.stderr
+    assert (target / ".github" / ACTIVE).read_text(encoding="utf-8") == OURS
+
+
+def _run_ps1(src: Path, target: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         [_powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(src / "deploy.ps1")]
         + ["-TargetDir", str(target)],
         capture_output=True,
@@ -163,8 +198,3 @@ def test_deploy_ps1_agrees(tmp_path: Path, project_content: str, verdict: str, w
         timeout=300,
         stdin=subprocess.DEVNULL,
     )
-
-    lines = res.stdout.splitlines()
-    assert any(line.strip().startswith(verdict) and ACTIVE in line for line in lines), res.stdout + res.stderr
-    assert (target / ".github" / ACTIVE).read_text(encoding="utf-8") == written
-    assert not (target / ".github" / AVAIL).exists()

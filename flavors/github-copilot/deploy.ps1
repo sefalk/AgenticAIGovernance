@@ -284,6 +284,18 @@ function Get-TargetClassifyHash([string]$Target) {
     return (Get-BytesHashUpper (Get-RegionStrippedBytes ([System.IO.File]::ReadAllBytes($Target))))
 }
 
+function Get-ActivatedSkillKey([string]$HashKey) {
+    # An optional skill the project activated by *moving* skills/_available/{name}/
+    # to skills/{name}/. Recreating the _available/ copy left every activated skill
+    # twice while the active copy never got a fix (#110), so the library source is
+    # deployed onto the active copy instead. Mirror of Test-DeactivatedSkillUnit;
+    # parity with deploy_core _activated_unit and deploy.sh activated_skill_key.
+    $parts = ($HashKey -replace '\\', '/') -split '/'
+    if ($parts.Count -lt 4 -or $parts[0] -ne 'skills' -or $parts[1] -ne '_available') { return $null }
+    if (-not (Test-Path (Join-Path $TargetGitHub "skills/$($parts[2])") -PathType Container)) { return $null }
+    return 'skills/' + (($parts[2..($parts.Count - 1)]) -join '/')
+}
+
 function Test-DeactivatedSkillUnit([string]$HashKey) {
     # Measure #3: an active-by-default skill the project deactivated by *moving* it
     # to skills/_available/{name}/. When the framework still ships skills/{name}/ but
@@ -434,7 +446,7 @@ foreach ($f in $ManifestVSCodeFiles) {
 }
 
 # ── Counters ───────────────────────────────────────────────────────────────
-$script:Stats = @{ Created = 0; Updated = 0; Unchanged = 0; Protected = 0; Conflict = 0; Preserved = 0; Deactivated = 0 }
+$script:Stats = @{ Created = 0; Updated = 0; Unchanged = 0; Protected = 0; Conflict = 0; Preserved = 0; Deactivated = 0; Activated = 0 }
 $script:BackupDir = $null
 $script:BackupCount = 0
 
@@ -797,10 +809,26 @@ function Publish-SingleFile {
         [string]$Source,
         [string]$Target,
         [string]$DisplayPath,
-        [string]$HashKey
+        [string]$HashKey,
+        [string]$MovedFrom
     )
     if (-not $HashKey) {
         $HashKey = $DisplayPath -replace '^\.github/', ''
+    }
+    $activeKey = Get-ActivatedSkillKey $HashKey
+    if ($activeKey) {
+        Write-Host "  ACTIVATED $DisplayPath  (skill moved to skills/)" -ForegroundColor DarkGray
+        $script:Stats.Activated++
+        Publish-SingleFile -Source $Source -Target (Join-Path $TargetGitHub $activeKey) -DisplayPath ".github/$activeKey" -HashKey $activeKey -MovedFrom $HashKey
+        # The moved-from key outlives the move only while a stale duplicate is on disk;
+        # its baseline moves to the active key, or a skipped CONFLICT reads as
+        # new-in-AF next run. Parity with deploy_core apply.
+        if (-not (Test-Path $Target -PathType Leaf) -and $script:DeployedHashes.ContainsKey($HashKey)) {
+            $carried = $script:DeployedHashes[$HashKey]
+            $script:DeployedHashes.Remove($HashKey)
+            if (-not $script:DeployedHashes.ContainsKey($activeKey)) { $script:DeployedHashes[$activeKey] = $carried }
+        }
+        return
     }
     $isCustom = $script:CustomizableFiles.Contains($HashKey)
     $exists = Test-Path $Target
@@ -833,6 +861,8 @@ function Publish-SingleFile {
 
         # ── 3-way merge detection ──
         $baselineHash = $script:BaselineHashes[$HashKey]
+        # A moved file keeps the baseline of the key it was moved from (#110).
+        if (-not $baselineHash -and $MovedFrom) { $baselineHash = $script:BaselineHashes[$MovedFrom] }
 
         if ($baselineHash) {
             $afChanged   = $sourceHash -ne $baselineHash
@@ -1142,24 +1172,18 @@ if ($script:AFEnvWasAbsent -and -not $DryRun) {
     }
 }
 
-# ── Stale activation check ─────────────────────────────────────────────────
-# Warn when a project has activated a skill (skills/{name}/) but the
-# _available/{name}/SKILL.md copy is newer. This happens when AF updates
-# a skill and deploy syncs _available/ but can't know about activated copies.
+# ── Duplicate activation check ─────────────────────────────────────────────
+# Activation is a move, and the deploy now updates the active copy in place
+# (#110). A skill still present in both places predates that: name it so the
+# stale _available/ copy can be removed.
 $staleSkills = @()
 $targetAvailable = Join-Path $TargetGitHub 'skills\_available'
 $targetSkills    = Join-Path $TargetGitHub 'skills'
 if ((Test-Path $targetAvailable) -and (Test-Path $targetSkills)) {
     foreach ($activeDir in (Get-ChildItem $targetSkills -Directory)) {
         if ($activeDir.Name -eq '_available' -or $activeDir.Name.StartsWith('.')) { continue }
-        $availCopy = Join-Path $targetAvailable "$($activeDir.Name)\SKILL.md"
-        $activeCopy = Join-Path $activeDir.FullName 'SKILL.md'
-        if ((Test-Path $availCopy) -and (Test-Path $activeCopy)) {
-            $availHash  = (Get-FileHash $availCopy).Hash
-            $activeHash = (Get-FileHash $activeCopy).Hash
-            if ($availHash -ne $activeHash) {
-                $staleSkills += $activeDir.Name
-            }
+        if (Test-Path (Join-Path $targetAvailable $activeDir.Name) -PathType Container) {
+            $staleSkills += $activeDir.Name
         }
     }
 }
@@ -1192,6 +1216,9 @@ if ($script:Stats.Preserved -gt 0) {
 if ($script:Stats.Deactivated -gt 0) {
     Write-Host "  Deactivated: $($script:Stats.Deactivated) -- skills moved to _available/, not deployed" -ForegroundColor DarkGray
 }
+if ($script:Stats.Activated -gt 0) {
+    Write-Host "  Activated: $($script:Stats.Activated) -- library skills deployed to the active copy in skills/" -ForegroundColor DarkGray
+}
 if ($script:Stats.Conflict -gt 0) {
     Write-Host "  Conflict:  $($script:Stats.Conflict) -- both sides changed, use agent to merge" -ForegroundColor Red
     Write-Host ""
@@ -1203,9 +1230,9 @@ if ($DryRun) {
 }
 if ($staleSkills.Count -gt 0) {
     Write-Host ""
-    Write-Host "  Stale activations ($($staleSkills.Count)): _available/ has newer SKILL.md" -ForegroundColor Yellow
+    Write-Host "  Duplicate activations ($($staleSkills.Count)): active in skills/ and still in skills/_available/" -ForegroundColor Yellow
     foreach ($s in $staleSkills | Sort-Object) {
-        Write-Host "    - skills/$s/  (re-copy from skills/_available/$s/ to update)" -ForegroundColor Yellow
+        Write-Host "    - skills/_available/$s/  (stale copy -- remove it; skills/$s/ is the one kept current)" -ForegroundColor Yellow
     }
 }
 
