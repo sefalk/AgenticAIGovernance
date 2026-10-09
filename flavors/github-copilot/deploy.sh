@@ -13,13 +13,14 @@ Supports two use cases:
   UC2 (coupled):  Re-run to sync updates from AF source to project.
 
 The .af-manifest supports annotations:
-  [customizable] -- file contains project-specific content; protected on update
+  [customizable] -- file contains project-specific content; protected once the project changes it
   [optional]     -- directory may not exist in AF source; no warning if missing
   [vscode]       -- file deployed to .vscode/ instead of .github/
 
-Customizable files are protected on update. When AF has changes to a
-customizable file, a PROTECT message with "review manually" guidance is
-shown. Use --force to overwrite.
+A customizable file the project changed is never overwritten unless --force
+is used: an AF change to it is a CONFLICT. One still identical to its
+baseline was never customized and takes the AF update (#106). A
+customizable file with no baseline entry is reported PROTECT.
 
 An ephemeral backup directory (.af-backup-{timestamp}) is created before
 files are overwritten. If no conflicts remain after deploy, the backup is
@@ -167,7 +168,7 @@ fi
 
 # ── Parse manifest with annotations ───────────────────────────────────────
 # Format: path  [annotation1, annotation2]
-#   [customizable] — project may modify; protected on update
+#   [customizable] — project may modify; protected once the project changes it
 #   [optional]     — may not exist in AF source; no warning if missing
 #   [vscode]       — deployed to .vscode/ instead of .github/
 
@@ -858,15 +859,14 @@ deploy_file() {
             [[ "$source_hash" != "$baseline_hash" ]] && af_changed=true
             [[ "$target_hash" != "$baseline_hash" ]] && proj_changed=true
 
-            # Customizable files: never auto-overwrite (unless --force)
-            if $is_custom && [[ "$FORCE" != "true" ]]; then
-                if $af_changed && $proj_changed; then
+            # Customizable files the project changed: never auto-overwrite (unless
+            # --force). One still equal to its baseline was never customized, so it
+            # takes the update below like any other file (#106).
+            if $is_custom && $proj_changed && [[ "$FORCE" != "true" ]]; then
+                if $af_changed; then
                     echo "  CONFLICT $display  (both AF and project changed)"
                     show_content_diff "$src" "$tgt"
                     ((STAT_CONFLICT++)) || true
-                elif $af_changed; then
-                    echo "  PROTECT $display  (AF has changes -- review manually)"
-                    ((STAT_PROTECTED++)) || true
                 else
                     echo "  PRESERVE $display  (project customization)"
                     ((STAT_PRESERVED++)) || true

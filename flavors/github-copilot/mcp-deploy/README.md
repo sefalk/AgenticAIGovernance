@@ -10,7 +10,8 @@ cloning the AF repository next to the target project**.
 > **Phase 2** (`[vscode]` file coverage) are implemented. Write tools require
 > `confirm=true` (a production server would use MCP *elicitation*); all writes
 > stay under the target `.github/` or `.vscode/`, back up before overwrite, and
-> never touch CONFLICT / PROTECT / PRESERVE / `[customizable]` files.
+> never touch CONFLICT / PROTECT / PRESERVE files or a `[customizable]` file the
+> project changed.
 
 > **Status: experimental — runs in parallel to `deploy.ps1` / `deploy.sh` for
 > now, not yet a replacement.** The scripts remain the supported, CI-integrated
@@ -150,7 +151,8 @@ pytest            # unit tests for the read-only deploy logic (no MCP needed)
 
 - **Guarded writes.** Write tools require `confirm=true`; all writes stay under
   the target `.github/` (or `.vscode/`); existing files are backed up before
-  overwrite; CONFLICT / PROTECT / PRESERVE / `[customizable]` files are never
+  overwrite; CONFLICT / PROTECT / PRESERVE files and `[customizable]` files the
+  project changed are never
   written by `apply`. The terminal `block-dangerous` hook does **not** see MCP
   tool calls, so these guards *are* the safety boundary (see the spec).
 - **3-way merge (#105).** A non-customizable file both sides changed is merged

@@ -469,10 +469,10 @@ def _classify(is_custom: bool, src_h: str, tgt_h: str | None, baseline: str | No
     if baseline:
         af_changed = src_h != baseline
         proj_changed = tgt_h != baseline
-        if is_custom:
-            if af_changed and proj_changed:
-                return "CONFLICT"
-            return "PROTECT" if af_changed else "PRESERVE"
+        # A customizable file still equal to its baseline was never customized,
+        # so it takes the update like any other file (#106).
+        if is_custom and proj_changed:
+            return "CONFLICT" if af_changed else "PRESERVE"
         if af_changed and not proj_changed:
             return "UPDATE"
         if not af_changed and proj_changed:
@@ -633,8 +633,8 @@ def dry_run(source_root: Path, target_dir: Path) -> dict:
 
 # ── Write path (Phase 1) ────────────────────────────────────────────────────
 # All writes stay under the target's ``.github/``; existing files are backed up
-# before overwrite; CONFLICT / PROTECT / PRESERVE / [customizable] files are
-# never written by ``apply``.
+# before overwrite; CONFLICT / PROTECT / PRESERVE files, and [customizable] files
+# the project changed, are never written by ``apply``.
 
 
 def _write_bytes(path: Path, data: bytes) -> None:
@@ -669,8 +669,8 @@ def _safe_join(base: Path, rel: str) -> Path:
 def apply(source_root: Path, target_dir: Path) -> dict:
     """Apply CREATE/UPDATE/MERGE files only. Backs up first; skips everything else.
 
-    Read-only classes (CONFLICT / PROTECT / PRESERVE / [customizable] / UNCHANGED)
-    are never written. Returns applied/merged/skipped lists and the backup directory.
+    Read-only classes (CONFLICT / PROTECT / PRESERVE / UNCHANGED) are never
+    written. Returns applied/merged/skipped lists and the backup directory.
     """
     source_github = source_root / ".github"
     target_github = target_dir / ".github"

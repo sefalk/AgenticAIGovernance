@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Asserts deploy.sh keeps the _available/ copy of a deactivated skill current
-# (#384), the bash counterpart of test_skill_deactivation.py.
+# (#384), the bash counterpart of test_skill_deactivation.py, and updates a
+# customizable file the project never changed (#106).
 #
 # The pytest parity cases for deploy.sh skip on Windows: a full deploy of the
 # real payload outlasts their 300s limit under Git-for-Windows bash (#260). This
@@ -67,6 +68,30 @@ bash "$SRC/deploy.sh" -t "$WORK/b" </dev/null >"$WORK/b.log" 2>&1
 assert_contains "$WORK/b.log" "CONFLICT .github/$KEY" "The edited copy is classified CONFLICT"
 assert_contains "$WORK/b/.github/$KEY" "demo skill, old version" "The edited copy is left as it was"
 
+# #106: the same minimal source covers the customizable branch of deploy_file.
+ARCH='instructions/architecture.instructions.md'
+mkdir -p "$SRC/.github/instructions"
+printf '# architecture, framework fix\n' >"$SRC/.github/$ARCH"
+OLD_HASH=$(printf '# architecture, as deployed\n' | sha256sum | cut -d' ' -f1 | tr 'a-f' 'A-F')
+
+echo "== C: an untouched customizable file is UPDATEd (#106) =="
+mkdir -p "$WORK/c/.github/instructions"
+printf '# architecture, as deployed\n' >"$WORK/c/.github/$ARCH"
+printf '# AF deployment baseline hashes\n%s=%s\n' "$ARCH" "$OLD_HASH" >"$WORK/c/.github/.af-hashes"
+git init -q "$WORK/c"
+bash "$SRC/deploy.sh" -t "$WORK/c" </dev/null >"$WORK/c.log" 2>&1
+assert_contains "$WORK/c.log" "UPDATE  .github/$ARCH" "The untouched customizable file is classified UPDATE"
+assert_contains "$WORK/c/.github/$ARCH" "framework fix" "The framework change is written"
+
+echo "== D: a customized file both sides changed stays CONFLICT (#106 control) =="
+mkdir -p "$WORK/d/.github/instructions"
+printf '# architecture, ours\n' >"$WORK/d/.github/$ARCH"
+printf '# AF deployment baseline hashes\n%s=%s\n' "$ARCH" "$OLD_HASH" >"$WORK/d/.github/.af-hashes"
+git init -q "$WORK/d"
+bash "$SRC/deploy.sh" -t "$WORK/d" </dev/null >"$WORK/d.log" 2>&1
+assert_contains "$WORK/d.log" "CONFLICT .github/$ARCH" "The customized file is classified CONFLICT"
+assert_contains "$WORK/d/.github/$ARCH" "architecture, ours" "The customized file is left as it was"
+
 echo ""
 echo "=== Summary ==="
 echo "  Passed: $passed"
@@ -74,6 +99,8 @@ echo "  Failed: $failed"
 if [[ "$failed" -gt 0 ]]; then
     echo "--- deploy output A ---"; cat "$WORK/a.log"
     echo "--- deploy output B ---"; cat "$WORK/b.log"
+    echo "--- deploy output C ---"; cat "$WORK/c.log"
+    echo "--- deploy output D ---"; cat "$WORK/d.log"
     exit 1
 fi
-echo "  All deactivated-skill sync tests passed."
+echo "  All deploy.sh minimal-source tests passed."

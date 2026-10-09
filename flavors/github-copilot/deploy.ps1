@@ -12,13 +12,14 @@
     - UC2 (coupled):  Re-run to sync updates from AF source to project.
 
     The .af-manifest supports annotations:
-    - [customizable] -- file contains project-specific content; protected on update
+    - [customizable] -- file contains project-specific content; protected once the project changes it
     - [optional]     -- directory may not exist in AF source; no warning if missing
     - [vscode]       -- file deployed to .vscode/ instead of .github/
 
-    Customizable files are protected on update -- they won't be overwritten
-    unless -Force is used. When AF has changes to a customizable file, a
-    PROTECT message with "review manually" guidance is shown.
+    A customizable file the project changed is never overwritten unless -Force
+    is used: an AF change to it is a CONFLICT. One still identical to its
+    baseline was never customized and takes the AF update (#106). A
+    customizable file with no baseline entry is reported PROTECT.
 
     An ephemeral backup directory (.af-backup-{timestamp}) is created before
     files are overwritten. If no conflicts remain after deploy, the backup
@@ -345,7 +346,7 @@ if (Test-Path $DeployedVersionFile) {
 
 # ── Parse manifest with annotations ───────────────────────────────────────
 # Format: path  [annotation1, annotation2]
-#   [customizable] — project may modify; protected on update
+#   [customizable] — project may modify; protected once the project changes it
 #   [optional]     — may not exist in AF source; no warning if missing
 #   [vscode]       — deployed to .vscode/ instead of .github/
 
@@ -837,15 +838,14 @@ function Publish-SingleFile {
             $afChanged   = $sourceHash -ne $baselineHash
             $projChanged = $targetHash -ne $baselineHash
 
-            # Customizable files: never auto-overwrite (unless -Force)
-            if ($isCustom -and -not $Force) {
-                if ($afChanged -and $projChanged) {
+            # Customizable files the project changed: never auto-overwrite (unless
+            # -Force). One still equal to its baseline was never customized, so it
+            # takes the update below like any other file (#106).
+            if ($isCustom -and $projChanged -and -not $Force) {
+                if ($afChanged) {
                     Write-Host "  CONFLICT $DisplayPath  (both AF and project changed)" -ForegroundColor Red
                     Show-ContentDiff $Source $Target
                     $script:Stats.Conflict++
-                } elseif ($afChanged) {
-                    Write-Host "  PROTECT $DisplayPath  (AF has changes -- review manually)" -ForegroundColor Yellow
-                    $script:Stats.Protected++
                 } else {
                     Write-Host "  PRESERVE $DisplayPath  (project customization)" -ForegroundColor Magenta
                     $script:Stats.Preserved++
