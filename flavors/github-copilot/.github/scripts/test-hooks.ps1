@@ -1220,6 +1220,55 @@ Assert-RunTask "run_task: unknown task id asks" `
 Assert-RunTask "run_task: missing tasks.json asks" `
     'ask' '' 'shell: anything' -NoTasksFile
 
+# ── create_and_run_task: an identical invocation is reused, not re-minted (#396) ──
+# createAndRunTask refuses an existing label and can never be auto-approved, so
+# re-running an invocation minted a new label each time: the MP project held
+# 227 tasks for 118 distinct invocations. runTask on the existing label runs the
+# same command without a creation prompt.
+function Get-CreateTaskVerdict {
+    param([string]$TasksJson, [hashtable]$Task, [switch]$NoTasksFile)
+    $dir = Join-Path ([System.IO.Path]::GetTempPath()) "af-tasks-$(Get-Random)"
+    if ($NoTasksFile) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    else { $dir = New-TasksFixture $TasksJson }
+    try {
+        $payload = @{
+            tool_name  = 'create_and_run_task'
+            tool_input = @{ task = $Task; workspaceFolder = $dir }
+        } | ConvertTo-Json -Depth 6 -Compress
+        $r = Invoke-Hook -Script 'block-dangerous.ps1' -JsonInput $payload
+        return @{ Decision = (Resolve-Decision $r.Output $r.ExitCode); Output = $r.Output }
+    } finally {
+        Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+$tasksLint = '{"version":"2.0.0","tasks":[{"label":"lint: changed files","type":"shell","command":".github/scripts/run-lint.ps1","args":["-Scope","changed"],"detail":"curated"}]}'
+$mintLint = @{ label = 'lint: changed scope (wit9999)'; type = 'shell'; command = '.github/scripts/run-lint.ps1'; args = @('-Scope', 'changed') }
+
+$v = Get-CreateTaskVerdict $tasksLint $mintLint
+Assert-True "create_and_run_task: an invocation that already has a task is denied" `
+    ($v.Decision -eq 'deny') "got '$($v.Decision)': $($v.Output)"
+Assert-True "create_and_run_task: the deny names the existing label and runTask" `
+    ($v.Output -match 'lint: changed files' -and $v.Output -match 'runTask') "output: $($v.Output)"
+
+$v = Get-CreateTaskVerdict $tasksLint @{ label = 'lint via shell'; type = 'shell'; command = 'powershell'; args = @('-NoProfile', '-File', '.github\scripts\run-lint.ps1', '-Scope', 'changed') }
+Assert-True "create_and_run_task: the same script behind powershell -File is the same invocation" `
+    ($v.Decision -eq 'deny') "got '$($v.Decision)': $($v.Output)"
+
+# False deny costs as much as a false allow: new arguments are a new invocation.
+$v = Get-CreateTaskVerdict $tasksLint @{ label = 'lint: all'; type = 'shell'; command = '.github/scripts/run-lint.ps1'; args = @('-Scope', 'all') }
+Assert-True "create_and_run_task: different arguments are still allowed" `
+    ($v.Decision -eq 'allow') "got '$($v.Decision)': $($v.Output)"
+
+$v = Get-CreateTaskVerdict '' $mintLint -NoTasksFile
+Assert-True "create_and_run_task: no tasks.json is still allowed" `
+    ($v.Decision -eq 'allow') "got '$($v.Decision)': $($v.Output)"
+
+# Hygiene, not a security gate: a tasks.json it cannot parse gives it no opinion.
+$v = Get-CreateTaskVerdict ("// comment`n" + $tasksLint) $mintLint
+Assert-True "create_and_run_task: an unparsable tasks.json does not deny" `
+    ($v.Decision -eq 'allow') "got '$($v.Decision)': $($v.Output)"
+
 Write-Output ""
 
 # ── 2. coordinator-pretooluse.ps1 ────────────────────────────────────────

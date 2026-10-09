@@ -154,6 +154,21 @@ build for one (#322).
   `validate-skills.py` and the deploy summary name every skill that is both
   active and in `_available/`.
 
+- **An agent reuses an existing task instead of minting a duplicate (#396).**
+  VS Code hard-codes a prompt for `createAndRunTask` (`allowAutoConfirm: false`),
+  and the tool refuses an existing label. So every re-run of an invocation
+  minted a new label and cost a prompt: the MP project held 227 tasks for 118
+  distinct invocations.
+  - `block-dangerous` (both dialects, via `task-duplicate.py`) denies a task
+    whose `command` and `args` match an existing task, and names that label.
+    `runTask` on it can be auto-approved.
+  - `prune-tasks.py` removes agent-minted tasks, meaning tasks without `detail`,
+    which `createAndRunTask` cannot write. It is a dry run by default; `--apply`
+    writes with a backup and keeps any task a kept task depends on. On the MP
+    file it would keep 31 of 228.
+  - The structural fix, a command registry with agent-supplied arguments, stays
+    with #60.
+
 - **A customizable file the project never changed now takes the framework
   update (#106).** `PROTECT` fired whenever AF changed a `[customizable]` file,
   without checking whether the project had changed it. In the measured upgrade

@@ -143,6 +143,9 @@
       ".github/hooks/scripts/planner-pretooluse.sh",
       ".github/hooks/scripts/check-plan-budget.py"
     ],
+    "test-prune-tasks.ps1": [
+      ".github/scripts/prune-tasks.py"
+    ],
     "test-python-missing-notice.ps1": [
       ".github/hooks/scripts/**",
       ".github/hooks/git/**"

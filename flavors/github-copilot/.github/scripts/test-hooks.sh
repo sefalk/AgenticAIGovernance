@@ -2698,6 +2698,50 @@ except Exception: print("unparsable")' 2>/dev/null)
 assert_true "a task command with backslashes and quotes still produces parsable JSON" \
     "$([ "$task_dec" = "deny" ] && echo 1 || echo 0)" "got '$task_dec' from: $task_out"
 
+# --- create_and_run_task: an identical invocation is reused (#396) ----------
+# createAndRunTask refuses an existing label and can never be auto-approved, so
+# re-running an invocation minted a new label each time (MP: 227 tasks for 118
+# distinct invocations). runTask on the existing label needs no creation prompt.
+dup_dir=$(mktemp -d)
+dup_win=$(cygpath -m "$dup_dir" 2>/dev/null || printf '%s' "$dup_dir")
+mkdir -p "$dup_dir/.vscode"
+dup_tasks='{"version":"2.0.0","tasks":[{"label":"lint: changed files","type":"shell","command":".github/scripts/run-lint.ps1","args":["-Scope","changed"],"detail":"curated"}]}'
+printf '%s' "$dup_tasks" >"$dup_dir/.vscode/tasks.json"
+create_out() { # <command> <args-json>
+    printf '{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"minted","type":"shell","command":"%s","args":%s},"workspaceFolder":"%s"}}' "$1" "$2" "$dup_win" |
+        bash "$HOOK_DIR/block-dangerous.sh" 2>&1
+}
+verdict_of() {
+    printf '%s' "$1" | "$af_py" -c 'import json,sys
+try: print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecision"])
+except Exception: print("none")' 2>/dev/null
+}
+
+dup_out=$(create_out '.github/scripts/run-lint.ps1' '["-Scope","changed"]')
+assert_true "create_and_run_task: an invocation that already has a task is denied" \
+    "$([ "$(verdict_of "$dup_out")" = "deny" ] && echo 1 || echo 0)" "got: $dup_out"
+assert_true "create_and_run_task: the deny names the existing label and runTask" \
+    "$(printf '%s' "$dup_out" | grep -q 'lint: changed files' && printf '%s' "$dup_out" | grep -q 'runTask' && echo 1 || echo 0)" "got: $dup_out"
+
+dup_out=$(create_out 'powershell' '["-NoProfile","-File",".github/scripts/run-lint.ps1","-Scope","changed"]')
+assert_true "create_and_run_task: the same script behind powershell -File is the same invocation" \
+    "$([ "$(verdict_of "$dup_out")" = "deny" ] && echo 1 || echo 0)" "got: $dup_out"
+
+dup_out=$(create_out '.github/scripts/run-lint.ps1' '["-Scope","all"]')
+assert_true "create_and_run_task: different arguments are still allowed" \
+    "$([ "$(verdict_of "$dup_out")" = "allow" ] && echo 1 || echo 0)" "got: $dup_out"
+
+printf '// comment\n%s' "$dup_tasks" >"$dup_dir/.vscode/tasks.json"
+dup_out=$(create_out '.github/scripts/run-lint.ps1' '["-Scope","changed"]')
+assert_true "create_and_run_task: an unparsable tasks.json does not deny" \
+    "$([ "$(verdict_of "$dup_out")" = "allow" ] && echo 1 || echo 0)" "got: $dup_out"
+
+rm -f "$dup_dir/.vscode/tasks.json"
+dup_out=$(create_out '.github/scripts/run-lint.ps1' '["-Scope","changed"]')
+assert_true "create_and_run_task: no tasks.json is still allowed" \
+    "$([ "$(verdict_of "$dup_out")" = "allow" ] && echo 1 || echo 0)" "got: $dup_out"
+rm -rf "$dup_dir"
+
 # --- The policy is stated, not inherited (issue #108) ----------------------
 #
 # The cases above mean the declared default policy set at the top of this file.
