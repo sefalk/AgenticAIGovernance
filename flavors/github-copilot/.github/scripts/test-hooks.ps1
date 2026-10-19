@@ -1269,6 +1269,21 @@ $v = Get-CreateTaskVerdict ("// comment`n" + $tasksLint) $mintLint
 Assert-True "create_and_run_task: an unparsable tasks.json does not deny" `
     ($v.Decision -eq 'allow') "got '$($v.Decision)': $($v.Output)"
 
+# ── The command server's trust store is not agent-editable (#60) ──────────
+# An agent that could write the store would approve its own script. Judged on
+# the target path only: content that merely names the path is not a write to it.
+$trustWin = 'C:\\Users\\dev\\AppData\\Local\\af-command-mcp\\trust\\0a1b.json'
+Assert-Deny "trust store: create_file into the store is denied" 'block-dangerous.ps1' `
+    "{`"tool_name`":`"create_file`",`"tool_input`":{`"filePath`":`"$trustWin`",`"content`":`"{}`"}}"
+Assert-Deny "trust store: an edit with forward slashes is denied" 'block-dangerous.ps1' `
+    '{"tool_name":"replace_string_in_file","tool_input":{"filePath":"/home/dev/.local/state/af-command-mcp/trust/0a1b.json","oldString":"a","newString":"b"}}'
+Assert-Deny "trust store: a batch edit with one entry in the store is denied" 'block-dangerous.ps1' `
+    "{`"tool_name`":`"multi_replace_string_in_file`",`"tool_input`":{`"replacements`":[{`"filePath`":`"C:\\\\repo\\\\a.py`"},{`"filePath`":`"$trustWin`"}]}}"
+Assert-Decision "trust store: an ordinary edit stays silent (control)" 'silent' 'block-dangerous.ps1' `
+    '{"tool_name":"create_file","tool_input":{"filePath":"C:\\repo\\docs\\a.md","content":"x"}}'
+Assert-Decision "trust store: content naming the store is not a write to it" 'silent' 'block-dangerous.ps1' `
+    "{`"tool_name`":`"create_file`",`"tool_input`":{`"filePath`":`"C:\\\\repo\\\\README.md`",`"content`":`"see $trustWin`"}}"
+
 Write-Output ""
 
 # ── 2. coordinator-pretooluse.ps1 ────────────────────────────────────────
