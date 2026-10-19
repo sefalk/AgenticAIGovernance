@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Asserts deploy.sh keeps the _available/ copy of a deactivated skill current
 # (#384), the bash counterpart of test_skill_deactivation.py, updates a
-# customizable file the project never changed (#106), and keeps an activated
-# optional skill where the project moved it (#110).
+# customizable file the project never changed (#106), keeps an activated
+# optional skill where the project moved it (#110), and keeps the baseline
+# store and merges a both-sides change like deploy_core (#393).
 #
 # The pytest parity cases for deploy.sh skip on Windows: a full deploy of the
 # real payload outlasts their 300s limit under Git-for-Windows bash (#260). This
@@ -130,6 +131,49 @@ bash "$SRC/deploy.sh" -t "$WORK/f" </dev/null >"$WORK/g.log" 2>&1
 assert_contains "$WORK/g.log" "CONFLICT .github/$OPT_ACTIVE" "The second run still reports CONFLICT"
 assert_contains "$WORK/f/.github/$OPT_ACTIVE" "project edit" "The second run leaves the edit alone"
 
+# #393: deploy.sh keeps the baseline store and merges a both-sides change like deploy_core.
+PLAIN='MANIFEST.md'
+lines() { for i in $(seq 1 12); do printf 'line %s\n' "$i"; done; }
+edit_lines() { lines | sed "$1"; }
+lines >"$SRC/.github/$PLAIN"
+H_HASH=$(lines | sha256sum | cut -d' ' -f1 | tr 'a-f' 'A-F')
+
+echo "== H: a script deploy stores each baselined content and ignores the store (#393) =="
+mkdir -p "$WORK/h"
+git init -q "$WORK/h"
+bash "$SRC/deploy.sh" -t "$WORK/h" </dev/null >"$WORK/h.log" 2>&1
+assert_contains "$WORK/h/.github/.af-hashes" "$PLAIN=$H_HASH" "The file is baselined"
+if [[ -f "$WORK/h/.github/.af-baseline/$H_HASH" ]] && cmp -s "$WORK/h/.github/.af-baseline/$H_HASH" "$SRC/.github/$PLAIN"; then
+    pass "The baselined content is stored under its hash"
+else
+    fail "The baselined content is stored under its hash"
+fi
+assert_contains "$WORK/h/.github/.af-baseline/.gitignore" "*" "The store ignores itself in git"
+
+echo "== I: a non-overlapping both-sides change is MERGEd (#393) =="
+cp -r "$WORK/h" "$WORK/i"
+edit_lines '2s/.*/line AF/' >"$SRC/.github/$PLAIN"
+edit_lines '10s/.*/line PROJECT/' >"$WORK/i/.github/$PLAIN"
+bash "$SRC/deploy.sh" -t "$WORK/i" </dev/null >"$WORK/i.log" 2>&1
+assert_contains "$WORK/i.log" "MERGE   .github/$PLAIN" "The file is classified MERGE"
+if cmp -s <(edit_lines '2s/.*/line AF/;10s/.*/line PROJECT/') "$WORK/i/.github/$PLAIN"; then
+    pass "The merged file carries both edits, byte-exact"
+else
+    fail "The merged file carries both edits, byte-exact"
+fi
+if [[ ! -e "$WORK/i/.github/.af-baseline/$H_HASH" ]]; then
+    pass "The superseded store object is pruned"
+else
+    fail "The superseded store object is pruned"
+fi
+
+echo "== J: overlapping changes stay CONFLICT (#393 control) =="
+cp -r "$WORK/h" "$WORK/j"
+edit_lines '2s/.*/line PROJECT/' >"$WORK/j/.github/$PLAIN"
+bash "$SRC/deploy.sh" -t "$WORK/j" </dev/null >"$WORK/j.log" 2>&1
+assert_contains "$WORK/j.log" "CONFLICT .github/$PLAIN" "The overlapping change is classified CONFLICT"
+assert_contains "$WORK/j/.github/$PLAIN" "line PROJECT" "The project file is left as it was"
+
 echo ""
 echo "=== Summary ==="
 echo "  Passed: $passed"
@@ -142,6 +186,7 @@ if [[ "$failed" -gt 0 ]]; then
     echo "--- deploy output E ---"; cat "$WORK/e.log"
     echo "--- deploy output F ---"; cat "$WORK/f.log"
     echo "--- deploy output G ---"; cat "$WORK/g.log"
+    for c in h i j; do echo "--- deploy output ${c^^} ---"; cat "$WORK/$c.log"; done
     exit 1
 fi
 echo "  All deploy.sh minimal-source tests passed."
