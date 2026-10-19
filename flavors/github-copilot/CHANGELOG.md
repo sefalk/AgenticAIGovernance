@@ -137,6 +137,22 @@ build for one (#322).
 
 ### Changed
 
+- **The Delegation Contract protects every literal, not one class (#141).**
+  A prompt protected its numbers ("copy them as given") but not a backticked
+  skill path, and the subagent swapped the path for a plausible name from the
+  skills catalogue. The same prompt put "exactly four groups" beside an
+  eight-row table, and the subagent invented a split to reconcile them.
+  - The contract gains a **Literals** field: one block, marked verbatim, holding
+    every file path, identifier, work-item id, URL, name and number the result
+    must contain.
+  - It also gains **Counts with their arithmetic**: a count that must match
+    supplied data states the relationship, never the count alone.
+  - A doc-only Trivial Fix now has a named step: the coordinator checks the
+    literals against `git diff --staged` before committing. That diff read was
+    the only check that caught both errors, and until now it was an unwritten
+    habit.
+  - The coordinator file grows to 9,425 of 9,450 tokens.
+
 - **The rule-duplication gate now reads the skills too (#354).**
   `check-rule-drift.py` adds every active `skills/*/SKILL.md` to its corpus
   (`skills/_available/` stays out, since nothing loads a parked skill). Measured
@@ -180,6 +196,24 @@ build for one (#322).
   sat in the gitignored default, written and then lost. Both gates now check for
   a stray first: documenter-stop blocks and names the path to move it to,
   stop-tests warns. A voluntary retro at `RETRO_DIR` still passes.
+
+- **A workflow-log metric is a number or `unmeasured`, never prose (#173,
+  #102).** The log schema asked for `<number>` in fields the documenter has no
+  instrument for and offered no word for "nobody measured this". Measured over
+  84 MP logs, 13 put prose or ad-hoc placeholders there (`N/A (target module not
+  yet implemented)`, `Verified by test run`, `>75%`). One log in #173 reported
+  `tests_added: 122` for a workflow that added 11.
+  - `check-workflow-log.py`, run by the documenter's Stop hook, now rejects a
+    metric field that is not a number, a percentage, `null`, or `unmeasured` /
+    `unknown`. It also rejects a `step_at_escalation` that names no step the
+    log records. Over the same 84 logs, these rules fire on exactly those 13
+    logs and nowhere else.
+  - The documenter schema shows `unmeasured` as the permitted value, and the
+    constraint now says facts are copied from the coordinator, never inferred.
+  - Not done: deriving `tests_added` from the branch diff. Measured against 66
+    reconstructable MP branches, counting added `def test_` lines matched the
+    logged value in only 31: parametrised cases and several workflows sharing
+    one branch make it a new wrong number, not a check.
 
 - **`deploy.ps1` and `deploy.sh` merge a file both sides changed, like the
   MCP deploy (#393).** Since #105 the MCP path reported `MERGE` for a

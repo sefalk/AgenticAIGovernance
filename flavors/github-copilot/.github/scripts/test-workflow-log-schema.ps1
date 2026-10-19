@@ -316,6 +316,56 @@ escalation:
     # The fixtures must carry what the cases claim, or AH/AK/AM pass vacuously.
     $results['AN_base_fixture_has_no_version'] = -not ($conforming -match '(?m)^af_version:')
     $results['AN_note_fixture_has_both']       = ($withNote -match '(?m)^af_version: ') -and ($withNote -match '(?m)^af_version_note: ')
+
+    # AO-AV: a metric is a number, a percentage, or an explicit absence (#173,
+    #    #102). The fabricated `test_suite_status: "2013 + 122 new tests"` and,
+    #    in 12 MP logs, prose such as `N/A (target module not yet implemented)`
+    #    or `Verified by test run` sat where a number belongs. Nobody measured
+    #    those values, and the schema offered no word for that, so one was made up.
+    function New-Metrics([string]$stepMetric, [string]$summaryMetric) {
+        $withStep = $conforming -replace '    action: "wrote tests"', ("    action: `"wrote tests`"`r`n    metrics:`r`n      " + $stepMetric)
+        return ($withStep -replace '  escalations: 0', ("  escalations: 0`r`n  " + $summaryMetric))
+    }
+
+    $r = Invoke-Checker (New-Metrics 'tests_added: 11' 'tests_added: 11')
+    $results['AO_numbers_ok'] = $r.Code -eq 0
+
+    $r = Invoke-Checker (New-Metrics 'line_coverage: 87.5%' 'tests_added: 0')
+    $results['AP_percentage_ok'] = $r.Code -eq 0
+
+    $r = Invoke-Checker (New-Metrics 'line_coverage: unmeasured' 'tests_added: null')
+    $results['AQ_unmeasured_and_null_ok'] = $r.Code -eq 0
+
+    $r = Invoke-Checker (New-Metrics 'line_coverage: "N/A (target module not yet implemented)"' 'tests_added: 11')
+    $results['AR_prose_metric_rejected'] = $r.Code -eq 1
+    $results['AR_names_field_and_word']  = ($r.Output -match 'line_coverage') -and ($r.Output -match 'unmeasured')
+
+    $r = Invoke-Checker (New-Metrics 'tests_added: 11' 'tests_added: "2013 + 122 new tests"')
+    $results['AS_arithmetic_prose_rejected'] = $r.Code -eq 1
+
+    # A block-scalar description that happens to contain `tests_added: lots`
+    # is prose about metrics, not a metric.
+    $trapMetric = $conforming -replace '    action: "wrote tests"', "    action: |`r`n      tests_added: lots of them`r`n    verdict_note: x"
+    $r = Invoke-Checker $trapMetric
+    $results['AT_block_scalar_metric_ignored'] = $r.Code -eq 0
+
+    # `step_at_escalation` must name a step the log records. A fabricated
+    #    escalation once pointed at step 6 of a workflow with fewer steps (#173).
+    function New-Escalation([string]$at) {
+        return ($conforming + "`r`nescalation:`r`n  trigger: `"stuck`"`r`n  resolution: `"human`"`r`n  step_at_escalation: $at`r`n")
+    }
+    $r = Invoke-Checker (New-Escalation '6')
+    $results['AU_escalation_step_missing_rejected'] = $r.Code -eq 1
+    $results['AU_names_the_step']                   = $r.Output -match 'step_at_escalation'
+    $r = Invoke-Checker (New-Escalation '2')
+    $results['AV_escalation_step_present_ok'] = $r.Code -eq 0
+    $r = Invoke-Checker (New-Escalation 'null')
+    $results['AV_escalation_step_null_ok'] = $r.Code -eq 0
+
+    # The fixtures must carry what the cases claim, or AO-AV pass vacuously.
+    $built = New-Metrics 'tests_added: 11' 'tests_added: 12'
+    $results['AW_metric_fixture_built'] = ($built -match '(?m)^      tests_added: 11') -and ($built -match '(?m)^  tests_added: 12')
+    $results['AW_trap_fixture_built']   = $trapMetric -match '(?m)^      tests_added: lots of them'
 }
 finally {
     foreach ($f in $files) { Remove-Item $f -Force -ErrorAction SilentlyContinue }
