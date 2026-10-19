@@ -178,6 +178,18 @@ build for one (#322).
 
 ### Fixed
 
+- **Deploy says when the target gitignores the payload, and keeps the only
+  rollback (#104).** A consumer that ignored `.github/` received 81 changed
+  files, and `git status` showed none of them. `-UpdateHashes` then deleted the
+  conflict backup, the only remaining way back.
+  - `deploy.ps1` and `deploy.sh` now warn before writing anything when
+    `.github/` or `.vscode/` is gitignored in the target. The warning names the
+    `.gitignore` rule and recommends ignoring `.github/logs/*.yaml` instead.
+  - `-UpdateHashes` keeps the conflict backups (`KEEP`) when `.github/` is
+    ignored. A tracked payload is still cleaned up as before.
+  - Not done: the explicit `-Force` confirmation the issue proposed. Warning
+    only, so an existing consumer's deploy does not start failing.
+
 - **Git permissions agree across the hook, `af-env.conf` and the skill (#295).**
   An always-on instruction once forbade what three other sources allowed, and
   nothing compared them. `test-rule-drift.ps1` now extracts every git
