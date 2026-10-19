@@ -404,5 +404,15 @@ if [ -f "$checker" ] && [ -f ".vscode/tasks.json" ]; then
     fi
 fi
 
+# The plan-status HARD gate in documenter.agent.md had no checker but its maker
+# (#252 remainder). This is the checker. It runs LAST: the stamps, cost block
+# and invocation census above are already written, so blocking here loses no
+# measurement. FAILED/ESCALATED logs stay a note -- the plan has no such status.
+if [ "$plan_status" != "COMPLETED" ] && [ "${log_status:-}" = "COMPLETED" ]; then
+    reason="Plan status gate: plan status is ${plan_status:-unset} but the workflow log reports COMPLETED -- set the plan's Status line to COMPLETED (or correct the log if the workflow did not finish). Measurements were already written.${retro_note}${schema_note}${stamp_note}${cost_note}${invocation_note}"
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"$(af_json_escape "$reason")\"}}"
+    exit 0
+fi
+
 echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS for '${workflow_id}'${lifecycle_note}${retro_note}${schema_note}${stamp_note}${cost_note}${invocation_note}${scratch_note}\"}"
 exit 0

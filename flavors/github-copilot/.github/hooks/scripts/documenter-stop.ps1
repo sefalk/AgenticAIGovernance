@@ -462,6 +462,22 @@ catch {
     $scratchNote = ''
 }
 
+# The plan-status HARD gate in documenter.agent.md had no checker but its maker
+# (#252 remainder). This is the checker. It runs LAST: the stamps, cost block
+# and invocation census above are already written, so blocking here loses no
+# measurement. FAILED/ESCALATED logs stay a note -- the plan has no such status.
+if ($plan.Status -ne 'COMPLETED' -and $logStatus -eq 'COMPLETED') {
+    $output = @{
+        hookSpecificOutput = @{
+            hookEventName = "Stop"
+            decision = "block"
+            reason = "Plan status gate: plan status is $seen but the workflow log reports COMPLETED -- set the plan's Status line to COMPLETED (or correct the log if the workflow did not finish). Measurements were already written.$retroNote$schemaNote$stampNote$costNote$invocationNote"
+        }
+    } | ConvertTo-Json -Compress -Depth 3
+    Write-Output $output
+    exit 0
+}
+
 $output = @{
     systemMessage = "documenter:Stop -- artifact gate PASS for '$workflowId'$lifecycleNote$retroNote$schemaNote$stampNote$costNote$invocationNote$scratchNote"
 } | ConvertTo-Json -Compress
