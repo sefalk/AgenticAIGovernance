@@ -9,6 +9,7 @@
     "test-cost-source.ps1": 30,
     "test-curation-consistency.ps1": 30,
     "test-deploy-flags.ps1": 60,
+    "test-deploy-engine.ps1": 300,
     "test-dialect-wrappers.ps1": 170,
     "test-body-shrink-guard.ps1": 240,
     "test-foreign-guard.ps1": 360,

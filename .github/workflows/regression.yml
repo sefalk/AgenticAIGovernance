@@ -559,12 +559,17 @@ jobs:
       # developer's machine. A hosted runner has no such log, so it exits 2.
       # Excluding it is honest; leaving it in would fail every run for a reason
       # unrelated to the code under review.
+      #
+      # test-deploy-engine.ps1 is excluded because it only delegates to
+      # run-deploy-suite.py, which the dedicated step above already runs. It
+      # exists for the LOCAL scoped run, which otherwise never reached the
+      # deploy pytest suite (#395); here it would double that step's cost.
       - name: Run all regression suites
         shell: powershell
         run: |
           .\flavors\github-copilot\.github\scripts\run-all-tests.ps1 `
             -FailOnSkip `
-            -Exclude test-hooks-integration.ps1
+            -Exclude test-hooks-integration.ps1, test-deploy-engine.ps1
 
       # run-all-tests.ps1 sweeps `test-*.ps1` only, so the one suite covering
       # the shipped bash hooks has never been executed by anything (#190) --
