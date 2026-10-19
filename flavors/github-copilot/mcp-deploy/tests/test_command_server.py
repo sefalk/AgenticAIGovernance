@@ -154,6 +154,13 @@ def test_only_list_scripts_claims_to_be_read_only() -> None:
     assert run is None or not run.read_only_hint
 
 
+def test_a_trust_dir_inside_the_workspace_is_ignored(ws: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AF_COMMAND_TRUST_DIR", str(ws / ".github" / "trust"))
+    assert cs._trust_base(ws.resolve()) is None
+    monkeypatch.setenv("AF_COMMAND_TRUST_DIR", str(tmp_path / "elsewhere"))
+    assert cs._trust_base(ws.resolve()) == (tmp_path / "elsewhere").resolve()
+
+
 def test_the_console_script_is_declared() -> None:
     scripts = tomllib.loads((MCP_DEPLOY / "pyproject.toml").read_text(encoding="utf-8"))["project"]["scripts"]
     assert scripts["af-command-mcp"] == "af_deploy_mcp.command_server:main"

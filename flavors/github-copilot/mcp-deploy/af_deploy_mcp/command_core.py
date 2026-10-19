@@ -290,6 +290,7 @@ def run_script(
     walltime_s: int | None = None,
     approve: Callable[[Resolved, str, Config], str | None] | None = None,
     on_tick: Callable[[float, str], None] | None = None,
+    tick_s: float = 15.0,
 ) -> dict:
     """Resolve, approve, run and log one script. Never raises for a refusal.
 
@@ -326,7 +327,7 @@ def run_script(
     )
     stamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")
     log_path = root / ".github" / "logs" / "command-runs" / f"{stamp}-{_slug(resolved.rel)}.log"
-    verdict, code, duration, output = execute(argv, root, log_path, walltime, on_tick)
+    verdict, code, duration, output = execute(argv, root, log_path, walltime, on_tick, tick_s)
     _append_run(root, _row(resolved, digest, args, verdict, code, duration, walltime, None))
     result.update(
         verdict=verdict,
