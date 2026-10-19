@@ -1894,6 +1894,32 @@ Assert-True "an out-of-schema status reaches the checker instead of exiting the 
     ($invalidStatus.Output -notmatch 'artifact gate not applied') `
     "got: $($invalidStatus.Output)" -Subject $invalidStatus.Output
 
+# The divergence used to be a NOTE in a channel nobody reads afterwards, while
+# documenter.agent.md listed "Plan file status set to COMPLETED" as HARD and
+# verified it by the documenter's own inspection -- a gate whose only checker
+# was its maker (#252 remainder). The hook is now that checker: it blocks, and
+# it blocks LAST, so the measurements this issue was about are already written.
+Assert-True "a log reporting COMPLETED with a plan that does not blocks finalisation" `
+    ($stalePlan.Output -match '"decision":\s*"block"') `
+    "got: $($stalePlan.Output)"
+Assert-Contains "and says to set the plan status" `
+    $stalePlan.Output 'set the plan'
+
+$LOG_FAILED = "workflow_id: `"72-x`"`nstatus: `"FAILED`"`n"
+$failedRun = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_RUNNING
+    '.github/logs/72-x.yaml'         = $LOG_FAILED
+    '.github/retros/auto/72-x.md'    = $RETRO_MD
+}
+Assert-True "control: a FAILED log does not demand a COMPLETED plan" `
+    ($failedRun.Output -notmatch '"decision":\s*"block"') `
+    "got: $($failedRun.Output)"
+
+$docAgentText = Get-Content (Join-Path $githubDir 'agents/documenter.agent.md') -Raw
+Assert-True "the HARD plan-status row names its independent checker" `
+    ($docAgentText -match '(?m)^\| Plan file status set to COMPLETED \| HARD \|[^|\n]*documenter-stop') `
+    "the row is still verified by the documenter's own inspection"
+
 # Unclassifiable is not the same as fine. The gate says which one it is rather
 # than passing in silence -- the failure mode this whole issue family is about.
 $noPlan = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{ 'README.md' = 'x' }

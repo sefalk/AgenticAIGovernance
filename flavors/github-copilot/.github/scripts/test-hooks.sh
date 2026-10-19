@@ -953,6 +953,15 @@ doc_stop_case "a log claiming no end still leaves the mid-workflow call alone" \
 doc_stop_case "an out-of-schema status reaches the checker instead of exiting the gate" \
     finalised "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING" "$LOG_INVALID" "$RETRO_FILE"
 
+# The hook is the independent checker of the HARD plan-status row (#252
+# remainder): it blocks the divergence, last, after the measurements.
+doc_stop_case "a log reporting COMPLETED with a plan that does not blocks finalisation" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING" "$LOG_DONE" "$RETRO_FILE"
+
+doc_stop_case "control: a FAILED log does not demand a COMPLETED plan" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING" \
+    '.github/logs/72-x.yaml=workflow_id: "72-x"\nstatus: "FAILED"\n' "$RETRO_FILE"
+
 # Unclassifiable is not the same as fine. The gate says which one it is rather
 # than passing in silence -- the failure mode this whole issue family is about.
 doc_stop_case "with no plan file the gate says it could not classify the call" \
@@ -1342,6 +1351,12 @@ st_kept=$(FIXTURE_TRACK=retros/auto/72-x.md stop_output stop-tests.sh \
     "retros/auto/72-x.md=$LEGACY_RETRO")
 assert_not_contains "stop-tests does not warn about a tracked legacy retro either" \
     "$st_kept" "WARNING"
+
+# #252 remainder, the message half -- here because stop_output is defined above.
+stale_out=$(stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING" "$LOG_DONE" "$RETRO_FILE")
+assert_contains "a stale plan status is blocked with the instruction to set the plan" \
+    "$stale_out" "set the plan"
 
 # --- Workflow-log timestamps are measured, not authored (issue #91) --------
 #
