@@ -190,6 +190,34 @@ build for one (#322).
     missing or unparseable, because without it restricted agents have no
     execution surface and improvise scratch labels instead.
 
+- **`run-all-tests -Changed` runs the deploy pytest suite for a deploy-engine
+  change (#395).** A `deploy_core.py` change "widened to every suite" and
+  reported 35/35, and none of those suites executed the changed code. The
+  pytest suite reached only CI, through its own step.
+  - The new framework-only suite `test-deploy-engine.ps1` delegates to
+    `run-deploy-suite.py`, so the skip rules and the floor under executed tests
+    stay single-sourced.
+  - `suite-scope.json` maps `mcp-deploy/**`, `deploy.ps1`, `deploy.sh` and
+    `.github/.af-manifest` to the new suite, and `test-suite-scope.ps1` asserts
+    that mapping.
+  - CI excludes the suite from its sweep, because the dedicated step already
+    runs the same script.
+  - The first local run found an unlisted environmental skip: creating a
+    symlink needs a privilege a developer account often lacks. That skip is now
+    in `ALLOWED_SKIPS`, with the reason.
+
+- **Git permissions agree across the hook, `af-env.conf` and the skill (#295).**
+  An always-on instruction once forbade what three other sources allowed, and
+  nothing compared them. `test-rule-drift.ps1` now extracts every git
+  subcommand that `block-dangerous` auto-approves under GIT_FEATURE and
+  GIT_MERGE, in both dialects, and requires both `af-env.conf` and the
+  git-workflow skill table to name each one.
+  - Its first run found one gap: `git restore` was auto-approved and named
+    nowhere. Both documents now name it: it restores only the session's own
+    changes, and a path that was dirty at session start still asks (#120).
+  - The skill table also gains `git fetch --prune` for stale remote-tracking
+    refs.
+
 - **A retro written twice is caught (#239).** The documenter and stop-tests
   gates only asked whether the configured retro existed, so a second copy
   elsewhere always passed. The legacy-path check also switched itself off when
