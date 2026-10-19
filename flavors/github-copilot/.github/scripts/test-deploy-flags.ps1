@@ -86,6 +86,39 @@ try {
     Remove-Item $target2 -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# #104: a consumer that gitignores .github/ received 81 changed files and git
+# showed nothing; -UpdateHashes then deleted the only rollback. Say so, and keep
+# the backup when it is the only one.
+function New-GitTarget([string]$Ignore) {
+    $dir = New-TestTarget
+    $ErrorActionPreference = 'Continue'
+    & git -C $dir init -q 2>&1 | Out-Null
+    & git -C $dir checkout -q -b dev 2>&1 | Out-Null
+    if ($Ignore) { [IO.File]::WriteAllText((Join-Path $dir '.gitignore'), $Ignore) }
+    New-Item -ItemType Directory -Path (Join-Path $dir '.af-backup-20260101000000') -Force | Out-Null
+    return $dir
+}
+$ignored = New-GitTarget "build/`n.github/`n.vscode/`n"
+$tracked = New-GitTarget "build/`n.github/logs/*.yaml`n"
+try {
+    $out = Invoke-DeployDryRun -TargetDir $ignored
+    Assert-Contains -Output $out -Needle 'WARNING: .github/ is gitignored in the target' -Label 'An ignored payload is announced before anything is written (#104)'
+    Assert-Contains -Output $out -Needle '.gitignore:2' -Label 'The warning names the rule that ignores it'
+    Assert-Contains -Output $out -Needle 'WARNING: .vscode/ is gitignored in the target' -Label 'An ignored .vscode/ is announced too'
+
+    $out = Invoke-DeployDryRun -TargetDir $tracked
+    Assert-Excludes -Output $out -Needle 'is gitignored in the target' -Label 'A tracked payload draws no warning'
+
+    $out = Invoke-DeployDryRun -TargetDir $ignored -ExtraArgs @('-UpdateHashes')
+    Assert-Contains -Output $out -Needle 'KEEP    conflict backup' -Label '-UpdateHashes keeps the backup when it is the only rollback'
+    Assert-Excludes -Output $out -Needle 'Would remove' -Label 'and does not plan to delete it'
+
+    $out = Invoke-DeployDryRun -TargetDir $tracked -ExtraArgs @('-UpdateHashes')
+    Assert-Contains -Output $out -Needle 'Would remove 1 conflict backup' -Label 'control: a tracked payload still cleans its backups'
+} finally {
+    Remove-Item $ignored, $tracked -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 # What preflight consists of is a different question from what its checks
 # conclude, and only the first one is asserted here. Running them to find out
 # re-ran test-hooks.ps1 nested inside this suite -- 708 of its 788 seconds, for

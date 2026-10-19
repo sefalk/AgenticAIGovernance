@@ -84,6 +84,15 @@ run_past_header "$TARGET" "$WORK/c.log"
 assert_contains "$WORK/c.log" "$PAST_HEADER" "Deploy proceeds on dev"
 assert_absent "$WORK/c.log" "$WARN_PREFIX" "No branch warning on dev"
 
+# #104: the bash twin of the ignored-payload warning in test-deploy-flags.ps1.
+echo "== D: same repository, .github/ and .vscode/ gitignored =="
+printf 'build/\n.github/\n.vscode/\n' >"$TARGET/.gitignore"
+run_past_header "$TARGET" "$WORK/d.log"
+assert_contains "$WORK/d.log" "WARNING: .github/ is gitignored in the target" "An ignored payload is announced before anything is written"
+assert_contains "$WORK/d.log" ".gitignore:2" "The warning names the rule that ignores it"
+assert_contains "$WORK/d.log" "WARNING: .vscode/ is gitignored in the target" "An ignored .vscode/ is announced too"
+assert_absent "$WORK/c.log" "is gitignored in the target" "control: case C (nothing ignored) drew no warning"
+
 echo ""
 echo "=== Summary ==="
 echo "  Passed: $passed"
