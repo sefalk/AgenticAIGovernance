@@ -3498,7 +3498,7 @@ Assert-True "a count reconciled against data must state its arithmetic" `
 # check that caught both errors was the coordinator reading the diff -- a
 # habit, until it is written down as a step.
 Assert-True "a doc-only change gets a named diff review before commit" `
-    ($coordAgent -match '(?i)prose is the deliverable' -and $coordAgent -match '(?i)staged diff') `
+    ($coordAgent -match '(?i)prose is the\s+deliverable' -and $coordAgent -match '(?i)git diff --staged') `
     "reading the diff before commit is still an unwritten habit"
 
 Write-Output ""
