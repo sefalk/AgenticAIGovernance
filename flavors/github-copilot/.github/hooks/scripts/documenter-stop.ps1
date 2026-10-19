@@ -152,12 +152,12 @@ if (Test-Path $retroPath) {
         $missing += "a single retro -- it was written twice, also at '$($strays -join ' ')'; delete the copy outside RETRO_DIR, $retroPath is the one that counts"
     }
 } else {
-    if ($retro.Required) {
-        if ($strays.Count -gt 0) {
-            $missing += "retro snippet at its configured path -- found '$($strays[0])', which is not the configured destination; move it to $retroPath"
-        } else {
-            $missing += "retro snippet ($retroPath), required because $($retro.Reason)"
-        }
+    # A misplaced retro is a defect whether or not one was owed: the default
+    # location is gitignored, so it would be written, counted and lost (#176).
+    if ($strays.Count -gt 0) {
+        $missing += "retro snippet at its configured path -- found '$($strays[0])', which is not the configured destination; move it to $retroPath"
+    } elseif ($retro.Required) {
+        $missing += "retro snippet ($retroPath), required because $($retro.Reason)"
     } else {
         $retroNote = " -- no retro required ($($retro.Reason))"
     }

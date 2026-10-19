@@ -140,12 +140,12 @@ if [ -f "${retro_dir}/${workflow_id}.md" ]; then
 else
     retro_verdict=$(af_retro_required "$workflow_id")
     retro_reason="${retro_verdict#*|}"
-    if [ "${retro_verdict%%|*}" = "1" ]; then
-        if [ -n "$retro_strays" ]; then
-            missing+=("retro snippet at its configured path -- found '${retro_strays%% *}', which is not the configured destination; move it to ${retro_dir}/${workflow_id}.md")
-        else
-            missing+=("retro snippet (${retro_dir}/${workflow_id}.md), required because ${retro_reason}")
-        fi
+    # A misplaced retro is a defect whether or not one was owed: the default
+    # location is gitignored, so it would be written, counted and lost (#176).
+    if [ -n "$retro_strays" ]; then
+        missing+=("retro snippet at its configured path -- found '${retro_strays%% *}', which is not the configured destination; move it to ${retro_dir}/${workflow_id}.md")
+    elif [ "${retro_verdict%%|*}" = "1" ]; then
+        missing+=("retro snippet (${retro_dir}/${workflow_id}.md), required because ${retro_reason}")
     else
         retro_note=" -- no retro required (${retro_reason})"
     fi
