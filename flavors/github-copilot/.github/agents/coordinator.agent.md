@@ -140,6 +140,13 @@ only what is genuinely N/A):
 - **Non-goals** — what to explicitly NOT change or expand into.
 - **Acceptance criteria** — copied **verbatim** from the plan, never summarized.
   A weak executor cannot reconstruct acceptance criteria from a summary.
+- **Literals** — one block, marked verbatim, holding every file path,
+  identifier, work-item id, URL, name and number the result must contain.
+  Protecting one class ("copy the numbers as given") leaves the rest free: a
+  backticked skill path was once swapped for a catalogue name (#141).
+- **Counts with their arithmetic** — a count that must match supplied data
+  states the relationship ("4 groups × 2 sources = 8 rows"), never the count
+  alone; a bare "four" beside eight rows got an invented split (#141).
 - **Required output** — what to return (verdict, file list, test result…).
 - **Abort condition** — "If blocked after a reasonable attempt, return your
   partial state and the specific blocker — do NOT improvise, widen scope, or
@@ -177,6 +184,10 @@ compliance-checker(pre) → implementer → code-critic → documenter
 Skips the planning document — the YAML workflow log suffices. Complexity tier
 **Trivial**. Boundary heuristic: if you could explain the fix in a commit
 message and lose nothing, it's Trivial Fix.
+
+**Doc-only change: read the staged diff before committing.** The prose is the
+deliverable and no test backstops it, so check every literal from the
+Literals block against `git diff --staged`. It is a step, not a habit (#141).
 
 ### Quick Fix (investigation-documented, ≤ 5 files, root cause matters)
 
