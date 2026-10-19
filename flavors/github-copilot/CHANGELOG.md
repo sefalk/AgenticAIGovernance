@@ -178,6 +178,18 @@ build for one (#322).
 
 ### Fixed
 
+- **Git permissions agree across the hook, `af-env.conf` and the skill (#295).**
+  An always-on instruction once forbade what three other sources allowed, and
+  nothing compared them. `test-rule-drift.ps1` now extracts every git
+  subcommand that `block-dangerous` auto-approves under GIT_FEATURE and
+  GIT_MERGE, in both dialects, and requires both `af-env.conf` and the
+  git-workflow skill table to name each one.
+  - Its first run found one gap: `git restore` was auto-approved and named
+    nowhere. Both documents now name it: it restores only the session's own
+    changes, and a path that was dirty at session start still asks (#120).
+  - The skill table also gains `git fetch --prune` for stale remote-tracking
+    refs.
+
 - **A retro written twice is caught (#239).** The documenter and stop-tests
   gates only asked whether the configured retro existed, so a second copy
   elsewhere always passed. The legacy-path check also switched itself off when
