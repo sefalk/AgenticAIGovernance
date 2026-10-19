@@ -953,6 +953,15 @@ doc_stop_case "a log claiming no end still leaves the mid-workflow call alone" \
 doc_stop_case "an out-of-schema status reaches the checker instead of exiting the gate" \
     finalised "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING" "$LOG_INVALID" "$RETRO_FILE"
 
+# The hook is the independent checker of the HARD plan-status row (#252
+# remainder): it blocks the divergence, last, after the measurements.
+doc_stop_case "a log reporting COMPLETED with a plan that does not blocks finalisation" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING" "$LOG_DONE" "$RETRO_FILE"
+
+doc_stop_case "control: a FAILED log does not demand a COMPLETED plan" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING" \
+    '.github/logs/72-x.yaml=workflow_id: "72-x"\nstatus: "FAILED"\n' "$RETRO_FILE"
+
 # Unclassifiable is not the same as fine. The gate says which one it is rather
 # than passing in silence -- the failure mode this whole issue family is about.
 doc_stop_case "with no plan file the gate says it could not classify the call" \
@@ -1028,6 +1037,9 @@ stop_output() {
         use_fixture_conf
         git init -q .
         git checkout -q -b agent/72-x
+        # Whether a seeded file is under version control is an input for gates
+        # that must not instruct untracking one (issue #109).
+        if [ -n "${FIXTURE_TRACK:-}" ]; then git add -f -- $FIXTURE_TRACK; fi
         printf '%s' '{"session_id":"s1","transcript_path":"/none"}' \
             | bash ".github/hooks/scripts/$hook"
     ) 2>/dev/null
@@ -1265,6 +1277,86 @@ st_twin=$(stop_output stop-tests.sh \
     ".github/retros/auto/72-x.md=$LEGACY_RETRO")
 assert_contains "stop-tests warns about the twin as well" \
     "$st_twin" "WARNING"
+
+# --- a stray retro is a defect even when none was owed (issue #176) --------
+# Whether one was owed decides whether it MUST exist, not whether it may sit
+# in the gitignored default where it is silently lost.
+doc_stop_case "a clean run with a retro outside RETRO_DIR blocks" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_CLEAN_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO"
+
+doc_stop_case "control: a clean run with a voluntary retro at RETRO_DIR passes" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_CLEAN_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO"
+
+st_stray_clean=$(stop_output stop-tests.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_CLEAN_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO")
+assert_contains "stop-tests warns about a stray nobody owed" \
+    "$st_stray_clean" "WARNING"
+
+# --- a gate never instructs taking a record out of git (issue #109) --------
+# A tracked retro next to an ignored RETRO_DIR is history, not a stray: moving
+# it would remove it from version control, invisibly to `git status`.
+IGNORE_ALL_B='*\n'
+kept_owed=$(FIXTURE_TRACK=retros/auto/72-x.md stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/retros/auto/.gitignore=$IGNORE_ALL_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO")
+assert_contains "an owed retro is still owed when only a tracked legacy copy exists" \
+    "$kept_owed" '"decision": "block"'
+assert_not_contains "but the gate does not tell the agent to move the tracked copy" \
+    "$kept_owed" "move it to"
+assert_contains "and says why it stays" \
+    "$kept_owed" "version control"
+
+kept_twin=$(FIXTURE_TRACK=retros/auto/72-x.md stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/retros/auto/.gitignore=$IGNORE_ALL_B" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO" \
+    "retros/auto/72-x.md=$LEGACY_RETRO")
+assert_not_contains "a tracked copy beside an ignored RETRO_DIR is not a twin to delete" \
+    "$kept_twin" '"decision": "block"'
+assert_contains "and the pass names the copy it left in place" \
+    "$kept_twin" "retros/auto/72-x.md"
+
+kept_clean=$(FIXTURE_TRACK=retros/auto/72-x.md stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_CLEAN_B" \
+    ".github/retros/auto/.gitignore=$IGNORE_ALL_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO")
+assert_not_contains "a clean run with a tracked legacy retro passes" \
+    "$kept_clean" '"decision": "block"'
+
+loose_owed=$(stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/retros/auto/.gitignore=$IGNORE_ALL_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO")
+assert_contains "control: an untracked legacy copy is still to be moved" \
+    "$loose_owed" "move it to .github/retros/auto/72-x.md"
+
+st_kept=$(FIXTURE_TRACK=retros/auto/72-x.md stop_output stop-tests.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_CLEAN_B" \
+    ".github/retros/auto/.gitignore=$IGNORE_ALL_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO")
+assert_not_contains "stop-tests does not warn about a tracked legacy retro either" \
+    "$st_kept" "WARNING"
+
+# #252 remainder, the message half -- here because stop_output is defined above.
+stale_out=$(stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING" "$LOG_DONE" "$RETRO_FILE")
+assert_contains "a stale plan status is blocked with the instruction to set the plan" \
+    "$stale_out" "set the plan"
 
 # --- Workflow-log timestamps are measured, not authored (issue #91) --------
 #
