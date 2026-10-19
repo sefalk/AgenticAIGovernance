@@ -1885,6 +1885,60 @@ else
     assert_true "_common.ps1 exposes the return reader" 0 "no Get-AfSubagentReturn wrapper"
 fi
 
+# --- a compliance quotation needs a read behind it (issue #286) ---------------
+# Bash twin of the ps1 cases: a report citing path:line with zero read_file
+# calls blocks (0 of 88 real logs fired it); a cited path never read is only
+# advisory (5 of 88 fired, mostly falsely); no log or no words is unmeasurable.
+cc_stop_out() {
+    # $1 = response text ('' -> no log), $2 = read path ('' -> none), $3 = 'tool' for a words-free return
+    local root fixture sid=s286 dir out resp
+    root=$(mktemp -d 2>/dev/null || echo "/tmp/af-286-$$-$RANDOM")
+    fixture="$root/repo"
+    dir="$root/chat/debug-logs/$sid"
+    mkdir -p "$fixture/.github/hooks/scripts" "$dir"
+    for f in compliance-checker-stop.sh _common.sh _agentlog.py subagent-return.py check-compliance-reads.py; do
+        [ -f "$HOOK_DIR/$f" ] && cp "$HOOK_DIR/$f" "$fixture/.github/hooks/scripts/"
+    done
+    if [ -n "$1" ] || [ "${3:-}" = "tool" ]; then
+        {
+            if [ -n "$2" ]; then
+                printf '%s\n' "{\"ts\":1500,\"type\":\"tool_call\",\"name\":\"read_file\",\"attrs\":{\"args\":\"{\\\"filePath\\\":\\\"$2\\\",\\\"startLine\\\":1,\\\"endLine\\\":40}\"}}"
+            fi
+            if [ "${3:-}" = "tool" ]; then
+                resp='[{\"role\":\"assistant\",\"parts\":[{\"type\":\"tool_call\",\"name\":\"read_file\"}]}]'
+            else
+                resp="[{\\\"role\\\":\\\"assistant\\\",\\\"parts\\\":[{\\\"type\\\":\\\"text\\\",\\\"content\\\":\\\"$1\\\"}]}]"
+            fi
+            printf '%s\n' "{\"ts\":2000,\"type\":\"agent_response\",\"attrs\":{\"response\":\"$resp\"}}"
+        } > "$dir/runSubagent-compliance-checker-toolu_cc.jsonl"
+    fi
+    out=$(
+        cd "$fixture" || exit 1
+        use_fixture_conf
+        git init -q . && git checkout -q -b agent/72-x
+        [ -f .github/hooks/scripts/compliance-checker-stop.sh ] || exit 0
+        printf '%s' "{\"session_id\":\"$sid\",\"transcript_path\":\"$root/chat/transcripts/$sid.jsonl\"}" \
+            | bash .github/hooks/scripts/compliance-checker-stop.sh
+    ) 2>/dev/null
+    rm -rf "$root"
+    printf '%s' "$out"
+}
+
+cc_quote='Post-Flight Verdict: PASS. RETRO_DIR is docs/retros (.github/af-env.conf:12).'
+cc_out=$(cc_stop_out "$cc_quote" "")
+assert_contains "a report quoting a file with no read behind it is blocked" "$cc_out" '"decision": "block"'
+assert_contains "and the block names the citation it could not back" "$cc_out" "af-env.conf"
+cc_out=$(cc_stop_out "$cc_quote" "c:/repo/.github/af-env.conf")
+assert_contains "control: the same report with a read behind it passes" "$cc_out" "PASS"
+assert_not_contains "and is not blocked" "$cc_out" '"decision": "block"'
+cc_out=$(cc_stop_out "Lesson at line 4 (.github/retros/auto/72-x.md:4)." "c:/repo/.github/af-env.conf")
+assert_contains "a cited path that was never read is advisory" "$cc_out" "ADVISORY"
+assert_not_contains "and not a block" "$cc_out" '"decision": "block"'
+cc_out=$(cc_stop_out "" "")
+assert_contains "no log is unmeasurable, not a pass and not a block" "$cc_out" "not measurable"
+cc_out=$(cc_stop_out "" "" tool)
+assert_contains "a return with no words is unmeasurable too" "$cc_out" "not measurable"
+
 # A wrapper with nothing to read must still answer, and its answer must be a
 # status rather than silence.
 if [ -f "$HOOK_DIR/_common.sh" ]; then
