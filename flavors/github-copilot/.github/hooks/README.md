@@ -421,6 +421,14 @@ missing or unparsable `tasks.json` gives no opinion. To clear what earlier
 sessions minted, run `python .github/scripts/prune-tasks.py` as a dry run,
 then with `--apply`. It removes tasks without `detail` and keeps a backup.
 
+**The command server's trust store is not agent-editable (#60).** An edit tool
+(`create_file`, `replace_string_in_file`, `multi_replace_string_in_file`, ...)
+whose target path lies under `af-command-mcp/trust` is denied in both
+dialects. Otherwise an agent could approve its own script for `run_script`.
+Only the target paths are judged: a file whose content names the store is not
+a write to it. A terminal write to the store is not covered; it stays a
+recorded residual.
+
 #### PreToolUse: Work Item Owner Gate
 
 **Scripts:** `scripts/block-dangerous.ps1` (Windows) / `scripts/block-dangerous.sh`

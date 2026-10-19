@@ -84,6 +84,20 @@ if ([string]$toolName -match '(wit_work_item_write|(?<!sub_)issue_write|update_p
 $isTaskShaped = ($toolName -eq 'create_and_run_task' -or $toolName -eq 'createAndRunTask')
 $isTaskRun = ($toolName -eq 'run_task' -or $toolName -eq 'runTask')
 $isExecSurface = ($toolName -match $execSurfacePattern)
+
+# The command server's trust store (#60): an agent that could edit it would
+# approve its own script. Judged on target paths only, never on content.
+if (Test-AfWriteTool $toolName) {
+    foreach ($target in (Get-AfWritePaths $inputData.tool_input)) {
+        if ([string]$target -match 'af-command-mcp[\\/]+trust([\\/]|$)') {
+            @{ hookSpecificOutput = @{ hookEventName = 'PreToolUse'; permissionDecision = 'deny'
+                    permissionDecisionReason = "Policy hard-deny: '$target' is in the command server's trust store (#60). Approving an agent script is the user's decision, made through the server's prompt; an agent may not write the store." }
+            } | ConvertTo-Json -Depth 3 -Compress
+            exit 0
+        }
+    }
+}
+
 if ($toolName -notmatch 'terminal|Terminal' -and -not $isTaskShaped -and -not $isTaskRun -and -not $isExecSurface) {
     Write-Output '{}'
     exit 0

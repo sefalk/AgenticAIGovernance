@@ -75,6 +75,16 @@ af_require_python "$raw" bd_is_gated_tool "dangerous-command"
 
 tool_name=$(echo "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_name',''))" 2>/dev/null)
 
+# The command server's trust store (#60): an agent that could edit it would
+# approve its own script. Judged on target paths only, never on content.
+if af_is_write_tool "$tool_name"; then
+    _bd_targets=$(printf '%s' "$raw" | af_write_paths)
+    if grep -qiE -e 'af-command-mcp[\\/]+trust([\\/]|$)' <<<"$_bd_targets"; then
+        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Policy hard-deny: the target is in the command server trust store (#60). Approving an agent script is the user decision, made through the server prompt; an agent may not write the store."}}\n'
+        exit 0
+    fi
+fi
+
 if ! bd_is_gated_tool "$tool_name"; then
     echo '{}'
     exit 0

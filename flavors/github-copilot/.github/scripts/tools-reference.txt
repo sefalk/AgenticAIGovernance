@@ -75,6 +75,10 @@ vscode/VSCodeAPI
 ## Web
 web/fetch
 
+## AF command server (MCP, af-command-mcp, registered as `af-command`)
+af-command/run_script
+af-command/list_scripts
+
 ## Other
 todo
 newWorkspace

@@ -18,6 +18,7 @@ dev = ["pytest>=8", "build>=1"]
 
 [project.scripts]
 af-deploy-mcp = "af_deploy_mcp.server:main"
+af-command-mcp = "af_deploy_mcp.command_server:main"
 
 # Package version tracks the AF framework VERSION, so a wheel's version equals the
 # bundled payload version (af-deploy-mcp@X == AF payload X). Rebuild + reinstall
