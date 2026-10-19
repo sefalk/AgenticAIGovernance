@@ -137,6 +137,22 @@ build for one (#322).
 
 ### Changed
 
+- **The Delegation Contract protects every literal, not one class (#141).**
+  A prompt protected its numbers ("copy them as given") but not a backticked
+  skill path, and the subagent swapped the path for a plausible name from the
+  skills catalogue. The same prompt put "exactly four groups" beside an
+  eight-row table, and the subagent invented a split to reconcile them.
+  - The contract gains a **Literals** field: one block, marked verbatim, holding
+    every file path, identifier, work-item id, URL, name and number the result
+    must contain.
+  - It also gains **Counts with their arithmetic**: a count that must match
+    supplied data states the relationship, never the count alone.
+  - A doc-only Trivial Fix now has a named step: the coordinator checks the
+    literals against `git diff --staged` before committing. That diff read was
+    the only check that caught both errors, and until now it was an unwritten
+    habit.
+  - The coordinator file grows to 9,425 of 9,450 tokens.
+
 - **The rule-duplication gate now reads the skills too (#354).**
   `check-rule-drift.py` adds every active `skills/*/SKILL.md` to its corpus
   (`skills/_available/` stays out, since nothing loads a parked skill). Measured
