@@ -137,6 +137,13 @@ escalation:
 agent_invocations: <appended by your Stop hook>
 ```
 
+**Every `<number>` above may be `unmeasured`, and your Stop hook rejects
+anything else that is not a number or a percentage.** A workflow log once
+reported `tests_added: 122` for a workflow that added 11, and 12 of 84 logs in
+one project carried prose such as `N/A (module not yet implemented)` where a
+number belongs (#173, #102). `step_at_escalation` must name a step the log
+records, or be `null`.
+
 **A step is a record of a call that happened.** Your Stop hook reads which
 subagents the editor actually invoked and appends the counts, then lists any
 agent your `steps` name that has no invocation behind it. A workflow log once
@@ -272,7 +279,10 @@ The human should review these during periodic governance audits.
 - Never stage or commit anything under `.github/logs/` — it ships a `.gitignore`, it is local instrumentation, and the log embeds the user request verbatim
 - Never stage or commit the retro either. At its default location it is gitignored; a project may point `RETRO_DIR` at a tracked directory, and then the **coordinator** commits it — staging is never yours
 - Do NOT modify production code or test code
-- Never fabricate metrics — use only values reported by the coordinator
+- Never fabricate metrics — use only values reported by the coordinator. A
+  field that describes *what happened* (a count, a step, an agent, a test
+  total) is copied from those facts; when they do not give it, the value is
+  `unmeasured`, never inferred, summed or rounded (#173, #102)
 
 ## Log-Only Invocation
 
