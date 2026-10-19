@@ -178,6 +178,18 @@ build for one (#322).
 
 ### Fixed
 
+- **Restricted producers reach the lint gate by name (#292).** In one consumer
+  workflow, three producers reported the HARD lint gate as passed without
+  running anything. The gate row named `check-python-linting.py`, a script they
+  cannot run, and nothing named the label they can run.
+  - The implementer and refactorer rows now name `run_task` →
+    `lint: changed files`. They also state that a gate you did not run is
+    BLOCKED, never PASS, and that an outcome is never argued by inspection.
+  - The test-writer never reports or asserts a lint outcome.
+  - The compliance-checker pre-flight blocks when `.vscode/tasks.json` is
+    missing or unparseable, because without it restricted agents have no
+    execution surface and improvise scratch labels instead.
+
 - **A retro written twice is caught (#239).** The documenter and stop-tests
   gates only asked whether the configured retro existed, so a second copy
   elsewhere always passed. The legacy-path check also switched itself off when
