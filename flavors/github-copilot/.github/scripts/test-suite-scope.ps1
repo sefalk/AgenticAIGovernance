@@ -83,7 +83,7 @@ Add-Result 'S4_patterns_are_a_concrete_path_or_a_directory' ($badShape.Count -eq
 # A pattern pointing at something that no longer exists is a mapping that can
 # never fire again -- the suite quietly stops being selected.
 . (Join-Path $scriptDir '_suite_env.ps1')
-$frameworkOnly = @('CHANGELOG.md', 'deploy.ps1', 'deploy.sh')
+$frameworkOnly = @('CHANGELOG.md', 'deploy.ps1', 'deploy.sh', 'mcp-deploy')
 $inSource = Test-AfSourceTree $scriptDir
 $dead = @()
 $absentHere = @()
