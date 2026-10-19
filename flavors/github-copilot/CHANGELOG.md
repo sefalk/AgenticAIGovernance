@@ -178,6 +178,18 @@ build for one (#322).
 
 ### Fixed
 
+- **Restricted producers reach the lint gate by name (#292).** In one consumer
+  workflow, three producers reported the HARD lint gate as passed without
+  running anything. The gate row named `check-python-linting.py`, a script they
+  cannot run, and nothing named the label they can run.
+  - The implementer and refactorer rows now name `run_task` →
+    `lint: changed files`. They also state that a gate you did not run is
+    BLOCKED, never PASS, and that an outcome is never argued by inspection.
+  - The test-writer never reports or asserts a lint outcome.
+  - The compliance-checker pre-flight blocks when `.vscode/tasks.json` is
+    missing or unparseable, because without it restricted agents have no
+    execution surface and improvise scratch labels instead.
+
 - **`run-all-tests -Changed` runs the deploy pytest suite for a deploy-engine
   change (#395).** A `deploy_core.py` change "widened to every suite" and
   reported 35/35, and none of those suites executed the changed code. The
