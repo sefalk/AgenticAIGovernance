@@ -178,6 +178,14 @@ build for one (#322).
 
 ### Fixed
 
+- **The ADO comment-reading gate is HARD (#186).** It stayed SOFT "until the ADO
+  read behaviour has been probed". It was probed on 2026-10-06 against MP WIT
+  3386: `wit_work_item get` returns `System.CommentCount` but no comment text.
+  - The `ado-work-item-manager` gate is now HARD and names the second call,
+    `list_comments`.
+  - `work-item-state` § 6 records the measurement, including that Markdown
+    descriptions and comments render, in place of "Not yet measured".
+
 - **Git permissions agree across the hook, `af-env.conf` and the skill (#295).**
   An always-on instruction once forbade what three other sources allowed, and
   nothing compared them. `test-rule-drift.ps1` now extracts every git
