@@ -65,7 +65,7 @@ Agents need to run reviewed scripts **and** scripts they write themselves, with 
 - **Exit criterion:** `test_command_core.py` green on Windows.
 - **Tests needed:** pytest with real subprocesses on tiny `.py` fixtures (portable); `.ps1` interpreter case on Windows only.
 - **Dependencies:** none
-- **Status:** TODO
+- **Status:** DONE
 
 ### 2. Approval and trust
 
@@ -85,7 +85,7 @@ Agents need to run reviewed scripts **and** scripts they write themselves, with 
 - **Exit criterion:** `test_command_trust.py` green.
 - **Tests needed:** pytest. The hook is a fixture script printing allow/deny JSON. Git uses a temp repo. The store root is injected.
 - **Dependencies:** 1
-- **Status:** TODO
+- **Status:** DONE
 
 ### 3. MCP server
 
@@ -101,7 +101,7 @@ Agents need to run reviewed scripts **and** scripts they write themselves, with 
 - **Exit criterion:** `test_command_server.py` green; full mcp-deploy suite green.
 - **Tests needed:** pytest with in-process tool calls.
 - **Dependencies:** 1, 2
-- **Status:** TODO
+- **Status:** DONE
 
 ### 4. Configuration, guard, grants, docs
 
@@ -119,7 +119,7 @@ Agents need to run reviewed scripts **and** scripts they write themselves, with 
 - **Exit criterion:** All suites green; PR open.
 - **Tests needed:** cases in `test-hooks.ps1` and `test-hooks.sh`.
 - **Dependencies:** 3
-- **Status:** TODO
+- **Status:** DONE
 
 ## Implementation Sequence
 
@@ -153,3 +153,5 @@ Agents need to run reviewed scripts **and** scripts they write themselves, with 
 | Date | Agent | Change |
 |---|---|---|
 | 2026-10-19 | coordinator | Initial plan created (template format) |
+| 2026-10-19 | coordinator | Subtasks 1-3 done: core 94%, trust 92%, server 89% coverage; full mcp-deploy suite 207 passed |
+| 2026-10-19 | coordinator | Subtask 4 done: trust-store guard in both dialects, config keys, grants, docs |

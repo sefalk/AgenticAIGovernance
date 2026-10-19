@@ -49,6 +49,9 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 | `pylance-mcp-server/pylanceRunCodeSnippet` | X | — | — | ✅ | — | ✅ | ✅ | — | — | — | — | — |
 | `pylance-mcp-server/pylanceInvokeRefactoring` | X | — | — | — | — | — | ✅ | — | — | — | — | — |
 | `pylance-mcp-server/pylanceWorkspaceUserFiles` | R | — | — | — | — | — | — | ✅ | — | — | — | — |
+| **AF command MCP** | | | | | | | | | | | | |
+| `af-command/run_script` | X | ✅ | — | ✅ | — | ✅ | ✅ | — | — | — | — | — |
+| `af-command/list_scripts` | R | ✅ | — | ✅ | — | ✅ | ✅ | — | — | — | — | — |
 | **Web** | | | | | | | | | | | | |
 | `web/fetch` | R | — | — | — | — | — | — | — | — | — | ✅ | — |
 | **Agent orchestration** | | | | | | | | | | | | |
