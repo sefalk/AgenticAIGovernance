@@ -211,11 +211,13 @@ The equivalent placement is the work item's description field, with decision
 records as work item comments — and `skills/ado-workitem/SKILL.md`'s existing
 "append or targeted rewrite only" rule governs the splice.
 
-**Not yet measured for this provider.** The § 1 constraint is a GitHub
-measurement. Whether an Azure DevOps description field renders Markdown depends
-on the process template, and whether the default work-item read returns comments
-has not been probed here. Probe both once, on first use, and record the outcome
-in this section rather than assuming the GitHub answer transfers.
+**Measured 2026-10-06** (MP WIT 3386, #186), so the GitHub answer is not assumed:
+
+- A description written with `format: Markdown` renders as Markdown
+  (`multilineFieldsFormat` reads back `markdown`); so do comments written that way.
+- `wit_work_item get` returns `System.CommentCount` but **no comment text**.
+  Comments need a second call, `action: list_comments` — the same two-call read
+  as on GitHub, and the same gate: a non-zero count left unread is a partial read.
 
 ## 7. Anti-patterns
 
