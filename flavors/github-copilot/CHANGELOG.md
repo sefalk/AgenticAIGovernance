@@ -206,6 +206,15 @@ build for one (#322).
   - an owed retro is still owed at `RETRO_DIR`;
   - an untracked stray is still to be moved, as before.
 
+- **The plan-status HARD gate has an independent checker (#252).** The
+  documenter's exit gate "Plan file status set to COMPLETED" was HARD but
+  verified by the documenter's own inspection, which the maker-checker rule
+  makes SOFT at best. `documenter-stop` (both dialects) now blocks when the
+  workflow log reports `COMPLETED` and the plan does not. It blocks last, after
+  stamps, cost block and invocation census are written, so no measurement is
+  lost. A `FAILED` or `ESCALATED` log stays a note, since the plan has no such
+  status.
+
 - **A workflow-log metric is a number or `unmeasured`, never prose (#173,
   #102).** The log schema asked for `<number>` in fields the documenter has no
   instrument for and offered no word for "nobody measured this". Measured over
