@@ -32,6 +32,7 @@ For worktree creation, cleanup, and troubleshooting see the separate
 | `git branch --list` | Coordinator | Read-only |
 | `git checkout {existing-branch}` | Coordinator | Reversible switch; verified ref only (file pathspec still prompts) |
 | `git switch {branch}` | Coordinator | Branch switch never touches files |
+| `git restore <path>` | Coordinator | Discards the session's own uncommitted change; a path dirty before the session started still asks (#120) |
 | `git push` (pure-git default) | **Human** | Crosses local→remote boundary |
 | `git push origin agent/{id}` (request-based path only) | Coordinator | Publishes feature branch for the request; never a protected branch |
 | `git push` to protected branches (`dev`/`main`/`master`) | **Forbidden** | Integration is request-based, never a direct push |
@@ -39,6 +40,7 @@ For worktree creation, cleanup, and troubleshooting see the separate
 | `git pull` / `git merge` / `cherry-pick` / `revert` (local) | Coordinator | Reversible topology change (reflog / `ORIG_HEAD`); protected-branch push still gated |
 | `git branch -d {merged, non-protected}` | Coordinator | git deletes only merged branches; ref recreatable |
 | `git push origin --delete agent/{id}` (merged) | Coordinator | Same ref, other side; the commits survive in the branch it merged into |
+| `git fetch --prune` | Coordinator | Drops remote-tracking refs whose branch is already gone; touches no branch |
 | `git branch -D` (force) / delete protected | **Forbidden** | Deletes unmerged commits / protected branch |
 | `git reset --hard` | **Human** | Destructive state rewrite (loses uncommitted work) |
 | `git rebase` | **Human** | History rewrite risk |
