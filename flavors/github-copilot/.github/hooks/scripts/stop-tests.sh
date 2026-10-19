@@ -60,12 +60,10 @@ if [[ "$branch" =~ ^agent/(.+)$ ]]; then
         fi
     else
         retro_verdict=$(af_retro_required "$workflow_id")
-        if [ "${retro_verdict%%|*}" = "1" ]; then
-            if [ -n "$retro_strays" ]; then
-                missing+=("retro snippet at its configured path (found '${retro_strays%% *}', not the configured destination)")
-            else
-                missing+=("retro snippet (${retro_dir}/${workflow_id}.md)")
-            fi
+        if [ -n "$retro_strays" ]; then
+            missing+=("retro snippet at its configured path (found '${retro_strays%% *}', not the configured destination)")
+        elif [ "${retro_verdict%%|*}" = "1" ]; then
+            missing+=("retro snippet (${retro_dir}/${workflow_id}.md)")
         fi
     fi
 

@@ -63,12 +63,10 @@ if ($branch -and $branch -match '^agent/(.+)$') {
         }
     } else {
         $retro = Get-AfRetroRequirement -WorkflowId $workflowId
-        if ($retro.Required) {
-            if ($strays.Count -gt 0) {
-                $missing += "retro snippet at its configured path (found '$($strays[0])', not the configured destination)"
-            } else {
-                $missing += "retro snippet ($retroPattern)"
-            }
+        if ($strays.Count -gt 0) {
+            $missing += "retro snippet at its configured path (found '$($strays[0])', not the configured destination)"
+        } elseif ($retro.Required) {
+            $missing += "retro snippet ($retroPattern)"
         }
     }
 
