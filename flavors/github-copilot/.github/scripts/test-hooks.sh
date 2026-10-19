@@ -1266,6 +1266,29 @@ st_twin=$(stop_output stop-tests.sh \
 assert_contains "stop-tests warns about the twin as well" \
     "$st_twin" "WARNING"
 
+# --- a stray retro is a defect even when none was owed (issue #176) --------
+# Whether one was owed decides whether it MUST exist, not whether it may sit
+# in the gitignored default where it is silently lost.
+doc_stop_case "a clean run with a retro outside RETRO_DIR blocks" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_CLEAN_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO"
+
+doc_stop_case "control: a clean run with a voluntary retro at RETRO_DIR passes" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_CLEAN_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO"
+
+st_stray_clean=$(stop_output stop-tests.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_CLEAN_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO")
+assert_contains "stop-tests warns about a stray nobody owed" \
+    "$st_stray_clean" "WARNING"
+
 # --- Workflow-log timestamps are measured, not authored (issue #91) --------
 #
 # A documenter wrote `completed:` six and a half hours into the future, in the

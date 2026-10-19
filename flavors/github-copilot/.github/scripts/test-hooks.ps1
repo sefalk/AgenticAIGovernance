@@ -2309,6 +2309,39 @@ $stTwin = Get-StopTestsOutput @{
 Assert-Contains "stop-tests warns about the twin as well" `
     $stTwin 'WARNING'
 
+# ── A stray retro is a defect even when none was owed (issue #176) ───────
+# A clean run owes no retro, and the gate said so and passed -- while the
+# documenter's voluntary retro sat in the gitignored default, written, counted
+# and silently lost. Whether one was owed decides whether it MUST exist, not
+# whether it may be in the wrong place.
+$strayClean = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+    '.github/logs/72-x.yaml'         = $LOG_CLEAN
+    '.github/af-env.conf'            = $CONF_ROOT
+    '.github/retros/auto/72-x.md'    = $RETRO_MD
+}
+Assert-True "a clean run with a retro outside RETRO_DIR blocks" `
+    ($strayClean.Output -match '"decision":\s*"block"') `
+    "got: $($strayClean.Output)"
+Assert-Contains "and names the stray and where it belongs" `
+    $strayClean.Output 'retros/auto/72-x.md'
+
+Assert-True "control: a clean run with a voluntary retro at RETRO_DIR passes" `
+    ((Get-RetroDecision $LOG_CLEAN @{
+        '.github/af-env.conf' = $CONF_ROOT
+        'retros/auto/72-x.md' = $RETRO_MD
+    }) -eq 'pass') `
+    "a retro nobody owed is still welcome in the right place"
+
+$stStrayClean = Get-StopTestsOutput @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+    '.github/logs/72-x.yaml'         = $LOG_CLEAN
+    '.github/af-env.conf'            = $CONF_ROOT
+    '.github/retros/auto/72-x.md'    = $RETRO_MD
+}
+Assert-Contains "stop-tests warns about a stray nobody owed" `
+    $stStrayClean 'WARNING'
+
 # The cheap static claim that the same edit reached the bash side. The bash
 # suite proves the behaviour; this catches the dialect drift that #93 lived in.
 Assert-True "the bash preamble resolves the destination from config" `
