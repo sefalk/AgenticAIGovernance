@@ -146,6 +146,31 @@ Add-Result 'S12_an_explicit_mapping_beats_the_ignore_list' `
     ($mappedReadme -match 'SELECT\s+test-hook-decision-contract\.ps1') `
     'mapped README'
 
+# A deploy-engine change "widened to every suite" and reported 35/35 -- none
+# of which ran the pytest suite that covers the changed code (#395). These
+# paths must select the suite that does, explicitly and not via the fallback.
+$deployPaths = @(
+    'flavors/github-copilot/mcp-deploy/af_deploy_mcp/deploy_core.py',
+    'flavors/github-copilot/mcp-deploy/tests/test_deploy_core.py',
+    'flavors/github-copilot/deploy.ps1',
+    'flavors/github-copilot/deploy.sh',
+    'flavors/github-copilot/.github/.af-manifest'
+)
+foreach ($p in $deployPaths) {
+    $sel = Invoke-Selection -Paths @($p)
+    Add-Result "S13_deploy_path_selects_the_deploy_engine_suite: $p" `
+        (($sel -match 'SELECT\s+test-deploy-engine\.ps1') -and ($sel -notmatch 'FALLBACK')) `
+        "selection: $(($sel -split "`r?`n" | Where-Object { $_ -match 'SELECT|FALLBACK' }) -join ' / ')"
+}
+
+# The suite has to actually run pytest -- via run-deploy-suite.py, so the skip
+# rules and the floor under executed tests stay single-sourced.
+$engineSuite = Join-Path $scriptDir 'test-deploy-engine.ps1'
+$engineText = if (Test-Path $engineSuite) { Get-Content $engineSuite -Raw } else { '' }
+Add-Result 'S14_the_deploy_engine_suite_delegates_to_run_deploy_suite' `
+    ($engineText -match 'run-deploy-suite\.py') `
+    'test-deploy-engine.ps1 must call run-deploy-suite.py'
+
 # ── Report ────────────────────────────────────────────────────────────────
 
 $passed = 0
