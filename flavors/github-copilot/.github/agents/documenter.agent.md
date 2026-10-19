@@ -367,7 +367,7 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 
 | Gate | Type | How to Verify | Tier |
 |---|---|---|---|
-| Plan file status set to COMPLETED | HARD | Verify status field updated | Standard+ |
+| Plan file status set to COMPLETED | HARD | documenter-stop blocks a `COMPLETED` log whose plan is not | Standard+ |
 | YAML workflow log created and valid | HARD | Verify file exists, mandatory fields present | All (`Standard+` if `AF_WORKFLOW_LOG_COVERAGE=standard+`) |
 | Provenance markers verified on all AI-touched files | HARD | Scan changed files for markers | Standard+ |
 | Retro snippet in `RETRO_DIR` when the run had something to teach | HARD | Verify file created with required fields | Standard+ |

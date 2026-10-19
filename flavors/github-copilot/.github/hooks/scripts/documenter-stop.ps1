@@ -144,6 +144,11 @@ if (-not (Test-Path $logPath1) -and -not (Test-Path $logPath2)) {
 $retroDir = Get-AfRetroDir
 $retroPath = "$retroDir/$workflowId.md"
 $strays = @(Get-AfRetroStrays -WorkflowId $workflowId)
+$kept = @(Get-AfRetroStrays -WorkflowId $workflowId -Kept)
+$keptNote = ''
+if ($kept.Count -gt 0) {
+    $keptNote = " -- left '$($kept -join ' ')' in place: it is tracked and RETRO_DIR is gitignored, so moving or deleting it would take it out of version control (#109)"
+}
 $retro = Get-AfRetroRequirement -WorkflowId $workflowId
 $retroNote = ''
 
@@ -152,16 +157,17 @@ if (Test-Path $retroPath) {
         $missing += "a single retro -- it was written twice, also at '$($strays -join ' ')'; delete the copy outside RETRO_DIR, $retroPath is the one that counts"
     }
 } else {
-    if ($retro.Required) {
-        if ($strays.Count -gt 0) {
-            $missing += "retro snippet at its configured path -- found '$($strays[0])', which is not the configured destination; move it to $retroPath"
-        } else {
-            $missing += "retro snippet ($retroPath), required because $($retro.Reason)"
-        }
+    # A misplaced retro is a defect whether or not one was owed: the default
+    # location is gitignored, so it would be written, counted and lost (#176).
+    if ($strays.Count -gt 0) {
+        $missing += "retro snippet at its configured path -- found '$($strays[0])', which is not the configured destination; move it to $retroPath"
+    } elseif ($retro.Required) {
+        $missing += "retro snippet ($retroPath), required because $($retro.Reason)$keptNote"
     } else {
         $retroNote = " -- no retro required ($($retro.Reason))"
     }
 }
+$retroNote += $keptNote
 
 # ---------- Verdict ----------
 
@@ -454,6 +460,22 @@ try {
 }
 catch {
     $scratchNote = ''
+}
+
+# The plan-status HARD gate in documenter.agent.md had no checker but its maker
+# (#252 remainder). This is the checker. It runs LAST: the stamps, cost block
+# and invocation census above are already written, so blocking here loses no
+# measurement. FAILED/ESCALATED logs stay a note -- the plan has no such status.
+if ($plan.Status -ne 'COMPLETED' -and $logStatus -eq 'COMPLETED') {
+    $output = @{
+        hookSpecificOutput = @{
+            hookEventName = "Stop"
+            decision = "block"
+            reason = "Plan status gate: plan status is $seen but the workflow log reports COMPLETED -- set the plan's Status line to COMPLETED (or correct the log if the workflow did not finish). Measurements were already written.$retroNote$schemaNote$stampNote$costNote$invocationNote"
+        }
+    } | ConvertTo-Json -Compress -Depth 3
+    Write-Output $output
+    exit 0
 }
 
 $output = @{

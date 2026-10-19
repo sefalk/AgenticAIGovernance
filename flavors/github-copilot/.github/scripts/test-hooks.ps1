@@ -122,7 +122,8 @@ function Invoke-Hook {
         [hashtable]$Files,
         [string]$ReadBack,
         [string]$StubBin,
-        [hashtable]$StubFiles
+        [hashtable]$StubFiles,
+        [string[]]$Track
     )
     $hookPath = Join-Path $scriptDir $Script
     if (-not (Test-Path $hookPath)) {
@@ -131,7 +132,7 @@ function Invoke-Hook {
     if (-not $Branch -and -not $Detached -and -not $Files) {
         return (Invoke-HookScript -HookPath $hookPath -JsonInput $JsonInput)
     }
-    return (Invoke-HookInFixture -HookPath $hookPath -Script $Script -JsonInput $JsonInput -Branch $Branch -Detached:$Detached -Files $Files -ReadBack $ReadBack -StubBin $StubBin -StubFiles $StubFiles)
+    return (Invoke-HookInFixture -HookPath $hookPath -Script $Script -JsonInput $JsonInput -Branch $Branch -Detached:$Detached -Files $Files -ReadBack $ReadBack -StubBin $StubBin -StubFiles $StubFiles -Track $Track)
 }
 
 # Branch-context gates read the branch of the repo the hook sits in, resolved
@@ -161,7 +162,11 @@ function Invoke-HookInFixture {
         # back beside its output. A gate that reads the last line of the runner's
         # output then reads `exit /b 1` instead of the summary, and the case fails
         # for a reason that has nothing to do with the hook. Measured 2026-08-24.
-        [hashtable]$StubFiles
+        [hashtable]$StubFiles,
+        # Seeded paths to put in the index. Whether a file is under version
+        # control is an input for gates that must not instruct untracking one
+        # (issue #109).
+        [string[]]$Track
     )
     $fixture = Join-Path ([System.IO.Path]::GetTempPath()) "af-hook-branch-$(Get-Random)"
     $fixtureHooks = Join-Path $fixture '.github/hooks/scripts'
@@ -232,6 +237,9 @@ function Invoke-HookInFixture {
                 [System.IO.File]::WriteAllText($dest, $StubFiles[$rel], $noBom)
             }
         }
+        # Quiet on purpose: a CRLF warning on stderr is a terminating error
+        # under this suite's error policy and aborted the whole run (measured).
+        if ($Track) { git -c core.autocrlf=false -c core.safecrlf=false add -f -- $Track 2>&1 | Out-Null }
         # In a fixture, the fixture's config is the config -- several cases pass
         # one through -Files to test a key (RETRO_DIR, SRC_DIR) and mean that
         # file, not the process-wide declared policy. Set after -Files, which
@@ -1886,6 +1894,32 @@ Assert-True "an out-of-schema status reaches the checker instead of exiting the 
     ($invalidStatus.Output -notmatch 'artifact gate not applied') `
     "got: $($invalidStatus.Output)" -Subject $invalidStatus.Output
 
+# The divergence used to be a NOTE in a channel nobody reads afterwards, while
+# documenter.agent.md listed "Plan file status set to COMPLETED" as HARD and
+# verified it by the documenter's own inspection -- a gate whose only checker
+# was its maker (#252 remainder). The hook is now that checker: it blocks, and
+# it blocks LAST, so the measurements this issue was about are already written.
+Assert-True "a log reporting COMPLETED with a plan that does not blocks finalisation" `
+    ($stalePlan.Output -match '"decision":\s*"block"') `
+    "got: $($stalePlan.Output)"
+Assert-Contains "and says to set the plan status" `
+    $stalePlan.Output 'set the plan'
+
+$LOG_FAILED = "workflow_id: `"72-x`"`nstatus: `"FAILED`"`n"
+$failedRun = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_RUNNING
+    '.github/logs/72-x.yaml'         = $LOG_FAILED
+    '.github/retros/auto/72-x.md'    = $RETRO_MD
+}
+Assert-True "control: a FAILED log does not demand a COMPLETED plan" `
+    ($failedRun.Output -notmatch '"decision":\s*"block"') `
+    "got: $($failedRun.Output)"
+
+$docAgentText = Get-Content (Join-Path $githubDir 'agents/documenter.agent.md') -Raw
+Assert-True "the HARD plan-status row names its independent checker" `
+    ($docAgentText -match '(?m)^\| Plan file status set to COMPLETED \| HARD \|[^|\n]*documenter-stop') `
+    "the row is still verified by the documenter's own inspection"
+
 # Unclassifiable is not the same as fine. The gate says which one it is rather
 # than passing in silence -- the failure mode this whole issue family is about.
 $noPlan = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{ 'README.md' = 'x' }
@@ -2308,6 +2342,102 @@ $stTwin = Get-StopTestsOutput @{
 }
 Assert-Contains "stop-tests warns about the twin as well" `
     $stTwin 'WARNING'
+
+# ── A stray retro is a defect even when none was owed (issue #176) ───────
+# A clean run owes no retro, and the gate said so and passed -- while the
+# documenter's voluntary retro sat in the gitignored default, written, counted
+# and silently lost. Whether one was owed decides whether it MUST exist, not
+# whether it may be in the wrong place.
+$strayClean = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+    '.github/logs/72-x.yaml'         = $LOG_CLEAN
+    '.github/af-env.conf'            = $CONF_ROOT
+    '.github/retros/auto/72-x.md'    = $RETRO_MD
+}
+Assert-True "a clean run with a retro outside RETRO_DIR blocks" `
+    ($strayClean.Output -match '"decision":\s*"block"') `
+    "got: $($strayClean.Output)"
+Assert-Contains "and names the stray and where it belongs" `
+    $strayClean.Output 'retros/auto/72-x.md'
+
+Assert-True "control: a clean run with a voluntary retro at RETRO_DIR passes" `
+    ((Get-RetroDecision $LOG_CLEAN @{
+        '.github/af-env.conf' = $CONF_ROOT
+        'retros/auto/72-x.md' = $RETRO_MD
+    }) -eq 'pass') `
+    "a retro nobody owed is still welcome in the right place"
+
+$stStrayClean = Get-StopTestsOutput @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+    '.github/logs/72-x.yaml'         = $LOG_CLEAN
+    '.github/af-env.conf'            = $CONF_ROOT
+    '.github/retros/auto/72-x.md'    = $RETRO_MD
+}
+Assert-Contains "stop-tests warns about a stray nobody owed" `
+    $stStrayClean 'WARNING'
+
+# ── A gate never instructs taking a record out of git (issue #109) ───────
+# Following "move it to .github/retros/auto" in a consumer whose legacy retros
+# were tracked would have removed 35 lesson records from version control,
+# invisible to `git status` because the destination is ignored. A tracked
+# retro next to an ignored RETRO_DIR is history, not a stray: it stays put.
+$IGNORE_ALL = "*`n"
+$keptOwed = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Track @('retros/auto/72-x.md') -Files @{
+    'docs/plans/fix-2026-08-07-x.md'  = $PLAN_DONE
+    '.github/logs/72-x.yaml'          = $LOG_RETRIES
+    '.github/retros/auto/.gitignore'  = $IGNORE_ALL
+    'retros/auto/72-x.md'             = $RETRO_MD
+}
+Assert-True "an owed retro is still owed when only a tracked legacy copy exists" `
+    ($keptOwed.Output -match '"decision":\s*"block"') `
+    "got: $($keptOwed.Output)"
+Assert-True "but the gate does not tell the agent to move the tracked copy" `
+    ($keptOwed.Output -notmatch 'move it to') `
+    "got: $($keptOwed.Output)"
+Assert-Contains "and says why it stays" `
+    $keptOwed.Output 'version control'
+
+$keptTwin = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Track @('retros/auto/72-x.md') -Files @{
+    'docs/plans/fix-2026-08-07-x.md'  = $PLAN_DONE
+    '.github/logs/72-x.yaml'          = $LOG_RETRIES
+    '.github/retros/auto/.gitignore'  = $IGNORE_ALL
+    '.github/retros/auto/72-x.md'     = $RETRO_MD
+    'retros/auto/72-x.md'             = $RETRO_MD
+}
+Assert-True "a tracked copy beside an ignored RETRO_DIR is not a twin to delete" `
+    ($keptTwin.Output -notmatch '"decision":\s*"block"') `
+    "got: $($keptTwin.Output)"
+Assert-Contains "and the pass names the copy it left in place" `
+    $keptTwin.Output 'retros/auto/72-x.md'
+
+$keptClean = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Track @('retros/auto/72-x.md') -Files @{
+    'docs/plans/fix-2026-08-07-x.md'  = $PLAN_DONE
+    '.github/logs/72-x.yaml'          = $LOG_CLEAN
+    '.github/retros/auto/.gitignore'  = $IGNORE_ALL
+    'retros/auto/72-x.md'             = $RETRO_MD
+}
+Assert-True "a clean run with a tracked legacy retro passes" `
+    ($keptClean.Output -notmatch '"decision":\s*"block"') `
+    "got: $($keptClean.Output)"
+
+$looseOwed = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'docs/plans/fix-2026-08-07-x.md'  = $PLAN_DONE
+    '.github/logs/72-x.yaml'          = $LOG_RETRIES
+    '.github/retros/auto/.gitignore'  = $IGNORE_ALL
+    'retros/auto/72-x.md'             = $RETRO_MD
+}
+Assert-Contains "control: an untracked legacy copy is still to be moved" `
+    $looseOwed.Output 'move it to .github/retros/auto/72-x.md'
+
+$stKept = (Invoke-Hook -Script 'stop-tests.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Track @('retros/auto/72-x.md') -Files @{
+    'docs/plans/fix-2026-08-07-x.md'  = $PLAN_DONE
+    '.github/logs/72-x.yaml'          = $LOG_CLEAN
+    '.github/retros/auto/.gitignore'  = $IGNORE_ALL
+    'retros/auto/72-x.md'             = $RETRO_MD
+}).Output
+Assert-True "stop-tests does not warn about a tracked legacy retro either" `
+    ($stKept -notmatch 'WARNING') `
+    "got: $stKept" -Subject $stKept
 
 # The cheap static claim that the same edit reached the bash side. The bash
 # suite proves the behaviour; this catches the dialect drift that #93 lived in.
