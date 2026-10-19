@@ -1207,6 +1207,65 @@ st_configured=$(stop_output stop-tests.sh \
 assert_not_contains "stop-tests honours RETRO_DIR too" \
     "$st_configured" "WARNING"
 
+# --- one retro, checked at every candidate place (issue #239) --------------
+# A one-sided existence check cannot see a second copy. In MP
+# (RETRO_DIR=retros/auto) 3 of 6 workflows wrote a byte-identical twin to the
+# gitignored default, and the legacy check was off because the configured path
+# was the legacy one.
+CONF_ROOT_B='RETRO_DIR=retros/auto\n'
+
+doc_stop_case "a retro written twice blocks even though the configured copy exists" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=$CONF_DOCS_B" \
+    "docs/retros/72-x.md=$LEGACY_RETRO" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO"
+
+doc_stop_case "the MP shape: RETRO_DIR=retros/auto with a twin at the default blocks" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO"
+
+twin_out=$(stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO")
+assert_contains "and names the twin to delete" \
+    "$twin_out" ".github/retros/auto/72-x.md"
+
+doc_stop_case "with the default config a twin at the legacy root blocks too" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO" \
+    "retros/auto/72-x.md=$LEGACY_RETRO"
+
+misplaced_out=$(stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO")
+assert_contains "with RETRO_DIR=retros/auto a lone retro at the default is found and named" \
+    "$misplaced_out" "found '.github/retros/auto/72-x.md'"
+
+doc_stop_case "control: RETRO_DIR=retros/auto with the one retro there passes" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO"
+
+st_twin=$(stop_output stop-tests.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO")
+assert_contains "stop-tests warns about the twin as well" \
+    "$st_twin" "WARNING"
+
 # --- Workflow-log timestamps are measured, not authored (issue #91) --------
 #
 # A documenter wrote `completed:` six and a half hours into the future, in the

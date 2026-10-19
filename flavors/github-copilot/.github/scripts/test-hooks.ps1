@@ -2242,6 +2242,73 @@ Assert-True "stop-tests honours RETRO_DIR too" `
     ($stConfigured -notmatch 'WARNING') `
     "got: $stConfigured" -Subject $stConfigured
 
+# ── One retro, checked at every candidate place (issue #239) ───────────────
+# The gate asked whether the configured file EXISTS -- a one-sided question
+# that a second copy elsewhere can never fail. In MP (RETRO_DIR=retros/auto)
+# 3 of 6 workflows wrote a byte-identical twin to the gitignored default, and
+# the legacy-path check was off because the configured path WAS the legacy one.
+$CONF_ROOT = New-ConfWith 'retros/auto'
+
+Assert-True "a retro written twice blocks even though the configured copy exists" `
+    ((Get-RetroDecision $LOG_RETRIES @{
+        '.github/af-env.conf'         = $CONF_DOCS
+        'docs/retros/72-x.md'         = $RETRO_MD
+        '.github/retros/auto/72-x.md' = $RETRO_MD
+    }) -eq 'block') `
+    "one destination means one file, not at least one"
+
+Assert-True "the MP shape: RETRO_DIR=retros/auto with a twin at the default blocks" `
+    ((Get-RetroDecision $LOG_RETRIES @{
+        '.github/af-env.conf'         = $CONF_ROOT
+        'retros/auto/72-x.md'         = $RETRO_MD
+        '.github/retros/auto/72-x.md' = $RETRO_MD
+    }) -eq 'block') `
+    "the configured path being the legacy one must not switch the check off"
+
+$twin = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+    '.github/logs/72-x.yaml'         = $LOG_RETRIES
+    '.github/af-env.conf'            = $CONF_ROOT
+    'retros/auto/72-x.md'            = $RETRO_MD
+    '.github/retros/auto/72-x.md'    = $RETRO_MD
+}
+Assert-Contains "and names the twin to delete" `
+    $twin.Output '.github/retros/auto/72-x.md'
+
+Assert-True "with the default config a twin at the legacy root blocks too" `
+    ((Get-RetroDecision $LOG_RETRIES @{
+        '.github/retros/auto/72-x.md' = $RETRO_MD
+        'retros/auto/72-x.md'         = $RETRO_MD
+    }) -eq 'block') `
+    "the default destination plus a legacy copy is still two"
+
+$misplaced = Invoke-Hook -Script 'documenter-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/72-x' -Files @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+    '.github/logs/72-x.yaml'         = $LOG_RETRIES
+    '.github/af-env.conf'            = $CONF_ROOT
+    '.github/retros/auto/72-x.md'    = $RETRO_MD
+}
+Assert-True "with RETRO_DIR=retros/auto a lone retro at the default is found and named" `
+    ($misplaced.Output -match 'found.{0,10}\.github/retros/auto/72-x\.md') `
+    "got: $($misplaced.Output)"
+
+Assert-True "control: RETRO_DIR=retros/auto with the one retro there passes" `
+    ((Get-RetroDecision $LOG_RETRIES @{
+        '.github/af-env.conf' = $CONF_ROOT
+        'retros/auto/72-x.md' = $RETRO_MD
+    }) -eq 'pass') `
+    "the configured root path is a legitimate destination"
+
+$stTwin = Get-StopTestsOutput @{
+    'docs/plans/fix-2026-08-07-x.md' = $PLAN_DONE
+    '.github/logs/72-x.yaml'         = $LOG_RETRIES
+    '.github/af-env.conf'            = $CONF_ROOT
+    'retros/auto/72-x.md'            = $RETRO_MD
+    '.github/retros/auto/72-x.md'    = $RETRO_MD
+}
+Assert-Contains "stop-tests warns about the twin as well" `
+    $stTwin 'WARNING'
+
 # The cheap static claim that the same edit reached the bash side. The bash
 # suite proves the behaviour; this catches the dialect drift that #93 lived in.
 Assert-True "the bash preamble resolves the destination from config" `
