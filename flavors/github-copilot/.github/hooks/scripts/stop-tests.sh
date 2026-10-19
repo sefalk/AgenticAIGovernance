@@ -53,11 +53,16 @@ if [[ "$branch" =~ ^agent/(.+)$ ]]; then
     # -- and only when the log shows there was something to learn (issues #98,
     # #27).
     retro_dir=$(af_retro_dir)
-    if [ ! -f "${retro_dir}/${workflow_id}.md" ]; then
+    retro_strays=$(af_retro_strays "$workflow_id")
+    if [ -f "${retro_dir}/${workflow_id}.md" ]; then
+        if [ -n "$retro_strays" ]; then
+            missing+=("a single retro (also written to '${retro_strays}'; delete the copy outside RETRO_DIR)")
+        fi
+    else
         retro_verdict=$(af_retro_required "$workflow_id")
         if [ "${retro_verdict%%|*}" = "1" ]; then
-            if [ "$retro_dir" != "retros/auto" ] && [ -f "retros/auto/${workflow_id}.md" ]; then
-                missing+=("retro snippet at its configured path (found 'retros/auto/${workflow_id}.md', no longer accepted)")
+            if [ -n "$retro_strays" ]; then
+                missing+=("retro snippet at its configured path (found '${retro_strays%% *}', not the configured destination)")
             else
                 missing+=("retro snippet (${retro_dir}/${workflow_id}.md)")
             fi

@@ -143,14 +143,18 @@ if (-not (Test-Path $logPath1) -and -not (Test-Path $logPath2)) {
 
 $retroDir = Get-AfRetroDir
 $retroPath = "$retroDir/$workflowId.md"
-$legacyRetroPath = "retros/auto/$workflowId.md"
+$strays = @(Get-AfRetroStrays -WorkflowId $workflowId)
 $retro = Get-AfRetroRequirement -WorkflowId $workflowId
 $retroNote = ''
 
-if (-not (Test-Path $retroPath)) {
+if (Test-Path $retroPath) {
+    if ($strays.Count -gt 0) {
+        $missing += "a single retro -- it was written twice, also at '$($strays -join ' ')'; delete the copy outside RETRO_DIR, $retroPath is the one that counts"
+    }
+} else {
     if ($retro.Required) {
-        if ($legacyRetroPath -ne $retroPath -and (Test-Path $legacyRetroPath)) {
-            $missing += "retro snippet at its configured path -- found '$legacyRetroPath', which is no longer accepted; move it to $retroPath"
+        if ($strays.Count -gt 0) {
+            $missing += "retro snippet at its configured path -- found '$($strays[0])', which is not the configured destination; move it to $retroPath"
         } else {
             $missing += "retro snippet ($retroPath), required because $($retro.Reason)"
         }

@@ -178,6 +178,19 @@ build for one (#322).
 
 ### Fixed
 
+- **A retro written twice is caught (#239).** The documenter and stop-tests
+  gates only asked whether the configured retro existed, so a second copy
+  elsewhere always passed. The legacy-path check also switched itself off when
+  `RETRO_DIR` was `retros/auto`. In MP, 3 of 6 workflows wrote an identical
+  twin to the gitignored default.
+  - Both gates, in both dialects, now check every known location
+    (`.github/retros/auto`, `retros/auto`) other than the configured one.
+  - A twin next to the configured file blocks finalisation (stop-tests warns)
+    and names the copy to delete.
+  - A lone retro outside `RETRO_DIR` is named with the path to move it to.
+  - `documenter.agent.md` states the rule and points to
+    `.github/retros/README.md` for why retros may be tracked and logs may not.
+
 - **A workflow-log metric is a number or `unmeasured`, never prose (#173,
   #102).** The log schema asked for `<number>` in fields the documenter has no
   instrument for and offered no word for "nobody measured this". Measured over

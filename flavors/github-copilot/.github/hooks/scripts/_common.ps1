@@ -103,6 +103,20 @@ function Get-AfRetroDir {
     return $dir
 }
 
+# Retro copies at a known destination other than the configured one (issue
+# #239). "The configured file exists" cannot see a second copy, and comparing
+# only against the legacy root switched itself off when RETRO_DIR WAS the
+# legacy root -- so MP wrote twins to the default for weeks. Every candidate is
+# checked, whichever one the configuration picked.
+function Get-AfRetroStrays {
+    param([string]$WorkflowId)
+    $configured = "$(Get-AfRetroDir)/$WorkflowId.md"
+    foreach ($dir in @('.github/retros/auto', 'retros/auto')) {
+        $candidate = "$dir/$WorkflowId.md"
+        if ($candidate -ne $configured -and (Test-Path $candidate)) { $candidate }
+    }
+}
+
 # A resolvable interpreter is not a working one: on Windows `python3` is an
 # App Execution Alias that is on PATH, runs nothing and exits non-zero.
 # Probe each candidate instead of trusting the lookup.
