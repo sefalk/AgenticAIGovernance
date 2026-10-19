@@ -132,12 +132,17 @@ fi
 
 retro_dir=$(af_retro_dir)
 retro_note=""
-if [ ! -f "${retro_dir}/${workflow_id}.md" ]; then
+retro_strays=$(af_retro_strays "$workflow_id")
+if [ -f "${retro_dir}/${workflow_id}.md" ]; then
+    if [ -n "$retro_strays" ]; then
+        missing+=("a single retro -- it was written twice, also at '${retro_strays}'; delete the copy outside RETRO_DIR, ${retro_dir}/${workflow_id}.md is the one that counts")
+    fi
+else
     retro_verdict=$(af_retro_required "$workflow_id")
     retro_reason="${retro_verdict#*|}"
     if [ "${retro_verdict%%|*}" = "1" ]; then
-        if [ "$retro_dir" != "retros/auto" ] && [ -f "retros/auto/${workflow_id}.md" ]; then
-            missing+=("retro snippet at its configured path -- found 'retros/auto/${workflow_id}.md', which is no longer accepted; move it to ${retro_dir}/${workflow_id}.md")
+        if [ -n "$retro_strays" ]; then
+            missing+=("retro snippet at its configured path -- found '${retro_strays%% *}', which is not the configured destination; move it to ${retro_dir}/${workflow_id}.md")
         else
             missing+=("retro snippet (${retro_dir}/${workflow_id}.md), required because ${retro_reason}")
         fi
