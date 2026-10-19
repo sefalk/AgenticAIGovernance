@@ -446,7 +446,7 @@ foreach ($f in $ManifestVSCodeFiles) {
 }
 
 # ── Counters ───────────────────────────────────────────────────────────────
-$script:Stats = @{ Created = 0; Updated = 0; Unchanged = 0; Protected = 0; Conflict = 0; Preserved = 0; Deactivated = 0; Activated = 0 }
+$script:Stats = @{ Created = 0; Updated = 0; Unchanged = 0; Protected = 0; Conflict = 0; Preserved = 0; Deactivated = 0; Activated = 0; Merged = 0 }
 $script:BackupDir = $null
 $script:BackupCount = 0
 
@@ -502,6 +502,90 @@ function Write-HashFile {
         $lines += "$($_.Key)=$($_.Value)"
     }
     [System.IO.File]::WriteAllText($path, (($lines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# ── Baseline content store (#105, #393) ───────────────────────────────────────
+# The canonical, region-stripped content behind every recorded hash, so a later
+# deploy can 3-way merge a file both sides changed. Gitignored; an object is
+# verified against its name before use. Parity with deploy_core _store_*.
+$script:StoreDir = Join-Path $TargetGitHub '.af-baseline'
+function Save-BaselineObject([byte[]]$Bytes) {
+    if ($null -eq $Bytes) { return }
+    if (-not (Test-Path $script:StoreDir)) { New-Item -ItemType Directory -Path $script:StoreDir -Force | Out-Null }
+    $obj = Join-Path $script:StoreDir (Get-BytesHashUpper $Bytes)
+    if (-not (Test-Path $obj)) { [System.IO.File]::WriteAllBytes($obj, $Bytes) }
+    $ignore = Join-Path $script:StoreDir '.gitignore'
+    if (-not (Test-Path $ignore)) {
+        [System.IO.File]::WriteAllText($ignore, "*`n", (New-Object System.Text.UTF8Encoding($false)))
+    }
+}
+function Save-SourceBaseline([string]$Source, [byte[]]$Canon) {
+    if ($null -ne $Canon) { Save-BaselineObject (Get-RegionStrippedBytes $Canon) }
+    else { Save-BaselineObject ([System.IO.File]::ReadAllBytes($Source)) }
+}
+function Get-BaselineObject([string]$Digest) {
+    $obj = Join-Path $script:StoreDir $Digest
+    if (-not (Test-Path $obj -PathType Leaf)) { return $null }
+    $bytes = [System.IO.File]::ReadAllBytes($obj)
+    if ((Get-BytesHashUpper $bytes) -ne $Digest) { return $null }
+    return ,$bytes
+}
+function Remove-UnreferencedBaselineObjects([hashtable]$Hashes) {
+    if (-not (Test-Path $script:StoreDir)) { return }
+    $keep = @{}
+    foreach ($value in $Hashes.Values) { $keep[[string]$value] = $true }
+    Get-ChildItem $script:StoreDir -File |
+        Where-Object { $_.Name -ne '.gitignore' -and -not $keep.ContainsKey($_.Name) } |
+        Remove-Item -Force
+}
+
+function Invoke-ThreeWayMerge([string]$Target, [string]$BaselineHash, [byte[]]$Canon) {
+    # The bytes to deploy for a both-sides change that merges cleanly, else $null.
+    # All three inputs are canonical LF with managed regions emptied, the form the
+    # hashes are taken over; the project's region bodies are transplanted back.
+    # Parity with deploy_core _three_way: binary, no git, a missing or tampered
+    # store object, or overlap all keep the file CONFLICT.
+    if ($null -eq $Canon) { return $null }
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $git) { return $null }
+    $base = Get-BaselineObject $BaselineHash
+    if ($null -eq $base) { return $null }
+    $strict = New-Object System.Text.UTF8Encoding($false, $true)
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    try {
+        $oursText = $strict.GetString([System.IO.File]::ReadAllBytes($Target))
+        $null = $strict.GetString($base)
+    } catch { return $null }
+    if ($oursText.Length -gt 0 -and $oursText[0] -eq [char]0xFEFF) { $oursText = $oursText.Substring(1) }
+    $oursText = ($oursText -replace "`r`n", "`n") -replace "`r", "`n"
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "af-merge-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $tmp | Out-Null
+    try {
+        [System.IO.File]::WriteAllBytes((Join-Path $tmp 'ours'), [byte[]](Get-RegionStrippedBytes $utf8.GetBytes($oursText)))
+        [System.IO.File]::WriteAllBytes((Join-Path $tmp 'base'), [byte[]]$base)
+        [System.IO.File]::WriteAllBytes((Join-Path $tmp 'theirs'), [byte[]](Get-RegionStrippedBytes $Canon))
+        # Raw bytes from stdout: `& git` would decode and re-encode the merge.
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $git.Source
+        $psi.Arguments = 'merge-file -p ours base theirs'
+        $psi.WorkingDirectory = $tmp
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $stderr = $proc.StandardError.ReadToEndAsync()
+        $buffer = New-Object System.IO.MemoryStream
+        $proc.StandardOutput.BaseStream.CopyTo($buffer)
+        $proc.WaitForExit()
+        $null = $stderr.Result
+        if ($proc.ExitCode -ne 0) { return $null }
+        $mergedText = $strict.GetString($buffer.ToArray())
+    } catch {
+        return $null
+    } finally {
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    return ,$utf8.GetBytes((Merge-ManagedRegions $mergedText $oursText))
 }
 
 $script:BaselineHashes = Read-HashFile
@@ -784,15 +868,18 @@ if ($UpdateHashes) {
     foreach ($rel in $sourceFiles) {
         $src = Join-Path $SourceGitHub $rel
         $hashEntries[$rel] = Get-SourceHashResolved $src
+        if (-not $DryRun) { Save-SourceBaseline $src (Get-CanonicalBytes $src) }
     }
     foreach ($f in $ManifestVSCodeFiles) {
         $src = Join-Path $SourceVSCode $f
         if (Test-Path $src) {
             $hashEntries["vscode/$f"] = Get-SourceHashResolved $src
+            if (-not $DryRun) { Save-SourceBaseline $src (Get-CanonicalBytes $src) }
         }
     }
     if (-not $DryRun) {
         Write-HashFile $hashEntries
+        Remove-UnreferencedBaselineObjects $hashEntries
         Write-Host "  Wrote .af-hashes with $($hashEntries.Count) entries (v$AFVersion)" -ForegroundColor Green
     } else {
         Write-Host "  [DRY RUN] Would write .af-hashes with $($hashEntries.Count) entries" -ForegroundColor Yellow
@@ -856,6 +943,7 @@ function Publish-SingleFile {
         if ($sourceHash -eq $targetHash) {
             $script:DeployedHashes[$HashKey] = $sourceHash
             $script:Stats.Unchanged++
+            if (-not $DryRun) { Save-SourceBaseline $Source $canon }
             return
         }
 
@@ -893,6 +981,19 @@ function Publish-SingleFile {
                 $script:Stats.Preserved++
                 return
             } else {
+                # [customizable] files belong to the project and are never merged (#105).
+                $merged = if ($isCustom) { $null } else { Invoke-ThreeWayMerge $Target $baselineHash $canon }
+                if ($null -ne $merged) {
+                    Write-Host "  MERGE   $DisplayPath  (both sides changed, merged without overlap)" -ForegroundColor Cyan
+                    $script:Stats.Merged++
+                    $script:DeployedHashes[$HashKey] = $sourceHash
+                    if (-not $DryRun) {
+                        Backup-BeforeOverwrite -TargetFile $Target -DisplayPath $DisplayPath
+                        [System.IO.File]::WriteAllBytes($Target, [byte[]]$merged)
+                        Save-SourceBaseline $Source $canon
+                    }
+                    return
+                }
                 Write-Host "  CONFLICT $DisplayPath  (both AF and project changed)" -ForegroundColor Red
                 Show-ContentDiff $Source $Target
                 $script:Stats.Conflict++
@@ -933,6 +1034,7 @@ function Publish-SingleFile {
         } else {
             Copy-Item $Source $Target -Force
         }
+        Save-SourceBaseline $Source $canon
     }
 }
 
@@ -1115,6 +1217,7 @@ if ($ManifestVSCodeFiles.Count -gt 0) {
 # Write .af-hashes
 if (-not $DryRun) {
     Write-HashFile $script:DeployedHashes
+    Remove-UnreferencedBaselineObjects $script:DeployedHashes
 }
 Write-Host ""
 Write-Host "  WRITE   .github/.af-hashes" -ForegroundColor Cyan
@@ -1218,6 +1321,9 @@ if ($script:Stats.Deactivated -gt 0) {
 }
 if ($script:Stats.Activated -gt 0) {
     Write-Host "  Activated: $($script:Stats.Activated) -- library skills deployed to the active copy in skills/" -ForegroundColor DarkGray
+}
+if ($script:Stats.Merged -gt 0) {
+    Write-Host "  Merged:    $($script:Stats.Merged) -- both sides changed, merged without overlap (backups kept)" -ForegroundColor Cyan
 }
 if ($script:Stats.Conflict -gt 0) {
     Write-Host "  Conflict:  $($script:Stats.Conflict) -- both sides changed, use agent to merge" -ForegroundColor Red
@@ -1323,6 +1429,7 @@ if ($DryRun) {
         unchanged = $script:Stats.Unchanged
         protected = $script:Stats.Protected
         preserved = $script:Stats.Preserved
+        merged = $script:Stats.Merged
         conflict = $script:Stats.Conflict
         backup_prune_days = $resolvedBackupPruneDays
     }

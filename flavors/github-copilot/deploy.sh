@@ -283,6 +283,7 @@ STAT_CONFLICT=0
 STAT_PRESERVED=0
 STAT_DEACTIVATED=0
 STAT_ACTIVATED=0
+STAT_MERGED=0
 BACKUP_DIR=""
 BACKUP_COUNT=0
 
@@ -597,6 +598,75 @@ write_hash_file() {
 
 read_hash_file
 
+# ── Baseline content store (#105, #393) ──────────────────────────────────────
+# The canonical, region-stripped content behind every recorded hash, so a later
+# deploy can 3-way merge a file both sides changed. Gitignored; an object is
+# verified against its name before use. Parity with deploy_core _store_* and
+# deploy.ps1 Save-BaselineObject.
+STORE_DIR="$TARGET_GITHUB/.af-baseline"
+store_put_file() {
+    # $1 = file whose bytes are the object
+    local h; h="$(file_hash "$1")"
+    mkdir -p "$STORE_DIR"
+    [[ -f "$STORE_DIR/$h" ]] || cp "$1" "$STORE_DIR/$h"
+    [[ -f "$STORE_DIR/.gitignore" ]] || printf '*\n' >"$STORE_DIR/.gitignore"
+}
+store_put_source() {
+    # $1 = source path; stores its canonical, region-stripped bytes
+    local tmp strip
+    tmp="$(mktemp)"
+    canonical_write "$1" "$tmp"
+    if _has_region_marker "$tmp"; then
+        strip="$(mktemp)"; strip_regions_to "$tmp" "$strip"; store_put_file "$strip"; rm -f "$strip"
+    else
+        store_put_file "$tmp"
+    fi
+    rm -f "$tmp"
+}
+store_get() {
+    # $1 = hash, $2 = out file; 1 if the object is missing or does not match its name
+    [[ -f "$STORE_DIR/$1" ]] || return 1
+    [[ "$(file_hash "$STORE_DIR/$1")" == "$1" ]] || return 1
+    cp "$STORE_DIR/$1" "$2"
+}
+store_prune() {
+    [[ -d "$STORE_DIR" ]] || return 0
+    local -A keep=()
+    local v obj
+    for v in "${DEPLOYED_HASHES[@]}"; do keep["$v"]=1; done
+    for obj in "$STORE_DIR"/*; do
+        [[ -f "$obj" ]] || continue
+        [[ -n "${keep[$(basename "$obj")]+x}" ]] || rm -f "$obj"
+    done
+}
+three_way_merge() {
+    # $1 = source, $2 = target, $3 = baseline hash, $4 = out file. 0 on a clean
+    # merge. All three inputs are canonical LF with managed regions emptied; the
+    # project's region bodies are transplanted back. Parity with deploy_core
+    # _three_way: binary, no git, a missing or tampered object, or overlap fail.
+    local src="$1" tgt="$2" bh="$3" out="$4" d e=0 f
+    command -v git >/dev/null 2>&1 || return 1
+    LC_ALL=C grep -Iq . "$src" 2>/dev/null || return 1
+    if [[ -s "$tgt" ]] && ! LC_ALL=C grep -Iq . "$tgt" 2>/dev/null; then return 1; fi
+    d="$(mktemp -d)"
+    if ! store_get "$bh" "$d/base"; then rm -rf "$d"; return 1; fi
+    _strip_bom_cr "$tgt" >"$d/ours.canon"
+    canonical_write "$src" "$d/theirs.canon"
+    for f in ours theirs; do
+        if _has_region_marker "$d/$f.canon"; then strip_regions_to "$d/$f.canon" "$d/$f"; else cp "$d/$f.canon" "$d/$f"; fi
+    done
+    if ! git merge-file -p "$d/ours" "$d/base" "$d/theirs" >"$d/merged" 2>/dev/null; then
+        rm -rf "$d"; return 1
+    fi
+    if _has_region_marker "$d/merged" && _has_region_marker "$d/ours.canon"; then
+        _ends_with_nl "$d/merged" && e=1
+        awk -v endnl="$e" "$_AWK_MERGE" "$d/ours.canon" "$d/merged" >"$out"
+    else
+        cp "$d/merged" "$out"
+    fi
+    rm -rf "$d"
+}
+
 # Copy baseline into deployed hashes
 for k in "${!BASELINE_HASHES[@]}"; do
     DEPLOYED_HASHES["$k"]="${BASELINE_HASHES[$k]}"
@@ -812,15 +882,18 @@ if [[ "$UPDATE_HASHES" == "true" ]]; then
     while IFS= read -r rel; do
         src="$SOURCE_GITHUB/$rel"
         DEPLOYED_HASHES["$rel"]="$(source_hash_resolved "$src")"
+        if [[ "$DRY_RUN" != "true" ]]; then store_put_source "$src"; fi
     done < <(get_af_source_files)
     for f in "${MANIFEST_VSCODE_FILES[@]}"; do
         src="$SOURCE_VSCODE/$f"
         if [[ -f "$src" ]]; then
             DEPLOYED_HASHES["vscode/$f"]="$(source_hash_resolved "$src")"
+            if [[ "$DRY_RUN" != "true" ]]; then store_put_source "$src"; fi
         fi
     done
     if [[ "$DRY_RUN" != "true" ]]; then
         write_hash_file
+        store_prune
         echo "  Wrote .af-hashes with ${#DEPLOYED_HASHES[@]} entries (v$AF_VERSION)"
     else
         echo "  [DRY RUN] Would write .af-hashes with ${#DEPLOYED_HASHES[@]} entries"
@@ -879,6 +952,7 @@ deploy_file() {
         if [[ "$source_hash" == "$target_hash" ]]; then
             DEPLOYED_HASHES["$hash_key"]="$source_hash"
             ((STAT_UNCHANGED++)) || true
+            if [[ "$DRY_RUN" != "true" ]]; then store_put_source "$src"; fi
             return
         fi
 
@@ -918,6 +992,22 @@ deploy_file() {
                 ((STAT_PRESERVED++)) || true
                 return
             else
+                # [customizable] files belong to the project and are never merged (#105).
+                local merged
+                merged="$(mktemp)"
+                if ! $is_custom && three_way_merge "$src" "$tgt" "$baseline_hash" "$merged"; then
+                    echo "  MERGE   $display  (both sides changed, merged without overlap)"
+                    ((STAT_MERGED++)) || true
+                    DEPLOYED_HASHES["$hash_key"]="$source_hash"
+                    if [[ "$DRY_RUN" != "true" ]]; then
+                        backup_before_overwrite "$tgt" "$display"
+                        cp "$merged" "$tgt"
+                        store_put_source "$src"
+                    fi
+                    rm -f "$merged"
+                    return
+                fi
+                rm -f "$merged"
                 echo "  CONFLICT $display  (both AF and project changed)"
                 show_content_diff "$src" "$tgt"
                 ((STAT_CONFLICT++)) || true
@@ -952,6 +1042,7 @@ deploy_file() {
         backup_before_overwrite "$tgt" "$display"
         mkdir -p "$(dirname "$tgt")"
         write_deployed "$src" "$tgt"
+        store_put_source "$src"
     fi
 }
 
@@ -1132,6 +1223,7 @@ fi
 # Write .af-hashes
 if [[ "$DRY_RUN" != "true" ]]; then
     write_hash_file
+    store_prune
 fi
 echo ""
 echo "  WRITE   .github/.af-hashes"
@@ -1197,6 +1289,9 @@ fi
 if [[ "$STAT_ACTIVATED" -gt 0 ]]; then
     echo "  Activated: $STAT_ACTIVATED -- library skills deployed to the active copy in skills/"
 fi
+if [[ "$STAT_MERGED" -gt 0 ]]; then
+    echo "  Merged:    $STAT_MERGED -- both sides changed, merged without overlap (backups kept)"
+fi
 if [[ "$STAT_CONFLICT" -gt 0 ]]; then
     echo "  Conflict:  $STAT_CONFLICT -- both sides changed, use agent to merge"
     echo ""
@@ -1259,7 +1354,7 @@ prune_old_backups "$TARGET_DIR" "$BACKUP_PRUNE_DAYS" "$BACKUP_DIR"
 
 if [[ "$DRY_RUN" == "true" ]]; then
     echo ""
-    echo "  DRYRUN_JSON {\"mode\":\"dry-run\",\"created\":$STAT_CREATED,\"updated\":$STAT_UPDATED,\"unchanged\":$STAT_UNCHANGED,\"protected\":$STAT_PROTECTED,\"preserved\":$STAT_PRESERVED,\"deactivated\":$STAT_DEACTIVATED,\"conflict\":$STAT_CONFLICT,\"backup_prune_days\":$BACKUP_PRUNE_DAYS}"
+    echo "  DRYRUN_JSON {\"mode\":\"dry-run\",\"created\":$STAT_CREATED,\"updated\":$STAT_UPDATED,\"unchanged\":$STAT_UNCHANGED,\"protected\":$STAT_PROTECTED,\"preserved\":$STAT_PRESERVED,\"merged\":$STAT_MERGED,\"deactivated\":$STAT_DEACTIVATED,\"conflict\":$STAT_CONFLICT,\"backup_prune_days\":$BACKUP_PRUNE_DAYS}"
 fi
 
 # Backup cleanup
