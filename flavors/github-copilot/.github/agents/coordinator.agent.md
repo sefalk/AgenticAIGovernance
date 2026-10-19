@@ -16,6 +16,8 @@ tools:
   - execute/runTests
   - execute/runTask
   - execute/createAndRunTask
+  - af-command/run_script
+  - af-command/list_scripts
   - execute/testFailure
   - execute/runInTerminal
   - execute/getTerminalOutput

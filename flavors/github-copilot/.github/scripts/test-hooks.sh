@@ -2742,6 +2742,21 @@ assert_true "create_and_run_task: no tasks.json is still allowed" \
     "$([ "$(verdict_of "$dup_out")" = "allow" ] && echo 1 || echo 0)" "got: $dup_out"
 rm -rf "$dup_dir"
 
+# --- The command server's trust store is not agent-editable (#60) -----------
+# An agent that could write the store would approve its own script. Judged on
+# the target path only: content that merely names the path is not a write to it.
+trust_win='C:\\Users\\dev\\AppData\\Local\\af-command-mcp\\trust\\0a1b.json'
+run_case "trust store: create_file into the store is denied" block-dangerous.sh agent/fixture \
+    "{\"tool_name\":\"create_file\",\"tool_input\":{\"filePath\":\"$trust_win\",\"content\":\"{}\"}}" deny
+run_case "trust store: an edit with forward slashes is denied" block-dangerous.sh agent/fixture \
+    '{"tool_name":"replace_string_in_file","tool_input":{"filePath":"/home/dev/.local/state/af-command-mcp/trust/0a1b.json","oldString":"a","newString":"b"}}' deny
+run_case "trust store: a batch edit with one entry in the store is denied" block-dangerous.sh agent/fixture \
+    "{\"tool_name\":\"multi_replace_string_in_file\",\"tool_input\":{\"replacements\":[{\"filePath\":\"/repo/a.py\"},{\"filePath\":\"$trust_win\"}]}}" deny
+run_case "trust store: an ordinary edit stays silent (control)" block-dangerous.sh agent/fixture \
+    '{"tool_name":"create_file","tool_input":{"filePath":"/repo/docs/a.md","content":"x"}}' silent
+run_case "trust store: content naming the store is not a write to it" block-dangerous.sh agent/fixture \
+    "{\"tool_name\":\"create_file\",\"tool_input\":{\"filePath\":\"/repo/README.md\",\"content\":\"see $trust_win\"}}" silent
+
 # --- The policy is stated, not inherited (issue #108) ----------------------
 #
 # The cases above mean the declared default policy set at the top of this file.

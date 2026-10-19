@@ -147,6 +147,38 @@ workspace path; the server only reads.
 pytest            # unit tests for the read-only deploy logic (no MCP needed)
 ```
 
+## Command server (`af-command-mcp`, #60)
+
+A second stdio server from the same wheel. It runs project scripts with
+agent-supplied arguments, so agents need neither `createAndRunTask` nor a new
+`tasks.json` entry per argument set. Register it under the key `af-command`,
+because the agent files grant `af-command/run_script` and `af-command/list_scripts`:
+
+```jsonc
+{ "servers": { "af-command": { "type": "stdio", "command": "af-command-mcp" } } }
+```
+
+- **Where scripts may live:** `AF_SCRIPT_DIRS` (default `.github/scripts/agent`,
+  `dir:mode` per folder) plus `AF_TASK_SCRIPT_DIRS` in mode `reviewed`.
+  `.py` runs with the project venv, `.ps1` with PowerShell, `.sh` with bash;
+  arguments are an argv list, never a shell string.
+- **Approval:** `AF_SCRIPT_APPROVAL` = `off | ask | ask-always | autonomous`.
+  `ask` prompts once per script content through MCP elicitation and remembers
+  the answer in a per-user store outside the workspace
+  (`%LOCALAPPDATA%\af-command-mcp\trust`, XDG state elsewhere). Without
+  elicitation the asking modes refuse. Every mode but `reviewed` first runs
+  the script text through the project's `block-dangerous` hook.
+- **Walltime:** an upper bound, not a duration: the call returns when the
+  script exits. Default: twice the slowest of the last five passing runs
+  (floor 30 s), else the suite budget, else `AF_SCRIPT_WALLTIME_DEFAULT`;
+  capped at `AF_SCRIPT_WALLTIME_MAX`. Past it the process tree is killed and
+  the verdict is `TIMEOUT`.
+- **Output:** the tail (60 lines, 6000 chars) in the result; the full log in
+  `.github/logs/command-runs/`, one JSONL line per run in
+  `.github/logs/command-runs.jsonl`.
+- **VS Code confirmation:** `run_script` executes code, so it carries no
+  `readOnlyHint`; answer the confirmation with "always allow" for the tool.
+
 ## Scope & safety (PoC)
 
 - **Guarded writes.** Write tools require `confirm=true`; all writes stay under

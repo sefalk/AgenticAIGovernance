@@ -15,6 +15,8 @@ tools:
   - todo
   - execute/runTests
   - execute/runTask
+  - af-command/run_script
+  - af-command/list_scripts
   - execute/testFailure
   - edit/editFiles
   - edit/createFile

@@ -44,6 +44,7 @@ scripts/run-tests.sh                                     [customizable]
 scripts/run-lint.ps1                                     [customizable]
 scripts/run-lint.sh                                      [customizable]
 scripts/run-deps.ps1
+scripts/agent/README.md
 scripts/bootstrap-python-env.ps1
 scripts/bootstrap-python-env.sh
 scripts/run-metrics.ps1

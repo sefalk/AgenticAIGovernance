@@ -15,6 +15,30 @@ build for one (#322).
 
 ### Added
 
+- **A command server lets agents run scripts with arguments (#60).**
+  `createAndRunTask` asks on every call and cannot be pre-approved; `runTask`
+  takes no arguments. MP held 228 tasks, 197 of them minted by agents.
+  - `af-command-mcp`, a second console script of the `af-deploy-mcp` wheel,
+    serves `run_script` and `list_scripts` over stdio MCP. Register it as
+    `af-command`; the coordinator and the three producers are granted both.
+  - Scripts live in `AF_SCRIPT_DIRS` (default `.github/scripts/agent`, more
+    folders and a per-folder mode via `dir:mode`) or, in mode `reviewed`, in
+    `AF_TASK_SCRIPT_DIRS`. `.py`, `.ps1` and `.sh` run with an argv list, no
+    shell; anything resolving outside a folder is refused.
+  - `AF_SCRIPT_APPROVAL` = `off | ask | ask-always | autonomous` (default
+    `ask`). `ask` prompts once per script content through MCP elicitation and
+    keeps the answer in a per-user store outside the workspace; without
+    elicitation it refuses. Every mode but `reviewed` also scans the script
+    with `block-dangerous`, which now denies edit tools aimed at that store.
+  - The walltime is an upper bound: the call returns when the script exits.
+    It defaults to twice the slowest of the last five passing runs, else the
+    suite budget, else `AF_SCRIPT_WALLTIME_DEFAULT` (600 s), capped at
+    `AF_SCRIPT_WALLTIME_MAX` (3600 s). Past it, the process tree is killed and
+    the verdict is `TIMEOUT`. Measured before building: VS Code waits at
+    least 1800 s for a silent MCP call.
+  - Elicitation and a live start of the server are still to be checked by
+    the owner; the server is covered by pytest only.
+
 - **The MCP deploy merges a file both sides changed instead of withholding it
   (#105).** `CONFLICT` was a hash verdict. In a measured upgrade, 4 of 7
   conflicts merged cleanly, and two of them carried the fixes the upgrade was
