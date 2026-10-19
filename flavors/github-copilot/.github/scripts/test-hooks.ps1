@@ -3755,7 +3755,7 @@ foreach ($prAgent in @('ado-pr-manager', 'gh-pr-manager')) {
 }
 $gitSkill = Get-Content (Join-Path $githubDir 'skills/git-workflow/SKILL.md') -Raw
 Assert-True "the coordinator derives the merge SHA from git, the worker's is advisory" `
-    ($gitSkill -match '(?i)merge SHA[^\n]*from git[^\n]*advisory') `
+    ($gitSkill -match '(?is)merge SHA.{0,40}from git.{0,160}advisory') `
     "a worker-reported merge SHA can still enter the records unchecked"
 
 Write-Output ""

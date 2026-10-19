@@ -196,6 +196,7 @@ At the start of each invocation:
 - **Branch probe:** {query run → response summary}
 - **Capability probe:** {READY | DEGRADED | BLOCKED}
 - **Merge attempt:** {merged | refused by platform ({reason}) | not attempted (human-only) | not attempted (checks not required)}
+- **Merge commit:** {`merge_commit_sha` read back from the merged PR | not yet available} — never composed or inferred (#276)
 - **Issue reference:** {#n, closing keyword used: yes/no + why}
 - **Head branch after merge:** {deleted by repository setting | still present | n/a}
 - **Reviewers set:** {none or list}
