@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Asserts deploy.sh keeps the _available/ copy of a deactivated skill current
 # (#384), the bash counterpart of test_skill_deactivation.py, updates a
-# customizable file the project never changed (#106), and keeps an activated
-# optional skill where the project moved it (#110).
+# customizable file the project never changed (#106), keeps an activated
+# optional skill where the project moved it (#110), and keeps the baseline
+# store and merges a both-sides change like deploy_core (#393).
 #
 # The pytest parity cases for deploy.sh skip on Windows: a full deploy of the
 # real payload outlasts their 300s limit under Git-for-Windows bash (#260). This

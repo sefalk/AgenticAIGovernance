@@ -138,6 +138,25 @@ build for one (#322).
 
 ### Fixed
 
+- **`deploy.ps1` and `deploy.sh` merge a file both sides changed, like the
+  MCP deploy (#393).** Since #105 the MCP path reported `MERGE` for a
+  non-customizable file both sides changed without overlap, while the scripts
+  reported `CONFLICT` and withheld it. The scripts also never wrote the
+  baseline store, so a script deploy left it stale for the next MCP deploy and
+  never pruned it.
+  - Both scripts now store the canonical, region-stripped content behind every
+    hash they record in `.github/.af-baseline/`, keep its `.gitignore`, and
+    prune objects no hash references. This applies to deploys and to
+    `-UpdateHashes` / `--update-hashes`.
+  - A both-sides change in a non-customizable file goes through
+    `git merge-file` with the same inputs as `deploy_core`: LF, managed regions
+    emptied, the project's region bodies transplanted back. A clean merge is
+    `MERGE`, applied with a backup, without `-Force`.
+  - Overlap, a missing or tampered store object, a binary file or no `git`
+    keep the file `CONFLICT`. `[customizable]` files are never merged.
+  - Measured: `deploy.ps1` writes the same bytes as `deploy_core` for the same
+    diverged target, including a CRLF project file.
+
 - **An activated optional skill now receives framework updates where the
   project moved it (#110).** Activating a library skill means moving
   `skills/_available/{name}/` to `skills/{name}/`. The deploy did not know that.
