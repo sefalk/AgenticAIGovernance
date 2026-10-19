@@ -58,8 +58,11 @@ the lessons stop being an artifact only the machine that produced them can see.
 
 What does **not** become a choice: there is still exactly one destination. The
 gates resolve the same key the documenter writes to, so a retro in the wrong
-place is still detected rather than quietly accepted (issue #98). And the logs
-stay local, unconditionally — the verbatim-request argument is true of them.
+place is still detected rather than quietly accepted (issue #98). The gates
+check every known location — the default and the legacy `retros/auto` — not
+just the configured one, so a second copy blocks too, whichever of them
+`RETRO_DIR` names (issue #239). And the logs stay local, unconditionally — the
+verbatim-request argument is true of them.
 
-Related: issues #98, #27, #109, #117.
+Related: issues #98, #27, #109, #117, #239.
 

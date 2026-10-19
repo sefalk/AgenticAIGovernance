@@ -162,6 +162,19 @@ build for one (#322).
 
 ### Fixed
 
+- **A retro written twice is caught (#239).** The documenter and stop-tests
+  gates only asked whether the configured retro existed, so a second copy
+  elsewhere always passed. The legacy-path check also switched itself off when
+  `RETRO_DIR` was `retros/auto`. In MP, 3 of 6 workflows wrote an identical
+  twin to the gitignored default.
+  - Both gates, in both dialects, now check every known location
+    (`.github/retros/auto`, `retros/auto`) other than the configured one.
+  - A twin next to the configured file blocks finalisation (stop-tests warns)
+    and names the copy to delete.
+  - A lone retro outside `RETRO_DIR` is named with the path to move it to.
+  - `documenter.agent.md` states the rule and points to
+    `.github/retros/README.md` for why retros may be tracked and logs may not.
+
 - **`deploy.ps1` and `deploy.sh` merge a file both sides changed, like the
   MCP deploy (#393).** Since #105 the MCP path reported `MERGE` for a
   non-customizable file both sides changed without overlap, while the scripts

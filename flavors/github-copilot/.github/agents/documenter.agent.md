@@ -224,7 +224,9 @@ case — write the log accurately and the condition follows.
 
 **Filename:** `{RETRO_DIR}/{workflow-id}.md` — read `RETRO_DIR` from
 `af-env.conf`; it defaults to `.github/retros/auto`. Your Stop hook resolves
-the same key, so writing anywhere else is a blocked finalisation.
+the same key, so writing anywhere else — or a second copy at the default — is a
+blocked finalisation. Why retros may be tracked and logs never:
+`.github/retros/README.md`.
 
 **Format:** `Outcome` is the same closed set as the log's `status:`. A run that
 finished with problems is `COMPLETED`; the problems belong in the sections
