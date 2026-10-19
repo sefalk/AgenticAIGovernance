@@ -181,6 +181,15 @@ build for one (#322).
   a stray first: documenter-stop blocks and names the path to move it to,
   stop-tests warns. A voluntary retro at `RETRO_DIR` still passes.
 
+- **No retro gate tells an agent to take a record out of git (#109).** Moving a
+  tracked legacy retro into a gitignored `RETRO_DIR` removes it from version
+  control, and `git status` does not show it because the destination is
+  ignored. In one consumer this would have untracked 35 records. A tracked copy
+  beside an ignored `RETRO_DIR` is now history, not a stray:
+  - the gates leave it in place and name it, with the reason;
+  - an owed retro is still owed at `RETRO_DIR`;
+  - an untracked stray is still to be moved, as before.
+
 - **`deploy.ps1` and `deploy.sh` merge a file both sides changed, like the
   MCP deploy (#393).** Since #105 the MCP path reported `MERGE` for a
   non-customizable file both sides changed without overlap, while the scripts
