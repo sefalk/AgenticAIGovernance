@@ -3470,6 +3470,39 @@ foreach ($worker in @('ado-work-item-manager', 'ado-pipeline-manager', 'gh-issue
 
 Write-Output ""
 
+# ── 6e2. Delegation protects every literal, not one class (issue #141) ────
+
+Write-Output "## Delegation literals (issue #141)"
+
+# A prompt said "copy the numbers as given" and named a skill path in
+# backticks. The subagent kept the numbers and swapped the path for a skill
+# name from the catalogue: protecting one class of literal had left the rest
+# free. And a count of four sat beside an eight-row table with nothing saying
+# why, so the subagent invented a split.
+$coordAgent = Get-Content (Join-Path $githubDir 'agents/coordinator.agent.md') -Raw
+$contract = if ($coordAgent -match '(?s)## Delegation Contract(.*?)\n## ') { $Matches[1] } else { '' }
+
+Assert-True "the Delegation Contract exists to be checked" `
+    ($contract.Length -gt 200) "no Delegation Contract section found in coordinator.agent.md"
+
+Assert-True "the contract carries one verbatim block for every literal class" `
+    ($contract -match '(?i)verbatim' -and $contract -match '(?i)path' -and $contract -match '(?i)identifier' -and
+     $contract -match '(?i)work.item' -and $contract -match '(?i)URL' -and $contract -match '(?i)number') `
+    "literals are still protected class by class"
+
+Assert-True "a count reconciled against data must state its arithmetic" `
+    ($contract -match '(?i)relationship') `
+    "a bare count beside a table is still allowed"
+
+# The Trivial tier has no critic and, for prose, no test backstop. The only
+# check that caught both errors was the coordinator reading the diff -- a
+# habit, until it is written down as a step.
+Assert-True "a doc-only change gets a named diff review before commit" `
+    ($coordAgent -match '(?i)prose is the deliverable' -and $coordAgent -match '(?i)staged diff') `
+    "reading the diff before commit is still an unwritten habit"
+
+Write-Output ""
+
 # ── 6f. Producer claims carry their measurement (issues #273, #175) ──────
 
 Write-Output "## Measured producer claims (issues #273, #175)"
