@@ -133,6 +133,11 @@ fi
 retro_dir=$(af_retro_dir)
 retro_note=""
 retro_strays=$(af_retro_strays "$workflow_id")
+retro_kept=$(af_retro_strays "$workflow_id" kept)
+kept_note=""
+if [ -n "$retro_kept" ]; then
+    kept_note=" -- left '${retro_kept}' in place: it is tracked and RETRO_DIR is gitignored, so moving or deleting it would take it out of version control (#109)"
+fi
 if [ -f "${retro_dir}/${workflow_id}.md" ]; then
     if [ -n "$retro_strays" ]; then
         missing+=("a single retro -- it was written twice, also at '${retro_strays}'; delete the copy outside RETRO_DIR, ${retro_dir}/${workflow_id}.md is the one that counts")
@@ -145,11 +150,12 @@ else
     if [ -n "$retro_strays" ]; then
         missing+=("retro snippet at its configured path -- found '${retro_strays%% *}', which is not the configured destination; move it to ${retro_dir}/${workflow_id}.md")
     elif [ "${retro_verdict%%|*}" = "1" ]; then
-        missing+=("retro snippet (${retro_dir}/${workflow_id}.md), required because ${retro_reason}")
+        missing+=("retro snippet (${retro_dir}/${workflow_id}.md), required because ${retro_reason}${kept_note}")
     else
         retro_note=" -- no retro required (${retro_reason})"
     fi
 fi
+retro_note="${retro_note}${kept_note}"
 
 # ---------- Verdict ----------
 

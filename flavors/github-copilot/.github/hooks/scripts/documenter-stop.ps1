@@ -144,6 +144,11 @@ if (-not (Test-Path $logPath1) -and -not (Test-Path $logPath2)) {
 $retroDir = Get-AfRetroDir
 $retroPath = "$retroDir/$workflowId.md"
 $strays = @(Get-AfRetroStrays -WorkflowId $workflowId)
+$kept = @(Get-AfRetroStrays -WorkflowId $workflowId -Kept)
+$keptNote = ''
+if ($kept.Count -gt 0) {
+    $keptNote = " -- left '$($kept -join ' ')' in place: it is tracked and RETRO_DIR is gitignored, so moving or deleting it would take it out of version control (#109)"
+}
 $retro = Get-AfRetroRequirement -WorkflowId $workflowId
 $retroNote = ''
 
@@ -157,11 +162,12 @@ if (Test-Path $retroPath) {
     if ($strays.Count -gt 0) {
         $missing += "retro snippet at its configured path -- found '$($strays[0])', which is not the configured destination; move it to $retroPath"
     } elseif ($retro.Required) {
-        $missing += "retro snippet ($retroPath), required because $($retro.Reason)"
+        $missing += "retro snippet ($retroPath), required because $($retro.Reason)$keptNote"
     } else {
         $retroNote = " -- no retro required ($($retro.Reason))"
     }
 }
+$retroNote += $keptNote
 
 # ---------- Verdict ----------
 

@@ -108,12 +108,23 @@ function Get-AfRetroDir {
 # only against the legacy root switched itself off when RETRO_DIR WAS the
 # legacy root -- so MP wrote twins to the default for weeks. Every candidate is
 # checked, whichever one the configuration picked.
+#
+# -Kept lists the opposite set instead: tracked copies beside a gitignored
+# RETRO_DIR. Those are history, not strays -- moving or deleting one takes a
+# record out of git, invisibly to `git status` because the destination is
+# ignored (issue #109). No gate may instruct that.
 function Get-AfRetroStrays {
-    param([string]$WorkflowId)
+    param([string]$WorkflowId, [switch]$Kept)
     $configured = "$(Get-AfRetroDir)/$WorkflowId.md"
     foreach ($dir in @('.github/retros/auto', 'retros/auto')) {
         $candidate = "$dir/$WorkflowId.md"
-        if ($candidate -ne $configured -and (Test-Path $candidate)) { $candidate }
+        if ($candidate -eq $configured -or -not (Test-Path $candidate)) { continue }
+        $isKept = $false
+        if (git ls-files -- $candidate) {
+            git check-ignore -q -- $configured
+            $isKept = ($LASTEXITCODE -eq 0)
+        }
+        if ($isKept -eq [bool]$Kept) { $candidate }
     }
 }
 
