@@ -255,6 +255,35 @@ def test_a_missing_hook_fails_closed(tmp_path: Path) -> None:
     assert "content scan unavailable" in reason
 
 
+def test_unreadable_hook_output_fails_closed(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    hooks = root / ".github" / "hooks" / "scripts"
+    hooks.mkdir(parents=True)
+    (hooks / "block-dangerous.ps1").write_text("'not json'\n", encoding="utf-8")
+    (hooks / "block-dangerous.sh").write_text("echo 'not json'\n", encoding="utf-8")
+    reason = ct.hook_scan(root, _script(root, f"{AGENT_DIR}/a.py"))
+    assert reason is not None
+    assert "unreadable hook output" in reason
+
+
+def test_a_corrupt_store_trusts_nothing_and_is_rewritten(tmp_path: Path) -> None:
+    path = tmp_path / "store" / "x.json"
+    path.parent.mkdir(parents=True)
+    path.write_text("{broken", encoding="utf-8")
+    store = ct.TrustStore(path)
+    assert not store.is_trusted("a.py", "abc")
+    store.add("a.py", "abc")
+    assert ct.TrustStore(path).is_trusted("a.py", "abc")
+
+
+def test_reviewed_as_the_default_falls_back_to_off(tmp_path: Path) -> None:
+    root = _workspace(tmp_path, "AF_SCRIPT_APPROVAL=reviewed\n")
+    _script(root, f"{AGENT_DIR}/a.py")
+    config = cc.load_config(root)
+    resolved = cc.resolve_script(root, config, f"{AGENT_DIR}/a.py")
+    assert ct.effective_mode(root, resolved, config) == "off"
+
+
 # ── wired into run_script ──────────────────────────────────────────────────
 
 
