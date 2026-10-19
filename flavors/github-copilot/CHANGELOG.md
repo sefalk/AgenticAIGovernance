@@ -175,6 +175,12 @@ build for one (#322).
   - `documenter.agent.md` states the rule and points to
     `.github/retros/README.md` for why retros may be tracked and logs may not.
 
+- **A misplaced retro blocks even when none was owed (#176).** A clean run owes
+  no retro, so the gate passed with "no retro required" while a voluntary retro
+  sat in the gitignored default, written and then lost. Both gates now check for
+  a stray first: documenter-stop blocks and names the path to move it to,
+  stop-tests warns. A voluntary retro at `RETRO_DIR` still passes.
+
 - **`deploy.ps1` and `deploy.sh` merge a file both sides changed, like the
   MCP deploy (#393).** Since #105 the MCP path reported `MERGE` for a
   non-customizable file both sides changed without overlap, while the scripts
