@@ -162,6 +162,24 @@ build for one (#322).
 
 ### Fixed
 
+- **A workflow-log metric is a number or `unmeasured`, never prose (#173,
+  #102).** The log schema asked for `<number>` in fields the documenter has no
+  instrument for and offered no word for "nobody measured this". Measured over
+  84 MP logs, 13 put prose or ad-hoc placeholders there (`N/A (target module not
+  yet implemented)`, `Verified by test run`, `>75%`). One log in #173 reported
+  `tests_added: 122` for a workflow that added 11.
+  - `check-workflow-log.py`, run by the documenter's Stop hook, now rejects a
+    metric field that is not a number, a percentage, `null`, or `unmeasured` /
+    `unknown`. It also rejects a `step_at_escalation` that names no step the
+    log records. Over the same 84 logs, these rules fire on exactly those 13
+    logs and nowhere else.
+  - The documenter schema shows `unmeasured` as the permitted value, and the
+    constraint now says facts are copied from the coordinator, never inferred.
+  - Not done: deriving `tests_added` from the branch diff. Measured against 66
+    reconstructable MP branches, counting added `def test_` lines matched the
+    logged value in only 31: parametrised cases and several workflows sharing
+    one branch make it a new wrong number, not a check.
+
 - **`deploy.ps1` and `deploy.sh` merge a file both sides changed, like the
   MCP deploy (#393).** Since #105 the MCP path reported `MERGE` for a
   non-customizable file both sides changed without overlap, while the scripts
