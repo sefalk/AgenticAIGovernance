@@ -431,6 +431,15 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-suite-timeout.py
 
+      # `mcp` went a full major out of date unnoticed until a clean install
+      # could not import the server (#274): `>=1.2` with no upper bound. This
+      # asserts the Dependabot configuration and that every runtime dependency
+      # carries an upper bound or a recorded reason, with negative controls
+      # on temporary copies (#275).
+      - name: Test dependency notification and upper bounds
+        shell: powershell
+        run: python .github\scripts\test-dependency-bounds.py
+
       # The always-on payload is read on every chat request in every project,
       # so a record copied into it is paid for forever. #126 shipped a skills
       # table under a line declaring another file canonical, and four prompts
