@@ -285,7 +285,7 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | AC coverage map posted before any closure transition | HARD | Verify an AC->evidence map comment exists for the item | Standard+ |
 | Closure only against merged evidence | HARD | Closed only post-merge; otherwise `CLOSE_PENDING_MERGE` or `BLOCKED_CLOSURE` | Standard+ |
 | Working-state block updated when the item's state changed | HARD | `Working state` field is `updated`, or names why no state changed (`skills/work-item-state/SKILL.md` § 5) | Standard+ |
-| Existing comments read before acting on an existing item | SOFT | Reviewer checks the comment trail was fetched, not assumed empty — HARD once the ADO read behaviour in `skills/work-item-state/SKILL.md` § 6 has been probed | Standard+ |
+| Existing comments read before acting on an existing item | HARD | `wit_work_item get` returns `System.CommentCount` but no text: when it is non-zero, a `list_comments` call follows and its result is reported. A count left unread is a partial read (#186) | Standard+ |
 | AC fully covered (map correctness) | SOFT | Reviewer checks each AC maps to real evidence | Standard+ |
 | No bulk-close of linked work items | HARD | Each linked item closed only after its own AC verification | Standard+ |
 | Multi-phase detection is deterministic; child closed not parent | HARD | Feature/tag/child signal used; Feature stays open, delivered phase closed via child story | Standard+ |

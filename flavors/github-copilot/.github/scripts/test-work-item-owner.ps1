@@ -206,6 +206,18 @@ try {
     Add-Result 'W18_the_worker_routes_the_body_by_type' `
         ($agentText -match '(?i)the body of a Bug goes to `Microsoft\.VSTS\.TCM\.ReproSteps`' -and $agentText -match '(?i)never mirror a Bug body into `System\.Description`') `
         'ado-work-item-manager must name the Bug narrative field and drop System.Description as its fallback'
+
+    # #186: the comment-reading gate stayed SOFT "until probed". It was probed
+    # on 2026-10-06 (MP WIT 3386): `get` returns System.CommentCount but no
+    # text, so comments need `list_comments`. The gate is HARD and names it.
+    $commentRow = [regex]::Match($agentText, '(?m)^\| Existing comments read[^\n]*').Value
+    Add-Result 'W19_the_comment_reading_gate_is_hard_and_names_the_second_call' `
+        ($commentRow -match '\| HARD \|' -and $commentRow -match 'list_comments') `
+        "row: $commentRow"
+    $wisText = Get-Content (Join-Path $ghDir 'skills/work-item-state/SKILL.md') -Raw
+    Add-Result 'W20_the_skill_records_the_ado_measurement' `
+        ($wisText -notmatch 'Not yet measured for this provider' -and $wisText -match '(?s)CommentCount.{0,200}list_comments') `
+        'work-item-state § 6 still says the ADO behaviour is unmeasured'
 } finally {
     Remove-Item $fixture -Recurse -Force -ErrorAction SilentlyContinue
 }

@@ -75,6 +75,20 @@ For file- or test-scoped runs, use `runTests` with `files` and/or `testNames`
 arguments. For one-off tasks not covered by pre-defined tasks (e.g., syntax
 checks, custom lint), use `createAndRunTask`.
 
+`runTests` leaves no entry in `.github/test-log.json` — it returns a count and
+writes no file (measured, #307). Use it to iterate; when another agent must be
+able to see the result, run the scope through a `tests:` label, which goes
+through `run-tests.ps1` and writes the log.
+
+**Lint one file?** Use `lint: changed files` — the file you are working on is in
+the branch delta. Never create a task label for a single file or a single
+workflow: 66 of one consumer's 125 labels were exactly that, and duplicates
+make `run_task` ambiguous.
+
+**Caller-supplied arguments** go through `af-command/run_script`: a reviewed
+script under `AF_SCRIPT_DIRS`, the arguments passed per call, no label minted.
+Where that server is not registered, `createAndRunTask` is the fallback.
+
 Only `code-critic` and `coordinator` have `run_in_terminal` — other agents
 must use `run_task`, `runTests`, or `createAndRunTask`.
 

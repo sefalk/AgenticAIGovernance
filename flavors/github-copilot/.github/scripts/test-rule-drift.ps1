@@ -234,6 +234,22 @@ foreach ($op in $hookOps) {
 Add-Result 'R20_found_the_hook_s_auto_approved_git_operations' ($hookOps.Count -ge 8) "ops=$($hookOps -join ', ')"
 Add-Result 'R21_every_auto_approved_git_operation_is_named_in_config_and_skill' ($missing.Count -eq 0) "unnamed: $($missing -join '; ')"
 
+# #369: a threshold the gatekeeper may not have loaded is advisory in practice.
+# Measured 2026-10-19 over MP: 7 of 7 workflows with a code-critic step record
+# no read of the metrics skill. So the minimal table lives where it is enforced
+# -- and since the skill keeps it too, the two copies must be identical, or the
+# fix becomes the next drift.
+function Get-ThresholdRows([string]$Text) {
+    @([regex]::Matches($Text, '(?m)^\| (Domain core|Ports|Adapters|Utilities) \|[^\n]*') |
+        ForEach-Object { ($_.Value -replace '\s+', ' ').Trim() })
+}
+$skillRows = @(Get-ThresholdRows (Get-Content (Join-Path $payload 'skills/metrics/SKILL.md') -Raw -Encoding UTF8))
+$criticRows = @(Get-ThresholdRows (Get-Content (Join-Path $payload 'agents/code-critic.agent.md') -Raw -Encoding UTF8))
+Add-Result 'R22_code_critic_carries_the_threshold_table_it_enforces' ($criticRows.Count -eq 4) "rows in code-critic: $($criticRows.Count)"
+Add-Result 'R23_the_carried_table_equals_the_metrics_skill' `
+    ($skillRows.Count -eq 4 -and (($criticRows -join "`n") -ceq ($skillRows -join "`n"))) `
+    "skill=$($skillRows -join ' / ') critic=$($criticRows -join ' / ')"
+
 Write-Output '===== rule-drift detector tests (issue #304) ====='
 foreach ($n in $notes) { Write-Output "  SKIP  $n" }
 $failed = 0

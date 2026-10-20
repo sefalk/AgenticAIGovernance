@@ -142,6 +142,10 @@ exactly one point: post-merge, evidence-based reconciliation.
   Bug, absent on a Task — never assumed by name.
 - The `ado-work-item-manager` performs every status transition; the coordinator
   triggers the post-merge reconciliation once the merge is confirmed.
+- **Confirming the merge:** the coordinator takes the merge SHA from git
+  (`git fetch`, then `git log origin/<target>`); a worker-reported SHA is advisory.
+  One worker reported a SHA that resolved to nothing (#276), and a fetch right
+  after a merge can still show the pre-merge tip — fetch again before deciding.
 
 ## 4. Branch Relevance
 

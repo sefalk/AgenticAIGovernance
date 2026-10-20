@@ -121,6 +121,7 @@ The coordinator invokes you with `mode=pre-flight` and provides:
 | Retro directory scanned | `RETRO_DIR` (`af-env.conf`, default `.github/retros/auto/`) was checked for lessons | **ADVISORY** |
 | Branch relates to task description | Compare branch slug semantics to task | **ADVISORY** |
 | Work-item first (tracker active) | If `ADO_CAPABILITY_MODE != off`: a resolved work item exists, is **Active**, and its id prefixes the branch slug | **BLOCKING** when tracker active |
+| `.vscode/tasks.json` present | **Read** it when a restricted producer (test-writer, implementer, refactorer) is in the workflow; missing or not strict JSON leaves them no execution surface (#292) | **BLOCKING** |
 
 ### Pre-Flight Return Format
 
@@ -246,6 +247,7 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Pre-flight: branch not on main/master | HARD | Check branch name | Standard+ |
 | Pre-flight: plan directory resolved | HARD | Verify directory exists | Standard+ |
 | Pre-flight: work-item first (tracker active) | HARD | When `ADO_CAPABILITY_MODE != off`: a resolved work item exists, is Active, and its id prefixes the branch slug | Standard+ |
+| Pre-flight: task surface present | HARD | **Read** `.vscode/tasks.json` when a restricted producer runs; missing or unparseable ⇒ BLOCKING | Standard+ |
 | Post-flight: plan file status = COMPLETED | HARD | Read plan file, check status field | Standard+ |
 | Post-flight: workflow log YAML is complete | HARD | **Read** `.github/logs/{workflow-id}.yaml` — a successful read is the existence proof, never a search hit — AND check its `status:` is `COMPLETED` AND `workflow_id`, `git_branch`, `completed:` and a non-empty `steps:` list are present. Existence alone is not the gate: a log written mid-workflow to satisfy a hook is a file, not a record (issue #72). | Standard+ |
 | Post-flight: retro snippet is substantive **when one is owed** | HARD | A retro is owed only if the log records retries, escalations, an adverse step verdict, or a status other than COMPLETED — a clean run owes none (issue #27). When owed: **Read** `{RETRO_DIR}/{workflow-id}.md` (`RETRO_DIR` from `af-env.conf`, default `.github/retros/auto`) AND check it carries at least one concrete lesson — not an empty file, not the unfilled template, not placeholder text — AND report the line number that carries it | Standard+ |
