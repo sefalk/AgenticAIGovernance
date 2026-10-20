@@ -100,15 +100,23 @@ execution** over full-suite runs when the change scope is known:
 - [ ] **Docstrings** on all public functions
 - [ ] **Naming conventions** followed
 - [ ] **No wildcard imports**
-- [ ] **Complexity within limits** — consult **metrics** skill for thresholds
+- [ ] **Complexity within limits** — Max Complexity column in Step 5
 - [ ] **No over-engineering** — could this be done more simply? Flag:
   unnecessary abstractions, premature generalization, helper functions used
   only once, patterns applied where a plain function suffices
 
 ### Step 5: Metrics Validation
 
-Run coverage and complexity checks. Consult the **metrics** skill for
-project-specific commands, thresholds, and tool configuration.
+Run coverage and complexity checks against these thresholds — carried here
+because a gate whose numbers you may not have loaded is advisory (#369). The
+**metrics** skill holds the commands and delta rules; this table must equal it.
+
+| Module Type | Line Cov | Branch Cov | Mutation | Max Complexity | Test:Code |
+|---|---|---|---|---|---|
+| Domain core | ≥ 90% | ≥ 85% | ≥ 80% | ≤ 10 | ≥ 1.5:1 |
+| Ports | ≥ 80% | ≥ 75% | ≥ 70% | ≤ 5 | ≥ 1.0:1 |
+| Adapters | ≥ 60% | ≥ 50% | N/A | ≤ 15 | ≥ 0.5:1 |
+| Utilities | ≥ 85% | ≥ 80% | ≥ 75% | ≤ 8 | ≥ 1.2:1 |
 
 ### Step 6: Security Review
 

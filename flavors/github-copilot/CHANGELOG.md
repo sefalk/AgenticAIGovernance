@@ -178,6 +178,16 @@ build for one (#322).
 
 ### Fixed
 
+- **code-critic carries the thresholds it enforces (#369).** The critic's HARD
+  gate "Metrics collected and compared to thresholds" pointed to a table that
+  exists only in the `metrics` skill. Measured over MP: 7 of 7 workflows with a
+  code-critic step record no read of that skill (6 of the 7 record no skill
+  reads at all, so the instrument may under-report). Following the #354 rule,
+  the minimal part moves to the point of enforcement:
+  - the four-row threshold table now sits in code-critic Step 5;
+  - `test-rule-drift.ps1` R22/R23 fail if the copy is missing or differs from
+    the skill's table, so the fix cannot become the next drift.
+
 - **The hook attestation gate states what CI covers (#184).** Its rationale
   said the hooks were "covered by nothing" without the hand-run suite, while
   the same job runs `test-hooks.ps1` on every pull request.
