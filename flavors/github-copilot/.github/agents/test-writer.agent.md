@@ -73,6 +73,8 @@ Consult these skills when relevant to the task:
 - Tests must **fail** when you return. If they pass, no test-first work needed.
 - Tests must fail because the **feature is missing**, not because of import
   errors, syntax errors, or setup problems.
+- Linting is not your gate: never report or assert a lint outcome. The
+  implementer's `lint: changed files` gate measures your tests too.
 
 ## Key Test Principles
 

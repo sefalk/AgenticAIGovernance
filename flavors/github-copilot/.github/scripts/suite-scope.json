@@ -47,6 +47,12 @@
       "deploy.ps1",
       ".github/af-env.conf"
     ],
+    "test-deploy-engine.ps1": [
+      "mcp-deploy/**",
+      "deploy.ps1",
+      "deploy.sh",
+      ".github/.af-manifest"
+    ],
     "test-hook-decision-contract.ps1": [
       ".github/hooks/README.md",
       ".github/hooks/scripts/scan-secrets.py",
