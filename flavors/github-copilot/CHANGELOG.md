@@ -188,6 +188,68 @@ build for one (#322).
 
 ### Fixed
 
+- **The ADO comment-reading gate is HARD (#186).** It stayed SOFT "until the ADO
+  read behaviour has been probed". It was probed on 2026-10-06 against MP WIT
+  3386: `wit_work_item get` returns `System.CommentCount` but no comment text.
+  - The `ado-work-item-manager` gate is now HARD and names the second call,
+    `list_comments`.
+  - `work-item-state` § 6 records the measurement, including that Markdown
+    descriptions and comments render, in place of "Not yet measured".
+    
+- **A merge SHA is read back, never composed (#276).** `ado-pr-manager`
+  reported a merge commit that did not exist in the repository. Its return
+  format had no such field, so the value was produced outside the contract.
+  - `ado-pr-manager` and `gh-pr-manager` gain a **Merge commit** field. It may
+    hold only the value read back from the completed PR (`lastMergeCommit` /
+    `merge_commit_sha`), or "not yet available".
+  - The git-workflow skill has the coordinator take the merge SHA from git and
+    treat a worker-reported SHA as advisory, fetching again if the first fetch
+    still shows the pre-merge tip.
+
+- **code-critic carries the thresholds it enforces (#369).** The critic's HARD
+  gate "Metrics collected and compared to thresholds" pointed to a table that
+  exists only in the `metrics` skill. Measured over MP: 7 of 7 workflows with a
+  code-critic step record no read of that skill (6 of the 7 record no skill
+  reads at all, so the instrument may under-report). Following the #354 rule,
+  the minimal part moves to the point of enforcement:
+  - the four-row threshold table now sits in code-critic Step 5;
+  - `test-rule-drift.ps1` R22/R23 fail if the copy is missing or differs from
+    the skill's table, so the fix cannot become the next drift.
+
+- **The hook attestation gate states what CI covers (#184).** Its rationale
+  said the hooks were "covered by nothing" without the hand-run suite, while
+  the same job runs `test-hooks.ps1` on every pull request.
+  - The comment and the error message in `regression.yml` now say that CI
+    covers hook logic, and that only firing in a live VS Code session is left
+    for `test-hooks-integration.ps1`.
+  - The trigger stays on all of `hooks/`. A script change can fail only live
+    (interpreter resolution, working directory, an output shape VS Code
+    ignores), and only the live log records that.
+  - `test-local-check-marker.py` pins the rationale.
+
+- **The test-execution skill names the reviewed path for dynamic runs (#307).**
+  One consumer had 125 task labels, and 66 of them were one-file lint labels.
+  No reviewed per-call path existed, and the skill never said which fixed label
+  already covers the case. The skill now says:
+  - `runTests` writes no `test-log.json` entry (measured), so a result other
+    agents must see goes through a `tests:` label;
+  - lint a single file with `lint: changed files`, and never create a label for
+    a single file or a single workflow;
+  - pass caller-supplied arguments through `af-command/run_script` (#60), with
+    `createAndRunTask` only where that server is not registered.
+
+- **Restricted producers reach the lint gate by name (#292).** In one consumer
+  workflow, three producers reported the HARD lint gate as passed without
+  running anything. The gate row named `check-python-linting.py`, a script they
+  cannot run, and nothing named the label they can run.
+  - The implementer and refactorer rows now name `run_task` →
+    `lint: changed files`. They also state that a gate you did not run is
+    BLOCKED, never PASS, and that an outcome is never argued by inspection.
+  - The test-writer never reports or asserts a lint outcome.
+  - The compliance-checker pre-flight blocks when `.vscode/tasks.json` is
+    missing or unparseable, because without it restricted agents have no
+    execution surface and improvise scratch labels instead.
+
 - **`run-all-tests -Changed` runs the deploy pytest suite for a deploy-engine
   change (#395).** A `deploy_core.py` change "widened to every suite" and
   reported 35/35, and none of those suites executed the changed code. The
