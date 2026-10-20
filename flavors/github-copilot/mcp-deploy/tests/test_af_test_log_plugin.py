@@ -122,3 +122,57 @@ def test_a_wrapper_run_is_left_to_the_wrapper(project):
 @pytest.mark.parametrize("wrapper", ["run-tests.ps1", "run-tests.sh"])
 def test_wrappers_switch_the_plugin_off(wrapper):
     assert "AF_TEST_LOG_BY_WRAPPER" in (AF_ROOT / ".github" / "scripts" / wrapper).read_text(encoding="utf-8")
+
+
+# ── The deploy says when a project has not loaded the plugin ────────────────
+
+NOTE = "af_test_log"
+
+
+def test_mcp_apply_notes_a_missing_registration(tmp_path):
+    from af_deploy_mcp import deploy_core
+
+    target = tmp_path / "proj"
+    target.mkdir()
+    (target / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    assert any(NOTE in line for line in deploy_core.apply(AF_ROOT, target)["test_log_plugin"])
+
+    (target / "pyproject.toml").write_text(PYPROJECT, encoding="utf-8")
+    assert deploy_core.apply(AF_ROOT, target)["test_log_plugin"] == []
+
+
+def test_mcp_apply_is_silent_without_a_pyproject(tmp_path):
+    from af_deploy_mcp import deploy_core
+
+    target = tmp_path / "proj"
+    target.mkdir()
+    assert deploy_core.apply(AF_ROOT, target)["test_log_plugin"] == []
+
+
+def _pwsh() -> str | None:
+    return next((exe for exe in ("pwsh", "powershell") if shutil.which(exe)), None)
+
+
+@pytest.mark.skipif(_pwsh() is None, reason="PowerShell not available")
+def test_ps1_deploy_notes_a_missing_registration(tmp_path):
+    target = tmp_path / "proj"
+    target.mkdir()
+    (target / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    res = subprocess.run(
+        [
+            _pwsh(),
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(AF_ROOT / "deploy.ps1"),
+            "-TargetDir",
+            str(target),
+            "-Force",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "-p af_test_log" in res.stdout

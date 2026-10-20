@@ -1447,6 +1447,15 @@ if (Test-Path $costProbe) {
     }
 }
 
+# ── Test-log plugin ────────────────────────────────────────────────────────────
+# pyproject.toml belongs to the project, so the deploy only says what is missing (#180).
+$targetPyproject = Join-Path $TargetDir 'pyproject.toml'
+if ((Test-Path $targetPyproject) -and -not (Select-String -Path $targetPyproject -Pattern 'af_test_log' -SimpleMatch -Quiet)) {
+    Write-Host ""
+    Write-Host "  NOTE    runTests / Test Explorer runs are not logged -- load the af_test_log plugin (#180):" -ForegroundColor Cyan
+    Write-Host '          pyproject.toml [tool.pytest.ini_options]: pythonpath = [".github/scripts"], addopts = "-p af_test_log"' -ForegroundColor Cyan
+}
+
 # Prune stale backups from previous deploy runs
 Invoke-PruneOldBackups -RootDir $TargetDir -Days $resolvedBackupPruneDays -ActiveBackupDir $script:BackupDir
 
