@@ -1,8 +1,10 @@
-"""The curated tier model defaults agree across all three deploy paths (#418).
+"""Tier model defaults have exactly one home: the framework's af-env.conf (#418).
 
-`deploy.ps1`, `deploy.sh` and `deploy_core.py` each carry a copy of the
-defaults that fill an agent's `__AF_TIER_*__` placeholder. A model line-up
-change touches all three, and nothing compared them.
+The line-up used to live in three hardcoded copies (`deploy.ps1`, `deploy.sh`,
+`deploy_core.py`), so every model change touched three scripts and two tests.
+Now the framework's own `af-env.conf` carries `AF_MODEL_DEFAULT_*`, every deploy
+path reads it from the SOURCE payload, and a project overrides a tier with
+`AF_MODEL_TIER_*` in its own copy (blank = framework default).
 """
 
 # copilot:generated | coordinator | 2026-10-20
@@ -12,42 +14,57 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from af_deploy_mcp import deploy_core
 
 FLAVOR = Path(__file__).resolve().parents[2]
+SOURCE_ENV = FLAVOR / ".github" / "af-env.conf"
 TIERS = ("PREMIUM", "BALANCED", "EFFICIENT")
+PLANNER = "---\nname: planner\nmodel: __AF_TIER_BALANCED__\n---\n"
 
-# Withdrawn from the Copilot model picker; a default list naming one only
-# costs a fallback, but one naming nothing else leaves the agent without a model.
-WITHDRAWN = ("Claude Opus 4.8", "Claude Opus 4.7", "Claude Haiku 4.5", "Claude Sonnet 5 ")
-
-
-def _ps1() -> dict[str, str]:
-    text = (FLAVOR / "deploy.ps1").read_text(encoding="utf-8")
-    return dict(re.findall(r"^\s*(PREMIUM|BALANCED|EFFICIENT)\s*=\s*'([^']*)'", text, re.M))
+# The Claude 4.x line and older is no longer offered in Copilot (owner, 2026-10-20).
+WITHDRAWN = re.compile(r"Claude (Opus|Sonnet|Haiku) [1-4](\.\d+)? ")
 
 
-def _sh() -> dict[str, str]:
-    text = (FLAVOR / "deploy.sh").read_text(encoding="utf-8")
-    return dict(re.findall(r"^\s*\[(PREMIUM|BALANCED|EFFICIENT)\]='([^']*)'", text, re.M))
+def _defaults() -> dict[str, list[str]]:
+    out = {}
+    for tier in TIERS:
+        raw = deploy_core.get_af_env_value(SOURCE_ENV, f"AF_MODEL_DEFAULT_{tier}")
+        out[tier] = [m.strip() for m in raw.split(",") if m.strip()]
+    return out
 
 
-def test_three_copies_are_identical():
-    core = {t: deploy_core.TIER_DEFAULTS[t] for t in TIERS}
-    assert _ps1() == core
-    assert _sh() == core
+def test_framework_config_carries_a_default_for_every_tier():
+    assert all(_defaults()[t] for t in TIERS), _defaults()
 
 
 def test_no_default_names_a_withdrawn_model():
-    for tier, models in deploy_core.TIER_DEFAULTS.items():
-        for gone in WITHDRAWN:
-            assert gone not in models + " ", f"{tier} still names {gone.strip()}"
+    for tier, models in _defaults().items():
+        stale = [m for m in models if WITHDRAWN.search(m + " ")]
+        assert not stale, f"{tier}: {stale}"
 
 
-def test_current_line_up_leads_each_tier():
-    first = {t: deploy_core.TIER_DEFAULTS[t].split(",")[0].strip() for t in TIERS}
-    assert first == {
-        "PREMIUM": "Claude Opus 5.5 (copilot)",
-        "BALANCED": "Claude Sonnet 5.5 (copilot)",
-        "EFFICIENT": "Claude Haiku 5.5 (copilot)",
-    }
+@pytest.mark.parametrize("script", ["deploy.ps1", "deploy.sh", "mcp-deploy/af_deploy_mcp/deploy_core.py"])
+def test_no_deploy_path_hardcodes_a_model(script):
+    text = (FLAVOR / script).read_text(encoding="utf-8")
+    assert "(copilot)" not in text
+    assert "AF_MODEL_DEFAULT_" in text
+
+
+def test_blank_project_tier_takes_the_framework_default(tmp_path):
+    target = tmp_path / "af-env.conf"
+    target.write_text("AF_MODEL_TIER_BALANCED=\n", encoding="utf-8")
+    resolved = deploy_core.resolve_tier_tokens(PLANNER, target, SOURCE_ENV)
+    assert resolved == "---\nname: planner\nmodel:\n" + "".join(f"  - {m}\n" for m in _defaults()["BALANCED"]) + "---\n"
+
+
+def test_project_tier_overrides_the_default(tmp_path):
+    target = tmp_path / "af-env.conf"
+    target.write_text("AF_MODEL_TIER_BALANCED=Only One (copilot)\n", encoding="utf-8")
+    assert "model: Only One (copilot)\n" in deploy_core.resolve_tier_tokens(PLANNER, target, SOURCE_ENV)
+
+
+def test_no_list_anywhere_fails_loudly(tmp_path):
+    with pytest.raises(ValueError, match="AF_MODEL_DEFAULT_BALANCED"):
+        deploy_core.resolve_tier_tokens(PLANNER, tmp_path / "none.conf", tmp_path / "none.conf")
