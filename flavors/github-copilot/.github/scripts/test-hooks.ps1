@@ -181,7 +181,7 @@ function Invoke-HookInFixture {
     # deliberate and not a wildcard: copying every `*.py` also brings the
     # schema checkers, which turns "the fixture is missing a helper" into a
     # different hook running that the case never asked for.
-    $helpers = @('collect-agent-invocations.py', 'concurrent-agent-edits.py', 'check-compliance-reads.py', 'subagent-return.py')
+    $helpers = @('collect-agent-invocations.py', 'concurrent-agent-edits.py', 'compliance-checker-stop.py', 'subagent-return.py')
     # Shared modules those helpers import, matched by the underscore prefix that
     # marks a module rather than a hook. Derived, because the maintained list
     # went stale the moment `_agentlog.py` was extracted (#291) and the symptom
@@ -3766,11 +3766,13 @@ function New-CcSession {
         foreach ($r in $Reads) {
             $lines += (@{ ts = 1500; type = 'tool_call'; name = 'read_file'; attrs = @{ args = (@{ filePath = $r; startLine = 1; endLine = 40 } | ConvertTo-Json -Compress) } } | ConvertTo-Json -Compress -Depth 6)
         }
-        $parts = if ($ToolOnly) { @(@{ type = 'tool_call'; name = 'read_file' }) } else { @(@{ type = 'text'; content = $Text }) }
+        # `if` as an expression unrolls a one-element array; @() keeps `parts` a list.
+        $parts = @(if ($ToolOnly) { @{ type = 'tool_call'; name = 'read_file' } } else { @{ type = 'text'; content = $Text } })
         $response = @(@{ role = 'assistant'; parts = $parts }) | ConvertTo-Json -Compress -Depth 6
         if (-not $response.StartsWith('[')) { $response = "[$response]" }
         $lines += (@{ ts = 2000; type = 'agent_response'; attrs = @{ response = $response } } | ConvertTo-Json -Compress -Depth 6)
-        Set-Content -Path (Join-Path $dir 'runSubagent-compliance-checker-toolu_cc.jsonl') -Value ($lines -join "`n") -Encoding UTF8
+        # PS 5.1 `Set-Content -Encoding UTF8` writes a BOM; a real debug log has none.
+        [IO.File]::WriteAllText((Join-Path $dir 'runSubagent-compliance-checker-toolu_cc.jsonl'), ($lines -join "`n") + "`n", (New-Object Text.UTF8Encoding $false))
     }
     @{ session_id = $sid; transcript_path = (Join-Path (Join-Path $chat 'transcripts') "$sid.jsonl") } | ConvertTo-Json -Compress
 }

@@ -1891,12 +1891,15 @@ fi
 # advisory (5 of 88 fired, mostly falsely); no log or no words is unmeasurable.
 cc_stop_out() {
     # $1 = response text ('' -> no log), $2 = read path ('' -> none), $3 = 'tool' for a words-free return
-    local root fixture sid=s286 dir out resp
+    local root fixture sid=s286 dir out resp native
     root=$(mktemp -d 2>/dev/null || echo "/tmp/af-286-$$-$RANDOM")
     fixture="$root/repo"
     dir="$root/chat/debug-logs/$sid"
     mkdir -p "$fixture/.github/hooks/scripts" "$dir"
-    for f in compliance-checker-stop.sh _common.sh _agentlog.py subagent-return.py check-compliance-reads.py; do
+    # A real payload carries a native path; under MSYS a /tmp path is invisible
+    # to a Windows python, so hand the hook the native spelling where one exists.
+    native=$(cd "$root" && { pwd -W 2>/dev/null || pwd; })
+    for f in compliance-checker-stop.sh compliance-checker-stop.py _common.sh _agentlog.py subagent-return.py; do
         [ -f "$HOOK_DIR/$f" ] && cp "$HOOK_DIR/$f" "$fixture/.github/hooks/scripts/"
     done
     if [ -n "$1" ] || [ "${3:-}" = "tool" ]; then
@@ -1917,7 +1920,7 @@ cc_stop_out() {
         use_fixture_conf
         git init -q . && git checkout -q -b agent/72-x
         [ -f .github/hooks/scripts/compliance-checker-stop.sh ] || exit 0
-        printf '%s' "{\"session_id\":\"$sid\",\"transcript_path\":\"$root/chat/transcripts/$sid.jsonl\"}" \
+        printf '%s' "{\"session_id\":\"$sid\",\"transcript_path\":\"$native/chat/transcripts/$sid.jsonl\"}" \
             | bash .github/hooks/scripts/compliance-checker-stop.sh
     ) 2>/dev/null
     rm -rf "$root"
