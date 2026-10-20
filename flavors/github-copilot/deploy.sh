@@ -311,9 +311,9 @@ file_hash() {
 # curated defaults below. Multiple comma-separated entries become a prioritized
 # YAML array (VS Code tries each until available). Keep in sync with deploy.ps1.
 declare -A TIER_DEFAULTS=(
-    [PREMIUM]='Claude Opus 4.8 (copilot), Claude Opus 4.7 (copilot), Claude Sonnet 5 (copilot)'
-    [BALANCED]='Claude Sonnet 5 (copilot), Claude Sonnet 4.6 (copilot), Claude Sonnet 4.5 (copilot)'
-    [EFFICIENT]='Claude Haiku 4.5 (copilot), Claude Sonnet 5 (copilot)'
+    [PREMIUM]='Claude Opus 5.5 (copilot), Claude Opus 5 (copilot), Claude Sonnet 5.5 (copilot)'
+    [BALANCED]='Claude Sonnet 5.5 (copilot), Claude Sonnet 4.6 (copilot), Claude Sonnet 4.5 (copilot)'
+    [EFFICIENT]='Claude Haiku 5.5 (copilot), Claude Sonnet 5.5 (copilot)'
 )
 tier_yaml() {
     # $1 = tier name; prints a `model:` line or a multi-line YAML array

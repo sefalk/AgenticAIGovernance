@@ -56,7 +56,7 @@ def test_resolved_source_bytes_tier_from_crlf_is_lf(tmp_path: Path) -> None:
     out = deploy_core.resolved_source_bytes(src, tmp_path / "af-env.conf")
     assert b"\r" not in out
     assert b"__AF_TIER_BALANCED__" not in out
-    assert b"model:\n  - Claude Sonnet 5 (copilot)" in out
+    assert b"model:\n  - Claude Sonnet 5.5 (copilot)" in out
 
 
 def test_source_hash_resolved_is_eol_independent(tmp_path: Path) -> None:

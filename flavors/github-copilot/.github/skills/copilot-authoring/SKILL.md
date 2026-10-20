@@ -81,8 +81,8 @@ model: __AF_TIER_BALANCED__
   implementer, test-critic; EFFICIENT = concrete tasks (test-writer, refactorer,
   documenter, researcher, compliance-checker, ado-* workers).
 
-Model names use the format `Model Name (vendor)` — e.g. `Claude Sonnet 4
-(copilot)`, `GPT-4.1 (copilot)`, `Gemini 3 Flash (Preview) (copilot)`. A raw
+Model names use the format `Model Name (vendor)` — e.g. `Claude Sonnet 5.5
+(copilot)`, `Claude Haiku 5.5 (copilot)`. A raw
 array works where a tier placeholder is not appropriate; VS Code tries each
 entry in order. With no `model:` field the user's current selection is used.
 

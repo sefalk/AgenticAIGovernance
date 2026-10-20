@@ -45,7 +45,7 @@ def _make_source(root: Path, version: str = "1.0.0") -> Path:
 
 def test_tier_resolution_uses_defaults_as_yaml_array(tmp_path: Path) -> None:
     resolved = deploy_core.resolve_tier_tokens(PLANNER, tmp_path / "af-env.conf")
-    assert "model:\n  - Claude Sonnet 5 (copilot)\n  - Claude Sonnet 4.6 (copilot)" in resolved
+    assert "model:\n  - Claude Sonnet 5.5 (copilot)\n  - Claude Sonnet 4.6 (copilot)" in resolved
     assert "__AF_TIER_BALANCED__" not in resolved
 
 
@@ -59,7 +59,7 @@ def test_tier_resolution_single_entry_is_inline(tmp_path: Path) -> None:
 def test_tier_resolution_preserves_crlf(tmp_path: Path) -> None:
     crlf = PLANNER.replace("\n", "\r\n")
     resolved = deploy_core.resolve_tier_tokens(crlf, tmp_path / "af-env.conf")
-    assert "\r\n  - Claude Sonnet 5 (copilot)\r\n" in resolved
+    assert "\r\n  - Claude Sonnet 5.5 (copilot)\r\n" in resolved
 
 
 # ── Status ─────────────────────────────────────────────────────────────────

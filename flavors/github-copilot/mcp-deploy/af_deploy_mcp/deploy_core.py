@@ -28,9 +28,9 @@ from pathlib import Path
 
 # Curated fallback tiers — keep in sync with deploy.ps1 / deploy.sh $TierDefaults.
 TIER_DEFAULTS: dict[str, str] = {
-    "PREMIUM": "Claude Opus 4.8 (copilot), Claude Opus 4.7 (copilot), Claude Sonnet 5 (copilot)",
-    "BALANCED": "Claude Sonnet 5 (copilot), Claude Sonnet 4.6 (copilot), Claude Sonnet 4.5 (copilot)",
-    "EFFICIENT": "Claude Haiku 4.5 (copilot), Claude Sonnet 5 (copilot)",
+    "PREMIUM": "Claude Opus 5.5 (copilot), Claude Opus 5 (copilot), Claude Sonnet 5.5 (copilot)",
+    "BALANCED": "Claude Sonnet 5.5 (copilot), Claude Sonnet 4.6 (copilot), Claude Sonnet 4.5 (copilot)",
+    "EFFICIENT": "Claude Haiku 5.5 (copilot), Claude Sonnet 5.5 (copilot)",
 }
 
 _TIER_TOKEN_RE = re.compile(r"__AF_TIER_(PREMIUM|BALANCED|EFFICIENT)__")

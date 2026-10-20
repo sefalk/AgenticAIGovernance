@@ -162,9 +162,9 @@ function Get-AFEnvValue {
 # becomes a YAML array so VS Code tries each model until one is available
 # (drift-resilient). Curate these defaults when the model line-up changes.
 $script:TierDefaults = @{
-    PREMIUM   = 'Claude Opus 4.8 (copilot), Claude Opus 4.7 (copilot), Claude Sonnet 5 (copilot)'
-    BALANCED  = 'Claude Sonnet 5 (copilot), Claude Sonnet 4.6 (copilot), Claude Sonnet 4.5 (copilot)'
-    EFFICIENT = 'Claude Haiku 4.5 (copilot), Claude Sonnet 5 (copilot)'
+    PREMIUM   = 'Claude Opus 5.5 (copilot), Claude Opus 5 (copilot), Claude Sonnet 5.5 (copilot)'
+    BALANCED  = 'Claude Sonnet 5.5 (copilot), Claude Sonnet 4.6 (copilot), Claude Sonnet 4.5 (copilot)'
+    EFFICIENT = 'Claude Haiku 5.5 (copilot), Claude Sonnet 5.5 (copilot)'
 }
 function Get-TierModels([string]$Tier) {
     $val = Get-AFEnvValue -Key "AF_MODEL_TIER_$Tier" -Default ''
