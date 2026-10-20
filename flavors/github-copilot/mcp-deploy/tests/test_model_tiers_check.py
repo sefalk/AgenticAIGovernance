@@ -94,6 +94,26 @@ def test_catalogue_path_comes_from_the_environment(envs):
     assert res.returncode == 1, res.stdout + res.stderr
 
 
+def test_newest_catalogue_is_discovered_in_vscode_storage(envs, tmp_path):
+    # The real path: no override, found under the VS Code user storage root.
+    source, target, _ = envs
+    home = tmp_path / "home"
+    if sys.platform == "win32":
+        user = tmp_path / "Code" / "User"
+    elif sys.platform == "darwin":
+        user = home / "Library" / "Application Support" / "Code" / "User"
+    else:
+        user = home / ".config" / "Code" / "User"
+    session = user / "workspaceStorage" / "ws" / "GitHub.copilot-chat" / "debug-logs" / "s1"
+    session.mkdir(parents=True)
+    found = _catalogue(session / "models.json", "Known Big", "Known Mid", "Known Small", "Gone Model")
+    env = {k: v for k, v in os.environ.items() if k != "AF_MODELS_JSON"}
+    env.update(APPDATA=str(tmp_path), HOME=str(home), USERPROFILE=str(home))
+    res = _run("--source-env", str(source), "--target-env", str(target), env=env)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert str(found) in res.stdout
+
+
 def test_mcp_apply_reports_the_check(tmp_path, monkeypatch):
     catalogue = _catalogue(tmp_path / "models.json", "Nothing Real")
     monkeypatch.setenv("AF_MODELS_JSON", str(catalogue))

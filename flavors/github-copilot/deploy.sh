@@ -1365,6 +1365,23 @@ if [[ -f "$curated_json" ]]; then
     fi
 fi
 
+# ── Tier models vs Copilot's catalogue ────────────────────────────────────────
+# VS Code only greys out an unknown model, which no agent sees (#421).
+# Advisory only -- the catalogue is a snapshot and never fails the deploy.
+model_probe="$SOURCE_GITHUB/scripts/check-model-tiers.py"
+if [[ -f "$model_probe" ]]; then
+    model_python=""
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1; then model_python="$candidate"; break; fi
+    done
+    echo ""
+    if [[ -n "$model_python" ]]; then
+        "$model_python" "$model_probe" --source-env "$SOURCE_AF_ENV" --target-env "$TARGET_AF_ENV" 2>&1 || true
+    else
+        echo "  NOTE    tier models not checked -- no Python interpreter"
+    fi
+fi
+
 # ── Cost tracking source ───────────────────────────────────────────────────
 # A workflow log records `cost: available: false` when VS Code's agent debug
 # log is off, and that file is not one anybody opens unprompted. A deploy is
