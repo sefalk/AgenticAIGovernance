@@ -53,10 +53,12 @@ def test_resolved_source_bytes_lf_is_noop(tmp_path: Path) -> None:
 def test_resolved_source_bytes_tier_from_crlf_is_lf(tmp_path: Path) -> None:
     src = tmp_path / "planner.agent.md"
     _write_bytes(src, TIER_FILE.replace("\n", "\r\n").encode("utf-8"))
-    out = deploy_core.resolved_source_bytes(src, tmp_path / "af-env.conf")
+    source_env = tmp_path / "source-af-env.conf"
+    _write_bytes(source_env, b"AF_MODEL_DEFAULT_BALANCED=B1 (copilot), B2 (copilot)\n")
+    out = deploy_core.resolved_source_bytes(src, tmp_path / "af-env.conf", source_env)
     assert b"\r" not in out
     assert b"__AF_TIER_BALANCED__" not in out
-    assert b"model:\n  - Claude Sonnet 5.5 (copilot)" in out
+    assert b"model:\n  - B1 (copilot)" in out
 
 
 def test_source_hash_resolved_is_eol_independent(tmp_path: Path) -> None:

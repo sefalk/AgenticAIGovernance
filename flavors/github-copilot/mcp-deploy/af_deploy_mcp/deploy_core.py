@@ -26,13 +26,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-# Curated fallback tiers — keep in sync with deploy.ps1 / deploy.sh $TierDefaults.
-TIER_DEFAULTS: dict[str, str] = {
-    "PREMIUM": "Claude Opus 5.5 (copilot), Claude Opus 5 (copilot), Claude Sonnet 5.5 (copilot)",
-    "BALANCED": "Claude Sonnet 5.5 (copilot), Claude Sonnet 4.6 (copilot), Claude Sonnet 4.5 (copilot)",
-    "EFFICIENT": "Claude Haiku 5.5 (copilot), Claude Sonnet 5.5 (copilot)",
-}
-
 _TIER_TOKEN_RE = re.compile(r"__AF_TIER_(PREMIUM|BALANCED|EFFICIENT)__")
 
 
@@ -53,12 +46,19 @@ def get_af_env_value(af_env_path: Path, key: str) -> str:
     return ""
 
 
-def _tier_models(tier: str, af_env_path: Path) -> list[str]:
-    val = get_af_env_value(af_env_path, f"AF_MODEL_TIER_{tier}") or TIER_DEFAULTS[tier]
-    return [m.strip() for m in val.split(",") if m.strip()]
+def _tier_models(tier: str, af_env_path: Path, default_af_env: Path | None) -> list[str]:
+    """Project override (target ``AF_MODEL_TIER_*``), else the framework default
+    (``AF_MODEL_DEFAULT_*`` in the SOURCE af-env.conf, its only home -- #418)."""
+    val = get_af_env_value(af_env_path, f"AF_MODEL_TIER_{tier}")
+    if not val and default_af_env is not None:
+        val = get_af_env_value(default_af_env, f"AF_MODEL_DEFAULT_{tier}")
+    models = [m.strip() for m in val.split(",") if m.strip()]
+    if not models:
+        raise ValueError(f"no model list for tier {tier}: set AF_MODEL_DEFAULT_{tier} in the framework af-env.conf")
+    return models
 
 
-def resolve_tier_tokens(text: str, af_env_path: Path) -> str:
+def resolve_tier_tokens(text: str, af_env_path: Path, default_af_env: Path | None = None) -> str:
     """Replace ``model: __AF_TIER_X__`` lines with the resolved model list.
 
     Byte-compatible with ``deploy.ps1`` Resolve-TierTokens: preserves the file's
@@ -70,11 +70,8 @@ def resolve_tier_tokens(text: str, af_env_path: Path) -> str:
         token = f"__AF_TIER_{tier}__"
         if token not in text:
             continue
-        models = _tier_models(tier, af_env_path)
-        if len(models) <= 1:
-            repl = f"model: {models[0]}" if models else "model:"
-        else:
-            repl = "model:" + "".join(f"{nl}  - {m}" for m in models)
+        models = _tier_models(tier, af_env_path, default_af_env)
+        repl = f"model: {models[0]}" if len(models) <= 1 else "model:" + "".join(f"{nl}  - {m}" for m in models)
         pattern = re.compile(r"(?m)^model:[ \t]*" + re.escape(token) + r"[ \t]*(?=\r?\n|$)")
         text = pattern.sub(lambda _m, r=repl: r, text)
     return text
@@ -96,7 +93,7 @@ def _canonicalize_text(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def resolved_source_bytes(path: Path, af_env_path: Path) -> bytes:
+def resolved_source_bytes(path: Path, af_env_path: Path, default_af_env: Path | None = None) -> bytes:
     """The canonical bytes that would be deployed.
 
     Canonical = UTF-8 without BOM, LF line endings, with agent model-tier tokens
@@ -112,7 +109,7 @@ def resolved_source_bytes(path: Path, af_env_path: Path) -> bytes:
         return raw  # binary -- never touch
     text = _canonicalize_text(text)
     if _TIER_TOKEN_RE.search(text):
-        text = resolve_tier_tokens(text, af_env_path)
+        text = resolve_tier_tokens(text, af_env_path, default_af_env)
     return text.encode("utf-8")
 
 
@@ -171,10 +168,10 @@ def _merge_target_regions(data: bytes, target: Path) -> bytes:
     return merged.encode("utf-8")
 
 
-def source_hash_resolved(path: Path, af_env_path: Path) -> str:
+def source_hash_resolved(path: Path, af_env_path: Path, default_af_env: Path | None = None) -> str:
     """Classification hash of the deployed content: canonical + tier-resolved, with
     managed-region bodies stripped (region content is project-owned, not framework)."""
-    return _sha256_upper_bytes(_strip_bytes(resolved_source_bytes(path, af_env_path)))
+    return _sha256_upper_bytes(_strip_bytes(resolved_source_bytes(path, af_env_path, default_af_env)))
 
 
 def _target_classify_hash(path: Path) -> str:
@@ -632,7 +629,7 @@ def dry_run(source_root: Path, target_dir: Path) -> dict:
     results: list[dict] = []
     counts: dict[str, int] = {}
     for u in units:
-        data = resolved_source_bytes(u.source, target_af_env)
+        data = resolved_source_bytes(u.source, target_af_env, source_root / ".github" / "af-env.conf")
         src_h = _sha256_upper_bytes(_strip_bytes(data))
         moved_from = None
         active = _activated_unit(u, target_github)
@@ -720,7 +717,7 @@ def apply(source_root: Path, target_dir: Path) -> dict:
     made_backup = False
 
     for u in collect_units(source_root, target_dir, manifest):
-        data = resolved_source_bytes(u.source, target_af_env)
+        data = resolved_source_bytes(u.source, target_af_env, source_github / "af-env.conf")
         src_h = _sha256_upper_bytes(_strip_bytes(data))
         moved_from = None
         active = _activated_unit(u, target_github)
@@ -783,7 +780,7 @@ def update_hashes(source_root: Path, target_dir: Path) -> dict:
     version = read_version(source_root)
     hashes: dict[str, str] = {}
     for u in collect_units(source_root, target_dir, manifest):
-        stripped = _strip_bytes(resolved_source_bytes(u.source, target_af_env))
+        stripped = _strip_bytes(resolved_source_bytes(u.source, target_af_env, source_root / ".github" / "af-env.conf"))
         hashes[u.hash_key] = _sha256_upper_bytes(stripped)
         _store_put(target_github, stripped)
     _write_hashes(target_github, hashes, version)
@@ -830,7 +827,13 @@ def conflict_diff(source_root: Path, target_dir: Path, path: str) -> str:
     """
     src_path, tgt_path, display = _resolve_pair(source_root, target_dir, path)
     target_af_env = target_dir / ".github" / "af-env.conf"
-    src_text = resolved_source_bytes(src_path, target_af_env).decode("utf-8", "replace") if src_path.is_file() else ""
+    src_text = (
+        resolved_source_bytes(src_path, target_af_env, source_root / ".github" / "af-env.conf").decode(
+            "utf-8", "replace"
+        )
+        if src_path.is_file()
+        else ""
+    )
     tgt_text = tgt_path.read_text(encoding="utf-8", errors="replace") if tgt_path.is_file() else ""
     return "".join(
         difflib.unified_diff(

@@ -157,20 +157,24 @@ function Get-AFEnvValue {
 # ── Agent model tier resolution ────────────────────────────────────────────
 # Subagent .agent.md files carry a tier placeholder (__AF_TIER_PREMIUM__ etc.)
 # in their `model:` frontmatter. At deploy time it is replaced with the concrete
-# model list for that tier, resolved from the TARGET project's af-env.conf
-# (AF_MODEL_TIER_*) or, if unset, the curated defaults below. A multi-entry list
-# becomes a YAML array so VS Code tries each model until one is available
-# (drift-resilient). Curate these defaults when the model line-up changes.
-$script:TierDefaults = @{
-    PREMIUM   = 'Claude Opus 5.5 (copilot), Claude Opus 5 (copilot), Claude Sonnet 5.5 (copilot)'
-    BALANCED  = 'Claude Sonnet 5.5 (copilot), Claude Sonnet 4.6 (copilot), Claude Sonnet 4.5 (copilot)'
-    EFFICIENT = 'Claude Haiku 5.5 (copilot), Claude Sonnet 5.5 (copilot)'
-}
+# model list for that tier: the TARGET project's AF_MODEL_TIER_* override, else
+# AF_MODEL_DEFAULT_* from the SOURCE af-env.conf -- the line-up's only home
+# (#418). A multi-entry list becomes a YAML array so VS Code tries each model
+# until one is available.
+$SourceAFEnv = Join-Path $SourceGitHub 'af-env.conf'
 function Get-TierModels([string]$Tier) {
     $val = Get-AFEnvValue -Key "AF_MODEL_TIER_$Tier" -Default ''
-    if (-not $val) { $val = $script:TierDefaults[$Tier] }
-    return @($val -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if (-not $val -and (Test-Path $SourceAFEnv)) {
+        $m = Select-String -Path $SourceAFEnv -Pattern "^AF_MODEL_DEFAULT_$Tier=(.+)$" -ErrorAction SilentlyContinue
+        if ($m) { $val = $m.Matches[0].Groups[1].Value.Trim() }
+    }
+    $models = @($val -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($models.Count -eq 0) { throw "no model list for tier ${Tier}: set AF_MODEL_DEFAULT_$Tier in the framework af-env.conf" }
+    return $models
 }
+$tierSources = @(Get-ChildItem (Join-Path $SourceGitHub 'agents') -Filter '*.agent.md' -ErrorAction SilentlyContinue |
+    Where-Object { Select-String -Path $_.FullName -Pattern '__AF_TIER_' -Quiet })
+if ($tierSources.Count -gt 0) { foreach ($t in 'PREMIUM', 'BALANCED', 'EFFICIENT') { $null = Get-TierModels $t } }
 function Resolve-TierTokens([string]$Text) {
     $nl = if ($Text.Contains("`r`n")) { "`r`n" } else { "`n" }
     foreach ($tier in 'PREMIUM', 'BALANCED', 'EFFICIENT') {
