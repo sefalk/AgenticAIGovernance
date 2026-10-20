@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import importlib.util
 import os
 import re
 import shutil
@@ -769,7 +770,21 @@ def apply(source_root: Path, target_dir: Path) -> dict:
         "merged": merged,
         "skipped": skipped,
         "backup_dir": str(backup_dir) if made_backup else None,
+        "model_check": model_check(source_root, target_af_env),
     }
+
+
+def model_check(source_root: Path, target_af_env: Path) -> dict:
+    """Tier models vs Copilot's catalogue (#421), via the payload's own checker
+    so all three deploy paths share one implementation. Advisory, never fatal."""
+    script = source_root / ".github" / "scripts" / "check-model-tiers.py"
+    spec = importlib.util.spec_from_file_location("check_model_tiers", script)
+    if not script.is_file() or spec is None or spec.loader is None:
+        return {"exit": 2, "lines": ["  NOTE    tier models not checked -- check-model-tiers.py missing"]}
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    code, lines = module.check(source_root / ".github" / "af-env.conf", target_af_env, module.discover_catalogue())
+    return {"exit": code, "lines": lines}
 
 
 def update_hashes(source_root: Path, target_dir: Path) -> dict:

@@ -259,6 +259,12 @@ Agents are deployed with a **model tier**, configured once in
   path reads it from the payload being deployed, so a re-deploy always brings
   the current line-up.
 - Re-deploy after editing the tiers to propagate them into the agent files.
+- Every deploy checks the tier models against Copilot's model catalogue
+  (`.github/scripts/check-model-tiers.py`) and prints a `WARN` per unknown
+  model. VS Code itself only greys such an entry out. The catalogue is the
+  `models.json` Copilot Chat writes into its debug-log directory (needs
+  `github.copilot.chat.agentDebugLog.fileLogging.enabled`). It is a snapshot,
+  so its age is printed too; without it the check says "not checked".
 
 **History:** v1.18.6 removed the hardcoded per-agent model lists in favour of
 pure user selection; tiers were reintroduced as *deploy-resolved configuration*
