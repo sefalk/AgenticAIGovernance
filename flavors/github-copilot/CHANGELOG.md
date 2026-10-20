@@ -137,6 +137,21 @@ build for one (#322).
 
 ### Changed
 
+- **Tier model defaults follow the current Copilot line-up (#418).** Claude
+  Haiku 5.5 and Sonnet 5.5 are available, and Opus 4.8, Opus 4.7, Haiku 4.5
+  and Sonnet 5 are no longer offered. The defaults that fill
+  `__AF_TIER_*__` at deploy time are now:
+  - PREMIUM: Opus 5.5, Opus 5, Sonnet 5.5
+  - BALANCED: Sonnet 5.5, Sonnet 4.6, Sonnet 4.5
+  - EFFICIENT: Haiku 5.5, Sonnet 5.5
+
+  `deploy.ps1`, `deploy.sh` and `deploy_core.py` each carry a copy of these
+  defaults. `test_tier_defaults.py` now fails if the three copies differ or if
+  one names a withdrawn model. The doc examples in `af-env.conf`, the
+  copilot-authoring skill and `MANIFEST.md` now use current model names.
+  Takes effect on the next deploy. A project that sets `AF_MODEL_TIER_*`
+  keeps its own lists.
+
 - **The Delegation Contract protects every literal, not one class (#141).**
   A prompt protected its numbers ("copy them as given") but not a backticked
   skill path, and the subagent swapped the path for a plausible name from the
