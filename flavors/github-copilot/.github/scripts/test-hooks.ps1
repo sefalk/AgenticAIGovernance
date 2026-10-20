@@ -181,7 +181,7 @@ function Invoke-HookInFixture {
     # deliberate and not a wildcard: copying every `*.py` also brings the
     # schema checkers, which turns "the fixture is missing a helper" into a
     # different hook running that the case never asked for.
-    $helpers = @('collect-agent-invocations.py', 'concurrent-agent-edits.py')
+    $helpers = @('collect-agent-invocations.py', 'concurrent-agent-edits.py', 'compliance-checker-stop.py', 'subagent-return.py')
     # Shared modules those helpers import, matched by the underscore prefix that
     # marks a module rather than a hook. Derived, because the maintained list
     # went stale the moment `_agentlog.py` was extracted (#291) and the symptom
@@ -3757,6 +3757,75 @@ $gitSkill = Get-Content (Join-Path $githubDir 'skills/git-workflow/SKILL.md') -R
 Assert-True "the coordinator derives the merge SHA from git, the worker's is advisory" `
     ($gitSkill -match '(?is)merge SHA.{0,40}from git.{0,160}advisory') `
     "a worker-reported merge SHA can still enter the records unchecked"
+
+Write-Output ""
+
+# ── 6g. A compliance quotation needs a read behind it (issue #286) ────────
+#
+# #174: a post-flight report quoted a retro that did not say that, and an
+# af-env.conf value the file did not hold, in a turn that read nothing. The
+# agent file forbids it; this is the mechanical half. Measured over 88 real
+# logs: "cites path:line with zero read_file calls" fired 0 times, so it
+# blocks; "a cited path was never read" fired 5 times, mostly falsely, so it
+# is advisory only.
+Write-Output "## compliance-checker-stop (issue #286)"
+
+function New-CcSession {
+    param([string]$Text, [string[]]$Reads = @(), [switch]$NoLog, [switch]$ToolOnly)
+    $chat = Join-Path ([IO.Path]::GetTempPath()) "af-286-$(Get-Random)"
+    $sid = 's286'
+    $dir = Join-Path (Join-Path $chat 'debug-logs') $sid
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    if (-not $NoLog) {
+        $lines = @()
+        foreach ($r in $Reads) {
+            $lines += (@{ ts = 1500; type = 'tool_call'; name = 'read_file'; attrs = @{ args = (@{ filePath = $r; startLine = 1; endLine = 40 } | ConvertTo-Json -Compress) } } | ConvertTo-Json -Compress -Depth 6)
+        }
+        # `if` as an expression unrolls a one-element array; @() keeps `parts` a list.
+        $parts = @(if ($ToolOnly) { @{ type = 'tool_call'; name = 'read_file' } } else { @{ type = 'text'; content = $Text } })
+        $response = @(@{ role = 'assistant'; parts = $parts }) | ConvertTo-Json -Compress -Depth 6
+        if (-not $response.StartsWith('[')) { $response = "[$response]" }
+        $lines += (@{ ts = 2000; type = 'agent_response'; attrs = @{ response = $response } } | ConvertTo-Json -Compress -Depth 6)
+        # PS 5.1 `Set-Content -Encoding UTF8` writes a BOM; a real debug log has none.
+        [IO.File]::WriteAllText((Join-Path $dir 'runSubagent-compliance-checker-toolu_cc.jsonl'), ($lines -join "`n") + "`n", (New-Object Text.UTF8Encoding $false))
+    }
+    @{ session_id = $sid; transcript_path = (Join-Path (Join-Path $chat 'transcripts') "$sid.jsonl") } | ConvertTo-Json -Compress
+}
+function Invoke-CcStop([string]$Json) {
+    # A missing hook is a failed case, not a crashed suite.
+    if (-not (Test-Path (Join-Path $scriptDir 'compliance-checker-stop.ps1'))) { return '' }
+    (Invoke-Hook -Script 'compliance-checker-stop.ps1' -JsonInput $Json -Branch 'agent/72-x' -Files @{ 'README.md' = 'x' }).Output
+}
+
+$ccQuote = "Post-Flight Verdict: PASS. RETRO_DIR is docs/retros (.github/af-env.conf:12)."
+
+$ccNoRead = Invoke-CcStop (New-CcSession -Text $ccQuote)
+Assert-True "a report quoting a file with no read behind it is blocked" `
+    ($ccNoRead -match '"decision":\s*"block"') "got: $ccNoRead" -Subject $ccNoRead
+Assert-Contains "and the block names the citation it could not back" `
+    $ccNoRead 'af-env.conf'
+
+$ccRead = Invoke-CcStop (New-CcSession -Text $ccQuote -Reads @('c:\repo\.github\af-env.conf'))
+Assert-True "control: the same report with a read behind it passes" `
+    ($ccRead -notmatch '"decision":\s*"block"' -and $ccRead -match 'PASS') "got: $ccRead" -Subject $ccRead
+
+$ccOther = Invoke-CcStop (New-CcSession -Text "Lesson at line 4 (.github/retros/auto/72-x.md:4)." -Reads @('c:\repo\.github\af-env.conf'))
+Assert-True "a cited path that was never read is advisory, not a block" `
+    ($ccOther -notmatch '"decision":\s*"block"' -and $ccOther -match 'ADVISORY' -and $ccOther -match '72-x\.md') `
+    "got: $ccOther" -Subject $ccOther
+
+$ccNoLog = Invoke-CcStop (New-CcSession -NoLog)
+Assert-True "no log is unmeasurable, not a pass and not a block" `
+    ($ccNoLog -notmatch '"decision":\s*"block"' -and $ccNoLog -match 'not measurable') "got: $ccNoLog" -Subject $ccNoLog
+
+$ccEmpty = Invoke-CcStop (New-CcSession -ToolOnly)
+Assert-True "a return with no words is unmeasurable too" `
+    ($ccEmpty -notmatch '"decision":\s*"block"' -and $ccEmpty -match 'not measurable') "got: $ccEmpty" -Subject $ccEmpty
+
+$ccAgent = Get-Content (Join-Path $githubDir 'agents/compliance-checker.agent.md') -Raw
+Assert-True "the compliance-checker registers the hook as SubagentStop" `
+    ($ccAgent -match '(?s)^---.*hooks:\s*\n\s*SubagentStop:.*compliance-checker-stop\.sh.*compliance-checker-stop\.ps1.*?\n---') `
+    "compliance-checker.agent.md has no SubagentStop registration for compliance-checker-stop"
 
 Write-Output ""
 
