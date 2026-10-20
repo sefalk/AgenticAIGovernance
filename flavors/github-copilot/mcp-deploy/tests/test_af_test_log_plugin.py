@@ -137,16 +137,13 @@ def test_mcp_apply_notes_a_missing_registration(tmp_path):
     (target / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
     assert any(NOTE in line for line in deploy_core.apply(AF_ROOT, target)["test_log_plugin"])
 
-    (target / "pyproject.toml").write_text(PYPROJECT, encoding="utf-8")
-    assert deploy_core.apply(AF_ROOT, target)["test_log_plugin"] == []
 
-
-def test_mcp_apply_is_silent_without_a_pyproject(tmp_path):
+def test_the_note_goes_once_registered_and_never_without_a_pyproject(tmp_path):
     from af_deploy_mcp import deploy_core
 
-    target = tmp_path / "proj"
-    target.mkdir()
-    assert deploy_core.apply(AF_ROOT, target)["test_log_plugin"] == []
+    assert deploy_core.test_log_plugin_note(tmp_path) == []
+    (tmp_path / "pyproject.toml").write_text(PYPROJECT, encoding="utf-8")
+    assert deploy_core.test_log_plugin_note(tmp_path) == []
 
 
 def _pwsh() -> str | None:
