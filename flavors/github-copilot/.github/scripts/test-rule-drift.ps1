@@ -250,6 +250,33 @@ Add-Result 'R23_the_carried_table_equals_the_metrics_skill' `
     ($skillRows.Count -eq 4 -and (($criticRows -join "`n") -ceq ($skillRows -join "`n"))) `
     "skill=$($skillRows -join ' / ') critic=$($criticRows -join ' / ')"
 
+# #284: a tool missing from an agent's set cannot be reached however the payload
+# is spelled, which a gate cannot promise. The sets below were decided from the
+# measured use (comment on #284, 2026-10-20); a widened set fails here rather
+# than changing silently, and so does a new agent that gains an execution tool.
+$execTool = '(?i)^(execute/|af-command/run_script$|pylance-mcp-server/pylanceRunCodeSnippet$)'
+$declaredExec = @{
+    'code-critic'  = 'execute/createAndRunTask execute/runTask execute/runTests execute/testFailure'
+    'coordinator'  = 'af-command/run_script execute/createAndRunTask execute/getTerminalOutput execute/runInTerminal execute/runTask execute/runTests execute/testFailure'
+    'documenter'   = 'execute/runTask'
+    'implementer'  = 'af-command/run_script execute/createAndRunTask execute/runNotebookCell execute/runTask execute/runTests execute/testFailure pylance-mcp-server/pylanceRunCodeSnippet'
+    'planner'      = 'execute/runTask'
+    'refactorer'   = 'af-command/run_script execute/createAndRunTask execute/runTask execute/runTests execute/testFailure pylance-mcp-server/pylanceRunCodeSnippet'
+    'test-critic'  = 'execute/runTask execute/runTests execute/testFailure'
+    'test-writer'  = 'af-command/run_script execute/runTask execute/runTests execute/testFailure pylance-mcp-server/pylanceRunCodeSnippet'
+}
+$toolsetDrift = @()
+foreach ($agentFile in Get-ChildItem (Join-Path $payload 'agents') -Filter '*.agent.md') {
+    $name = $agentFile.Name -replace '\.agent\.md$', ''
+    $front = ((Get-Content $agentFile.FullName -Raw -Encoding UTF8) -split '(?m)^---\s*$')[1]
+    $toolsBlock = if ($front -match '(?s)\ntools:\s*\n(.*?)(\n\S|$)') { $Matches[1] } else { '' }
+    $exec = @([regex]::Matches($toolsBlock, '(?m)^\s*-\s*[''"]?([^''"\s#]+)') |
+        ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -match $execTool } | Sort-Object -Unique)
+    $want = if ($declaredExec.ContainsKey($name)) { $declaredExec[$name] } else { '' }
+    if (($exec -join ' ') -cne $want) { $toolsetDrift += "$name has [$($exec -join ' ')] want [$want]" }
+}
+Add-Result 'R28_every_agent_s_execution_tools_are_the_declared_set' ($toolsetDrift.Count -eq 0) ($toolsetDrift -join '; ')
+
 Write-Output '===== rule-drift detector tests (issue #304) ====='
 foreach ($n in $notes) { Write-Output "  SKIP  $n" }
 $failed = 0
