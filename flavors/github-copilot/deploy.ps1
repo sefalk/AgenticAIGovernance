@@ -1413,6 +1413,24 @@ if (Test-Path $curatedJsonPath) {
     }
 }
 
+# ── Tier models vs Copilot's catalogue ────────────────────────────────────────
+# VS Code only greys out an unknown model, which no agent sees (#421).
+# Advisory only -- the catalogue is a snapshot and never fails the deploy.
+$modelProbe = Join-Path $SourceGitHub 'scripts\check-model-tiers.py'
+if (Test-Path $modelProbe) {
+    $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $pythonCmd) { $pythonCmd = Get-Command python3 -ErrorAction SilentlyContinue }
+    Write-Host ""
+    if ($pythonCmd) {
+        $modelLines = @(& $pythonCmd.Source $modelProbe --source-env $SourceAFEnv --target-env $TargetAFEnv 2>&1 |
+            ForEach-Object { $_.ToString() })
+        $color = if ($LASTEXITCODE -eq 1) { 'Yellow' } else { 'Cyan' }
+        foreach ($line in $modelLines) { Write-Host $line -ForegroundColor $color }
+    } else {
+        Write-Host "  NOTE    tier models not checked -- no Python interpreter" -ForegroundColor Cyan
+    }
+}
+
 # ── Version-stale detection ────────────────────────────────────────────────
 # Warn when files were updated/created but VERSION hasn't changed since last
 # deploy. This catches the common mistake of forgetting to bump VERSION.

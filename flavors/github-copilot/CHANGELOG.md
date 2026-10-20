@@ -39,6 +39,24 @@ build for one (#322).
     does not load the plugin. The test-execution skill says that `runTests` is
     logged only with the plugin.
 
+- **Tier models are checked against Copilot's model catalogue (#421).**
+  VS Code only greys out an unknown `model:` entry ("Unknown model ... will be
+  ignored"). It is neither an error nor a warning, so no agent sees it, and a
+  tier whose every entry is unknown falls back to the picker model unnoticed.
+  - `check-model-tiers.py` compares the effective tier lists with the newest
+    `models.json`:
+    - the project's `AF_MODEL_TIER_*` override, else the framework's
+      `AF_MODEL_DEFAULT_*` (#418);
+    - `models.json` is written by Copilot Chat into its debug-log directory,
+      and the cost analysis already reads the same file as its rate card.
+  - The script exits 0 when every model is known, 1 when a model is unknown,
+    and 2 when no catalogue exists, which means not checked and never a pass.
+    The catalogue is a snapshot, so the script always prints its age.
+  - `deploy.ps1`, `deploy.sh` and the MCP `apply` (`model_check`) run it after
+    deploying. It is advisory and never fails a deploy.
+  - Cross-checked against the editor on 2026-10-20: the catalogue and VS Code's
+    greying agree.
+
 - **The compliance-checker's quotations need a read behind them (#286).**
   #174 recorded a post-flight report that quoted file content from a turn
   that read nothing. A `SubagentStop` hook (`compliance-checker-stop`, a
