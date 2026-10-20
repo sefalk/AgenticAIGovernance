@@ -363,8 +363,8 @@ until one is available. This optimises cost and speed:
 
 ```yaml
 model:
-  - Claude Sonnet 4 (copilot)
-  - GPT-4.1 (copilot)
+  - Claude Sonnet 5.5 (copilot)
+  - Claude Haiku 5.5 (copilot)
 ```
 
 If no model is specified, the user's currently selected model is used.

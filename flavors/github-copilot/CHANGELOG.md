@@ -147,6 +147,30 @@ build for one (#322).
 
 ### Changed
 
+- **Tier model defaults have one home: the framework `af-env.conf` (#418).**
+  The line-up used to be hardcoded three times (`deploy.ps1`, `deploy.sh`,
+  `deploy_core.py`), and two tests repeated it. Every model change therefore
+  touched five files.
+  - New framework-owned keys `AF_MODEL_DEFAULT_PREMIUM|BALANCED|EFFICIENT`.
+    Every deploy path reads them from the payload being deployed, never from
+    the project's copy, so a re-deploy always brings the current line-up.
+  - `AF_MODEL_TIER_*` in the project stays the override; blank means the
+    framework default.
+  - A deploy with no list for a tier now fails loudly instead of writing an
+    unresolved placeholder into an agent.
+  - New line-up (owner, 2026-10-20). The Claude 4.x line is no longer offered.
+    - PREMIUM: Claude Opus 5.5, GPT-6 Astra
+    - BALANCED: Claude Sonnet 5.5, GPT-6.1 Sol
+    - EFFICIENT: Claude Haiku 5.5, GPT-6 Luna
+  - `test_tier_defaults.py` requires the following:
+    - every tier has a default;
+    - no default names a Claude 4.x model or older;
+    - no deploy script hardcodes a model;
+    - the override and fallback order holds.
+
+    The engine tests now use fixture models, so a line-up change no longer
+    touches them.
+
 - **The Delegation Contract protects every literal, not one class (#141).**
   A prompt protected its numbers ("copy them as given") but not a backticked
   skill path, and the subagent swapped the path for a plausible name from the

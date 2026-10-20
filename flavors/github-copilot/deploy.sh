@@ -316,19 +316,31 @@ file_hash() {
 }
 # ── Agent model tier resolution ────────────────────────────────────────
 # Subagent .agent.md files carry a tier placeholder (__AF_TIER_PREMIUM__ etc.)
-# resolved at deploy time from the target af-env.conf (AF_MODEL_TIER_*) or the
-# curated defaults below. Multiple comma-separated entries become a prioritized
-# YAML array (VS Code tries each until available). Keep in sync with deploy.ps1.
-declare -A TIER_DEFAULTS=(
-    [PREMIUM]='Claude Opus 4.8 (copilot), Claude Opus 4.7 (copilot), Claude Sonnet 5 (copilot)'
-    [BALANCED]='Claude Sonnet 5 (copilot), Claude Sonnet 4.6 (copilot), Claude Sonnet 4.5 (copilot)'
-    [EFFICIENT]='Claude Haiku 4.5 (copilot), Claude Sonnet 5 (copilot)'
-)
+# resolved at deploy time: the target's AF_MODEL_TIER_* override, else
+# AF_MODEL_DEFAULT_* from the SOURCE af-env.conf -- the line-up's only home
+# (#418). Multiple comma-separated entries become a prioritized YAML array.
+SOURCE_AF_ENV="$SOURCE_GITHUB/af-env.conf"
+tier_value() {
+    local tier="$1" val line
+    val="$(get_af_env_value "AF_MODEL_TIER_$tier" "")"
+    if [[ -z "$val" && -f "$SOURCE_AF_ENV" ]]; then
+        line="$(grep -E "^AF_MODEL_DEFAULT_${tier}=" "$SOURCE_AF_ENV" | head -1 || true)"
+        val="$(printf '%s' "${line#*=}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    fi
+    printf '%s' "$val"
+}
+if grep -rqlE '__AF_TIER_' "$SOURCE_GITHUB/agents" 2>/dev/null; then
+    for _tier in PREMIUM BALANCED EFFICIENT; do
+        if [[ -z "$(tier_value "$_tier" | tr -d ', ')" ]]; then
+            echo "Error: no model list for tier $_tier: set AF_MODEL_DEFAULT_$_tier in the framework af-env.conf" >&2
+            exit 1
+        fi
+    done
+fi
 tier_yaml() {
     # $1 = tier name; prints a `model:` line or a multi-line YAML array
     local tier="$1" val
-    val="$(get_af_env_value "AF_MODEL_TIER_$tier" "")"
-    [[ -z "$val" ]] && val="${TIER_DEFAULTS[$tier]}"
+    val="$(tier_value "$tier")"
     local IFS=',' arr m count=0
     read -ra arr <<< "$val"
     for m in "${arr[@]}"; do
