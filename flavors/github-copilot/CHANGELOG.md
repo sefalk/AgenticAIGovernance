@@ -188,6 +188,17 @@ build for one (#322).
 
 ### Fixed
 
+- **A stale declared dependency is noticed (#275).** `mcp` fell a full major
+  version behind, and nothing reported it until a clean install could not import
+  the server (#274).
+  - `.github/dependabot.yml` covers `pip` (mcp-deploy) and `github-actions`,
+    and targets `dev`.
+  - `test-dependency-bounds.py` (CI) requires an upper bound on every runtime
+    dependency in a tracked `pyproject.toml`, or a reason of at least 10
+    characters under `[tool.af.unbounded-dependencies]`. Negative controls on
+    temporary copies prove that it rejects an unbounded declaration.
+  - `mcp>=2` is now `mcp>=2,<3`.
+
 - **Deploy says when the target gitignores the payload, and keeps the only
   rollback (#104).** A consumer that ignored `.github/` received 81 changed
   files, and `git status` showed none of them. `-UpdateHashes` then deleted the

@@ -1,0 +1,27 @@
+# copilot:generated | coordinator | 2026-10-20
+#
+# #275: `mcp` went a full major out of date and the framework found out only
+# when a clean install could not import its own server (#274). This turns the
+# next one into a pull request instead of a red build. The upper bounds that
+# stop a clean install from resolving a breaking major in the meantime are
+# asserted by .github/scripts/test-dependency-bounds.py.
+#
+# Every entry targets dev: integration happens there, and a pull request
+# against main would bypass the release cut.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /flavors/github-copilot/mcp-deploy
+    target-branch: dev
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+
+  # Also covers the Node 20 deprecation of actions/checkout@v4 and
+  # actions/setup-python@v5 that every run currently warns about.
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
