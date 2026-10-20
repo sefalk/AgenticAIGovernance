@@ -196,6 +196,60 @@ try {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# #295: prose clustering cannot see a permission that one source enumerates and
+# another never names. The three machine-readable ends can be compared: every
+# git subcommand block-dangerous auto-approves under GIT_FEATURE / GIT_MERGE
+# must be named by af-env.conf's category text AND by the git-workflow skill's
+# autonomy table. Measured 2026-10-19: one gap -- `git restore`, auto-approved
+# in both dialects and named in neither document.
+$payload = Split-Path $scriptDir
+function Get-AutoGitOps([string]$Text, [string]$Start, [string]$End) {
+    $i = $Text.IndexOf($Start); $j = $Text.IndexOf($End, [Math]::Max($i, 0))
+    if ($i -lt 0 -or $j -lt 0) { return @() }
+    $block = $Text.Substring($i, $j - $i)
+    $ops = @()
+    foreach ($m in [regex]::Matches($block, 'git(?:\\s\+|\[\[:space:\]\]\+)\(?([a-z|-]+(?:\\s\+agent/)?)')) {
+        foreach ($t in ($m.Groups[1].Value -split '\|')) {
+            $op = ($t -replace '\\s\+agent/', '').Trim()
+            if ($op -match '^[a-z][a-z-]+$') { $ops += $op }
+        }
+    }
+    return @($ops | Sort-Object -Unique)
+}
+$ps1 = Get-Content (Join-Path $payload 'hooks/scripts/block-dangerous.ps1') -Raw
+$sh = Get-Content (Join-Path $payload 'hooks/scripts/block-dangerous.sh') -Raw
+$hookOps = @(
+    (Get-AutoGitOps $ps1 "if (`$catGitFeature -eq 'auto')" '# tests / lint')
+    (Get-AutoGitOps $sh 'if [ "$cat_git_feature" = "auto" ]' 'if [ "$cat_tests" = "auto" ]')
+) | Sort-Object -Unique
+$confText = Get-Content (Join-Path $payload 'af-env.conf') -Raw
+$confDesc = [regex]::Match($confText, '(?s)# GIT_FEATURE.*?AUTONOMY_CAT_GIT_MERGE=').Value
+$skillText = Get-Content (Join-Path $payload 'skills/git-workflow/SKILL.md') -Raw
+$skillTable = (([regex]::Matches($skillText, '(?m)^\| `git [^\n]*') | ForEach-Object { $_.Value }) -join "`n")
+$missing = @()
+foreach ($op in $hookOps) {
+    if ($confDesc -notmatch "\b$op\b") { $missing += "$op (af-env.conf)" }
+    if ($skillTable -notmatch "\b$op\b") { $missing += "$op (git-workflow skill)" }
+}
+Add-Result 'R20_found_the_hook_s_auto_approved_git_operations' ($hookOps.Count -ge 8) "ops=$($hookOps -join ', ')"
+Add-Result 'R21_every_auto_approved_git_operation_is_named_in_config_and_skill' ($missing.Count -eq 0) "unnamed: $($missing -join '; ')"
+
+# #369: a threshold the gatekeeper may not have loaded is advisory in practice.
+# Measured 2026-10-19 over MP: 7 of 7 workflows with a code-critic step record
+# no read of the metrics skill. So the minimal table lives where it is enforced
+# -- and since the skill keeps it too, the two copies must be identical, or the
+# fix becomes the next drift.
+function Get-ThresholdRows([string]$Text) {
+    @([regex]::Matches($Text, '(?m)^\| (Domain core|Ports|Adapters|Utilities) \|[^\n]*') |
+        ForEach-Object { ($_.Value -replace '\s+', ' ').Trim() })
+}
+$skillRows = @(Get-ThresholdRows (Get-Content (Join-Path $payload 'skills/metrics/SKILL.md') -Raw -Encoding UTF8))
+$criticRows = @(Get-ThresholdRows (Get-Content (Join-Path $payload 'agents/code-critic.agent.md') -Raw -Encoding UTF8))
+Add-Result 'R22_code_critic_carries_the_threshold_table_it_enforces' ($criticRows.Count -eq 4) "rows in code-critic: $($criticRows.Count)"
+Add-Result 'R23_the_carried_table_equals_the_metrics_skill' `
+    ($skillRows.Count -eq 4 -and (($criticRows -join "`n") -ceq ($skillRows -join "`n"))) `
+    "skill=$($skillRows -join ' / ') critic=$($criticRows -join ' / ')"
+
 Write-Output '===== rule-drift detector tests (issue #304) ====='
 foreach ($n in $notes) { Write-Output "  SKIP  $n" }
 $failed = 0
