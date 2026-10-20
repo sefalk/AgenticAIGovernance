@@ -188,6 +188,18 @@ build for one (#322).
 
 ### Fixed
 
+- **Deploy says when the target gitignores the payload, and keeps the only
+  rollback (#104).** A consumer that ignored `.github/` received 81 changed
+  files, and `git status` showed none of them. `-UpdateHashes` then deleted the
+  conflict backup, the only remaining way back.
+  - `deploy.ps1` and `deploy.sh` now warn before writing anything when
+    `.github/` or `.vscode/` is gitignored in the target. The warning names the
+    `.gitignore` rule and recommends ignoring `.github/logs/*.yaml` instead.
+  - `-UpdateHashes` keeps the conflict backups (`KEEP`) when `.github/` is
+    ignored. A tracked payload is still cleaned up as before.
+  - Not done: the explicit `-Force` confirmation the issue proposed. Warning
+    only, so an existing consumer's deploy does not start failing.
+    
 - **The ADO comment-reading gate is HARD (#186).** It stayed SOFT "until the ADO
   read behaviour has been probed". It was probed on 2026-10-06 against MP WIT
   3386: `wit_work_item get` returns `System.CommentCount` but no comment text.
