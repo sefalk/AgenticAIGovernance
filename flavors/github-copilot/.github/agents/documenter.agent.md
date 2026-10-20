@@ -155,7 +155,7 @@ step is not.
 
 For the `verdict` field in step entries, use the parseable format from
 MANIFEST § 13 (Inter-Agent Contracts → Verdict Format): APPROVED,
-REJECTED, ESCALATE, RESOLVED, or COMPROMISE.
+REJECTED, ESCALATE, RESOLVED, COMPROMISE, or NEEDS_CLARIFICATION.
 
 **`status:` and `verdict:` are closed sets, and your Stop hook now blocks on
 them.** Use `COMPLETED`, `FAILED` or `ESCALATED` for a status and one of the

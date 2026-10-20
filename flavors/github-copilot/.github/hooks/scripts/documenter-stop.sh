@@ -196,7 +196,7 @@ if [ -f "$schema_checker" ]; then
         fi
         if [ "$schema_code" -eq 1 ]; then
             detail=$(echo "$schema_out" | grep -v 'derived ' | af_json_escape)
-            echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Workflow log schema violation for '${workflow_id}': ${detail}. Fix the log, then finish. Use the vocabulary in your Workflow Log Schema: status is COMPLETED, FAILED or ESCALATED; a step verdict is APPROVED, REJECTED, ESCALATE, RESOLVED, COMPROMISE or null. Do not invent a value to describe a state the schema has no word for — say it in 'action:' instead.\"}}"
+            echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Workflow log schema violation for '${workflow_id}': ${detail}. Fix the log, then finish. Use the vocabulary in your Workflow Log Schema: status is COMPLETED, FAILED or ESCALATED; a step verdict is APPROVED, REJECTED, ESCALATE, RESOLVED, COMPROMISE, NEEDS_CLARIFICATION or null. Do not invent a value to describe a state the schema has no word for — say it in 'action:' instead.\"}}"
             exit 0
         fi
     fi
