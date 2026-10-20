@@ -137,20 +137,29 @@ build for one (#322).
 
 ### Changed
 
-- **Tier model defaults follow the current Copilot line-up (#418).** Claude
-  Haiku 5.5 and Sonnet 5.5 are available, and Opus 4.8, Opus 4.7, Haiku 4.5
-  and Sonnet 5 are no longer offered. The defaults that fill
-  `__AF_TIER_*__` at deploy time are now:
-  - PREMIUM: Opus 5.5, Opus 5, Sonnet 5.5
-  - BALANCED: Sonnet 5.5, Sonnet 4.6, Sonnet 4.5
-  - EFFICIENT: Haiku 5.5, Sonnet 5.5
+- **Tier model defaults have one home: the framework `af-env.conf` (#418).**
+  The line-up used to be hardcoded three times (`deploy.ps1`, `deploy.sh`,
+  `deploy_core.py`), and two tests repeated it. Every model change therefore
+  touched five files.
+  - New framework-owned keys `AF_MODEL_DEFAULT_PREMIUM|BALANCED|EFFICIENT`.
+    Every deploy path reads them from the payload being deployed, never from
+    the project's copy, so a re-deploy always brings the current line-up.
+  - `AF_MODEL_TIER_*` in the project stays the override; blank means the
+    framework default.
+  - A deploy with no list for a tier now fails loudly instead of writing an
+    unresolved placeholder into an agent.
+  - New line-up (owner, 2026-10-20). The Claude 4.x line is no longer offered.
+    - PREMIUM: Claude Opus 5.5, GPT-6 Astra
+    - BALANCED: Claude Sonnet 5.5, GPT-6.1 Sol
+    - EFFICIENT: Claude Haiku 5.5, GPT-6 Luna
+  - `test_tier_defaults.py` requires the following:
+    - every tier has a default;
+    - no default names a Claude 4.x model or older;
+    - no deploy script hardcodes a model;
+    - the override and fallback order holds.
 
-  `deploy.ps1`, `deploy.sh` and `deploy_core.py` each carry a copy of these
-  defaults. `test_tier_defaults.py` now fails if the three copies differ or if
-  one names a withdrawn model. The doc examples in `af-env.conf`, the
-  copilot-authoring skill and `MANIFEST.md` now use current model names.
-  Takes effect on the next deploy. A project that sets `AF_MODEL_TIER_*`
-  keeps its own lists.
+    The engine tests now use fixture models, so a line-up change no longer
+    touches them.
 
 - **The Delegation Contract protects every literal, not one class (#141).**
   A prompt protected its numbers ("copy them as given") but not a backticked

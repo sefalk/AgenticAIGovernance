@@ -71,12 +71,13 @@ model: __AF_TIER_BALANCED__
 ```
 
 - Tokens: `__AF_TIER_PREMIUM__`, `__AF_TIER_BALANCED__`, `__AF_TIER_EFFICIENT__`.
-- The deploy replaces the token with the list from the target `af-env.conf`
-  (`AF_MODEL_TIER_*`) or the curated defaults in `deploy.ps1` / `deploy.sh`.
+- The deploy replaces the token with the target's `AF_MODEL_TIER_*` override,
+  else `AF_MODEL_DEFAULT_*` from the framework `af-env.conf` (its only home).
   A multi-entry list becomes a prioritized YAML array — VS Code tries each until
   one is available (drift-resilient).
-- **Curating drift:** when the model line-up changes, update the tier arrays in
-  `af-env.conf` (or the deploy defaults) and re-deploy — never edit each agent.
+- **Curating drift:** when the model line-up changes, edit
+  `AF_MODEL_DEFAULT_*` in the framework `af-env.conf` and re-deploy — never
+  edit each agent.
 - Tiers: PREMIUM = deep reasoning (arbiter, code-critic); BALANCED = planner,
   implementer, test-critic; EFFICIENT = concrete tasks (test-writer, refactorer,
   documenter, researcher, compliance-checker, ado-* workers).

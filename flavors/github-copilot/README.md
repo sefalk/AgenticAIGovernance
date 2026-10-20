@@ -254,7 +254,10 @@ Agents are deployed with a **model tier**, configured once in
 - Format is `Model Name (vendor)`; comma-separated entries become a
   **prioritized array**, and VS Code falls back down the list when a model is
   unavailable — so a model line-up change does not break the deployment.
-- Leave a tier **blank** to use the deploy's curated built-in default.
+- Leave a tier **blank** to use the framework default: `AF_MODEL_DEFAULT_*`
+  in the framework's own `af-env.conf`, the line-up's only home. Every deploy
+  path reads it from the payload being deployed, so a re-deploy always brings
+  the current line-up.
 - Re-deploy after editing the tiers to propagate them into the agent files.
 
 **History:** v1.18.6 removed the hardcoded per-agent model lists in favour of
