@@ -256,12 +256,12 @@ Add-Result 'R23_the_carried_table_equals_the_metrics_skill' `
 # than changing silently, and so does a new agent that gains an execution tool.
 $execTool = '(?i)^(execute/|af-command/run_script$|pylance-mcp-server/pylanceRunCodeSnippet$)'
 $declaredExec = @{
-    'code-critic'  = 'execute/createAndRunTask execute/runTask execute/runTests execute/testFailure'
+    'code-critic'  = 'execute/createAndRunTask execute/runNotebookCell execute/runTask execute/runTests execute/testFailure'
     'coordinator'  = 'af-command/run_script execute/createAndRunTask execute/getTerminalOutput execute/runInTerminal execute/runTask execute/runTests execute/testFailure'
     'documenter'   = 'execute/runTask'
     'implementer'  = 'af-command/run_script execute/createAndRunTask execute/runNotebookCell execute/runTask execute/runTests execute/testFailure pylance-mcp-server/pylanceRunCodeSnippet'
     'planner'      = 'execute/runTask'
-    'refactorer'   = 'af-command/run_script execute/createAndRunTask execute/runTask execute/runTests execute/testFailure pylance-mcp-server/pylanceRunCodeSnippet'
+    'refactorer'   = 'af-command/run_script execute/createAndRunTask execute/runNotebookCell execute/runTask execute/runTests execute/testFailure pylance-mcp-server/pylanceRunCodeSnippet'
     'test-critic'  = 'execute/runTask execute/runTests execute/testFailure'
     'test-writer'  = 'af-command/run_script execute/runTask execute/runTests execute/testFailure pylance-mcp-server/pylanceRunCodeSnippet'
 }
