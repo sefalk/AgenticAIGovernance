@@ -178,6 +178,17 @@ build for one (#322).
 
 ### Fixed
 
+- **A stale declared dependency is noticed (#275).** `mcp` fell a full major
+  version behind, and nothing reported it until a clean install could not import
+  the server (#274).
+  - `.github/dependabot.yml` covers `pip` (mcp-deploy) and `github-actions`,
+    and targets `dev`.
+  - `test-dependency-bounds.py` (CI) requires an upper bound on every runtime
+    dependency in a tracked `pyproject.toml`, or a reason of at least 10
+    characters under `[tool.af.unbounded-dependencies]`. Negative controls on
+    temporary copies prove that it rejects an unbounded declaration.
+  - `mcp>=2` is now `mcp>=2,<3`.
+
 - **The test-execution skill names the reviewed path for dynamic runs (#307).**
   One consumer had 125 task labels, and 66 of them were one-file lint labels.
   No reviewed per-call path existed, and the skill never said which fixed label
