@@ -189,6 +189,46 @@ build for one (#322).
   - pass caller-supplied arguments through `af-command/run_script` (#60), with
     `createAndRunTask` only where that server is not registered.
 
+- **Restricted producers reach the lint gate by name (#292).** In one consumer
+  workflow, three producers reported the HARD lint gate as passed without
+  running anything. The gate row named `check-python-linting.py`, a script they
+  cannot run, and nothing named the label they can run.
+  - The implementer and refactorer rows now name `run_task` →
+    `lint: changed files`. They also state that a gate you did not run is
+    BLOCKED, never PASS, and that an outcome is never argued by inspection.
+  - The test-writer never reports or asserts a lint outcome.
+  - The compliance-checker pre-flight blocks when `.vscode/tasks.json` is
+    missing or unparseable, because without it restricted agents have no
+    execution surface and improvise scratch labels instead.
+
+- **`run-all-tests -Changed` runs the deploy pytest suite for a deploy-engine
+  change (#395).** A `deploy_core.py` change "widened to every suite" and
+  reported 35/35, and none of those suites executed the changed code. The
+  pytest suite reached only CI, through its own step.
+  - The new framework-only suite `test-deploy-engine.ps1` delegates to
+    `run-deploy-suite.py`, so the skip rules and the floor under executed tests
+    stay single-sourced.
+  - `suite-scope.json` maps `mcp-deploy/**`, `deploy.ps1`, `deploy.sh` and
+    `.github/.af-manifest` to the new suite, and `test-suite-scope.ps1` asserts
+    that mapping.
+  - CI excludes the suite from its sweep, because the dedicated step already
+    runs the same script.
+  - The first local run found an unlisted environmental skip: creating a
+    symlink needs a privilege a developer account often lacks. That skip is now
+    in `ALLOWED_SKIPS`, with the reason.
+
+- **Git permissions agree across the hook, `af-env.conf` and the skill (#295).**
+  An always-on instruction once forbade what three other sources allowed, and
+  nothing compared them. `test-rule-drift.ps1` now extracts every git
+  subcommand that `block-dangerous` auto-approves under GIT_FEATURE and
+  GIT_MERGE, in both dialects, and requires both `af-env.conf` and the
+  git-workflow skill table to name each one.
+  - Its first run found one gap: `git restore` was auto-approved and named
+    nowhere. Both documents now name it: it restores only the session's own
+    changes, and a path that was dirty at session start still asks (#120).
+  - The skill table also gains `git fetch --prune` for stale remote-tracking
+    refs.
+
 - **A retro written twice is caught (#239).** The documenter and stop-tests
   gates only asked whether the configured retro existed, so a second copy
   elsewhere always passed. The legacy-path check also switched itself off when
@@ -201,6 +241,30 @@ build for one (#322).
   - A lone retro outside `RETRO_DIR` is named with the path to move it to.
   - `documenter.agent.md` states the rule and points to
     `.github/retros/README.md` for why retros may be tracked and logs may not.
+
+- **A misplaced retro blocks even when none was owed (#176).** A clean run owes
+  no retro, so the gate passed with "no retro required" while a voluntary retro
+  sat in the gitignored default, written and then lost. Both gates now check for
+  a stray first: documenter-stop blocks and names the path to move it to,
+  stop-tests warns. A voluntary retro at `RETRO_DIR` still passes.
+
+- **No retro gate tells an agent to take a record out of git (#109).** Moving a
+  tracked legacy retro into a gitignored `RETRO_DIR` removes it from version
+  control, and `git status` does not show it because the destination is
+  ignored. In one consumer this would have untracked 35 records. A tracked copy
+  beside an ignored `RETRO_DIR` is now history, not a stray:
+  - the gates leave it in place and name it, with the reason;
+  - an owed retro is still owed at `RETRO_DIR`;
+  - an untracked stray is still to be moved, as before.
+
+- **The plan-status HARD gate has an independent checker (#252).** The
+  documenter's exit gate "Plan file status set to COMPLETED" was HARD but
+  verified by the documenter's own inspection, which the maker-checker rule
+  makes SOFT at best. `documenter-stop` (both dialects) now blocks when the
+  workflow log reports `COMPLETED` and the plan does not. It blocks last, after
+  stamps, cost block and invocation census are written, so no measurement is
+  lost. A `FAILED` or `ESCALATED` log stays a note, since the plan has no such
+  status.
 
 - **A workflow-log metric is a number or `unmeasured`, never prose (#173,
   #102).** The log schema asked for `<number>` in fields the documenter has no

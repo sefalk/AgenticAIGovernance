@@ -722,6 +722,43 @@ try {
     Remove-Item -Recurse -Force $stubBin -ErrorAction SilentlyContinue
 }
 
+# 28. The gate is reachable by name (#292). Three producers in one workflow
+#     reported the HARD lint gate as passed without running anything: the row
+#     named a script they cannot run, and nothing named the label they can.
+$agentsDir = Join-Path (Split-Path $scriptDir) 'agents'
+function Get-LintRow([string]$Agent) {
+    $text = Get-Content (Join-Path $agentsDir "$Agent.agent.md") -Raw
+    $m = [regex]::Match($text, '(?m)^\| Linting clean[^\n]*')
+    if ($m.Success) { return $m.Value } else { return '' }
+}
+foreach ($agent in @('implementer', 'refactorer')) {
+    $row = Get-LintRow $agent
+    $results["lint_row_names_the_label_$agent"] = ($row -match '`lint: changed files`')
+    $details["lint_row_names_the_label_$agent"] = "row: $row"
+    # A gate that was not executed is BLOCKED -- an argument is not a measurement.
+    $results["lint_row_unexecuted_is_blocked_$agent"] = ($row -match '(?i)not (run|executed)[^|]*BLOCKED')
+    $details["lint_row_unexecuted_is_blocked_$agent"] = "row: $row"
+}
+
+$twText = Get-Content (Join-Path $agentsDir 'test-writer.agent.md') -Raw
+$results['test_writer_never_asserts_a_lint_outcome'] = ($twText -match '(?i)never (report|assert|claim)[^.\n]*lint')
+$details['test_writer_never_asserts_a_lint_outcome'] = 'test-writer.agent.md has no rule against asserting a lint result it did not measure'
+
+# A missing tasks.json removes the whole curated surface in silence; agents
+# then improvise scratch labels (seven measured in one consumer).
+$ccText = Get-Content (Join-Path $agentsDir 'compliance-checker.agent.md') -Raw
+$results['preflight_checks_the_task_surface'] = ($ccText -match '(?m)^\| [^|\n]*`\.vscode/tasks\.json`[^\n]*\|[^\n]*BLOCKING')
+$details['preflight_checks_the_task_surface'] = 'compliance-checker pre-flight has no BLOCKING row for .vscode/tasks.json'
+
+# The label the rows name has to exist and reach the gate script's scope.
+. (Join-Path $scriptDir '_suite_env.ps1')
+if (Test-AfSourceTree $scriptDir) {
+    $tasksText = Get-Content (Join-Path (Split-Path (Split-Path $scriptDir)) '.vscode/tasks.json') -Raw
+    $results['the_named_label_exists_and_lints_the_delta'] =
+        ($tasksText -match '"label":\s*"lint: changed files"[\s\S]{0,400}?run-lint\.ps1[\s\S]{0,200}?"changed"')
+    $details['the_named_label_exists_and_lints_the_delta'] = 'no lint: changed files label routing run-lint.ps1 -Scope changed'
+}
+
 $failed = 0
 Write-Host ''
 Write-Host '=== Lint gate regression suite ==='
