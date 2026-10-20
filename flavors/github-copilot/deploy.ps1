@@ -349,6 +349,19 @@ function Get-CurrentGitBranch {
     }
 }
 
+# The .gitignore rule that ignores a payload tree in the target, or '' (#104).
+# A consumer ignoring .github/ received 81 changed files and git showed none of
+# them. --no-index asks the rules, so already-tracked files do not mask it.
+function Get-PayloadIgnoreRule {
+    param([string]$RepoDir, [string]$Probe)
+
+    if (-not (Test-TargetIsGitRepo -RepoDir $RepoDir)) { return '' }
+    $ErrorActionPreference = 'Continue'
+    $line = & git -C $RepoDir check-ignore -v --no-index -- $Probe 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $line) { return '' }
+    return (([string]$line) -split "`t")[0]
+}
+
 # ── Read versions ──────────────────────────────────────────────────────────
 $AFVersion = if (Test-Path $VersionPath) {
     (Get-Content $VersionPath -Raw).Trim()
@@ -888,8 +901,14 @@ if ($UpdateHashes) {
     } else {
         Write-Host "  [DRY RUN] Would write .af-hashes with $($hashEntries.Count) entries" -ForegroundColor Yellow
     }
-    # When hashes are refreshed, previous conflict backups are no longer needed.
-    Invoke-CleanupConflictBackups -RootDir $TargetDir
+    # When hashes are refreshed, previous conflict backups are no longer needed --
+    # unless the payload is gitignored: then the backup is the only rollback (#104).
+    $payloadIgnore = Get-PayloadIgnoreRule -RepoDir $TargetDir -Probe '.github/.af-version'
+    if ($payloadIgnore) {
+        Write-Host "  KEEP    conflict backups -- .github/ is gitignored ($payloadIgnore), so they are the only rollback" -ForegroundColor Yellow
+    } else {
+        Invoke-CleanupConflictBackups -RootDir $TargetDir
+    }
     Write-Host ""
     exit 0
 }
@@ -1171,6 +1190,12 @@ if (Test-TargetIsGitRepo -RepoDir $TargetDir) {
     $currentBranch = Get-CurrentGitBranch -RepoDir $TargetDir
     if ($currentBranch -like 'agent/*') {
         Write-Host "  WARNING: Target repo is on '$currentBranch'. Prefer running framework rollouts on dev/main." -ForegroundColor Yellow
+    }
+    foreach ($probe in @(@{ Tree = '.github/'; Path = '.github/.af-version' }, @{ Tree = '.vscode/'; Path = '.vscode/tasks.json' })) {
+        $rule = Get-PayloadIgnoreRule -RepoDir $TargetDir -Probe $probe.Path
+        if ($rule) {
+            Write-Host "  WARNING: $($probe.Tree) is gitignored in the target ($rule) -- this deploy leaves no diff, history or revert in git. Ignore .github/logs/*.yaml instead of the whole tree." -ForegroundColor Yellow
+        }
     }
 } else {
     Write-Host '  Note: Target is not a git repository -- branch checks skipped.'

@@ -144,6 +144,15 @@ target_is_git_repo() {
     git -C "$repo_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1
 }
 
+# The .gitignore rule that ignores a payload tree in the target, or nothing
+# (#104). --no-index asks the rules, so already-tracked files do not mask it.
+payload_ignore_rule() {
+    local repo_dir="$1" probe="$2" line
+    target_is_git_repo "$repo_dir" || return 0
+    line="$(git -C "$repo_dir" check-ignore -v --no-index -- "$probe" 2>/dev/null)" || return 0
+    printf '%s' "${line%%$'\t'*}"
+}
+
 get_current_git_branch() {
     local repo_dir="$1"
     if ! command -v git >/dev/null 2>&1; then
@@ -910,7 +919,12 @@ if [[ "$UPDATE_HASHES" == "true" ]]; then
     else
         echo "  [DRY RUN] Would write .af-hashes with ${#DEPLOYED_HASHES[@]} entries"
     fi
-    cleanup_conflict_backups "$TARGET_DIR"
+    payload_ignore="$(payload_ignore_rule "$TARGET_DIR" .github/.af-version)"
+    if [[ -n "$payload_ignore" ]]; then
+        echo "  KEEP    conflict backups -- .github/ is gitignored ($payload_ignore), so they are the only rollback"
+    else
+        cleanup_conflict_backups "$TARGET_DIR"
+    fi
     echo ""
     exit 0
 fi
@@ -1193,6 +1207,12 @@ if target_is_git_repo "$TARGET_DIR"; then
     if [[ "$CURRENT_BRANCH" == agent/* ]]; then
         echo "  WARNING: Target repo is on '$CURRENT_BRANCH'. Prefer running framework rollouts on dev/main."
     fi
+    for probe in .github/.af-version .vscode/tasks.json; do
+        rule="$(payload_ignore_rule "$TARGET_DIR" "$probe")"
+        if [[ -n "$rule" ]]; then
+            echo "  WARNING: ${probe%%/*}/ is gitignored in the target ($rule) -- this deploy leaves no diff, history or revert in git. Ignore .github/logs/*.yaml instead of the whole tree."
+        fi
+    done
 else
     CURRENT_BRANCH=""
     echo "  Note: Target is not a git repository -- branch checks skipped."

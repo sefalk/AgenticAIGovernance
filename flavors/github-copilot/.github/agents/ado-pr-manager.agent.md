@@ -200,6 +200,7 @@ feature branch before invoking you. Before creating the PR:
 - **Reviewers set:** {none or list}
 - **Traceability thread:** {posted | skipped (already present) | none}
 - **Autocomplete:** {enabled | not-applicable (human-only) | unavailable (policy not configured)}
+- **Merge commit:** {`lastMergeCommit.commitId` read back from the completed PR | not yet available} — never composed or inferred (#276)
 - **Blocking issue:** {none or reason}
 
 ### Gate Summary

@@ -15,6 +15,16 @@ build for one (#322).
 
 ### Added
 
+- **The compliance-checker's quotations need a read behind them (#286).**
+  #174 recorded a post-flight report that quoted file content from a turn
+  that read nothing. A `SubagentStop` hook (`compliance-checker-stop`, a
+  Python core plus thin `.ps1`/`.sh` wrappers per #287) now checks the return.
+  - A return that cites `path:line` in a turn with **zero** `read_file` calls
+    is blocked. Over 88 real compliance-checker logs this fired 0 times.
+  - A cited path that no `read_file` call touched is reported as ADVISORY
+    only. It fired 5 of 88 times, at least 4 of them falsely.
+  - No log or no readable return is reported as "not measurable": never a pass.
+
 - **A command server lets agents run scripts with arguments (#60).**
   `createAndRunTask` asks on every call and cannot be pre-approved; `runTask`
   takes no arguments. MP held 228 tasks, 197 of them minted by agents.
@@ -201,6 +211,57 @@ build for one (#322).
   the `metrics` thresholds), is not duplication and moved to #369.
 
 ### Fixed
+
+- **A stale declared dependency is noticed (#275).** `mcp` fell a full major
+  version behind, and nothing reported it until a clean install could not import
+  the server (#274).
+  - `.github/dependabot.yml` covers `pip` (mcp-deploy) and `github-actions`,
+    and targets `dev`.
+  - `test-dependency-bounds.py` (CI) requires an upper bound on every runtime
+    dependency in a tracked `pyproject.toml`, or a reason of at least 10
+    characters under `[tool.af.unbounded-dependencies]`. Negative controls on
+    temporary copies prove that it rejects an unbounded declaration.
+  - `mcp>=2` is now `mcp>=2,<3`.
+
+- **Deploy says when the target gitignores the payload, and keeps the only
+  rollback (#104).** A consumer that ignored `.github/` received 81 changed
+  files, and `git status` showed none of them. `-UpdateHashes` then deleted the
+  conflict backup, the only remaining way back.
+  - `deploy.ps1` and `deploy.sh` now warn before writing anything when
+    `.github/` or `.vscode/` is gitignored in the target. The warning names the
+    `.gitignore` rule and recommends ignoring `.github/logs/*.yaml` instead.
+  - `-UpdateHashes` keeps the conflict backups (`KEEP`) when `.github/` is
+    ignored. A tracked payload is still cleaned up as before.
+  - Not done: the explicit `-Force` confirmation the issue proposed. Warning
+    only, so an existing consumer's deploy does not start failing.
+    
+- **The ADO comment-reading gate is HARD (#186).** It stayed SOFT "until the ADO
+  read behaviour has been probed". It was probed on 2026-10-06 against MP WIT
+  3386: `wit_work_item get` returns `System.CommentCount` but no comment text.
+  - The `ado-work-item-manager` gate is now HARD and names the second call,
+    `list_comments`.
+  - `work-item-state` § 6 records the measurement, including that Markdown
+    descriptions and comments render, in place of "Not yet measured".
+    
+- **A merge SHA is read back, never composed (#276).** `ado-pr-manager`
+  reported a merge commit that did not exist in the repository. Its return
+  format had no such field, so the value was produced outside the contract.
+  - `ado-pr-manager` and `gh-pr-manager` gain a **Merge commit** field. It may
+    hold only the value read back from the completed PR (`lastMergeCommit` /
+    `merge_commit_sha`), or "not yet available".
+  - The git-workflow skill has the coordinator take the merge SHA from git and
+    treat a worker-reported SHA as advisory, fetching again if the first fetch
+    still shows the pre-merge tip.
+
+- **code-critic carries the thresholds it enforces (#369).** The critic's HARD
+  gate "Metrics collected and compared to thresholds" pointed to a table that
+  exists only in the `metrics` skill. Measured over MP: 7 of 7 workflows with a
+  code-critic step record no read of that skill (6 of the 7 record no skill
+  reads at all, so the instrument may under-report). Following the #354 rule,
+  the minimal part moves to the point of enforcement:
+  - the four-row threshold table now sits in code-critic Step 5;
+  - `test-rule-drift.ps1` R22/R23 fail if the copy is missing or differs from
+    the skill's table, so the fix cannot become the next drift.
 
 - **The hook attestation gate states what CI covers (#184).** Its rationale
   said the hooks were "covered by nothing" without the hand-run suite, while

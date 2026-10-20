@@ -8,6 +8,11 @@ tools:
   - search/changes
   - read/readFile
   - read/problems
+hooks:
+  SubagentStop:
+    - type: command
+      command: 'bash .github/hooks/scripts/compliance-checker-stop.sh'
+      windows: 'powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/compliance-checker-stop.ps1'
 ---
 
 # Compliance Checker Agent (Worker)
