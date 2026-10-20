@@ -178,6 +178,17 @@ build for one (#322).
 
 ### Fixed
 
+- **The test-execution skill names the reviewed path for dynamic runs (#307).**
+  One consumer had 125 task labels, and 66 of them were one-file lint labels.
+  No reviewed per-call path existed, and the skill never said which fixed label
+  already covers the case. The skill now says:
+  - `runTests` writes no `test-log.json` entry (measured), so a result other
+    agents must see goes through a `tests:` label;
+  - lint a single file with `lint: changed files`, and never create a label for
+    a single file or a single workflow;
+  - pass caller-supplied arguments through `af-command/run_script` (#60), with
+    `createAndRunTask` only where that server is not registered.
+
 - **Restricted producers reach the lint gate by name (#292).** In one consumer
   workflow, three producers reported the HARD lint gate as passed without
   running anything. The gate row named `check-python-linting.py`, a script they
