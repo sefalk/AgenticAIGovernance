@@ -89,6 +89,15 @@ try {
     # E: `null` is an absent verdict, not an invented one.
     $results['E_null_verdict_ok'] = (Invoke-Checker $conforming).Code -eq 0
 
+    # E2: a producer's clarification request is a recorded step (#142), so every
+    #     place that quotes the closed set must carry it, or the log is refused.
+    $r = Invoke-Checker ($conforming -replace 'verdict: "APPROVED"\r?\n  - step: 2', "verdict: `"NEEDS_CLARIFICATION`"`r`n  - step: 2")
+    $results['E2_needs_clarification_verdict_ok'] = $r.Code -eq 0
+    $quoting = @('hooks/scripts/documenter-stop.ps1', 'hooks/scripts/documenter-stop.sh', 'scripts/analyze-retry-economy.py', 'agents/documenter.agent.md')
+    $missingQuote = @($quoting | Where-Object { (Get-Content (Join-Path (Join-Path $scriptDir '..') $_) -Raw) -notmatch 'NEEDS_CLARIFICATION' })
+    $results['E2_closed_set_quoted_everywhere'] = $missingQuote.Count -eq 0
+    if ($missingQuote.Count) { Write-Output "      closed set without NEEDS_CLARIFICATION: $($missingQuote -join ', ')" }
+
     # F: a verdict with a note attached is the verdict, not a new word.
     $r = Invoke-Checker ($conforming -replace 'verdict: "APPROVED"', 'verdict: "APPROVED (Attempt 2)"')
     $results['F_verdict_with_note_ok'] = $r.Code -eq 0
