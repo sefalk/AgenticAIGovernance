@@ -188,6 +188,45 @@ build for one (#322).
   - `test-rule-drift.ps1` R22/R23 fail if the copy is missing or differs from
     the skill's table, so the fix cannot become the next drift.
 
+- **The test-execution skill names the reviewed path for dynamic runs (#307).**
+  One consumer had 125 task labels, and 66 of them were one-file lint labels.
+  No reviewed per-call path existed, and the skill never said which fixed label
+  already covers the case. The skill now says:
+  - `runTests` writes no `test-log.json` entry (measured), so a result other
+    agents must see goes through a `tests:` label;
+  - lint a single file with `lint: changed files`, and never create a label for
+    a single file or a single workflow;
+  - pass caller-supplied arguments through `af-command/run_script` (#60), with
+    `createAndRunTask` only where that server is not registered.
+
+- **Restricted producers reach the lint gate by name (#292).** In one consumer
+  workflow, three producers reported the HARD lint gate as passed without
+  running anything. The gate row named `check-python-linting.py`, a script they
+  cannot run, and nothing named the label they can run.
+  - The implementer and refactorer rows now name `run_task` →
+    `lint: changed files`. They also state that a gate you did not run is
+    BLOCKED, never PASS, and that an outcome is never argued by inspection.
+  - The test-writer never reports or asserts a lint outcome.
+  - The compliance-checker pre-flight blocks when `.vscode/tasks.json` is
+    missing or unparseable, because without it restricted agents have no
+    execution surface and improvise scratch labels instead.
+
+- **`run-all-tests -Changed` runs the deploy pytest suite for a deploy-engine
+  change (#395).** A `deploy_core.py` change "widened to every suite" and
+  reported 35/35, and none of those suites executed the changed code. The
+  pytest suite reached only CI, through its own step.
+  - The new framework-only suite `test-deploy-engine.ps1` delegates to
+    `run-deploy-suite.py`, so the skip rules and the floor under executed tests
+    stay single-sourced.
+  - `suite-scope.json` maps `mcp-deploy/**`, `deploy.ps1`, `deploy.sh` and
+    `.github/.af-manifest` to the new suite, and `test-suite-scope.ps1` asserts
+    that mapping.
+  - CI excludes the suite from its sweep, because the dedicated step already
+    runs the same script.
+  - The first local run found an unlisted environmental skip: creating a
+    symlink needs a privilege a developer account often lacks. That skip is now
+    in `ALLOWED_SKIPS`, with the reason.
+
 - **Git permissions agree across the hook, `af-env.conf` and the skill (#295).**
   An always-on instruction once forbade what three other sources allowed, and
   nothing compared them. `test-rule-drift.ps1` now extracts every git
