@@ -178,6 +178,17 @@ build for one (#322).
 
 ### Fixed
 
+- **The hook attestation gate states what CI covers (#184).** Its rationale
+  said the hooks were "covered by nothing" without the hand-run suite, while
+  the same job runs `test-hooks.ps1` on every pull request.
+  - The comment and the error message in `regression.yml` now say that CI
+    covers hook logic, and that only firing in a live VS Code session is left
+    for `test-hooks-integration.ps1`.
+  - The trigger stays on all of `hooks/`. A script change can fail only live
+    (interpreter resolution, working directory, an output shape VS Code
+    ignores), and only the live log records that.
+  - `test-local-check-marker.py` pins the rationale.
+
 - **The test-execution skill names the reviewed path for dynamic runs (#307).**
   One consumer had 125 task labels, and 66 of them were one-file lint labels.
   No reviewed per-call path existed, and the skill never said which fixed label
