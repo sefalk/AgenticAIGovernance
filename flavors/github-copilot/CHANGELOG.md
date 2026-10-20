@@ -15,6 +15,16 @@ build for one (#322).
 
 ### Added
 
+- **The compliance-checker's quotations need a read behind them (#286).**
+  #174 recorded a post-flight report that quoted file content from a turn
+  that read nothing. A `SubagentStop` hook (`compliance-checker-stop`, a
+  Python core plus thin `.ps1`/`.sh` wrappers per #287) now checks the return.
+  - A return that cites `path:line` in a turn with **zero** `read_file` calls
+    is blocked. Over 88 real compliance-checker logs this fired 0 times.
+  - A cited path that no `read_file` call touched is reported as ADVISORY
+    only. It fired 5 of 88 times, at least 4 of them falsely.
+  - No log or no readable return is reported as "not measurable": never a pass.
+
 - **A command server lets agents run scripts with arguments (#60).**
   `createAndRunTask` asks on every call and cannot be pre-approved; `runTask`
   takes no arguments. MP held 228 tasks, 197 of them minted by agents.
