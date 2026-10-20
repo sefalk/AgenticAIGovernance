@@ -178,6 +178,14 @@ build for one (#322).
 
 ### Fixed
 
+- **The ADO comment-reading gate is HARD (#186).** It stayed SOFT "until the ADO
+  read behaviour has been probed". It was probed on 2026-10-06 against MP WIT
+  3386: `wit_work_item get` returns `System.CommentCount` but no comment text.
+  - The `ado-work-item-manager` gate is now HARD and names the second call,
+    `list_comments`.
+  - `work-item-state` § 6 records the measurement, including that Markdown
+    descriptions and comments render, in place of "Not yet measured".
+    
 - **A merge SHA is read back, never composed (#276).** `ado-pr-manager`
   reported a merge commit that did not exist in the repository. Its return
   format had no such field, so the value was produced outside the contract.
