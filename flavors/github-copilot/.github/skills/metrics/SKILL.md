@@ -131,6 +131,9 @@ find tests/ -name "*.py" | xargs cat | grep -v "^\s*$" | grep -v "^\s*#" | wc -l
 
 ## Quality Gate Thresholds
 
+`code-critic.agent.md` carries a copy of this table where it enforces it, and
+`test-rule-drift.ps1` fails if the two differ (#369). Change both together.
+
 | Module Type | Line Cov | Branch Cov | Mutation | Max Complexity | Test:Code |
 |---|---|---|---|---|---|
 | Domain core | ≥ 90% | ≥ 85% | ≥ 80% | ≤ 10 | ≥ 1.5:1 |

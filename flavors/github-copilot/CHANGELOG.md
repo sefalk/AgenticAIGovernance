@@ -189,6 +189,57 @@ build for one (#322).
     temporary copies prove that it rejects an unbounded declaration.
   - `mcp>=2` is now `mcp>=2,<3`.
 
+- **Deploy says when the target gitignores the payload, and keeps the only
+  rollback (#104).** A consumer that ignored `.github/` received 81 changed
+  files, and `git status` showed none of them. `-UpdateHashes` then deleted the
+  conflict backup, the only remaining way back.
+  - `deploy.ps1` and `deploy.sh` now warn before writing anything when
+    `.github/` or `.vscode/` is gitignored in the target. The warning names the
+    `.gitignore` rule and recommends ignoring `.github/logs/*.yaml` instead.
+  - `-UpdateHashes` keeps the conflict backups (`KEEP`) when `.github/` is
+    ignored. A tracked payload is still cleaned up as before.
+  - Not done: the explicit `-Force` confirmation the issue proposed. Warning
+    only, so an existing consumer's deploy does not start failing.
+    
+- **The ADO comment-reading gate is HARD (#186).** It stayed SOFT "until the ADO
+  read behaviour has been probed". It was probed on 2026-10-06 against MP WIT
+  3386: `wit_work_item get` returns `System.CommentCount` but no comment text.
+  - The `ado-work-item-manager` gate is now HARD and names the second call,
+    `list_comments`.
+  - `work-item-state` § 6 records the measurement, including that Markdown
+    descriptions and comments render, in place of "Not yet measured".
+    
+- **A merge SHA is read back, never composed (#276).** `ado-pr-manager`
+  reported a merge commit that did not exist in the repository. Its return
+  format had no such field, so the value was produced outside the contract.
+  - `ado-pr-manager` and `gh-pr-manager` gain a **Merge commit** field. It may
+    hold only the value read back from the completed PR (`lastMergeCommit` /
+    `merge_commit_sha`), or "not yet available".
+  - The git-workflow skill has the coordinator take the merge SHA from git and
+    treat a worker-reported SHA as advisory, fetching again if the first fetch
+    still shows the pre-merge tip.
+
+- **code-critic carries the thresholds it enforces (#369).** The critic's HARD
+  gate "Metrics collected and compared to thresholds" pointed to a table that
+  exists only in the `metrics` skill. Measured over MP: 7 of 7 workflows with a
+  code-critic step record no read of that skill (6 of the 7 record no skill
+  reads at all, so the instrument may under-report). Following the #354 rule,
+  the minimal part moves to the point of enforcement:
+  - the four-row threshold table now sits in code-critic Step 5;
+  - `test-rule-drift.ps1` R22/R23 fail if the copy is missing or differs from
+    the skill's table, so the fix cannot become the next drift.
+
+- **The hook attestation gate states what CI covers (#184).** Its rationale
+  said the hooks were "covered by nothing" without the hand-run suite, while
+  the same job runs `test-hooks.ps1` on every pull request.
+  - The comment and the error message in `regression.yml` now say that CI
+    covers hook logic, and that only firing in a live VS Code session is left
+    for `test-hooks-integration.ps1`.
+  - The trigger stays on all of `hooks/`. A script change can fail only live
+    (interpreter resolution, working directory, an output shape VS Code
+    ignores), and only the live log records that.
+  - `test-local-check-marker.py` pins the rationale.
+
 - **The test-execution skill names the reviewed path for dynamic runs (#307).**
   One consumer had 125 task labels, and 66 of them were one-file lint labels.
   No reviewed per-call path existed, and the skill never said which fixed label

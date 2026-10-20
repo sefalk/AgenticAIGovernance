@@ -3743,6 +3743,21 @@ Assert-True "the coordinator re-measures the documenter, which no critic reviews
     ($tddSkill -match '(?i)re-measure one claimed quantity yourself') `
     "a documenter content edit still reaches the human on its own word"
 
+# #276: ado-pr-manager reported a merge SHA that resolves to nothing. Its return
+# format had no such field, so the value was composed outside the contract. The
+# field now exists, may only be filled by read-back, and the coordinator derives
+# the SHA from git and treats the worker's value as advisory.
+foreach ($prAgent in @('ado-pr-manager', 'gh-pr-manager')) {
+    $prText = Get-Content (Join-Path $githubDir "agents/$prAgent.agent.md") -Raw
+    Assert-True "$prAgent returns a merge commit only as a read-back value" `
+        ($prText -match '(?m)^- \*\*Merge commit:\*\*[^\n]*read back[^\n]*not yet available') `
+        "$prAgent has no merge-commit field bound to a read-back, so a value can be composed"
+}
+$gitSkill = Get-Content (Join-Path $githubDir 'skills/git-workflow/SKILL.md') -Raw
+Assert-True "the coordinator derives the merge SHA from git, the worker's is advisory" `
+    ($gitSkill -match '(?is)merge SHA.{0,40}from git.{0,160}advisory') `
+    "a worker-reported merge SHA can still enter the records unchecked"
+
 Write-Output ""
 
 # ── 7. Edge cases ────────────────────────────────────────────────────────
