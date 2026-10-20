@@ -75,10 +75,13 @@ For file- or test-scoped runs, use `runTests` with `files` and/or `testNames`
 arguments. For one-off tasks not covered by pre-defined tasks (e.g., syntax
 checks, custom lint), use `createAndRunTask`.
 
-`runTests` leaves no entry in `.github/test-log.json` — it returns a count and
-writes no file (measured, #307). Use it to iterate; when another agent must be
-able to see the result, run the scope through a `tests:` label, which goes
-through `run-tests.ps1` and writes the log.
+`runTests` writes a `.github/test-log.json` entry only when the project loads
+the `af_test_log` pytest plugin (`pythonpath = [".github/scripts"]`,
+`addopts = "-p af_test_log"` in `pyproject.toml`; the deploy warns while it is
+missing, #180). Its entry carries `"run_by": "pytest-plugin"`, and a file- or
+test-scoped run is filed as `partial`, never as a scope. Without the plugin,
+`runTests` writes nothing (measured, #307): iterate with it, and when another
+agent must see the result run the scope through a `tests:` label.
 
 **Lint one file?** Use `lint: changed files` — the file you are working on is in
 the branch delta. Never create a task label for a single file or a single

@@ -288,7 +288,8 @@ write_log_entry "$SCOPE_KEY" "{\"last_run\":\"$STARTED\",\"started\":\"$STARTED\
 # fails, and discarding it is what made this failure mode silent.
 cd "$WORKSPACE_ROOT"
 STDERR_PATH="$(mktemp "${TMPDIR:-/tmp}/af-run-tests.XXXXXX")"
-STDOUT=$("$PYTHON" "${PYTEST_ARGS[@]}" 2>"$STDERR_PATH")
+# The wrapper writes its own entry; the af_test_log plugin stays out of its runs (#180).
+STDOUT=$(AF_TEST_LOG_BY_WRAPPER=1 "$PYTHON" "${PYTEST_ARGS[@]}" 2>"$STDERR_PATH")
 PYTEST_EXIT=$?
 STDERR_TEXT="$(cat "$STDERR_PATH" 2>/dev/null)"
 rm -f "$STDERR_PATH"

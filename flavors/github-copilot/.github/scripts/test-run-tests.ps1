@@ -866,11 +866,12 @@ finally {
 #    125 task labels, 66 of them one-file lint labels, because no reviewed
 #    path existed and the skill never said which fixed label already answers
 #    it. And runTests was presented as a plain fallback while leaving no entry
-#    in the shared log this runner writes -- measured byte-identical.
+#    in the shared log this runner writes -- measured byte-identical. Since
+#    #180 the af_test_log plugin logs it, but only once the project loads it.
 $skillPath = Join-Path $githubDir 'skills/test-execution/SKILL.md'
 $skillText = if (Test-Path $skillPath) { Get-Content $skillPath -Raw } else { '' }
-$results['L_skill_says_runTests_leaves_no_log_entry'] = ($skillText -match '(?i)runTests[^\n]*\b(no|not)\b[^\n]*test-log')
-$details['L_skill_says_runTests_leaves_no_log_entry'] = 'test-execution skill does not say runTests writes no test-log.json entry'
+$results['L_skill_says_runTests_leaves_no_log_entry'] = ($skillText -match '(?is)runTests.{0,80}test-log\.json.{0,40}only when.{0,200}af_test_log') -and ($skillText -match '(?is)without the plugin.{0,40}runTests.{0,20}writes nothing')
+$details['L_skill_says_runTests_leaves_no_log_entry'] = 'test-execution skill does not say runTests is logged only with the af_test_log plugin, and writes nothing without it'
 $results['L_skill_forbids_per_file_labels'] = ($skillText -match '(?i)never (mint|create|add)[^.\n]*label[^.\n]*(file|per-file)')
 $details['L_skill_forbids_per_file_labels'] = 'test-execution skill does not forbid one-file task labels'
 $results['L_skill_names_the_reviewed_dynamic_path'] = ($skillText -match 'af-command/run_script')

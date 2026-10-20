@@ -15,6 +15,30 @@ build for one (#322).
 
 ### Added
 
+- **Every pytest invocation can write the test log (#180).** Only
+  `run-tests.ps1/.sh` wrote `.github/test-log.json`. A run through `runTests`,
+  Test Explorer or a bare `pytest` therefore left no entry, and a missing entry
+  reads like "never run".
+  - New pytest plugin `.github/scripts/af_test_log.py`. A project loads it in
+    its `pyproject.toml`:
+    `[tool.pytest.ini_options] pythonpath = [".github/scripts"]` and
+    `addopts = "-p af_test_log"`. This is a one-time manual step, because the
+    file belongs to the project (owner decision 2026-10-20). Measured: the ini
+    `pythonpath` is applied before `-p` in `addopts` (pytest 9.1.1).
+  - The plugin writes the wrappers' entry shape with
+    `"run_by": "pytest-plugin"`:
+    - the entry is claimed as `running` before the first test, so an
+      interrupted run stays `running` (#179);
+    - `tests` is filed as `all`, `tests/<scope>` as that scope, and a file,
+      node id, several paths, `-k` or `-m` as `partial` (#303);
+    - other entries survive.
+  - The wrappers set `AF_TEST_LOG_BY_WRAPPER=1` for their runs. They keep their
+    own entry, which also records failures before pytest starts, and nothing is
+    written twice.
+  - All three deploy paths print a NOTE while a project's `pyproject.toml`
+    does not load the plugin. The test-execution skill says that `runTests` is
+    logged only with the plugin.
+
 - **Tier models are checked against Copilot's model catalogue (#421).**
   VS Code only greys out an unknown `model:` entry ("Unknown model ... will be
   ignored"). It is neither an error nor a warning, so no agent sees it, and a

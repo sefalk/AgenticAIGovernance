@@ -1398,6 +1398,14 @@ if [[ -f "$cost_probe" ]]; then
     fi
 fi
 
+# ── Test-log plugin ────────────────────────────────────────────────────────────
+# pyproject.toml belongs to the project, so the deploy only says what is missing (#180).
+if [[ -f "$TARGET_DIR/pyproject.toml" ]] && ! grep -qF 'af_test_log' "$TARGET_DIR/pyproject.toml"; then
+    echo ""
+    echo "  NOTE    runTests / Test Explorer runs are not logged -- load the af_test_log plugin (#180):"
+    echo '          pyproject.toml [tool.pytest.ini_options]: pythonpath = [".github/scripts"], addopts = "-p af_test_log"'
+fi
+
 # Prune stale backups from previous deploy runs
 prune_old_backups "$TARGET_DIR" "$BACKUP_PRUNE_DAYS" "$BACKUP_DIR"
 

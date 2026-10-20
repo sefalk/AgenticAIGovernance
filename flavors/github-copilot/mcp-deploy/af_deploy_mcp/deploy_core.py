@@ -771,7 +771,22 @@ def apply(source_root: Path, target_dir: Path) -> dict:
         "skipped": skipped,
         "backup_dir": str(backup_dir) if made_backup else None,
         "model_check": model_check(source_root, target_af_env),
+        "test_log_plugin": test_log_plugin_note(target_dir),
     }
+
+
+TEST_LOG_PLUGIN_NOTE = [
+    "  NOTE    runTests / Test Explorer runs are not logged -- load the af_test_log plugin (#180):",
+    '          pyproject.toml [tool.pytest.ini_options]: pythonpath = [".github/scripts"], addopts = "-p af_test_log"',
+]
+
+
+def test_log_plugin_note(target_dir: Path) -> list[str]:
+    """The note a Python project gets while its pyproject.toml does not load the plugin."""
+    pyproject = target_dir / "pyproject.toml"
+    if not pyproject.is_file() or "af_test_log" in pyproject.read_text(encoding="utf-8", errors="replace"):
+        return []
+    return list(TEST_LOG_PLUGIN_NOTE)
 
 
 def model_check(source_root: Path, target_af_env: Path) -> dict:
