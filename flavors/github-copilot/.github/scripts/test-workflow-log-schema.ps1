@@ -98,6 +98,12 @@ try {
     $results['E2_closed_set_quoted_everywhere'] = $missingQuote.Count -eq 0
     if ($missingQuote.Count) { Write-Output "      closed set without NEEDS_CLARIFICATION: $($missingQuote -join ', ')" }
 
+    # E3: the re-invocation that answers a clarification is not a retry.
+    $clarified = $conforming -replace '(?s)  - step: 2\r?\n    agent: "test-writer"\r?\n    action: "wrote tests"\r?\n    verdict: "null"', "  - step: 2`r`n    agent: `"test-writer`"`r`n    action: `"asked which file`"`r`n    verdict: `"NEEDS_CLARIFICATION`"`r`n  - step: 2b`r`n    agent: `"test-writer`"`r`n    action: `"wrote tests`"`r`n    verdict: `"null`""
+    $r = Invoke-Checker $clarified
+    $results['E3_clarification_rerun_is_not_a_retry'] = ($clarified -match 'step: 2b') -and $r.Code -eq 0
+    if ($r.Code -ne 0) { Write-Output "      $($r.Output.Trim())" }
+
     # F: a verdict with a note attached is the verdict, not a new word.
     $r = Invoke-Checker ($conforming -replace 'verdict: "APPROVED"', 'verdict: "APPROVED (Attempt 2)"')
     $results['F_verdict_with_note_ok'] = $r.Code -eq 0
