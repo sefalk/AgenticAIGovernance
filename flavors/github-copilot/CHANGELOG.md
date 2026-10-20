@@ -178,6 +178,16 @@ build for one (#322).
 
 ### Fixed
 
+- **A merge SHA is read back, never composed (#276).** `ado-pr-manager`
+  reported a merge commit that did not exist in the repository. Its return
+  format had no such field, so the value was produced outside the contract.
+  - `ado-pr-manager` and `gh-pr-manager` gain a **Merge commit** field. It may
+    hold only the value read back from the completed PR (`lastMergeCommit` /
+    `merge_commit_sha`), or "not yet available".
+  - The git-workflow skill has the coordinator take the merge SHA from git and
+    treat a worker-reported SHA as advisory, fetching again if the first fetch
+    still shows the pre-merge tip.
+
 - **code-critic carries the thresholds it enforces (#369).** The critic's HARD
   gate "Metrics collected and compared to thresholds" pointed to a table that
   exists only in the `metrics` skill. Measured over MP: 7 of 7 workflows with a
