@@ -2499,6 +2499,33 @@ run_case "git branch -D is denied" \
     '{"tool_name":"runInTerminal","tool_input":{"command":"git branch -D old-branch"}}' \
     deny
 
+# --- Git global options before the subcommand (issue #431) -----------------
+# Every git rule was anchored at `git <subcommand>`, so `git -C <path> ...` --
+# the form agents are told to use in multi-root windows -- passed them all.
+for gcmd in \
+    'git -C C:/repo push --force origin x' \
+    'git -C C:/repo branch -D foo' \
+    'git -c core.pager=less reset --hard' \
+    'git -C C:/repo add .' \
+    'git --no-pager -C C:/repo rebase main' \
+    'git -C \"C:/my repo\" push origin main' \
+    'git --work-tree=C:/x --git-dir=C:/x/.git reset --hard'; do
+    run_case "$gcmd is denied (#431)" \
+        block-dangerous.sh agent/x \
+        "{\"tool_name\":\"runInTerminal\",\"tool_input\":{\"command\":\"$gcmd\"}}" \
+        deny
+done
+# Control: the normalised unit is still a data carrier, so a commit message
+# quoting a dangerous command stays data (was a false deny).
+run_case "git -C <path> commit quoting a dangerous command is not denied (#431)" \
+    block-dangerous.sh agent/x \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"git -C C:/repo commit -m \"docs: never git push --force\""}}' \
+    silent
+run_case "git -C <path> branch -d is not denied (#431)" \
+    block-dangerous.sh agent/x \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"git -C C:/repo branch -d merged"}}' \
+    silent
+
 run_case "--no-verify is denied" \
     block-dangerous.sh agent/x \
     '{"tool_name":"runInTerminal","tool_input":{"command":"git commit --no-verify -m test"}}' \
