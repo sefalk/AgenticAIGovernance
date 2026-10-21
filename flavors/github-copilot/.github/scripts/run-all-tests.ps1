@@ -36,14 +36,17 @@ param(
     [int]$TimeoutSeconds = 1800,
     # Overridable so the budget suite can drive this runner against a fixture.
     [string]$BudgetFile = '',
-    # Scope a local run to the suites the working diff requires. CI does not
-    # pass this and keeps sweeping everything (#334).
+    # Scope a run to the suites the diff requires (#334). CI passes it on pull
+    # requests into dev and sweeps everything after the merge (#427).
     [switch]$Changed,
     [switch]$ListSelection,
     [string]$Since = 'origin/dev',
     [string]$ScopeFile = '',
     # Bypasses git so the scope suite can assert selection deterministically.
-    [string[]]$ChangedFiles = @()
+    [string[]]$ChangedFiles = @(),
+    # Where the payload sits in its git repository ('flavors/github-copilot/' in
+    # the framework repo, '' or '.' in a project). Detected when not given.
+    [string]$PayloadPrefix
 )
 
 $ErrorActionPreference = 'Stop'
@@ -84,9 +87,16 @@ $suites = Get-ChildItem -Path $scriptDir -Filter 'test-*.ps1' |
 # Patterns are matched by suffix so the same map works here, where the tree
 # starts at flavors/github-copilot/, and in a project the payload was deployed
 # into, where it starts at .github/.
+# TrimStart('./') trims characters, so `.github/x` became `github/x` and no
+# project path matched; only the literal `./` prefix is removed.
+function ConvertTo-ScopePath {
+    param([string]$Path)
+    return (($Path -replace '\\', '/') -replace '^(\./)+', '')
+}
+
 function Test-PathMatchesPattern {
     param([string]$Path, [string]$Pattern)
-    $p = ($Path -replace '\\', '/').TrimStart('./')
+    $p = ConvertTo-ScopePath $Path
     if ($Pattern.EndsWith('/**')) {
         $dir = $Pattern.Substring(0, $Pattern.Length - 3)
         return ($p -eq $dir) -or $p.StartsWith("$dir/") -or $p.Contains("/$dir/")
@@ -105,12 +115,27 @@ function Get-ChangedPaths {
 }
 
 function Select-Suites {
-    param([string[]]$Paths, $Scope, [string[]]$AllSuites)
+    param([string[]]$Paths, $Scope, [string[]]$AllSuites, [string]$Prefix = '')
 
     $selected = New-Object 'System.Collections.Generic.HashSet[string]'
     $uncovered = @()
+    $outside = @()
+    $repoMap = @()
+    if ($Scope.PSObject.Properties.Name -contains 'repo') { $repoMap = @($Scope.repo.PSObject.Properties) }
 
     foreach ($path in $Paths) {
+        # A path outside the payload belongs to the repository around it, whose
+        # CI steps cover it unconditionally (#427). Only the repo map can make
+        # it a payload suite's business.
+        $norm = ConvertTo-ScopePath $path
+        if ($Prefix -and -not $norm.StartsWith($Prefix)) {
+            $mapped = $false
+            foreach ($entry in $repoMap) {
+                if (@($entry.Value) -contains $norm) { [void]$selected.Add($entry.Name); $mapped = $true }
+            }
+            if (-not $mapped) { $outside += $norm }
+            continue
+        }
         if (@($Scope.always | Where-Object { Test-PathMatchesPattern $path $_ }).Count -gt 0) {
             foreach ($s in $AllSuites) { [void]$selected.Add($s) }
             continue
@@ -135,7 +160,7 @@ function Select-Suites {
         $uncovered += $path
     }
 
-    return @{ Selected = @($selected); Uncovered = $uncovered }
+    return @{ Selected = @($selected); Uncovered = $uncovered; Outside = $outside }
 }
 
 if ($Changed -or $ListSelection) {
@@ -143,6 +168,15 @@ if ($Changed -or $ListSelection) {
     $allNames = @($suites | Select-Object -ExpandProperty Name)
     $chosen = $allNames
     $uncovered = @()
+    $outside = @()
+
+    if (-not $PSBoundParameters.ContainsKey('PayloadPrefix')) {
+        $ErrorActionPreference = 'Continue'
+        $PayloadPrefix = [string](git -C (Join-Path $scriptDir '..\..') rev-parse --show-prefix 2>$null)
+        $ErrorActionPreference = 'Stop'
+    }
+    $PayloadPrefix = $PayloadPrefix.Trim()
+    if ($PayloadPrefix -eq '.') { $PayloadPrefix = '' }
 
     $scope = $null
     if (Test-Path $ScopeFile) {
@@ -159,14 +193,18 @@ if ($Changed -or $ListSelection) {
     } elseif ($null -eq $paths) {
         $uncovered = @('could not read the diff')
     } else {
-        $selection = Select-Suites -Paths $paths -Scope $scope -AllSuites $allNames
+        $selection = Select-Suites -Paths $paths -Scope $scope -AllSuites $allNames -Prefix $PayloadPrefix
         $uncovered = $selection.Uncovered
+        $outside = $selection.Outside
         if ($uncovered.Count -eq 0) { $chosen = @($selection.Selected | Sort-Object) }
     }
 
     if ($ListSelection) {
         Write-Host ''
         Write-Host "=== AF suite selection ($($paths.Count) changed path(s)) ==="
+        if ($outside.Count -gt 0) {
+            Write-Host ("  OUTSIDE   not payload, covered by their own CI steps: {0}" -f ($outside -join ', '))
+        }
         if ($uncovered.Count -gt 0) {
             Write-Host ("  FALLBACK  no mapping covers: {0} -- running every suite" -f ($uncovered -join ', '))
         }
@@ -178,11 +216,14 @@ if ($Changed -or $ListSelection) {
         exit 0
     }
 
+    if ($outside.Count -gt 0) {
+        Write-Host ("Outside the payload, covered by their own CI steps: {0}" -f ($outside -join ', '))
+    }
     if ($uncovered.Count -gt 0) {
         Write-Host ("Scoped run widened to every suite -- no mapping covers: {0}" -f ($uncovered -join ', '))
     }
     if ($chosen.Count -eq 0) {
-        Write-Host 'Nothing to run -- no changed path requires a suite. CI still sweeps everything.'
+        Write-Host 'Nothing to run -- no changed path requires a suite. The full sweep runs after the merge.'
         exit 0
     }
     $suites = @($suites | Where-Object { $chosen -contains $_.Name })

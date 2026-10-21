@@ -38,11 +38,13 @@ function Add-Result {
 }
 
 function Invoke-Selection {
-    param([string[]]$Paths)
+    # The prefix is pinned so the result does not depend on where this suite
+    # runs: flavors/github-copilot/ in the framework repo, '' in a project.
+    param([string[]]$Paths, [string]$Prefix = 'flavors/github-copilot/')
     # Local: stderr from a native command is a terminating error under Stop.
     $ErrorActionPreference = 'Continue'
     $out = & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner `
-        -ListSelection -ChangedFiles $Paths 2>&1 | Out-String
+        -ListSelection -ChangedFiles $Paths -PayloadPrefix $Prefix 2>&1 | Out-String
     return $out
 }
 
@@ -106,7 +108,7 @@ Add-Result 'S6_a_hook_change_selects_hook_suites_only' `
     'hook change'
 
 # The fallback is the whole reason an incomplete map is survivable.
-$unknown = Invoke-Selection -Paths @('some/place/nobody/mapped.txt')
+$unknown = Invoke-Selection -Paths @('flavors/github-copilot/some/place/nobody/mapped.txt')
 Add-Result 'S7_an_unmapped_path_falls_back_to_the_full_sweep' `
     (($unknown -match 'FALLBACK') -and ($unknown -match 'SELECT\s+test-worktree-scripts\.ps1')) `
     'unmapped path'
@@ -175,6 +177,49 @@ $engineText = if (Test-Path $engineSuite) { Get-Content $engineSuite -Raw } else
 Add-Result 'S14_the_deploy_engine_suite_delegates_to_run_deploy_suite' `
     ($engineText -match 'run-deploy-suite\.py') `
     'test-deploy-engine.ps1 must call run-deploy-suite.py'
+
+# ── Paths outside the payload (#427) ────────────────────────────────────────
+
+# In the framework repo the payload is one directory of many. A change to the
+# repo's own CI, hooks or docs is not a payload change: those have their own
+# unconditional CI steps. Treating them as unmapped widened nearly every pull
+# request to the full sweep, which is what CI scoping exists to stop.
+$outside = Invoke-Selection -Paths @('.github/workflows/regression.yml', '.github/scripts/changelog-fragments.py')
+Add-Result 'S15_a_path_outside_the_payload_selects_nothing' `
+    (($outside -match 'nothing selected') -and ($outside -match 'OUTSIDE') -and ($outside -notmatch 'FALLBACK')) `
+    "selection: $(($outside -split "`r?`n" | Where-Object { $_ -match 'SELECT|FALLBACK|OUTSIDE|nothing' }) -join ' / ')"
+
+# Unless a suite reads it: test-context-budget asserts the repo's pre-commit
+# hook runs the shipped guards.
+$repoHook = Invoke-Selection -Paths @('.githooks/pre-commit')
+Add-Result 'S16_the_repo_map_selects_a_suite_for_a_path_outside_the_payload' `
+    (($repoHook -match 'SELECT\s+test-context-budget\.ps1') -and ($repoHook -notmatch 'FALLBACK') -and ($repoHook -notmatch 'SELECT\s+test-hooks\.ps1')) `
+    "selection: $(($repoHook -split "`r?`n" | Where-Object { $_ -match 'SELECT|FALLBACK|OUTSIDE|nothing' }) -join ' / ')"
+
+# In a project the payload is the repository root, so nothing is outside and
+# an unmapped path still widens.
+$project = Invoke-Selection -Paths @('src/app.py') -Prefix '.'
+Add-Result 'S17_with_the_payload_at_the_root_an_unmapped_path_still_widens' `
+    (($project -match 'FALLBACK') -and ($project -notmatch 'OUTSIDE')) `
+    'payload at the repository root'
+
+# In a project the paths start with `.github/`. Trimming the characters './'
+# instead of the prefix './' turned that into `github/`, and no mapping matched.
+$projectHook = Invoke-Selection -Paths @('.github/hooks/scripts/block-dangerous.ps1') -Prefix '.'
+Add-Result 'S19_a_project_path_starting_with_a_dot_still_matches_its_mapping' `
+    (($projectHook -match 'SELECT\s+test-hooks\.ps1') -and ($projectHook -notmatch 'FALLBACK')) `
+    "selection: $(($projectHook -split "`r?`n" | Where-Object { $_ -match 'SELECT|FALLBACK|OUTSIDE|nothing' }) -join ' / ')"
+
+$repoPatterns = @()
+if ($parsed -and $scope.PSObject.Properties.Name -contains 'repo') {
+    foreach ($entry in $scope.repo.PSObject.Properties) { $repoPatterns += @($entry.Value) }
+}
+$repoRoot = Join-Path $payloadRoot '..\..'
+$repoDead = @()
+if ($inSource) { $repoDead = @($repoPatterns | Where-Object { -not (Test-Path (Join-Path $repoRoot $_)) }) }
+Add-Result 'S18_every_repo_pattern_points_at_something_that_exists' `
+    (($repoPatterns.Count -gt 0) -and ($repoDead.Count -eq 0)) `
+    "repo patterns=$($repoPatterns -join ', '); dead=$($repoDead -join ', ')"
 
 # ── Report ────────────────────────────────────────────────────────────────
 
