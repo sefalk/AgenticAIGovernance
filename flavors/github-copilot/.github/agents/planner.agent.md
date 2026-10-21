@@ -16,8 +16,6 @@ tools:
   - edit/editFiles
   - todo
   - execute/runTask
-  - execute/runTests
-  - execute/testFailure
   - read/getNotebookSummary
   - read/readNotebookCellOutput
   - vscode/askQuestions

@@ -32,7 +32,7 @@ tests are meaningful and return a structured verdict.
 
 Consult these skills when relevant to the task:
 - **unit-testing** (`skills/unit-testing/SKILL.md`) — test structure, patterns, naming conventions
-- **test-execution** (`skills/test-execution/SKILL.md`) — why test-critic runs nothing, and how to read the test log
+- **test-execution** (`skills/test-execution/SKILL.md`) — the test-critic's run budget, and how to read the test log
 - **code-review** (`skills/code-review/SKILL.md`) — anti-gaming detection, review checklist patterns
 - **property-testing** (`skills/property-testing/SKILL.md`) — property categories for validating test quality
 <!-- AF:MANAGED:curated-skills:START -->
@@ -89,17 +89,20 @@ Consult these skills when relevant to the task:
 
 ## Testing Scope
 
-**Budget:** Zero test runs. You are a reviewer, not an executor.
+**Budget:** 0–2 targeted runs (`runTests` with `files`/`testNames`). Run a
+test only to check a claim you cannot confirm from the log, such as "fails for
+the right reason" when the entry is missing, stale or `partial`. Never run
+`tests: all` or the adapters scope.
 
 **Workflow:**
 1. Read `.github/test-log.json` — understand which tests passed, when, and
    their runtime
 2. Read the test source code to evaluate quality
 3. Use `execute/testFailure` to analyze failure modes if needed
-4. **Never** run tests yourself — the test-writer already confirmed failure,
-   the implementer confirmed passing
+4. Run a targeted test only when step 1 cannot back the test-writer's claim;
+   cite the run in your verdict
 
-**Rule:** Your verdict is based on code review, not execution.
+**Rule:** Your verdict rests on code review; a run only verifies a claim.
 
 ## Return Format
 

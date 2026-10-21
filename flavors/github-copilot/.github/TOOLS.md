@@ -28,10 +28,10 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 | `edit/createFile` | W | — | — | ✅ | — | ✅ | — | — | ✅ | — | — | — |
 | `edit/createDirectory` | W | — | — | ✅ | — | ✅ | — | — | ✅ | — | — | — |
 | **Execution** | | | | | | | | | | | | |
-| `execute/runTests` | X | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
+| `execute/runTests` | X | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
 | `execute/runTask` | X | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — |
 | `execute/createAndRunTask` | X | ✅ | — | — | — | ✅ | ✅ | ✅ | — | — | — | — |
-| `execute/testFailure` | X | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
+| `execute/testFailure` | X | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
 | `execute/runInTerminal` | X | ✅ | — | — | — | — | — | — | — | — | — | — |
 | `execute/getTerminalOutput` | X | ✅ | — | — | — | — | — | — | — | — | — | — |
 | **Notebook** | | | | | | | | | | | | |
