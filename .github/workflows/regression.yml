@@ -475,6 +475,34 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-precommit-format-gate.py
 
+      # The per-commit VERSION bump and the CHANGELOG top-insert made any two
+      # open pull requests conflict by construction (#426). The hook now
+      # refuses a top-insert instead of bumping; this drives it both ways.
+      - name: Test the pre-commit version gate
+        shell: powershell
+        run: python .github\scripts\test-precommit-version-gate.py
+
+      - name: Test the changelog fragment tool
+        shell: powershell
+        run: python .github\scripts\test-changelog-fragments.py
+
+      # The hook runs only in a clone that enabled it, so the pull request is
+      # held to the same rule: entries arrive as changelog.d/ fragments, and
+      # CHANGELOG.md changes only together with VERSION, at a release cut.
+      # Exempt on a dev -> main promotion, which carries what dev already holds.
+      - name: Check that changelog entries are fragments
+        shell: powershell
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          IS_PROMOTION: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref == 'dev' }}
+        run: |
+          if ($env:BASE_REF -and $env:IS_PROMOTION -ne 'true') {
+            python .github\scripts\changelog-fragments.py check --against "origin/$env:BASE_REF"
+          } else {
+            python .github\scripts\changelog-fragments.py check
+          }
+          exit $LASTEXITCODE
+
       # The delivery paths are a skill, not prose, precisely so that they can be
       # checked (#236). This asserts every path still ends in a verification, that
       # the hotfix path still names the checkout trap, that the release cut still

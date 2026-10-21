@@ -169,6 +169,23 @@ if [[ -f "$VERSION_PATH" ]]; then
     AF_VERSION="$(tr -d '[:space:]' < "$VERSION_PATH")"
 fi
 
+# VERSION moves only at a release cut, so the commit identifies a deploy between
+# releases (#426). Only a tracked payload has one -- a copy inside some other
+# checkout would otherwise report that checkout's HEAD. Same rule as
+# deploy_core.source_commit and deploy.ps1 Get-SourceCommit.
+source_commit() {
+    local root="$1" sha
+    command -v git >/dev/null 2>&1 || return 0
+    git -C "$root" ls-files --error-unmatch -- VERSION >/dev/null 2>&1 || return 0
+    sha="$(git -C "$root" rev-parse --short=12 HEAD 2>/dev/null)" || return 0
+    [[ -n "$sha" ]] || return 0
+    if [[ -n "$(git -C "$root" status --porcelain --untracked-files=no -- . 2>/dev/null)" ]]; then
+        sha="$sha-dirty"
+    fi
+    printf '%s' "$sha"
+}
+AF_COMMIT="$(source_commit "$AF_ROOT")"
+
 DEPLOYED_VERSION_FILE="$TARGET_GITHUB/.af-version"
 DEPLOYED_INFO=""
 if [[ -f "$DEPLOYED_VERSION_FILE" ]]; then
@@ -1268,6 +1285,9 @@ version: $AF_VERSION
 deployed: $(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S')
 source: $AF_ROOT
 EOF
+    if [[ -n "$AF_COMMIT" ]]; then
+        printf 'commit: %s\n' "$AF_COMMIT" >> "$DEPLOYED_VERSION_FILE"
+    fi
 fi
 echo "  WRITE   .github/.af-version"
 

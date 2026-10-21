@@ -2,21 +2,20 @@
 # Pre-commit hook for the Agent Framework's own repository.
 #
 # Runs the shipped commit guards, refuses a commit whose staged Python CI's
-# formatter would reject, and keeps flavors/github-copilot/VERSION in lockstep
-# with source edits so the version can never silently go stale (the drift that
-# stranded 1.18.26).
+# formatter would reject, and refuses a CHANGELOG top-insert.
 #
-# Behaviour:
-#   - If any staged file is under `flavors/github-copilot/` or `core/`, AND
-#   - VERSION was NOT itself manually staged (i.e. this is not a deliberate
-#     minor/major release cut) THEN bump the PATCH component and stage it.
-#   - A deliberate release cut stages VERSION explicitly -> the hook skips,
-#     so it never double-bumps on top of a chosen minor/major version.
+# VERSION is no longer bumped here. The per-commit patch bump changed the same
+# line in every pull request, so any two open at once conflicted on it (#426).
+# VERSION now moves only at a release cut; between cuts a deploy is identified
+# by the source commit it records in .af-version.
+#
+# Changelog entries go into flavors/github-copilot/changelog.d/ as one file per
+# pull request. A commit that stages CHANGELOG.md without VERSION is therefore
+# a top-insert and is refused; the release cut stages both. Resolving a merge
+# that touched CHANGELOG.md is not authoring an entry and passes.
 #
 # Enable once per clone:
 #   git config core.hooksPath .githooks
-#
-# Bypass for a single commit (e.g. docs-only): git commit --no-verify
 
 set -euo pipefail
 
@@ -25,8 +24,7 @@ set -euo pipefail
 # $repo_root/.github -- a directory this repo does not have. Until this line
 # existed they therefore ran in every consumer project and in none of the
 # commits that wrote them, which is how the context budget drifted 273 tokens
-# past its own ceiling unobserved (issue #85). Run them first, so a blocked
-# commit does not leave a bumped VERSION staged behind it.
+# past its own ceiling unobserved (issue #85). Run them first.
 PAYLOAD_HOOK="flavors/github-copilot/.github/hooks/git/pre-commit"
 if [ -f "$PAYLOAD_HOOK" ]; then
     sh "$PAYLOAD_HOOK" || exit 1
@@ -66,36 +64,18 @@ if [ -n "$pin" ]; then
 fi
 
 VERSION_FILE="flavors/github-copilot/VERSION"
-
-# Nothing to do if the VERSION file is missing.
-[ -f "$VERSION_FILE" ] || exit 0
+CHANGELOG_FILE="flavors/github-copilot/CHANGELOG.md"
 
 staged="$(git diff --cached --name-only)"
 
-# Only act when Agent Framework source actually changed.
-if ! printf '%s\n' "$staged" | grep -qE '^(flavors/github-copilot/|core/)'; then
-    exit 0
+# Here-strings, not `printf | grep -q`: under pipefail an early-exiting grep
+# turns a match into a failure.
+if grep -qx -e "$CHANGELOG_FILE" <<<"$staged" \
+    && ! grep -qx -e "$VERSION_FILE" <<<"$staged" \
+    && ! git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+    echo "[pre-commit] $CHANGELOG_FILE is staged without $VERSION_FILE -- that is a top-insert." >&2
+    echo "[pre-commit] Write the entry as flavors/github-copilot/changelog.d/<issue>-<slug>.md instead" >&2
+    echo "[pre-commit] (see changelog.d/README.md); the release cut folds fragments in (#426)." >&2
+    exit 1
 fi
-
-# Deliberate release cut: VERSION already staged -> respect the chosen version.
-if printf '%s\n' "$staged" | grep -qx "$VERSION_FILE"; then
-    exit 0
-fi
-
-cur="$(tr -d ' \t\r\n' < "$VERSION_FILE")"
-if ! printf '%s' "$cur" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-    echo "[pre-commit] VERSION '$cur' is not semver X.Y.Z -- skipping auto-bump." >&2
-    exit 0
-fi
-
-major="${cur%%.*}"
-rest="${cur#*.}"
-minor="${rest%%.*}"
-patch="${rest#*.}"
-patch=$((patch + 1))
-new="${major}.${minor}.${patch}"
-
-printf '%s\n' "$new" > "$VERSION_FILE"
-git add "$VERSION_FILE"
-echo "[pre-commit] AF VERSION auto-bumped ${cur} -> ${new}"
 exit 0
