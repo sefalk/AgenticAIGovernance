@@ -210,6 +210,27 @@ build for one (#322).
 
 ### Changed
 
+- **Each agent's execution tools are a declared, measured set (#284).** A tool
+  that is not in an agent's set cannot be reached, however the payload is
+  spelled. The #138 gate can promise less: it is a pattern match.
+  - Measured first, over every local subagent debug log (comment on #284):
+    - `pylanceRunCodeSnippet` is heavily used: implementer 241, test-writer
+      138, refactorer 69 calls. It stays.
+    - The planner never used `runTests` or `testFailure` (0 of 79 logs), so it
+      loses both.
+    - `runNotebookCell` stays on code-critic and refactorer despite 0 calls.
+      Their `notebook-execution` skill tells them to use it, and the measured
+      projects have had no `.ipynb` to run.
+  - `test-rule-drift.ps1` R28 asserts every agent's execution tools against the
+    declared set. A widened set, or a new agent with an execution tool, fails.
+  - The test-critic may now run tests, by owner decision 2026-10-21. It
+    already held `runTests`, while its agent file and the test budget said
+    "never". It ran tests 24 times in 66 logs anyway.
+    - Its budget is now 0–2 targeted runs, only to verify a claim the test log
+      cannot back.
+    - `test-rule-drift.ps1` R29 fails when an agent holding a test tool is
+      told to run no tests.
+
 - **Tier model defaults have one home: the framework `af-env.conf` (#418).**
   The line-up used to be hardcoded three times (`deploy.ps1`, `deploy.sh`,
   `deploy_core.py`), and two tests repeated it. Every model change therefore
