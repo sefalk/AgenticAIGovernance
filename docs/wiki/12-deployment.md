@@ -169,12 +169,18 @@ backups auto-prune after `BACKUP_PRUNE_DAYS` (default 14).
 ## Versioning
 
 The framework version lives in `flavors/github-copilot/VERSION` (semantic
-versioning). An **auto-version pre-commit hook** (`.githooks/pre-commit` in the
-AAIG repo, enabled via `git config core.hooksPath .githooks`) bumps the **patch**
-version automatically whenever `flavors/github-copilot/**` or `core/**` is staged
-and `VERSION` is not — so incidental changes are versioned without manual effort.
-A deliberate release cut stages `VERSION` itself (minor/major), which makes the
-hook skip.
+versioning) and changes **only at a release cut** (#426). Between cuts, a
+deploy is identified by the source commit it records in `.github/.af-version`
+(`commit: <sha12>`, suffixed `-dirty` when tracked files were edited), and
+`status` compares commits when both sides carry one.
+
+Changelog entries are **fragments**: each pull request adds
+`flavors/github-copilot/changelog.d/<issue>-<slug>.md` instead of editing
+`CHANGELOG.md`, so two open pull requests never write the same lines. The
+release cut runs `.github/scripts/changelog-fragments.py assemble --version
+X.Y.Z`, which folds every fragment into the changelog and sets `VERSION`. The
+AAIG repo's `.githooks/pre-commit` (enabled via `git config core.hooksPath
+.githooks`) and CI refuse a `CHANGELOG.md` change without `VERSION`.
 
 > Not to be confused with the **large-file commit guard**
 > (`.github/hooks/git/pre-commit`), which AF *deploys into target repos* — see

@@ -57,11 +57,19 @@ introduced.
 In the framework repository.
 
 1. Confirm what is being released: `git log --oneline origin/main..origin/dev`.
-2. Bump `flavors/github-copilot/VERSION` yourself for a minor/major (staging
-   `VERSION` makes the auto-patch pre-commit hook stand down); let the hook
-   handle a patch.
-3. Move the `[Unreleased]` section of `flavors/github-copilot/CHANGELOG.md`
-   under the new version heading.
+2. Fold the changelog and set the version in one step, on a branch off `dev`.
+   Between cuts nothing changes `VERSION` or `CHANGELOG.md`: each pull request
+   adds a `changelog.d/<issue>-<slug>.md` fragment, and a deploy is identified
+   by the `commit:` it records in `.af-version` (#426).
+
+   ```powershell
+   python .github/scripts/changelog-fragments.py assemble --version X.Y.Z --dry-run
+   python .github/scripts/changelog-fragments.py assemble --version X.Y.Z
+   ```
+
+3. Commit `VERSION`, `CHANGELOG.md` and the deleted fragments together — the
+   pre-commit hook and CI refuse a `CHANGELOG.md` change without `VERSION` —
+   and merge that pull request into `dev`.
 4. Open the promotion pull request `dev -> main`. Leave both declaration lines
    in the template commented out — CI checks the contributing pull requests
    instead (#234).

@@ -174,6 +174,33 @@ bash "$SRC/deploy.sh" -t "$WORK/j" </dev/null >"$WORK/j.log" 2>&1
 assert_contains "$WORK/j.log" "CONFLICT .github/$PLAIN" "The overlapping change is classified CONFLICT"
 assert_contains "$WORK/j/.github/$PLAIN" "line PROJECT" "The project file is left as it was"
 
+# #426: VERSION moves only at a release cut, so .af-version names the commit.
+echo "== K: a source outside git writes no commit line (#426) =="
+if grep -q '^commit:' "$WORK/h/.github/.af-version"; then
+    fail "No commit line without a commit"
+else
+    pass "No commit line without a commit"
+fi
+
+echo "== L: a committed source records its commit, dirty when a tracked file is edited (#426) =="
+git_t() { git -C "$SRC" -c core.autocrlf=false -c user.name=af-test -c user.email=af-test@example.invalid "$@"; }
+git_t init -q
+git_t add -- VERSION .github
+git_t commit -q --no-verify -m seed
+HEAD12=$(git_t rev-parse --short=12 HEAD)
+mkdir -p "$WORK/l" "$WORK/m"
+git init -q "$WORK/l"
+bash "$SRC/deploy.sh" -t "$WORK/l" </dev/null >"$WORK/l.log" 2>&1
+if grep -qx "commit: $HEAD12" "$WORK/l/.github/.af-version"; then
+    pass "The commit line is the short HEAD"
+else
+    fail "The commit line is the short HEAD (want $HEAD12)"
+fi
+printf 'line edited\n' >>"$SRC/.github/$PLAIN"
+git init -q "$WORK/m"
+bash "$SRC/deploy.sh" -t "$WORK/m" </dev/null >"$WORK/m.log" 2>&1
+assert_contains "$WORK/m/.github/.af-version" "commit: $HEAD12-dirty" "An edited tracked file marks the commit dirty"
+
 echo ""
 echo "=== Summary ==="
 echo "  Passed: $passed"
@@ -186,7 +213,7 @@ if [[ "$failed" -gt 0 ]]; then
     echo "--- deploy output E ---"; cat "$WORK/e.log"
     echo "--- deploy output F ---"; cat "$WORK/f.log"
     echo "--- deploy output G ---"; cat "$WORK/g.log"
-    for c in h i j; do echo "--- deploy output ${c^^} ---"; cat "$WORK/$c.log"; done
+    for c in h i j l m; do echo "--- deploy output ${c^^} ---"; cat "$WORK/$c.log"; done
     exit 1
 fi
 echo "  All deploy.sh minimal-source tests passed."

@@ -74,7 +74,9 @@ def status(workspace_root: str) -> dict:
         workspace_root: Absolute path to the target project (``${workspaceFolder}``).
 
     Returns a dict with ``source_version``, ``deployed_version`` and ``state``
-    (``up-to-date`` | ``stale`` | ``not-deployed``), plus ``payload_origin`` and
+    (``up-to-date`` | ``stale`` | ``not-deployed``), plus ``source_commit`` and
+    ``deployed_commit`` -- when both are set they decide ``state``, since VERSION
+    moves only at a release cut -- and ``payload_origin`` and
     ``payload_state`` (``current`` | ``behind-repository`` | ``unverifiable`` |
     ``not-applicable``) saying whether the payload this server serves is itself
     current — a bundled payload is a build-time copy and goes stale silently.

@@ -118,12 +118,17 @@ Add-Result 'S8_a_change_only_in_ignored_paths_selects_nothing' `
     ($ignored -match 'nothing selected') `
     'ignored path'
 
-# VERSION is bumped by the pre-commit hook on every single commit. Without it
-# in the ignore list every scoped run would see a changed file that no suite
-# covers, hit the fallback, and degrade straight back to a full sweep.
+# VERSION changes at a release cut, and a changelog fragment comes with nearly
+# every pull request (#426). Neither is code a suite covers; without them in the
+# ignore list a scoped run would hit the fallback and degrade to a full sweep.
 $versionIgnored = $false
 if ($parsed) { $versionIgnored = @($scope.ignore) -contains 'VERSION' }
-Add-Result 'S9_the_auto_bumped_VERSION_file_is_ignored' $versionIgnored 'VERSION in ignore'
+Add-Result 'S9_the_VERSION_file_is_ignored' $versionIgnored 'VERSION in ignore'
+
+$fragment = Invoke-Selection -Paths @('flavors/github-copilot/changelog.d/426-conflict-free-prs.md')
+Add-Result 'S9b_a_changelog_fragment_selects_nothing' `
+    ($fragment -match 'nothing selected') `
+    'changelog fragment'
 
 # Changing the selector itself must not be scoped by the selector.
 $runnerChange = Invoke-Selection -Paths @('flavors/github-copilot/.github/scripts/run-all-tests.ps1')
