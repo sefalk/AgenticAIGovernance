@@ -85,7 +85,7 @@ OVERRIDE = "ALLOW_WORKFLOW_LOG_SCHEMA"
 STATUS_VALUES = ("COMPLETED", "FAILED", "ESCALATED")
 
 # MANIFEST § 13, Inter-Agent Contracts -> Verdict Format.
-VERDICT_VALUES = ("APPROVED", "REJECTED", "ESCALATE", "RESOLVED", "COMPROMISE")
+VERDICT_VALUES = ("APPROVED", "REJECTED", "ESCALATE", "RESOLVED", "COMPROMISE", "NEEDS_CLARIFICATION")
 
 # How a log says a field has no value. A step that was not reviewed says so,
 # and so does a workflow whose `completed:` was never stamped.
@@ -198,19 +198,31 @@ def _populated(block: list[tuple[int, str]]) -> bool:
     return False
 
 
-def _step_agents(steps: list[tuple[int, str]]) -> list[str]:
-    return [value for _, value in _keys(steps, "agent")]
+def _step_items(steps: list[tuple[int, str]]) -> list[tuple[str, str]]:
+    """(agent, verdict) per `- ` item of `steps`, in order; a missing key is ''."""
+    items: list[dict[str, str]] = []
+    for _, line in steps[1:]:
+        match = KEY.match(line)
+        if line.lstrip().startswith("-"):
+            items.append({})
+        if match and items and match.group("key") in ("agent", "verdict"):
+            items[-1][match.group("key")] = _value(match.group("rest"))
+    return [(i.get("agent", ""), i.get("verdict", "").strip().upper()) for i in items]
 
 
 def _derive(sections: dict[str, list[tuple[int, str]]]) -> tuple[int, int]:
-    """Retries and escalations, counted the way analyze-retry-economy.py counts."""
+    """Retries and escalations, counted the way analyze-retry-economy.py counts.
+
+    The re-run that answers a NEEDS_CLARIFICATION is not a retry (#142): the
+    agent asked instead of guessing, and nothing it produced was rejected.
+    """
     steps = sections.get("steps", [])
-    seen: set[str] = set()
+    last_verdict: dict[str, str] = {}
     retries = 0
-    for agent in _step_agents(steps):
-        if agent in seen:
+    for agent, verdict in _step_items(steps):
+        if agent in last_verdict and not last_verdict[agent].startswith("NEEDS_CLARIFICATION"):
             retries += 1
-        seen.add(agent)
+        last_verdict[agent] = verdict
 
     escalations = sum(1 for _, verdict in _keys(steps, "verdict") if verdict.strip().upper().startswith("ESCALATE"))
     # A recorded `escalation:` block is an escalation the steps may not carry a

@@ -15,6 +15,27 @@ build for one (#322).
 
 ### Added
 
+- **A subagent can ask instead of guessing (#142).** `BLOCKED` covers a
+  missing capability. An ambiguous or self-contradictory instruction had no
+  exit except a guess: in 2026-08 a producer reconciled a contradictory prompt
+  with an invented fact.
+  - MANIFEST § 13 defines the return `## Needs Clarification`. It carries
+    `questions` (each with the candidate interpretations), `done_so_far` and
+    `resume`. A stated count that does not match the enumerated data it
+    describes triggers it mechanically.
+  - The delegation prompts for the test-writer, implementer and refactorer
+    offer this return.
+  - Verdict parsing answers the question from the plan or the request, asks
+    the human when neither answers it, and re-invokes the same agent. That
+    re-invocation is not a retry. The step is logged with
+    `verdict: "NEEDS_CLARIFICATION"`, so each one names an ambiguity the
+    coordinator's own prompt produced.
+  - `NEEDS_CLARIFICATION` joins the closed verdict set in
+    `check-workflow-log.py`, `analyze-retry-economy.py`, both `documenter-stop`
+    messages and the documenter. Both counters skip the re-run that answers it.
+  - `test-rule-drift.ps1` R24–R27, `test-workflow-log-schema.ps1` E2/E3 and
+    `test-retry-economy.ps1` M pin all of the above.
+
 - **Every pytest invocation can write the test log (#180).** Only
   `run-tests.ps1/.sh` wrote `.github/test-log.json`. A run through `runTests`,
   Test Explorer or a bare `pytest` therefore left no entry, and a missing entry

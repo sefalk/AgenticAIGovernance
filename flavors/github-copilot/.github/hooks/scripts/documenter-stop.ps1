@@ -221,7 +221,7 @@ try {
                     hookSpecificOutput = @{
                         hookEventName = "Stop"
                         decision = "block"
-                        reason = "Workflow log schema violation for '$workflowId': $detail. Fix the log, then finish. Use the vocabulary in your Workflow Log Schema: status is COMPLETED, FAILED or ESCALATED; a step verdict is APPROVED, REJECTED, ESCALATE, RESOLVED, COMPROMISE or null. Do not invent a value to describe a state the schema has no word for -- say it in `action:` instead."
+                        reason = "Workflow log schema violation for '$workflowId': $detail. Fix the log, then finish. Use the vocabulary in your Workflow Log Schema: status is COMPLETED, FAILED or ESCALATED; a step verdict is APPROVED, REJECTED, ESCALATE, RESOLVED, COMPROMISE, NEEDS_CLARIFICATION or null. Do not invent a value to describe a state the schema has no word for -- say it in `action:` instead."
                     }
                 } | ConvertTo-Json -Compress -Depth 3
                 Write-Output $output

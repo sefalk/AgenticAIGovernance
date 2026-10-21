@@ -277,6 +277,26 @@ foreach ($agentFile in Get-ChildItem (Join-Path $payload 'agents') -Filter '*.ag
 }
 Add-Result 'R28_every_agent_s_execution_tools_are_the_declared_set' ($toolsetDrift.Count -eq 0) ($toolsetDrift -join '; ')
 
+# #142: BLOCKED is wired for missing capability, not for an ambiguous instruction,
+# so a producer facing a contradiction reconciled it with an invented fact. The
+# return, the prompts that offer it and the parsing that acts on it must agree.
+$manifest = Get-Content (Join-Path $payload 'MANIFEST.md') -Raw -Encoding UTF8
+$tdd = Get-Content (Join-Path $payload 'skills/tdd-orchestration/SKILL.md') -Raw -Encoding UTF8
+Add-Result 'R24_manifest_defines_the_clarification_return' `
+    ($manifest -match '(?m)^## Needs Clarification' -and $manifest -match '(?is)candidate interpretations' -and
+     $manifest -match '(?is)resum') `
+    'MANIFEST has no NEEDS_CLARIFICATION return with questions, interpretations and resumption'
+Add-Result 'R25_a_stated_count_that_does_not_reconcile_is_a_question' `
+    ($manifest -match '(?is)count.{0,120}(does not|doesn.t) (match|reconcile).{0,120}NEEDS_CLARIFICATION') `
+    'the mechanical trigger (stated count vs enumerated data) is not written down'
+$producerPrompts = @([regex]::Matches($tdd, '(?s)Use the \*\*(test-writer|implementer|refactorer)\*\* agent as a subagent.*?\n---'))
+Add-Result 'R26_every_producer_prompt_offers_the_clarification_return' `
+    ($producerPrompts.Count -eq 3 -and @($producerPrompts | Where-Object { $_.Value -notmatch 'NEEDS_CLARIFICATION' }).Count -eq 0) `
+    "producer prompts found: $($producerPrompts.Count); prompts without NEEDS_CLARIFICATION: $(@($producerPrompts | Where-Object { $_.Value -notmatch 'NEEDS_CLARIFICATION' }).Count)"
+Add-Result 'R27_parsing_answers_and_reinvokes_without_counting_a_retry' `
+    ($tdd -match '(?is)### Verdict Parsing.{0,1500}NEEDS_CLARIFICATION.{0,400}not count as a retry') `
+    'verdict parsing does not handle NEEDS_CLARIFICATION as answer-and-re-invoke'
+
 Write-Output '===== rule-drift detector tests (issue #304) ====='
 foreach ($n in $notes) { Write-Output "  SKIP  $n" }
 $failed = 0
