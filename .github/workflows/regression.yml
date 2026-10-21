@@ -539,6 +539,10 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-workflow-checkout-order.py
 
+      - name: Test that the sweep is scoped only on pull requests into dev
+        shell: powershell
+        run: python .github\scripts\test-ci-scoped-sweep.py
+
       # #124 made `ruff format` blocking for consumers while the framework's
       # own Python went unformatted (#167). The file list comes from git rather
       # than a hardcoded glob, so a new file is covered the moment it is
@@ -581,12 +585,28 @@ jobs:
       # run-deploy-suite.py, which the dedicated step above already runs. It
       # exists for the LOCAL scoped run, which otherwise never reached the
       # deploy pytest suite (#395); here it would double that step's cost.
+      # A pull request into dev runs only the suites its diff needs, chosen by
+      # the same suite-scope.json local runs use; an unmapped path widens to
+      # every suite (#427). The push to dev after the merge and the promotion
+      # keep the full sweep, so a gap in the map never reaches main.
       - name: Run all regression suites
         shell: powershell
+        env:
+          SCOPED_SWEEP: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' }}
         run: |
-          .\flavors\github-copilot\.github\scripts\run-all-tests.ps1 `
-            -FailOnSkip `
-            -Exclude test-hooks-integration.ps1, test-deploy-engine.ps1
+          $runner = '.\flavors\github-copilot\.github\scripts\run-all-tests.ps1'
+          $exclude = @('test-hooks-integration.ps1', 'test-deploy-engine.ps1')
+          if ($env:SCOPED_SWEEP -eq 'true') {
+            $selection = & $runner -ListSelection -Since 'origin/dev' -Exclude $exclude | Out-String
+            Write-Host $selection
+            if ($env:GITHUB_STEP_SUMMARY) {
+              "### Scoped regression sweep`n`n``````text`n$selection`n```````n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            }
+            & $runner -FailOnSkip -Exclude $exclude -Changed -Since 'origin/dev'
+          } else {
+            & $runner -FailOnSkip -Exclude $exclude
+          }
+          exit $LASTEXITCODE
 
       # run-all-tests.ps1 sweeps `test-*.ps1` only, so the one suite covering
       # the shipped bash hooks has never been executed by anything (#190) --
