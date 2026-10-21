@@ -223,8 +223,13 @@ build for one (#322).
       projects have had no `.ipynb` to run.
   - `test-rule-drift.ps1` R28 asserts every agent's execution tools against the
     declared set. A widened set, or a new agent with an execution tool, fails.
-  - Finding left to the owner: the test-execution skill gives the test-critic
-    "0 runs", yet it ran tests 24 times in 66 logs.
+  - The test-critic may now run tests, by owner decision 2026-10-21. It
+    already held `runTests`, while its agent file and the test budget said
+    "never". It ran tests 24 times in 66 logs anyway.
+    - Its budget is now 0–2 targeted runs, only to verify a claim the test log
+      cannot back.
+    - `test-rule-drift.ps1` R29 fails when an agent holding a test tool is
+      told to run no tests.
 
 - **Tier model defaults have one home: the framework `af-env.conf` (#418).**
   The line-up used to be hardcoded three times (`deploy.ps1`, `deploy.sh`,
