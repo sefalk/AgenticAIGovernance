@@ -367,15 +367,53 @@ def read_version(source_root: Path) -> str:
     return vf.read_text(encoding="utf-8").strip() if vf.is_file() else ""
 
 
-def read_deployed_version(target_dir: Path) -> str:
+def _deployed_field(target_dir: Path, key: str) -> str:
     vf = target_dir / ".github" / ".af-version"
     if not vf.is_file():
         return ""
     for line in vf.read_text(encoding="utf-8").splitlines():
-        m = re.match(r"^\s*version:\s*(.+)$", line)
+        m = re.match(rf"^\s*{key}:\s*(.+)$", line)
         if m:
             return m.group(1).strip()
     return ""
+
+
+def read_deployed_version(target_dir: Path) -> str:
+    return _deployed_field(target_dir, "version")
+
+
+def read_deployed_commit(target_dir: Path) -> str:
+    return _deployed_field(target_dir, "commit")
+
+
+def source_commit(source_root: Path) -> str:
+    """Commit the payload is read from: ``<sha12>``, ``<sha12>-dirty``, or ``""``.
+
+    VERSION moves only at a release cut, so the commit is what identifies a
+    deploy between releases (#426). Only a payload whose ``VERSION`` is tracked
+    has one: the wheel's copy under ``mcp-deploy/.venv`` sits inside the
+    framework checkout, and that checkout's HEAD is not where the copy came
+    from. Untracked files do not count as dirty -- the payload is what git
+    tracks.
+    """
+
+    def git(*args: str) -> subprocess.CompletedProcess[str] | None:
+        try:
+            return subprocess.run(
+                ["git", "-C", str(source_root), *args], capture_output=True, text=True, timeout=30, check=False
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    tracked = git("ls-files", "--error-unmatch", "--", "VERSION")
+    if tracked is None or tracked.returncode != 0:
+        return ""
+    head = git("rev-parse", "--short=12", "HEAD")
+    if head is None or head.returncode != 0 or not head.stdout.strip():
+        return ""
+    sha = head.stdout.strip()
+    dirty = git("status", "--porcelain", "--untracked-files=no", "--", ".")
+    return f"{sha}-dirty" if dirty is not None and dirty.stdout.strip() else sha
 
 
 def repository_version(package_dir: Path | None = None) -> str:
@@ -412,11 +450,18 @@ def status(source_root: Path, target_dir: Path, package_dir: Path | None = None)
     repository it was built from. A bundled payload cannot notice that the
     repository moved on, so without this a deploy reports success while
     shipping a version older than the fix it was run to deliver (#236).
+
+    When both sides carry a commit, the commits decide: VERSION moves only at
+    a release cut, so two deploys between releases share a version (#426).
     """
     src_v = read_version(source_root)
     dep_v = read_deployed_version(target_dir)
+    src_c = source_commit(source_root)
+    dep_c = read_deployed_commit(target_dir)
     if not dep_v:
         state = "not-deployed"
+    elif src_c and dep_c:
+        state = "up-to-date" if src_c == dep_c else "stale"
     elif dep_v == src_v:
         state = "up-to-date"
     else:
@@ -447,6 +492,8 @@ def status(source_root: Path, target_dir: Path, package_dir: Path | None = None)
     result = {
         "source_version": src_v,
         "deployed_version": dep_v,
+        "source_commit": src_c,
+        "deployed_commit": dep_c,
         "state": state,
         "payload_origin": origin,
         "payload_state": payload_state,
@@ -682,8 +729,10 @@ def _write_hashes(target_github: Path, hashes: dict[str, str], version: str) -> 
     _write_bytes(target_github / ".af-hashes", ("\n".join(lines) + "\n").encode("utf-8"))
 
 
-def _write_version(target_dir: Path, version: str) -> None:
+def _write_version(target_dir: Path, version: str, commit: str = "") -> None:
     content = f"version: {version}\ndeployed: {datetime.now().isoformat(timespec='seconds')}\nsource: mcp:af-deploy\n"
+    if commit:
+        content += f"commit: {commit}\n"
     _write_bytes(target_dir / ".github" / ".af-version", content.encode("utf-8"))
 
 
@@ -762,7 +811,7 @@ def apply(source_root: Path, target_dir: Path) -> dict:
 
     _write_hashes(target_github, deployed, version)
     _store_prune(target_github, deployed)
-    _write_version(target_dir, version)
+    _write_version(target_dir, version, source_commit(source_root))
     return {
         "version": version,
         "applied_count": len(applied),

@@ -5,6 +5,7 @@
   ],
   "ignore": [
     "VERSION",
+    "changelog.d/**",
     "README.md",
     "docs/**",
     "ideas/**",

@@ -367,6 +367,25 @@ $AFVersion = if (Test-Path $VersionPath) {
     (Get-Content $VersionPath -Raw).Trim()
 } else { 'unknown' }
 
+# VERSION moves only at a release cut, so the commit identifies a deploy between
+# releases (#426). Only a tracked payload has one -- a copy inside some other
+# checkout would otherwise report that checkout's HEAD. Same rule as
+# deploy_core.source_commit and deploy.sh source_commit.
+function Get-SourceCommit {
+    param([string]$Root)
+
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return '' }
+    $ErrorActionPreference = 'Continue'
+    & git -C $Root ls-files --error-unmatch -- VERSION *> $null
+    if ($LASTEXITCODE -ne 0) { return '' }
+    $sha = [string](& git -C $Root rev-parse --short=12 HEAD 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $sha.Trim()) { return '' }
+    $dirty = & git -C $Root status --porcelain --untracked-files=no -- . 2>$null
+    if ($dirty) { return "$($sha.Trim())-dirty" }
+    return $sha.Trim()
+}
+$AFCommit = Get-SourceCommit -Root $AFRoot
+
 $DeployedVersionFile = Join-Path $TargetGitHub '.af-version'
 $DeployedInfo = $null
 if (Test-Path $DeployedVersionFile) {
@@ -1257,6 +1276,7 @@ version: $AFVersion
 deployed: $(Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
 source: $AFRoot
 "@
+if ($AFCommit) { $versionContent += "`ncommit: $AFCommit" }
 if (-not $DryRun) {
     if (-not (Test-Path $TargetGitHub)) {
         New-Item -ItemType Directory -Path $TargetGitHub -Force | Out-Null
@@ -1428,22 +1448,6 @@ if (Test-Path $modelProbe) {
         foreach ($line in $modelLines) { Write-Host $line -ForegroundColor $color }
     } else {
         Write-Host "  NOTE    tier models not checked -- no Python interpreter" -ForegroundColor Cyan
-    }
-}
-
-# ── Version-stale detection ────────────────────────────────────────────────
-# Warn when files were updated/created but VERSION hasn't changed since last
-# deploy. This catches the common mistake of forgetting to bump VERSION.
-$filesChanged = $script:Stats.Created + $script:Stats.Updated
-if ($filesChanged -gt 0 -and $DeployedInfo) {
-    $deployedVerLine = ($DeployedInfo -split "`n") | Where-Object { $_ -match '^version:\s*(.+)' } | Select-Object -First 1
-    if ($deployedVerLine -match '^version:\s*(.+)') {
-        $previousVer = $Matches[1].Trim()
-        if ($previousVer -eq $AFVersion) {
-            Write-Host ""
-            Write-Host "  WARNING: VERSION is still $AFVersion but $filesChanged file(s) changed." -ForegroundColor Red
-            Write-Host "  Did you forget to bump VERSION and update CHANGELOG.md?" -ForegroundColor Red
-        }
     }
 }
 

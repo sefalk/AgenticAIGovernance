@@ -143,6 +143,9 @@ def main() -> int:
     check("release cut rebuilds the wheel", "-m build" in release)
     check("release cut reinstalls it", "--force-reinstall" in release)
     check("release cut builds the wheel from the source tree, not via the sdist", "-m build --wheel" in release)
+    # #426: VERSION and CHANGELOG.md move only here, through the fragment tool.
+    check("release cut folds the changelog fragments", "changelog-fragments.py assemble" in release)
+    check("release cut no longer relies on an auto-bump", "auto-patch" not in release)
     verify = release.split(VERIFICATION, 1)[1] if VERIFICATION in release else ""
     check("release verification expects unverifiable for a bundled install", "unverifiable" in verify)
     check("release verification reads the payload VERSION in the installed wheel", "payload/VERSION" in verify)
