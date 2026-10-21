@@ -281,3 +281,40 @@ def test_a_refused_path_runs_nothing_and_says_why(tmp_path: Path) -> None:
     result = _run(root, "../outside.py")
     assert result["verdict"] == "REFUSED"
     assert "outside" in result["reason"]
+
+
+# ── header-declared arguments (#60, 2026-10-21) ──────────────────────────────
+
+HEADED = "# af-command: Echo one file.\n# af-arg: PATH  The file\nimport sys\nprint('ran', *sys.argv[1:])\n"
+
+
+def test_argv_matching_the_header_runs(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    _script(root, f"{AGENT_DIR}/echo.py", HEADED)
+    result = _run(root, f"{AGENT_DIR}/echo.py", ["a.txt"])
+    assert result["verdict"] == "PASS"
+    assert "ran a.txt" in result["tail"]
+
+
+def test_argv_violating_the_header_is_refused_before_approval(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    _script(root, f"{AGENT_DIR}/echo.py", HEADED)
+    asked: list[str] = []
+    result = cc.run_script(root, f"{AGENT_DIR}/echo.py", ["a", "b"], None, lambda r, d, c: asked.append(r.rel))
+    assert result["verdict"] == "REFUSED"
+    assert "usage: PATH" in result["reason"]
+    assert asked == []  # nobody is asked to approve a call that cannot be right
+
+
+def test_a_malformed_header_refuses_every_call(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    _script(root, f"{AGENT_DIR}/bad.py", "# af-arg: PATH\nprint('never')\n")
+    result = _run(root, f"{AGENT_DIR}/bad.py", ["x"])
+    assert result["verdict"] == "REFUSED"
+    assert "header" in result["reason"]
+
+
+def test_a_script_without_a_header_passes_argv_through(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    _script(root, f"{AGENT_DIR}/free.py", "import sys\nprint('got', *sys.argv[1:])\n")
+    assert "got --anything 1 2" in _run(root, f"{AGENT_DIR}/free.py", ["--anything", "1", "2"])["tail"]

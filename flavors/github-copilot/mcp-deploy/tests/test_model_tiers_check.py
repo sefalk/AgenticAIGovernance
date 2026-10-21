@@ -114,12 +114,12 @@ def test_newest_catalogue_is_discovered_in_vscode_storage(envs, tmp_path):
     assert str(found) in res.stdout
 
 
-def test_mcp_apply_reports_the_check(tmp_path, monkeypatch):
+def test_mcp_apply_reports_the_check(tmp_path, monkeypatch, minimal_source):
     catalogue = _catalogue(tmp_path / "models.json", "Nothing Real")
     monkeypatch.setenv("AF_MODELS_JSON", str(catalogue))
     target = tmp_path / "proj"
     target.mkdir()
-    result = deploy_core.apply(AF_ROOT, target)
+    result = deploy_core.apply(minimal_source, target)
     check = result["model_check"]
     assert check["exit"] == 1
     assert any("WARN" in line for line in check["lines"])
@@ -130,7 +130,7 @@ def _pwsh() -> str | None:
 
 
 @pytest.mark.skipif(_pwsh() is None, reason="PowerShell not available")
-def test_ps1_deploy_prints_the_warning(tmp_path):
+def test_ps1_deploy_prints_the_warning(tmp_path, minimal_source):
     catalogue = _catalogue(tmp_path / "models.json", "Nothing Real")
     target = tmp_path / "proj"
     target.mkdir()
@@ -143,7 +143,7 @@ def test_ps1_deploy_prints_the_warning(tmp_path):
             "-ExecutionPolicy",
             "Bypass",
             "-File",
-            str(AF_ROOT / "deploy.ps1"),
+            str(minimal_source / "deploy.ps1"),
             "-TargetDir",
             str(target),
             "-Force",

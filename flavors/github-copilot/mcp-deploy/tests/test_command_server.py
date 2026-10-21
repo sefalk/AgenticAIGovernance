@@ -146,6 +146,19 @@ def test_list_scripts_groups_scripts_by_folder_and_mode(ws: Path) -> None:
     assert folders["tools"]["scripts"][0]["default_walltime_s"] == 600
 
 
+def test_list_scripts_publishes_the_header_schema(ws: Path) -> None:
+    _script(ws, f"{AGENT_DIR}/lint.py", "# af-command: Lint files.\n# af-arg: FILE...  Files\n# af-arg: [--fix]  Fix\n")
+    _script(ws, f"{AGENT_DIR}/bad.py", "# af-arg: FILE\n")
+    _script(ws, f"{AGENT_DIR}/plain.py")
+    scripts = {s["path"]: s for s in cs.list_scripts(str(ws))["folders"][0]["scripts"]}
+    lint = scripts[f"{AGENT_DIR}/lint.py"]
+    assert lint["description"] == "Lint files."
+    assert lint["usage"] == "FILE... [--fix]"
+    assert [a["name"] for a in lint["args"]] == ["FILE", "--fix"]
+    assert "help" in scripts[f"{AGENT_DIR}/bad.py"]["header_error"]
+    assert "usage" not in scripts[f"{AGENT_DIR}/plain.py"]
+
+
 def test_only_list_scripts_claims_to_be_read_only() -> None:
     tools = {t.name: t for t in anyio.run(cs.mcp.list_tools)}
     assert set(tools) == {"run_script", "list_scripts"}

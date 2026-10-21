@@ -129,13 +129,13 @@ def test_wrappers_switch_the_plugin_off(wrapper):
 NOTE = "af_test_log"
 
 
-def test_mcp_apply_notes_a_missing_registration(tmp_path):
+def test_mcp_apply_notes_a_missing_registration(tmp_path, minimal_source):
     from af_deploy_mcp import deploy_core
 
     target = tmp_path / "proj"
     target.mkdir()
     (target / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
-    assert any(NOTE in line for line in deploy_core.apply(AF_ROOT, target)["test_log_plugin"])
+    assert any(NOTE in line for line in deploy_core.apply(minimal_source, target)["test_log_plugin"])
 
 
 def test_the_note_goes_once_registered_and_never_without_a_pyproject(tmp_path):
@@ -151,7 +151,7 @@ def _pwsh() -> str | None:
 
 
 @pytest.mark.skipif(_pwsh() is None, reason="PowerShell not available")
-def test_ps1_deploy_notes_a_missing_registration(tmp_path):
+def test_ps1_deploy_notes_a_missing_registration(tmp_path, minimal_source):
     target = tmp_path / "proj"
     target.mkdir()
     (target / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
@@ -162,7 +162,7 @@ def test_ps1_deploy_notes_a_missing_registration(tmp_path):
             "-ExecutionPolicy",
             "Bypass",
             "-File",
-            str(AF_ROOT / "deploy.ps1"),
+            str(minimal_source / "deploy.ps1"),
             "-TargetDir",
             str(target),
             "-Force",
