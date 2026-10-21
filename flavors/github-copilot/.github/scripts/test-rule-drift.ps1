@@ -277,6 +277,19 @@ foreach ($agentFile in Get-ChildItem (Join-Path $payload 'agents') -Filter '*.ag
 }
 Add-Result 'R28_every_agent_s_execution_tools_are_the_declared_set' ($toolsetDrift.Count -eq 0) ($toolsetDrift -join '; ')
 
+# #284: the test-critic held runTests while its agent file and the test budget
+# said "never run tests" -- and ran them 24 times in 66 logs. A grant and a rule
+# that disagree are decided by whichever one the agent happens to read last.
+$budgetText = Get-Content (Join-Path $payload 'skills/test-execution/SKILL.md') -Raw -Encoding UTF8
+$testToolDrift = @()
+foreach ($name in $declaredExec.Keys) {
+    if ($declaredExec[$name] -notmatch 'execute/runTests') { continue }
+    $agentText = Get-Content (Join-Path $payload "agents/$name.agent.md") -Raw -Encoding UTF8
+    if ($budgetText -match "(?m)^\| $name \| 0 runs") { $testToolDrift += "$name budget row says 0 runs" }
+    if ($agentText -match '(?i)zero test runs|never\*{0,2} run tests') { $testToolDrift += "$name agent file forbids running tests" }
+}
+Add-Result 'R29_an_agent_with_a_test_tool_is_not_told_to_run_no_tests' ($testToolDrift.Count -eq 0) ($testToolDrift -join '; ')
+
 # #142: BLOCKED is wired for missing capability, not for an ambiguous instruction,
 # so a producer facing a contradiction reconciled it with an invented fact. The
 # return, the prompts that offer it and the parsing that acts on it must agree.
