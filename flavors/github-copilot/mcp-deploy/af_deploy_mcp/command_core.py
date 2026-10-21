@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from . import command_schema
 from .deploy_core import get_af_env_value
 
 MODES = ("off", "reviewed", "ask", "ask-always", "autonomous")
@@ -314,6 +315,16 @@ def run_script(
         argv = [*interpreter_for(resolved.path, root), *[str(a) for a in args]]
     except (Refused, ValueError) as exc:
         result["reason"] = str(exc)
+        return result
+
+    # Checked before approval: nobody should be asked to approve a call that cannot be right.
+    try:
+        schema = command_schema.parse_header(resolved.path.read_text(encoding="utf-8", errors="replace"))
+    except command_schema.HeaderError as exc:
+        result["reason"] = f"malformed af-arg header in {resolved.rel}: {exc}"
+        return result
+    if schema is not None and (reason := command_schema.validate(schema, [str(a) for a in args])) is not None:
+        result["reason"] = f"arguments do not match the header of {resolved.rel}: {reason}"
         return result
 
     digest = content_hash(resolved.path)
