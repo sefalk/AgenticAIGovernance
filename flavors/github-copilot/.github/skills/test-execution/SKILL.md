@@ -146,7 +146,7 @@ workflow. All other test execution must be scoped.
 | implementer | unlimited domain, 1 adapters (if changed), 0× all | domain during dev, adapters only if adapter code changed | Stop hook runs all via canonical script and writes test log — do not pre-run all. |
 | refactorer | unlimited domain, 0 adapters, 0 all | domain after each step | Stop hook runs full suite — do NOT pre-run all yourself. |
 | code-critic | 0–1 scoped runs | domain+coverage or adapters+coverage | Accept implementer results if test log shows < 5 min old. Never re-run what test log shows as current. |
-| test-critic | 0 runs | N/A — review only, do not execute | Always skip. Read test log for context. |
+| test-critic | 0–2 targeted runs | `runTests` with `files`/`testNames`, only to verify a claim the test log cannot back | Read the test log first; never all, never adapters. |
 
 ## Test Log (`.github/test-log.json`)
 
