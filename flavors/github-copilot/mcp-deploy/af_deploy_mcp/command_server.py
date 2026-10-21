@@ -29,6 +29,7 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 
 from . import command_core as core
+from . import command_schema
 from . import command_trust as trust
 
 mcp = MCPServer("af-command")
@@ -132,9 +133,22 @@ async def run_script(
     return await anyio.to_thread.run_sync(work)
 
 
+def _header(file: Path) -> dict:
+    try:
+        schema = command_schema.parse_header(file.read_text(encoding="utf-8", errors="replace"))
+    except command_schema.HeaderError as exc:
+        return {"header_error": str(exc)}
+    return schema.to_dict() if schema is not None else {}
+
+
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 def list_scripts(workspace_root: str) -> dict:
-    """List the scripts ``run_script`` accepts, per folder, with mode and default walltime."""
+    """List the scripts ``run_script`` accepts, per folder, with mode and default walltime.
+
+    A script with an ``af-command`` / ``af-arg`` header also carries its
+    ``description``, ``usage`` and ``args``; ``run_script`` refuses argv that
+    does not fit them. ``header_error`` marks a header that cannot be read.
+    """
     root = Path(workspace_root).resolve()
     config = core.load_config(root)
     folders = []
@@ -155,7 +169,9 @@ def list_scripts(workspace_root: str) -> dict:
                 walltime, source = core.resolve_walltime(
                     None, core.read_history(root, rel), core.suite_budget(root, rel), config
                 )
-                scripts.append({"path": rel, "default_walltime_s": walltime, "walltime_source": source})
+                scripts.append(
+                    {"path": rel, "default_walltime_s": walltime, "walltime_source": source, **_header(file)}
+                )
         folders.append({"folder": folder.rel, "mode": folder.mode or config.approval, "scripts": scripts})
     return {"folders": folders, "approval_default": config.approval}
 
