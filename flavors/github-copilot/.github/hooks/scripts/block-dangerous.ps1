@@ -526,10 +526,21 @@ function Remove-QuotedData([string]$seg) {
     return ($seg -replace '"[^"]*"', '' -replace "'[^']*'", '')
 }
 
+# Git's global options sit between `git` and the subcommand, where every rule
+# anchored at `git <subcommand>` could not see past them (#431). Deny-side only:
+# the allow tier still judges the command as written.
+$gitValue = '(?:"[^"]*"|''[^'']*''|\S+)'
+$gitGlobalRe = '^(\s*git)((?:\s+(?:-[Cc]\s+' + $gitValue + '|--(?:git-dir|work-tree|namespace|config-env)\s+' + $gitValue +
+    '|--[A-Za-z][\w-]*=' + $gitValue + '|--(?:no-pager|paginate|bare|no-replace-objects|literal-pathspecs|glob-pathspecs|noglob-pathspecs|icase-pathspecs|no-optional-locks|no-advice)|-[pP]))+)(?=\s|$)'
+function Remove-GitGlobalOptions([string]$seg) {
+    return ($seg -creplace $gitGlobalRe, '$1')
+}
+
 function Get-ScanUnits([string]$cmd) {
     $units = New-Object System.Collections.Generic.List[string]
-    foreach ($seg in (Split-TopLevel $cmd)) {
-        if (-not $seg.Trim()) { continue }
+    foreach ($raw in (Split-TopLevel $cmd)) {
+        if (-not $raw.Trim()) { continue }
+        $seg = Remove-GitGlobalOptions $raw
         $isBareLiteral = $seg -match '^\s*("[^"]*"|''[^'']*'')\s*$'
         if ($isBareLiteral -or $seg -match $dataCarrierRe) {
             $units.Add((Remove-QuotedData $seg))
@@ -577,7 +588,7 @@ function Get-RawTargets([string]$cmd, [string]$Strength) {
         return , (@($t) + $payloads)
     }
     if ($cmd -match '\$\(' -or $cmd -match '`') { return , (@($cmd) + $payloads) }
-    $stripped = ((Split-TopLevel $cmd | ForEach-Object {
+    $stripped = ((Split-TopLevel $cmd | ForEach-Object { Remove-GitGlobalOptions $_ } | ForEach-Object {
                 if ($_ -match $dataCarrierRe -or $_ -match '^\s*("[^"]*"|''[^'']*'')\s*$') { Remove-QuotedData $_ } else { $_ }
             }) -join ' ; ')
     return , (@($stripped) + $payloads)

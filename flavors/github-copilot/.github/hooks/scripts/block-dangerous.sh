@@ -567,6 +567,15 @@ DATA = re.compile(r"^\s*(echo|printf|Write-Host|Write-Output|Write-Error|Write-V
 PAYLOAD = re.compile(r"(?:^|\s)(?:-c|--command|-Command|-e|--eval|-ScriptBlock|-ArgumentList|-Args|/c|/k|iex|Invoke-Expression|eval)\s+(?:\"([^\"]*)\"|\x27([^\x27]*)\x27)", re.I)
 BARE = re.compile(r"^\s*(\"[^\"]*\"|\x27[^\x27]*\x27)\s*$")
 
+# Git global options sit between git and the subcommand, where every rule
+# anchored at git <subcommand> could not see past them (#431). Deny side only.
+GV = r"(?:\"[^\"]*\"|\x27[^\x27]*\x27|\S+)"
+GIT_GLOBAL = re.compile(r"^(\s*git)((?:\s+(?:-[Cc]\s+" + GV + r"|--(?:git-dir|work-tree|namespace|config-env)\s+" + GV
+    + r"|--[A-Za-z][\w-]*=" + GV + r"|--(?:no-pager|paginate|bare|no-replace-objects|literal-pathspecs|glob-pathspecs|noglob-pathspecs|icase-pathspecs|no-optional-locks|no-advice)|-[pP]))+)(?=\s|$)")
+
+def no_git_globals(seg):
+    return GIT_GLOBAL.sub(r"\1", seg)
+
 def strip_quoted(seg):
     if "$(" in seg or "`" in seg:
         return seg
@@ -599,14 +608,15 @@ def build_raw(strength):
         return [t] + pls
     if "$(" in s or "`" in s:
         return [s] + pls
-    parts = [strip_quoted(seg) if (BARE.match(seg) or DATA.search(seg)) else seg for seg in segs]
+    parts = [strip_quoted(seg) if (BARE.match(seg) or DATA.search(seg)) else seg for seg in map(no_git_globals, segs)]
     return [" ; ".join(parts)] + pls
 
 def build_units():
     units=[]
-    for seg in segs:
-        if not seg.strip():
+    for raw in segs:
+        if not raw.strip():
             continue
+        seg = no_git_globals(raw)
         units.append(strip_quoted(seg) if (BARE.match(seg) or DATA.search(seg)) else seg)
         for m in PAYLOAD.finditer(seg):
             payload = m.group(1) if m.group(1) is not None else m.group(2)
