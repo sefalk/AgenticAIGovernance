@@ -44,7 +44,7 @@ jobs:
     steps:
       # gh-api.ps1 lives in the workspace, so the checkout comes first (#327).
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Delete agent branches fully contained in dev
         shell: pwsh

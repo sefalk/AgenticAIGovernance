@@ -45,7 +45,7 @@ jobs:
       # extracting it to a script made that placement a CommandNotFoundException
       # on every hook pull request (#327).
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
