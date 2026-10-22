@@ -1478,6 +1478,22 @@ if ((Test-Path $targetPyproject) -and -not (Select-String -Path $targetPyproject
     Write-Host '          pyproject.toml [tool.pytest.ini_options]: pythonpath = [".github/scripts"], addopts = "-p af_test_log"' -ForegroundColor Cyan
 }
 
+# ── af-command registration (#445) ─────────────────────────────────────────────────────────
+# Agents reference `af-command/...`, so the key decides; .code-workspace is JSONC, so text, not a parser.
+$afCommandFiles = @(Join-Path $TargetDir '.vscode/mcp.json') +
+    @(Get-ChildItem -Path $TargetDir, (Split-Path $TargetDir -Parent) -Filter '*.code-workspace' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+$afCommandFound = $false
+foreach ($f in $afCommandFiles) {
+    if ((Test-Path $f -PathType Leaf) -and ((Get-Content $f -Raw) -match '"af-command"\s*:\s*\{')) { $afCommandFound = $true; break }
+}
+if (-not $afCommandFound) {
+    Write-Host ""
+    Write-Host "  NOTE    af-command is not registered -- argument-bearing script runs have no route (#445, #60):" -ForegroundColor Cyan
+    Write-Host '          add "af-command": {"type": "stdio", "command": "<venv>/Scripts/af-command-mcp.exe"} under' -ForegroundColor Cyan
+    Write-Host '          servers in .vscode/mcp.json or settings.mcp.servers in your .code-workspace' -ForegroundColor Cyan
+    Write-Host '          (a user-level registration is not visible from here)' -ForegroundColor Cyan
+}
+
 # Prune stale backups from previous deploy runs
 Invoke-PruneOldBackups -RootDir $TargetDir -Days $resolvedBackupPruneDays -ActiveBackupDir $script:BackupDir
 
