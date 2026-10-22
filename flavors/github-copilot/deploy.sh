@@ -1443,6 +1443,10 @@ if [[ "$af_command_found" == "false" ]]; then
     echo '          (a user-level registration is not visible from here)'
 fi
 
+echo ""
+echo "  NOTE    AF supports the VS Code Local harness only: in the Copilot harness its hooks and guards"
+echo "          are unverified (#443, #447). Pick Local in the chat's session target."
+
 # Prune stale backups from previous deploy runs
 prune_old_backups "$TARGET_DIR" "$BACKUP_PRUNE_DAYS" "$BACKUP_DIR"
 

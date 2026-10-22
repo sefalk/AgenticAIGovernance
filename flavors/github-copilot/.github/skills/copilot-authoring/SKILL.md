@@ -129,7 +129,8 @@ divergence inside deployed files. Add a new region only when there is no sensibl
 
 **Search:** `search/codebase` (semantic), `search/textSearch` (exact/regex),
 `search/fileSearch` (glob), `search/listDirectory`, `search/usages`
-(references/definitions), `search/changes` (git diffs).
+(references/definitions). `search/changes` is documented but a Local subagent
+does not receive it (#443); use `git diff` instead.
 
 **Read:** `read/readFile`, `read/problems` (compiler/lint errors).
 
@@ -145,6 +146,7 @@ divergence inside deployed files. Add a new region only when there is no sensibl
 
 Extension / MCP tools need their server prefix
 (`pylance-mcp-server/pylanceImports`); `pylance-mcp-server/*` takes all of them.
+All names here are Local-harness names (#443); the Copilot harness is unverified (#447).
 
 ## Agent Hooks Authoring
 

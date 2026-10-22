@@ -5,7 +5,6 @@ description: 'Workflow compliance watchdog. Invoked as mandatory bookend (pre-fl
 user-invocable: false
 tools:
   - search/listDirectory
-  - search/changes
   - read/readFile
   - read/problems
 hooks:

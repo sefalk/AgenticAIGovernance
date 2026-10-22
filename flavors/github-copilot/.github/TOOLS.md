@@ -7,6 +7,12 @@
 >
 > Tool identifiers match the official VS Code built-in tools reference:
 > https://code.visualstudio.com/docs/copilot/reference/copilot-vscode-features#_chat-tools
+>
+> **Local harness only (#443).** These are Local-harness names, verified by
+> probing what a Local subagent receives. The Agent Customizations editor may
+> flag the `pylance-mcp-server/*` names: in Local they resolve (as
+> `mcp_pylance_mcp_s_*`), so the flag is cosmetic. `search/changes` does not
+> resolve and is assigned to no agent. The Copilot harness is unverified (#447).
 
 ## Tool-Agent Matrix
 
@@ -19,7 +25,7 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 | `search/textSearch` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `search/fileSearch` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `search/listDirectory` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `search/changes` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ |
+| `search/changes` | R | — | — | — | — | — | — | — | — | — | — | — |
 | `search/usages` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
 | `read/readFile` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `read/problems` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |

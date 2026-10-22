@@ -99,7 +99,7 @@ if [ -n "$AF_PYTHON" ] && [ -n "$AF_CODE_ROOT" ] && [ -f "$fg_core" ]; then
     [ -n "$_fg" ] && foreign_notice=" | ${_fg}"
 fi
 
-context="Project: ${project} | Branch: ${branch} | Last commit: ${commit} | ${py_ver}${test_log_summary}${python_notice}${foreign_notice}"
+context="Project: ${project} | Branch: ${branch} | Last commit: ${commit} | ${py_ver}${test_log_summary}${python_notice}${foreign_notice} | AF: Local harness only; in the Copilot harness its guards are unverified (#443)"
 
 # Return JSON — escape double quotes in context for safety
 context_escaped=$(echo "$context" | af_json_escape)

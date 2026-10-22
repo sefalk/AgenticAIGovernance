@@ -1494,6 +1494,10 @@ if (-not $afCommandFound) {
     Write-Host '          (a user-level registration is not visible from here)' -ForegroundColor Cyan
 }
 
+Write-Host ""
+Write-Host "  NOTE    AF supports the VS Code Local harness only: in the Copilot harness its hooks and guards" -ForegroundColor Cyan
+Write-Host "          are unverified (#443, #447). Pick Local in the chat's session target." -ForegroundColor Cyan
+
 # Prune stale backups from previous deploy runs
 Invoke-PruneOldBackups -RootDir $TargetDir -Days $resolvedBackupPruneDays -ActiveBackupDir $script:BackupDir
 
