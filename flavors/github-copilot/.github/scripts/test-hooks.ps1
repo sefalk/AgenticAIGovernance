@@ -2213,8 +2213,27 @@ function New-ConfWith {
     } else {
         $REAL_CONF.TrimEnd() + "`nRETRO_DIR=$Dir`n"
     }
-    if ($out -eq $REAL_CONF) { throw "RETRO_DIR not substituted -- the override would be untested" }
+    # Assert the target state, not a change: a consumer may already carry the value (#436).
+    if ($out -notmatch ('(?m)^RETRO_DIR=' + [regex]::Escape($Dir) + '\r?$')) { throw "RETRO_DIR not substituted -- the override would be untested" }
     return $out
+}
+
+# A consumer whose real value already equals the requested one (MP: retros/auto)
+# must get its config back, not an abort of every later case (issue #436).
+$savedConf = $REAL_CONF
+try {
+    $REAL_CONF = "AF_X=1`nRETRO_DIR=retros/auto`n"
+    $sameErr = $null; $same = $null
+    try { $same = New-ConfWith 'retros/auto' } catch { $sameErr = $_.Exception.Message }
+    Assert-True "New-ConfWith returns a config already set to the requested RETRO_DIR" `
+        ($null -eq $sameErr -and $same -match '(?m)^RETRO_DIR=retros/auto\s*$') `
+        "got error: $sameErr"
+    $REAL_CONF = "AF_X=1`nRETRO_DIR=.github/retros/auto`n"
+    Assert-True "and still substitutes a different value" `
+        ((New-ConfWith 'retros/auto') -match '(?m)^RETRO_DIR=retros/auto\s*$') `
+        "the override must reach the config it is meant for"
+} finally {
+    $REAL_CONF = $savedConf
 }
 
 $CONF_DOCS = New-ConfWith 'docs/retros'
