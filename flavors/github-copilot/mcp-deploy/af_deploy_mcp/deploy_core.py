@@ -821,6 +821,7 @@ def apply(source_root: Path, target_dir: Path) -> dict:
         "backup_dir": str(backup_dir) if made_backup else None,
         "model_check": model_check(source_root, target_af_env),
         "test_log_plugin": test_log_plugin_note(target_dir),
+        "af_command": af_command_note(target_dir),
     }
 
 
@@ -836,6 +837,27 @@ def test_log_plugin_note(target_dir: Path) -> list[str]:
     if not pyproject.is_file() or "af_test_log" in pyproject.read_text(encoding="utf-8", errors="replace"):
         return []
     return list(TEST_LOG_PLUGIN_NOTE)
+
+
+AF_COMMAND_NOTE = [
+    "  NOTE    af-command is not registered -- argument-bearing script runs have no route (#445, #60):",
+    '          add "af-command": {"type": "stdio", "command": "<venv>/Scripts/af-command-mcp.exe"} under',
+    "          servers in .vscode/mcp.json or settings.mcp.servers in your .code-workspace",
+    "          (a user-level registration is not visible from here)",
+]
+
+# The agent files reference `af-command/...`, so the key decides; JSONC rules out a parser.
+_AF_COMMAND_KEY = re.compile(r'"af-command"\s*:\s*\{')
+
+
+def af_command_note(target_dir: Path) -> list[str]:
+    """The note a project gets while no file it is likely opened with registers af-command."""
+    candidates = [target_dir / ".vscode" / "mcp.json"]
+    candidates += sorted(target_dir.glob("*.code-workspace")) + sorted(target_dir.parent.glob("*.code-workspace"))
+    for path in candidates:
+        if path.is_file() and _AF_COMMAND_KEY.search(path.read_text(encoding="utf-8", errors="replace")):
+            return []
+    return list(AF_COMMAND_NOTE)
 
 
 def model_check(source_root: Path, target_af_env: Path) -> dict:
