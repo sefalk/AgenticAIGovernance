@@ -717,6 +717,10 @@ assert_true "session-context makes exactly one statement" \
 assert_not_contains "session-context claims no test state when none was recorded" \
     "$sc_out" 'Tests:'
 
+# The guards were built and measured in the Local harness only (#443, owner decision A).
+assert_contains "session-context states that only the Local harness is supported" \
+    "$sc_out" 'Local harness only'
+
 sc_pass=$(hook_output session-context.sh agent/72-x "$SC_START" \
     ".github/test-log.json=$TEST_LOG_PASS")
 assert_contains "session-context folds the recorded test state into the context" \
