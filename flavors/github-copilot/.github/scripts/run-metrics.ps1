@@ -1,5 +1,5 @@
 # Metrics collection script for agent workflows.
-# Agents invoke this via predefined tasks (run_task) or createAndRunTask.
+# Agents invoke this via predefined tasks (run_task) or af-command run_script.
 #
 # Usage:
 #   .github/scripts/run-metrics.ps1 -Metric complexity     # Cyclomatic complexity

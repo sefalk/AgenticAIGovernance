@@ -9,17 +9,15 @@
 # A task is a second way to execute a command line, so it is classified twice,
 # at both points where the danger can enter (issue #74):
 #
-#   CREATION -- create_and_run_task (the agent authors the task). Allowlist:
-#     task.command must resolve (after path normalisation) inside a directory
-#     listed in AF_TASK_SCRIPT_DIRS -- a bare binary (git, ruff, pytest, ...)
-#     never can, since it has no path segment to match, so the hard-deny tier
-#     is covered as a consequence. Any unrecognised task shape denies.
+#   CREATION -- create_and_run_task (the agent authors the task). Denied
+#     outright since #60: the tool is removed from every agent, and runTask
+#     or af-command's run_script cover what it was used for.
 #
 #   EXECUTION -- run_task (a task already in .vscode/tasks.json runs). The
 #     payload carries only {id, workspaceFolder}: a name, not a command. The
 #     task is resolved out of tasks.json and its reconstructed command line is
-#     put through the SAME three tiers as a terminal command -- blocklist, not
-#     the creation allowlist, because tasks.json is human-authored and
+#     put through the SAME three tiers as a terminal command -- blocklist,
+#     because tasks.json is human-authored and
 #     legitimately calls bare binaries. Checked separately from creation
 #     because a task that was acceptable when written may not be acceptable
 #     now: policy, protected branches and categories all move underneath it.
@@ -153,184 +151,12 @@ print('\n'.join(out))
     exit 0
 fi
 
+# Removed for agents, not classified (#60): every shape denies, so the old
+# creation allowlist and the #396 duplicate check have nothing left to judge.
 if [ "$tool_name" = "createAndRunTask" ] || [ "$tool_name" = "create_and_run_task" ]; then
-    # ------------------------------------------------------------------
-    # createAndRunTask allowlist -- mirrors block-dangerous.ps1. A task's
-    # `command` must resolve, after path normalisation, inside one of the
-    # AF_TASK_SCRIPT_DIRS directories -- a bare binary (git, ruff, pytest,
-    # databricks, ...) never can, since it has no path segment to match.
-    # An interpreter (powershell/cmd/bash/python/...) is checked by its
-    # PAYLOAD instead (-File/-c/a positional script path), because that is
-    # what actually runs and the interpreter binary itself is never inside
-    # the repo. Everything unrecognised fails closed. Path normalisation
-    # and the JSON walk are delegated to Python (already a hard dependency
-    # of this hook) rather than re-implemented in shell.
-    # ------------------------------------------------------------------
-    emit_task() {
-        # $1 = decision, $2 = reason
-        # The deny reasons quote the offending task command back at the reader,
-        # and a task command is a path -- on Windows a backslash path. Raw
-        # interpolation would emit \s, an invalid JSON escape, and an
-        # unparsable verdict reads exactly like no verdict at all.
-        local reason
-        reason=$(af_json_escape "$2")
-        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$1" "$reason"
-        exit 0
-    }
-
-    for marker in '${input:' '${command:' '${config:'; do
-        if printf '%s' "$raw" | grep -qF "$marker"; then
-            emit_task deny "Policy hard-deny: task payload contains a $marker...} variable. Its value is produced elsewhere -- a prompt an agent cannot answer, a VS Code command that executes to yield it, or a setting -- so the payload cannot be classified. Pass a literal argument instead. Point the task command at a reviewed script under AF_TASK_SCRIPT_DIRS (default .github/scripts), or run the command yourself in the terminal."
-        fi
-    done
-
-    task_repo="$AF_CODE_ROOT"
-    task_dirs_raw=$(af_conf_get AF_TASK_SCRIPT_DIRS '')
-    [ -z "$task_dirs_raw" ] && task_dirs_raw=".github/scripts"
-
-    decision=$(printf '%s' "$raw" | "$PYTHON" -c '
-import sys, json, os
-
-raw = sys.stdin.read()
-repo = sys.argv[1] if len(sys.argv) > 1 else ""
-dirs_raw = sys.argv[2] if len(sys.argv) > 2 else ".github/scripts"
-
-sanctioned = (
-    "Point the task command at a reviewed script under AF_TASK_SCRIPT_DIRS "
-    "(default .github/scripts), e.g. .github/scripts/run-tests.ps1, or run "
-    "the command yourself in the terminal."
-)
-
-def resolve(p):
-    if not repo or not p:
-        return None
-    p = os.path.expandvars(p)
-    p = p.replace("${workspaceFolder}", repo).replace("${workspaceRoot}", repo)
-    # Substitution and env expansion both yield absolute paths, which must not
-    # be joined onto the repo root again.
-    if os.path.isabs(p):
-        return os.path.normpath(p)
-    return os.path.normpath(os.path.join(repo, p))
-
-allowed = []
-for d in dirs_raw.split(","):
-    d = d.strip()
-    if not d:
-        continue
-    r = resolve(d)
-    if r:
-        allowed.append(r + os.sep)
-
-def in_allowlist(p):
-    full = resolve(p)
-    if not full:
-        return False
-    return any(full.lower().startswith(a.lower()) for a in allowed)
-
-try:
-    data = json.loads(raw)
-except Exception:
-    print("DENY|Policy hard-deny: unrecognised task payload shape (invalid JSON); fail-closed. " + sanctioned)
-    sys.exit(0)
-
-task = data.get("tool_input", {}).get("task")
-if not isinstance(task, dict):
-    print("DENY|Policy hard-deny: unrecognised task payload shape (no task object); fail-closed. " + sanctioned)
-    sys.exit(0)
-
-run_opts = task.get("runOptions")
-if isinstance(run_opts, dict) and str(run_opts.get("runOn", "")) == "folderOpen":
-    print("DENY|Policy hard-deny: runOptions.runOn folderOpen registers a task that runs automatically the next time the folder is opened, outside any hook view. " + sanctioned)
-    sys.exit(0)
-
-interpreters = {"powershell", "pwsh", "cmd", "bash", "sh", "zsh", "python", "python3", "node", "perl", "ruby", "wscript", "cscript"}
-
-def deny_reason(command, args):
-    if not command:
-        return "Policy hard-deny: unrecognised task payload shape (no usable command found); fail-closed. " + sanctioned
-    # type: shell hands command to the shell verbatim, so it may be a whole
-    # command line. Metacharacters survive path normalisation, which would let
-    # anything ride along behind an allowlisted script name.
-    for ch in [";", "&", "|", "\n", "\r", "`"]:
-        if ch in command:
-            return "Policy hard-deny: task command " + command + " contains a shell metacharacter, so it is a command line rather than a path to a reviewed script. " + sanctioned
-    if "$(" in command:
-        return "Policy hard-deny: task command " + command + " contains a command substitution. " + sanctioned
-    if not isinstance(args, list):
-        args = []
-    args = [str(a) for a in args]
-    base = os.path.splitext(os.path.basename(command))[0].lower()
-
-    if base in interpreters:
-        inline = False
-        file_target = None
-        saw_file_flag = False
-        for i, a in enumerate(args):
-            if a.lower() in ("-command", "-c", "/c", "-encodedcommand"):
-                inline = True
-                break
-            if a.lower() == "-file":
-                saw_file_flag = True
-                if i + 1 < len(args):
-                    file_target = args[i + 1]
-                break
-        if inline:
-            return "Policy hard-deny: interpreter " + command + " invoked with an inline command payload (-Command/-c/-EncodedCommand) that is not visible to the task classifier. " + sanctioned
-        if not saw_file_flag:
-            for a in args:
-                if a and not a.startswith("-"):
-                    file_target = a
-                    break
-        if not file_target or not in_allowlist(file_target):
-            return "Policy hard-deny: interpreter " + command + " payload " + str(file_target) + " does not resolve inside an AF_TASK_SCRIPT_DIRS directory (unrecognised or external script). " + sanctioned
-        return None
-
-    if not in_allowlist(command):
-        return "Policy hard-deny: task command " + command + " does not resolve inside an AF_TASK_SCRIPT_DIRS directory. " + sanctioned
-    return None
-
-# An OS-specific scope overrides the task scope, so every variant present must
-# clear the bar -- checking only command classifies a decoy.
-scopes = [("task", task)]
-for osname in ("windows", "linux", "osx"):
-    variant = task.get(osname)
-    if isinstance(variant, dict):
-        scopes.append((osname, variant))
-
-for name, scope in scopes:
-    opts = scope.get("options")
-    if isinstance(opts, dict) and opts.get("shell"):
-        print("DENY|Policy hard-deny: the " + name + " scope overrides options.shell, which moves the executed payload into the shell own arguments where the task classifier cannot see it. " + sanctioned)
-        sys.exit(0)
-    cmd = scope.get("command") or task.get("command", "")
-    cmd = str(cmd) if cmd else ""
-    scope_args = scope.get("args") if scope.get("args") is not None else task.get("args", [])
-    reason = deny_reason(cmd, scope_args)
-    if reason:
-        if name != "task":
-            reason = "[" + name + " override] " + reason
-        print("DENY|" + reason)
-        sys.exit(0)
-
-print("ALLOW|Safe: every task scope resolves to a reviewed script under AF_TASK_SCRIPT_DIRS.")
-' "$task_repo" "$task_dirs_raw")
-
-    if [ -z "$decision" ]; then
-        emit_task deny "Policy hard-deny: unrecognised task payload shape (classifier error); fail-closed. Point the task command at a reviewed script under AF_TASK_SCRIPT_DIRS (default .github/scripts)."
-    fi
-
-    decision_word="${decision%%|*}"
-    decision_reason="${decision#*|}"
-    if [ "$decision_word" = "DENY" ]; then
-        emit_task deny "$decision_reason"
-    fi
-    # An identical invocation already has a label, and runTask runs it without
-    # the creation prompt createAndRunTask can never skip (#396).
-    dup_label=$(printf '%s' "$raw" | "$PYTHON" "$AF_SCRIPT_DIR/task-duplicate.py" "$task_repo" 2>/dev/null | head -n 1)
-    if [ -n "$dup_label" ]; then
-        emit_task deny "Policy deny: this invocation already exists as the task '$dup_label'. Run it with runTask (id 'shell: $dup_label'): it needs no creation prompt and can be auto-approved, while createAndRunTask would append a duplicate to tasks.json (#396)."
-    fi
-    emit_task allow "$decision_reason"
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' \
+        "Policy hard-deny: create_and_run_task is removed for agents (#60). It writes an agent-authored task into tasks.json and can never be auto-approved. Run a fixed task with runTask, or a reviewed script with arguments through af-command run_script. If af-command is not registered in this workspace, report BLOCKED and ask the user to register it."
+    exit 0
 fi
 
 command_str=$(echo "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_input',{}).get('command',''))" 2>/dev/null)

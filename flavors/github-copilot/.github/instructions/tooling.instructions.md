@@ -13,9 +13,9 @@ it silently removed an agent's ability to do its job.
 
 ## No comments — strict JSON only
 
-VS Code accepts JSONC in `tasks.json`, but the `createAndRunTask` tool **cannot
-parse it**. A single `//` line disables the documented fallback path for
-restricted agents (`skills/test-execution/SKILL.md`).
+VS Code accepts JSONC in `tasks.json`, but the `run_task` gate in
+`block-dangerous` **cannot parse it**. A single `//` line makes every task
+launch unresolvable, so each one asks for a human decision.
 
 Do not add comments. Per-task explanation goes in the `detail` field — it is
 data, survives tooling round-trips, and shows in the task picker; cross-cutting
@@ -58,10 +58,9 @@ pass parameters. Every distinct invocation needs its own task
 (`tests: domain`, `tests: domain + coverage`, `lint: ruff check tests`, …).
 
 Do not use `${input:...}` prompts in agent-facing tasks; they block autonomous
-execution waiting for human input. The PreToolUse classifier **denies**
-`${input:}`, `${command:}` and `${config:}` in a `createAndRunTask` payload —
-they resolve to content the classifier never saw, so what is reviewed is not
-what runs.
+execution waiting for human input. The `run_task` gate **asks** for
+`${input:}`, `${command:}` and `${config:}` — they resolve to content the
+classifier never saw, so what is reviewed is not what runs.
 
 ## A label names a script, never an invocation
 
@@ -71,8 +70,8 @@ time*. A label that encodes the invocation — `check-file-x`, `probe-run-v2`,
 surface into scratch. One script, varying arguments, one label per meaningful
 scope: if you are appending `v2` to a label, you are parameterising by copy.
 
-`createAndRunTask` writes its payload into `.vscode/tasks.json` as a side
-effect. Treat that file as a **cache of what agents may run**, not an audit
+`createAndRunTask` (removed in #60) wrote its payload into `.vscode/tasks.json`
+as a side effect. Treat that file as a **cache of what agents may run**, not an audit
 trail of what they did — execution is recorded in the workflow log and the hook
 decisions, so leftover scratch labels should be pruned rather than read as
 history. The documenter stop hook

@@ -69,11 +69,11 @@ not a skipped run. It fails loudly only when the changed set cannot be computed
 at all (no git repository), because "I cannot tell" must never be reported as
 "nothing to do".
 
-## Fallback: `runTests` or `createAndRunTask` (dynamic cases only)
+## Fallback: `runTests` or `af-command/run_script` (dynamic cases only)
 
 For file- or test-scoped runs, use `runTests` with `files` and/or `testNames`
-arguments. For one-off tasks not covered by pre-defined tasks (e.g., syntax
-checks, custom lint), use `createAndRunTask`.
+arguments. For one-off invocations not covered by pre-defined tasks (e.g.,
+syntax checks, custom lint), use `af-command/run_script`.
 
 `runTests` writes a `.github/test-log.json` entry only when the project loads
 the `af_test_log` pytest plugin (`pythonpath = [".github/scripts"]`,
@@ -90,25 +90,18 @@ make `run_task` ambiguous.
 
 **Caller-supplied arguments** go through `af-command/run_script`: a reviewed
 script under `AF_SCRIPT_DIRS`, the arguments passed per call, no label minted.
-Where that server is not registered, `createAndRunTask` is the fallback.
+Where that server is not registered, only the fixed `run_task` labels remain:
+report BLOCKED and ask the user to register it. `createAndRunTask` is removed
+for every agent and denied by `block-dangerous` (#60).
 
 Only `code-critic` and `coordinator` have `run_in_terminal` — other agents
-must use `run_task`, `runTests`, or `createAndRunTask`.
+must use `run_task`, `runTests`, or `af-command/run_script`.
 
-`createAndRunTask` requires `.vscode/tasks.json` to be strict JSON — it cannot
-parse JSONC. When adding or editing tasks, follow
-`instructions/tooling.instructions.md`; a pre-commit guard enforces it.
+When adding or editing tasks in `.vscode/tasks.json`, follow
+`instructions/tooling.instructions.md`; a pre-commit guard enforces strict JSON.
 
-Before creating a task, check whether a pre-defined task already covers it, or
-whether `runTests` handles the case. `createAndRunTask` is for invocations no
-fixed label expresses.
-
-It is **not** a quieter terminal. The same PreToolUse classifier inspects task
-payloads and terminal commands, and a task may only invoke scripts under
-`AF_TASK_SCRIPT_DIRS` — bare binaries (`git`, `ruff`, `pytest`), inline
-interpreter payloads (`powershell -Command …`), shell metacharacters and
-`options.shell` overrides are denied. If the thing you want to run has no
-reviewed script, the answer is to add one, not to phrase it as a task.
+If the thing you want to run has no reviewed script, the answer is to add one,
+not to look for another route to it.
 
 ## Phase-Specific Test Strategy
 

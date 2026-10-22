@@ -25,7 +25,7 @@ Use `run_task` for these static metrics. No dynamic arguments needed.
 | `lint: changed files` | Lint violations (branch delta — the gate's own set) | `run_task` |
 
 For per-module coverage, use `runTests(mode="coverage", coverageFiles=[...])`.
-For mutation testing (dynamic module), use `createAndRunTask`.
+For mutation testing (dynamic module), use `af-command/run_script`.
 
 When you report a lint figure as gate evidence, take it from
 `lint: changed files`. The directory scopes measure the repository, not the

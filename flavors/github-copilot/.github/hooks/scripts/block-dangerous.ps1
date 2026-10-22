@@ -11,24 +11,21 @@
 # A task is a second way to execute a command line, so it is classified twice,
 # at both points where the danger can enter (issue #74):
 #
-#   CREATION -- `create_and_run_task` (the agent authors the task). Allowlist:
-#     task.command must resolve (after path normalisation) inside a directory
-#     listed in AF_TASK_SCRIPT_DIRS -- a bare binary (git, ruff, pytest, ...)
-#     never can, since it has no path segment to match, so the hard-deny tier
-#     is covered as a consequence. See the $isTaskShaped block below.
+#   CREATION -- `create_and_run_task` (the agent authors the task). Denied
+#     outright since #60: the tool is removed from every agent, and runTask
+#     or af-command's run_script cover what it was used for.
 #
 #   EXECUTION -- `run_task` (a task already in .vscode/tasks.json runs). The
 #     payload carries only {id, workspaceFolder}: a name, not a command. The
 #     task is resolved out of tasks.json and its reconstructed command line is
-#     put through the SAME three tiers as a terminal command -- blocklist, not
-#     the creation allowlist, because tasks.json is human-authored and
+#     put through the SAME three tiers as a terminal command -- blocklist,
+#     because tasks.json is human-authored and
 #     legitimately calls bare binaries. Checked separately from creation
 #     because a task that was acceptable when written may not be acceptable
 #     now: policy, protected branches and categories all move underneath it.
 #
 # Fail-safe: on any parse ambiguity or unexpected shape the hook returns {}
-# (prompt) -- it never accidentally auto-approves. The creation allowlist is
-# stricter still: any unrecognised task shape denies (fail closed). An
+# (prompt) -- it never accidentally auto-approves. An
 # unresolvable run_task answers 'ask', never silence: silence is what a gate
 # that cannot run and a gate with nothing to say have in common (issue #68).
 
@@ -159,166 +156,13 @@ if ($isExecSurface) {
     exit 0
 }
 
+# Removed for agents, not classified (#60): every shape denies, so the old
+# creation allowlist and the #396 duplicate check have nothing left to judge.
 if ($isTaskShaped) {
-    # -----------------------------------------------------------------------
-    # createAndRunTask allowlist. A task's `command` must resolve, after path
-    # normalisation, inside one of the AF_TASK_SCRIPT_DIRS directories -- a
-    # bare binary (git, ruff, pytest, databricks, ...) never can, since it has
-    # no path segment to match. An interpreter (powershell/cmd/bash/python/...)
-    # is checked by its PAYLOAD instead (-File / -c / a positional script
-    # path), because that is what actually runs and the interpreter binary
-    # itself is never inside the repo. Everything unrecognised fails closed.
-    # -----------------------------------------------------------------------
-    function Emit-Task([string]$decision, [string]$reason) {
-        @{
-            hookSpecificOutput = @{
-                hookEventName            = 'PreToolUse'
-                permissionDecision       = $decision
-                permissionDecisionReason = $reason
-            }
-        } | ConvertTo-Json -Depth 3 -Compress
-        exit 0
-    }
-
-    $sanctioned = "Point 'command' at a reviewed script under AF_TASK_SCRIPT_DIRS (default .github/scripts), e.g. .github/scripts/run-tests.ps1, or run the command yourself in the terminal."
-
-    # Whole-payload scan for interactive input variables -- these block on a
-    # prompt an unattended agent can never answer. Scanned against the raw
-    # stdin text (single-quoted match: a double-quoted literal containing
-    # ${input: would interpolate as a drive-scoped variable and throw).
-    foreach ($v in @('${input:', '${command:', '${config:')) {
-        if ($raw.Contains($v)) {
-            Emit-Task 'deny' ("Policy hard-deny: task payload contains a '$v...}' variable. Its value is produced elsewhere -- a prompt an agent cannot answer, a VS Code command that executes to yield it, or a setting -- so the payload cannot be classified. Pass a literal argument instead. $sanctioned")
-        }
-    }
-
-    $task = $inputData.tool_input.task
-    if (-not $task) {
-        Emit-Task 'deny' ("Policy hard-deny: unrecognised task payload shape (no task object); fail-closed. $sanctioned")
-    }
-
-    # A folderOpen task executes later, outside any hook's view.
-    if ($task.runOptions -and ([string]$task.runOptions.runOn) -eq 'folderOpen') {
-        Emit-Task 'deny' ("Policy hard-deny: runOptions.runOn 'folderOpen' registers a task that runs automatically the next time the folder is opened, outside any hook's view. $sanctioned")
-    }
-
-    $taskRepo = $AfCodeRoot
-    $taskConfLines = @()
-    if ($AfConfFound) { $taskConfLines = Get-Content $AfConfPath }
-    function Get-AfEnvTask([string]$key, [string]$default) {
-        foreach ($l in $taskConfLines) {
-            if ($l -match "^\s*$([regex]::Escape($key))=(.*)$") { return $Matches[1].Trim() }
-        }
-        return $default
-    }
-    $allowedDirsRaw = @((Get-AfEnvTask 'AF_TASK_SCRIPT_DIRS' '.github/scripts') -split ',' |
-            ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    if ($allowedDirsRaw.Count -eq 0) { $allowedDirsRaw = @('.github/scripts') }
-
-    function Resolve-TaskPath([string]$p) {
-        if (-not $taskRepo -or -not $p) { return $null }
-        $expanded = [System.Environment]::ExpandEnvironmentVariables($p)
-        $expanded = $expanded.Replace('${workspaceFolder}', $taskRepo).Replace('${workspaceRoot}', $taskRepo)
-        try {
-            # Substitution and %VAR% expansion both yield absolute paths, which
-            # must not be joined onto the repo root again.
-            if ([System.IO.Path]::IsPathRooted($expanded)) { return [System.IO.Path]::GetFullPath($expanded) }
-            return [System.IO.Path]::GetFullPath((Join-Path $taskRepo $expanded))
-        }
-        catch { return $null }
-    }
-    $allowedDirsFull = @($allowedDirsRaw | ForEach-Object {
-            $r = Resolve-TaskPath $_
-            if ($r) { $r.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar }
-        } | Where-Object { $_ })
-    function Test-InAllowlist([string]$p) {
-        $full = Resolve-TaskPath $p
-        if (-not $full) { return $false }
-        foreach ($dir in $allowedDirsFull) {
-            if ($full.StartsWith($dir, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
-        }
-        return $false
-    }
-
-    # Interpreters are classified by their PAYLOAD, not their own path -- the
-    # binary itself (powershell, python, ...) is never inside the repo, so
-    # requiring it to resolve inside AF_TASK_SCRIPT_DIRS would be meaningless.
-    $interpreterNames = @('powershell', 'pwsh', 'cmd', 'bash', 'sh', 'zsh', 'python', 'python3', 'node', 'perl', 'ruby', 'wscript', 'cscript')
-
-    # Returns a deny reason, or $null when the command/args pair is acceptable.
-    function Get-CommandDenyReason([string]$cmd, $argList) {
-        if (-not $cmd) {
-            return "Policy hard-deny: unrecognised task payload shape (no usable 'command' found); fail-closed. $sanctioned"
-        }
-        # `type: shell` hands `command` to the shell verbatim, so it may be a
-        # whole command line. Metacharacters survive path normalisation, which
-        # would let anything ride along behind an allowlisted script name.
-        if ($cmd -match '[;&|\r\n`]' -or $cmd.Contains('$(')) {
-            return "Policy hard-deny: task command '$cmd' contains a shell metacharacter, so it is a command line rather than a path to a reviewed script. $sanctioned"
-        }
-        $taskArgs = @()
-        if ($argList) { $taskArgs = @($argList) }
-        $cmdBase = ([System.IO.Path]::GetFileNameWithoutExtension($cmd)).ToLower()
-
-        if ($interpreterNames -contains $cmdBase) {
-            $inlinePayload = $false
-            $fileTarget = $null
-            $sawFileFlag = $false
-            for ($i = 0; $i -lt $taskArgs.Count; $i++) {
-                $a = [string]$taskArgs[$i]
-                if ($a -match '(?i)^(-Command|-c|/c|-EncodedCommand)$') { $inlinePayload = $true; break }
-                if ($a -match '(?i)^-File$') {
-                    $sawFileFlag = $true
-                    if (($i + 1) -lt $taskArgs.Count) { $fileTarget = [string]$taskArgs[$i + 1] }
-                    break
-                }
-            }
-            if ($inlinePayload) {
-                return "Policy hard-deny: '$cmd' invoked with an inline command payload (-Command/-c/-EncodedCommand) that is not visible to the task classifier. $sanctioned"
-            }
-            if (-not $sawFileFlag) {
-                $fileTarget = $taskArgs | Where-Object { $_ -and -not ([string]$_).StartsWith('-') } | Select-Object -First 1
-            }
-            if (-not $fileTarget -or -not (Test-InAllowlist ([string]$fileTarget))) {
-                return "Policy hard-deny: '$cmd' payload '$fileTarget' does not resolve inside an AF_TASK_SCRIPT_DIRS directory (unrecognised or external script). $sanctioned"
-            }
-            return $null
-        }
-        if (-not (Test-InAllowlist $cmd)) {
-            return "Policy hard-deny: task command '$cmd' does not resolve inside an AF_TASK_SCRIPT_DIRS directory. $sanctioned"
-        }
-        return $null
-    }
-
-    # An OS-specific scope overrides the task scope, so every variant present
-    # must clear the bar -- checking only `command` classifies a decoy.
-    $scopes = @(@{ n = 'task'; o = $task })
-    foreach ($os in @('windows', 'linux', 'osx')) {
-        if ($task.$os) { $scopes += @{ n = $os; o = $task.$os } }
-    }
-    foreach ($s in $scopes) {
-        $o = $s.o
-        if ($o.options -and $o.options.shell) {
-            Emit-Task 'deny' ("Policy hard-deny: the '$($s.n)' scope overrides options.shell, which moves the executed payload into the shell's own arguments where the task classifier cannot see it. $sanctioned")
-        }
-        $effectiveCmd = if ($o.command) { [string]$o.command } else { [string]$task.command }
-        $effectiveArgs = if ($null -ne $o.args) { $o.args } else { $task.args }
-        $reason = Get-CommandDenyReason $effectiveCmd $effectiveArgs
-        if ($reason) {
-            if ($s.n -ne 'task') { $reason = "[$($s.n) override] $reason" }
-            Emit-Task 'deny' $reason
-        }
-    }
-    # An identical invocation already has a label, and runTask runs it without
-    # the creation prompt createAndRunTask can never skip (#396).
-    $dupHelper = Join-Path $PSScriptRoot 'task-duplicate.py'
-    if ($AfPython -and (Test-Path $dupHelper)) {
-        $dupLabel = @($raw | & $AfPython $dupHelper $AfCodeRoot 2>$null) | Select-Object -First 1
-        if ($dupLabel) {
-            Emit-Task 'deny' ("Policy deny: this invocation already exists as the task '$dupLabel'. Run it with runTask (id 'shell: $dupLabel'): it needs no creation prompt and can be auto-approved, while createAndRunTask would append a duplicate to tasks.json (#396).")
-        }
-    }
-    Emit-Task 'allow' 'Safe: every task scope resolves to a reviewed script under AF_TASK_SCRIPT_DIRS.'
+    @{ hookSpecificOutput = @{ hookEventName = 'PreToolUse'; permissionDecision = 'deny'
+            permissionDecisionReason = 'Policy hard-deny: create_and_run_task is removed for agents (#60). It writes an agent-authored task into tasks.json and can never be auto-approved. Run a fixed task with runTask, or a reviewed script with arguments through af-command run_script. If af-command is not registered in this workspace, report BLOCKED and ask the user to register it.' }
+    } | ConvertTo-Json -Depth 3 -Compress
+    exit 0
 }
 
 # Extract the command string (runInTerminal / terminal shape only, from here).
