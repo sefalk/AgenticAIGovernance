@@ -251,16 +251,23 @@ if [ -f "$log_path" ]; then
             ".github/.af-version" 2>/dev/null | head -1)
         [ -n "$version_value" ] && af_version="\"${version_value}\""
     fi
+    # Between release cuts the commit is what identifies a deploy (#426, #429).
+    af_commit="null"
+    if [ -f ".github/.af-version" ]; then
+        commit_value=$(sed -n 's/^[[:space:]]*commit:[[:space:]]*\([0-9a-f]\{12\}\(-dirty\)\{0,1\}\)[[:space:]]*$/\1/p' \
+            ".github/.af-version" 2>/dev/null | head -1)
+        [ -n "$commit_value" ] && af_commit="\"${commit_value}\""
+    fi
 
     stamp_tmp=$(mktemp)
     # Top-level keys only: a `started:` indented inside a step belongs to that
     # step and is none of this hook's business. `af_version_note:` is the
     # documenter's own field and is deliberately not matched here.
-    if awk -v s="started: \"${started_at}\"" -v c="completed: \"${completed_at}\"" -v v="af_version: ${af_version}" '
-        /^(started|completed|af_version):/ { next }
+    if awk -v s="started: \"${started_at}\"" -v c="completed: \"${completed_at}\"" -v v="af_version: ${af_version}" -v k="af_commit: ${af_commit}" '
+        /^(started|completed|af_version|af_commit):/ { next }
         { print }
-        /^workflow_id:/ && !ins { print s; print c; print v; ins = 1 }
-        END { if (!ins) { print s; print c; print v } }
+        /^workflow_id:/ && !ins { print s; print c; print v; print k; ins = 1 }
+        END { if (!ins) { print s; print c; print v; print k } }
     ' "$log_path" > "$stamp_tmp" 2>/dev/null && [ -s "$stamp_tmp" ]; then
         mv "$stamp_tmp" "$log_path"
         stamp_note=" + header fields stamped"

@@ -97,6 +97,7 @@ BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*\s*$")
 NESTED = re.compile(r"^\s+\S")
 ZONE = re.compile(r"(?P<zone>Z|[+-]\d{2}:?\d{2})$")
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
+COMMIT = re.compile(r"^[0-9a-f]{12}(-dirty)?$")
 
 # Fields that hold a measurement. A value is a number, a percentage, or a
 # stated absence; anything else was composed, not measured (#173, #102).
@@ -318,6 +319,18 @@ def _findings(text: str) -> tuple[list[str], list[str]]:
                 f"line {number}: af_version {shown!r} is not a version -- the field is stamped by "
                 "your Stop hook from `.github/.af-version`, so do not write it; remove the line, "
                 "and put anything you want to say about the version in `af_version_note:`"
+            )
+
+    # `af_commit` is stamped the same way from the `commit:` line (#429).
+    commit = _keys(sections.get("af_commit", []), "af_commit")
+    if commit:
+        number, value = commit[0]
+        stated = value.strip()
+        if stated.upper() not in ABSENT and not COMMIT.match(stated):
+            shown = stated if len(stated) <= 60 else stated[:57] + "..."
+            violations.append(
+                f"line {number}: af_commit {shown!r} is not a commit -- the field is stamped by "
+                "your Stop hook from `.github/.af-version`, so do not write it; remove the line"
             )
 
     violations.extend(_escalation_findings(sections, steps))

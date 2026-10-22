@@ -332,6 +332,16 @@ escalation:
     $results['AN_base_fixture_has_no_version'] = -not ($conforming -match '(?m)^af_version:')
     $results['AN_note_fixture_has_both']       = ($withNote -match '(?m)^af_version: ') -and ($withNote -match '(?m)^af_version_note: ')
 
+    # AN2: `af_commit` is stamped from the `commit:` line of `.af-version` (#429),
+    #    `<sha12>` or `<sha12>-dirty`. Anything else was written by hand.
+    foreach ($ok in @('af_commit: "0123456789ab"', 'af_commit: "0123456789ab-dirty"', 'af_commit: null')) {
+        $r = Invoke-Checker (New-Version $ok)
+        $results["AN2_ok: $ok"] = $r.Code -eq 0
+    }
+    $r = Invoke-Checker (New-Version 'af_commit: "see .af-version"')
+    $results['AN2_prose_commit_rejected'] = $r.Code -eq 1
+    $results['AN2_says_remove_it']        = ($r.Output -match 'af_commit') -and ($r.Output -match 'remove the line')
+
     # AO-AV: a metric is a number, a percentage, or an explicit absence (#173,
     #    #102). The fabricated `test_suite_status: "2013 + 122 new tests"` and,
     #    in 12 MP logs, prose such as `N/A (target module not yet implemented)`

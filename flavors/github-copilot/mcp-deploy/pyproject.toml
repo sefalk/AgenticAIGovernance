@@ -40,6 +40,10 @@ packages = ["af_deploy_mcp"]
 "../.vscode" = "af_deploy_mcp/payload/.vscode"
 "../VERSION" = "af_deploy_mcp/payload/VERSION"
 
+# Stamps af_deploy_mcp/payload/SOURCE_COMMIT: the bundled copy is no checkout (#429).
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

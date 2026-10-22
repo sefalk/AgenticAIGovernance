@@ -99,6 +99,64 @@ def test_an_untracked_payload_inside_a_repo_has_no_commit(tmp_path: Path) -> Non
     assert deploy_core.source_commit(copy) == ""
 
 
+# ── the wheel's payload carries its build commit (#429) ──────────────────────────────────
+
+
+def test_a_bundled_payload_reports_the_commit_stamped_at_build(tmp_path: Path) -> None:
+    src = _payload(tmp_path / "payload")
+    _write(src / "SOURCE_COMMIT", "0123456789ab\n")
+    assert deploy_core.source_commit(src) == "0123456789ab"
+
+
+def test_a_stamp_that_is_not_a_commit_is_ignored(tmp_path: Path) -> None:
+    src = _payload(tmp_path / "payload")
+    _write(src / "SOURCE_COMMIT", "see the release notes\n")
+    assert deploy_core.source_commit(src) == ""
+
+
+def test_a_tracked_checkout_wins_over_a_stale_stamp(tmp_path: Path) -> None:
+    src, head = _committed(tmp_path / "src")
+    _write(src / "SOURCE_COMMIT", "0123456789ab\n")
+    assert deploy_core.source_commit(src) == head
+
+
+def test_the_build_hook_stamps_the_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib.util
+    import sys
+    import types
+
+    # Hatchling is not in the dev venv; the hook only needs the base class.
+    iface = types.ModuleType("hatchling.builders.hooks.plugin.interface")
+
+    class BuildHookInterface:
+        def __init__(self, root: str) -> None:
+            self.root = root
+
+    iface.BuildHookInterface = BuildHookInterface
+    for name in ("hatchling", "hatchling.builders", "hatchling.builders.hooks", "hatchling.builders.hooks.plugin"):
+        monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+    monkeypatch.setitem(sys.modules, iface.__name__, iface)
+
+    spec = importlib.util.spec_from_file_location("af_hatch_build", AF_ROOT / "mcp-deploy" / "hatch_build.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    src, head = _committed(tmp_path / "src")
+    (src / "mcp-deploy").mkdir()
+    hook = module.SourceCommitHook(str(src / "mcp-deploy"))
+    build_data: dict = {"force_include": {}}
+    hook.initialize("standard", build_data)
+    [(stamp, dest)] = build_data["force_include"].items()
+    assert dest == "af_deploy_mcp/payload/SOURCE_COMMIT"
+    assert Path(stamp).read_text(encoding="utf-8").strip() == head
+
+
+def test_pyproject_registers_the_build_hook() -> None:
+    text = (AF_ROOT / "mcp-deploy" / "pyproject.toml").read_text(encoding="utf-8")
+    assert "[tool.hatch.build.targets.wheel.hooks.custom]" in text
+
+
 # ── .af-version ─────────────────────────────────────────────────────────────
 
 

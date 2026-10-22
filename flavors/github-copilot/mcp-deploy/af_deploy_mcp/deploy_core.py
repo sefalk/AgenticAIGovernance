@@ -407,13 +407,25 @@ def source_commit(source_root: Path) -> str:
 
     tracked = git("ls-files", "--error-unmatch", "--", "VERSION")
     if tracked is None or tracked.returncode != 0:
-        return ""
+        return bundled_commit(source_root)
     head = git("rev-parse", "--short=12", "HEAD")
     if head is None or head.returncode != 0 or not head.stdout.strip():
         return ""
     sha = head.stdout.strip()
     dirty = git("status", "--porcelain", "--untracked-files=no", "--", ".")
     return f"{sha}-dirty" if dirty is not None and dirty.stdout.strip() else sha
+
+
+_COMMIT_STAMP = re.compile(r"^[0-9a-f]{12}(-dirty)?$")
+
+
+def bundled_commit(source_root: Path) -> str:
+    """The commit ``hatch_build.py`` stamped into a wheel's payload, or ``""`` (#429)."""
+    stamp = source_root / "SOURCE_COMMIT"
+    if not stamp.is_file():
+        return ""
+    value = stamp.read_text(encoding="utf-8", errors="replace").strip()
+    return value if _COMMIT_STAMP.match(value) else ""
 
 
 def repository_version(package_dir: Path | None = None) -> str:
