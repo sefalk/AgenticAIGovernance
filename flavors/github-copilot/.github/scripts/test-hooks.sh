@@ -2933,10 +2933,8 @@ except Exception: print("unparsable")' 2>/dev/null)
 assert_true "a task command with backslashes and quotes still produces parsable JSON" \
     "$([ "$task_dec" = "deny" ] && echo 1 || echo 0)" "got '$task_dec' from: $task_out"
 
-# --- create_and_run_task: an identical invocation is reused (#396) ----------
-# createAndRunTask refuses an existing label and can never be auto-approved, so
-# re-running an invocation minted a new label each time (MP: 227 tasks for 118
-# distinct invocations). runTask on the existing label needs no creation prompt.
+# --- create_and_run_task is removed, not classified (#60) --------------------
+# Denied in every shape; the reason names the two routes that remain.
 dup_dir=$(mktemp -d)
 dup_win=$(cygpath -m "$dup_dir" 2>/dev/null || printf '%s' "$dup_dir")
 mkdir -p "$dup_dir/.vscode"
@@ -2955,26 +2953,17 @@ except Exception: print("none")' 2>/dev/null
 dup_out=$(create_out '.github/scripts/run-lint.ps1' '["-Scope","changed"]')
 assert_true "create_and_run_task: an invocation that already has a task is denied" \
     "$([ "$(verdict_of "$dup_out")" = "deny" ] && echo 1 || echo 0)" "got: $dup_out"
-assert_true "create_and_run_task: the deny names the existing label and runTask" \
-    "$(printf '%s' "$dup_out" | grep -q 'lint: changed files' && printf '%s' "$dup_out" | grep -q 'runTask' && echo 1 || echo 0)" "got: $dup_out"
-
-dup_out=$(create_out 'powershell' '["-NoProfile","-File",".github/scripts/run-lint.ps1","-Scope","changed"]')
-assert_true "create_and_run_task: the same script behind powershell -File is the same invocation" \
-    "$([ "$(verdict_of "$dup_out")" = "deny" ] && echo 1 || echo 0)" "got: $dup_out"
+assert_true "create_and_run_task: the deny names runTask and run_script as the routes left" \
+    "$(printf '%s' "$dup_out" | grep -q 'runTask' && printf '%s' "$dup_out" | grep -q 'run_script' && printf '%s' "$dup_out" | grep -q '#60' && echo 1 || echo 0)" "got: $dup_out"
 
 dup_out=$(create_out '.github/scripts/run-lint.ps1' '["-Scope","all"]')
-assert_true "create_and_run_task: different arguments are still allowed" \
-    "$([ "$(verdict_of "$dup_out")" = "allow" ] && echo 1 || echo 0)" "got: $dup_out"
-
-printf '// comment\n%s' "$dup_tasks" >"$dup_dir/.vscode/tasks.json"
-dup_out=$(create_out '.github/scripts/run-lint.ps1' '["-Scope","changed"]')
-assert_true "create_and_run_task: an unparsable tasks.json does not deny" \
-    "$([ "$(verdict_of "$dup_out")" = "allow" ] && echo 1 || echo 0)" "got: $dup_out"
+assert_true "create_and_run_task: a new reviewed-script invocation is denied too" \
+    "$([ "$(verdict_of "$dup_out")" = "deny" ] && echo 1 || echo 0)" "got: $dup_out"
 
 rm -f "$dup_dir/.vscode/tasks.json"
 dup_out=$(create_out '.github/scripts/run-lint.ps1' '["-Scope","changed"]')
-assert_true "create_and_run_task: no tasks.json is still allowed" \
-    "$([ "$(verdict_of "$dup_out")" = "allow" ] && echo 1 || echo 0)" "got: $dup_out"
+assert_true "create_and_run_task: no tasks.json is denied too" \
+    "$([ "$(verdict_of "$dup_out")" = "deny" ] && echo 1 || echo 0)" "got: $dup_out"
 rm -rf "$dup_dir"
 
 # --- The command server's trust store is not agent-editable (#60) -----------

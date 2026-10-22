@@ -254,14 +254,15 @@ Add-Result 'R23_the_carried_table_equals_the_metrics_skill' `
 # is spelled, which a gate cannot promise. The sets below were decided from the
 # measured use (comment on #284, 2026-10-20); a widened set fails here rather
 # than changing silently, and so does a new agent that gains an execution tool.
+# #60 (owner, 2026-10-21): createAndRunTask is held by no agent.
 $execTool = '(?i)^(execute/|af-command/run_script$|pylance-mcp-server/pylanceRunCodeSnippet$)'
 $declaredExec = @{
-    'code-critic'  = 'execute/createAndRunTask execute/runNotebookCell execute/runTask execute/runTests execute/testFailure'
-    'coordinator'  = 'af-command/run_script execute/createAndRunTask execute/getTerminalOutput execute/runInTerminal execute/runTask execute/runTests execute/testFailure'
+    'code-critic'  = 'execute/runNotebookCell execute/runTask execute/runTests execute/testFailure'
+    'coordinator'  = 'af-command/run_script execute/getTerminalOutput execute/runInTerminal execute/runTask execute/runTests execute/testFailure'
     'documenter'   = 'execute/runTask'
-    'implementer'  = 'af-command/run_script execute/createAndRunTask execute/runNotebookCell execute/runTask execute/runTests execute/testFailure pylance-mcp-server/pylanceRunCodeSnippet'
+    'implementer'  = 'af-command/run_script execute/runNotebookCell execute/runTask execute/runTests execute/testFailure pylance-mcp-server/pylanceRunCodeSnippet'
     'planner'      = 'execute/runTask'
-    'refactorer'   = 'af-command/run_script execute/createAndRunTask execute/runNotebookCell execute/runTask execute/runTests execute/testFailure pylance-mcp-server/pylanceRunCodeSnippet'
+    'refactorer'   = 'af-command/run_script execute/runNotebookCell execute/runTask execute/runTests execute/testFailure pylance-mcp-server/pylanceRunCodeSnippet'
     'test-critic'  = 'execute/runTask execute/runTests execute/testFailure'
     'test-writer'  = 'af-command/run_script execute/runTask execute/runTests execute/testFailure pylance-mcp-server/pylanceRunCodeSnippet'
 }
