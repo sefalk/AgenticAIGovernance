@@ -40,7 +40,7 @@ jobs:
     steps:
       # The script and gh-api.ps1 live in the workspace, so the checkout comes first (#327).
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Close issues named by merged pull requests
         shell: pwsh
