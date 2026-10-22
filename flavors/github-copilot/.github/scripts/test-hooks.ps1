@@ -4096,6 +4096,11 @@ Assert-NotContains "session-context claims no test state when none was recorded"
     $scBare.Output 'Tests:' `
     "an invented summary is worse than none, because it is acted on"
 
+# The guards were built and measured in the Local harness only (#443, owner decision A).
+Assert-Contains "session-context states that only the Local harness is supported" `
+    $scBare.Output 'Local harness only' `
+    "a Copilot-harness session must learn that its guards are unverified"
+
 $scPass = Invoke-Hook -Script 'session-context.ps1' -JsonInput $scStart -Branch 'agent/263-x' `
     -Files @{ '.github/test-log.json' = $scPassLog }
 Assert-Contains "session-context folds the recorded test state into the context" `

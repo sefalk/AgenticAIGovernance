@@ -834,6 +834,7 @@ def apply(source_root: Path, target_dir: Path) -> dict:
         "model_check": model_check(source_root, target_af_env),
         "test_log_plugin": test_log_plugin_note(target_dir),
         "af_command": af_command_note(target_dir),
+        "harness": list(HARNESS_NOTE),
     }
 
 
@@ -850,6 +851,11 @@ def test_log_plugin_note(target_dir: Path) -> list[str]:
         return []
     return list(TEST_LOG_PLUGIN_NOTE)
 
+
+HARNESS_NOTE = [
+    "  NOTE    AF supports the VS Code Local harness only: in the Copilot harness its hooks and guards",
+    "          are unverified (#443, #447). Pick Local in the chat's session target.",
+]
 
 AF_COMMAND_NOTE = [
     "  NOTE    af-command is not registered -- argument-bearing script runs have no route (#445, #60):",

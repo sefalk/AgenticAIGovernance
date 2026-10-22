@@ -71,6 +71,15 @@ def test_mcp_apply_reports_the_note(tmp_path, minimal_source):
     assert any(NOTE in line for line in deploy_core.apply(minimal_source, target)["af_command"])
 
 
+def test_mcp_apply_states_the_local_harness_scope(tmp_path, minimal_source):
+    # The guards were built and measured in the Local harness only (#443, decision A).
+    from af_deploy_mcp import deploy_core
+
+    target = tmp_path / "proj"
+    target.mkdir()
+    assert any("Local harness only" in line for line in deploy_core.apply(minimal_source, target)["harness"])
+
+
 def _pwsh() -> str | None:
     return next((exe for exe in ("pwsh", "powershell") if shutil.which(exe)), None)
 
@@ -97,6 +106,7 @@ def test_ps1_deploy_notes_a_missing_registration(tmp_path, minimal_source):
     )
     assert res.returncode == 0, res.stdout + res.stderr
     assert NOTE in res.stdout
+    assert "Local harness only" in res.stdout
 
 
 @pytest.mark.skipif(_pwsh() is None, reason="PowerShell not available")

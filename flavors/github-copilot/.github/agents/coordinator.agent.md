@@ -8,7 +8,6 @@ tools:
   - search/textSearch
   - search/fileSearch
   - search/listDirectory
-  - search/changes
   - search/usages
   - read/readFile
   - read/problems

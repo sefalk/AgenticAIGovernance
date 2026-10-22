@@ -278,6 +278,17 @@ foreach ($agentFile in Get-ChildItem (Join-Path $payload 'agents') -Filter '*.ag
 }
 Add-Result 'R28_every_agent_s_execution_tools_are_the_declared_set' ($toolsetDrift.Count -eq 0) ($toolsetDrift -join '; ')
 
+# #443: a Local subagent does not receive these, so listing one is a capability the agent believes it has.
+$unreceived = @('search/changes')
+$listsUnreceived = @()
+foreach ($agentFile in Get-ChildItem (Join-Path $payload 'agents') -Filter '*.agent.md') {
+    $front = ((Get-Content $agentFile.FullName -Raw -Encoding UTF8) -split '(?m)^---\s*$')[1]
+    foreach ($t in $unreceived) {
+        if ($front -match "(?m)^\s*-\s*['""]?$([regex]::Escape($t))['""]?\s*$") { $listsUnreceived += "$($agentFile.Name): $t" }
+    }
+}
+Add-Result 'R30_no_agent_lists_a_tool_a_Local_subagent_does_not_receive' ($listsUnreceived.Count -eq 0) ($listsUnreceived -join '; ')
+
 # #284: the test-critic held runTests while its agent file and the test budget
 # said "never run tests" -- and ran them 24 times in 66 logs. A grant and a rule
 # that disagree are decided by whichever one the agent happens to read last.
