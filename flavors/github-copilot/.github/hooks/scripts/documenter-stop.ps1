@@ -276,18 +276,22 @@ try {
     }
 
     $afVersion = 'null'
+    $afCommit = 'null'
     if (Test-Path '.github/.af-version') {
         foreach ($versionLine in (Get-Content '.github/.af-version')) {
             $m = [regex]::Match($versionLine, '^\s*version:\s*(\d+\.\d+\.\d+)\s*$')
-            if ($m.Success) { $afVersion = '"' + $m.Groups[1].Value + '"'; break }
+            if ($m.Success -and $afVersion -eq 'null') { $afVersion = '"' + $m.Groups[1].Value + '"' }
+            # Between release cuts the commit is what identifies a deploy (#426, #429).
+            $c = [regex]::Match($versionLine, '^\s*commit:\s*([0-9a-f]{12}(-dirty)?)\s*$')
+            if ($c.Success -and $afCommit -eq 'null') { $afCommit = '"' + $c.Groups[1].Value + '"' }
         }
     }
 
     # Top-level keys only: a `started:` indented inside a step belongs to that
     # step and is none of this hook's business. `af_version_note:` is the
     # documenter's own field and is deliberately not matched here.
-    $kept = @(Get-Content $logPath | Where-Object { $_ -notmatch '^(started|completed|af_version):' })
-    $stampLines = @("started: `"$startedAt`"", "completed: `"$completedAt`"", "af_version: $afVersion")
+    $kept = @(Get-Content $logPath | Where-Object { $_ -notmatch '^(started|completed|af_version|af_commit):' })
+    $stampLines = @("started: `"$startedAt`"", "completed: `"$completedAt`"", "af_version: $afVersion", "af_commit: $afCommit")
 
     $anchor = -1
     for ($i = 0; $i -lt $kept.Count; $i++) {
