@@ -1,0 +1,3 @@
+### Added
+
+- **A wheel's bundled payload and every workflow log now name the source commit (#429).** Since #426 `VERSION` moves only at a release cut, so a mid-cycle wheel and a mid-cycle deploy were indistinguishable from the cut. A hatch build hook (`mcp-deploy/hatch_build.py`) stamps `af_deploy_mcp/payload/SOURCE_COMMIT` at build time, and `source_commit()` falls back to that stamp when the payload is not a tracked checkout. `af_apply` from an installed wheel therefore writes `commit:` to `.af-version`, and `af_status` compares it. `documenter-stop` (both dialects) stamps `af_commit` from that `commit:` line next to `af_version`, `null` when absent. `check-workflow-log.py` accepts only `<sha12>`, `<sha12>-dirty` or `null` there.
