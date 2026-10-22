@@ -53,8 +53,10 @@ non-terminal tool ignored	agent/fixture	silent	{"tool_name":"read_file","tool_in
 # the shell verbatim so metacharacters survive, and substitution variables
 # resolve where the classifier cannot see. An allowlist reading only `command`
 # is decorative. `runOn: folderOpen` would execute later, outside any hook's
-# view. The allow rows are the regression half: a false deny costs as much as
-# a false allow, because it pushes agents back to the terminal.
+# view. Since #60 the tool is removed from every agent and denied outright, so
+# every row expects deny -- including the reviewed-script rows that used to
+# allow. Argument-bearing runs go through af-command's run_script; fixed ones
+# through runTask.
 #
 # Most rows below name the tool `createAndRunTask`, which VS Code never sends
 # (the real name is `create_and_run_task`, issue #74). They are kept because
@@ -75,10 +77,10 @@ createAndRunTask: powershell -Command inline script is denied	agent/fixture	deny
 createAndRunTask: -File to %TEMP% script is denied	agent/fixture	deny	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"temp-script","type":"shell","command":"powershell","args":["-NoProfile","-File","%TEMP%\\x.ps1"]}}}
 createAndRunTask: -File via path traversal is denied	agent/fixture	deny	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"traversal","type":"shell","command":"powershell","args":["-NoProfile","-File",".github/scripts/../../../Windows/System32/cmd.exe"]}}}
 createAndRunTask: interactive input variable is denied	agent/fixture	deny	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"user-input","type":"shell","command":"echo","args":["${input:promptUser}"]}}}
-createAndRunTask: .github/scripts/run-tests.ps1 -Scope domain allows	agent/fixture	allow	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"test-domain","type":"shell","command":".github/scripts/run-tests.ps1","args":["-Scope","domain"]}}}
-createAndRunTask: .github/scripts/run-lint.ps1 -Scope all allows	agent/fixture	allow	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"lint-all","type":"shell","command":".github/scripts/run-lint.ps1","args":["-Scope","all"]}}}
-createAndRunTask: .github/scripts/run-metrics.ps1 -Metric complexity allows	agent/fixture	allow	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"metrics-complexity","type":"shell","command":".github/scripts/run-metrics.ps1","args":["-Metric","complexity"]}}}
-createAndRunTask: .github/scripts/run-deps.ps1 -Scope dev allows	agent/fixture	allow	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"deps-dev","type":"shell","command":".github/scripts/run-deps.ps1","args":["-Scope","dev"]}}}
+createAndRunTask: .github/scripts/run-tests.ps1 -Scope domain is denied: the tool is removed (#60)	agent/fixture	deny	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"test-domain","type":"shell","command":".github/scripts/run-tests.ps1","args":["-Scope","domain"]}}}
+createAndRunTask: .github/scripts/run-lint.ps1 -Scope all is denied: the tool is removed (#60)	agent/fixture	deny	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"lint-all","type":"shell","command":".github/scripts/run-lint.ps1","args":["-Scope","all"]}}}
+createAndRunTask: .github/scripts/run-metrics.ps1 -Metric complexity is denied: the tool is removed (#60)	agent/fixture	deny	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"metrics-complexity","type":"shell","command":".github/scripts/run-metrics.ps1","args":["-Metric","complexity"]}}}
+createAndRunTask: .github/scripts/run-deps.ps1 -Scope dev is denied: the tool is removed (#60)	agent/fixture	deny	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"deps-dev","type":"shell","command":".github/scripts/run-deps.ps1","args":["-Scope","dev"]}}}
 createAndRunTask: OS-specific command override is denied	agent/fixture	deny	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"os-override","type":"shell","command":".github/scripts/run-tests.ps1","windows":{"command":"cmd.exe","args":["/c","echo pwned"]}}}}
 createAndRunTask: options.shell override is denied	agent/fixture	deny	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"shell-override","type":"shell","command":".github/scripts/run-tests.ps1","options":{"shell":{"executable":"powershell","args":["-Command","echo pwned"]}}}}}
 createAndRunTask: shell metacharacter in command is denied	agent/fixture	deny	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"chained","type":"shell","command":".github/scripts/run-tests.ps1; echo pwned"}}}
@@ -86,10 +88,10 @@ createAndRunTask: chained command operator is denied	agent/fixture	deny	{"tool_n
 createAndRunTask: command-substitution variable is denied	agent/fixture	deny	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"cmdvar","type":"process","command":"${command:python.interpreterPath}","args":["-c","print(1)"]}}}
 createAndRunTask: settings-substitution variable is denied	agent/fixture	deny	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"cfgvar","type":"process","command":"${config:python.defaultInterpreterPath}","args":["-c","print(1)"]}}}
 createAndRunTask: runOn folderOpen is denied	agent/fixture	deny	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"autorun","type":"shell","command":".github/scripts/run-tests.ps1","runOptions":{"runOn":"folderOpen"}}}}
-createAndRunTask: workspace-folder path variable allows	agent/fixture	allow	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"wsvar","type":"shell","command":"${workspaceFolder}/.github/scripts/run-tests.ps1","args":["-Scope","domain"]}}}
+createAndRunTask: workspace-folder path variable is denied: the tool is removed (#60)	agent/fixture	deny	{"tool_name":"createAndRunTask","tool_input":{"task":{"label":"wsvar","type":"shell","command":"${workspaceFolder}/.github/scripts/run-tests.ps1","args":["-Scope","domain"]}}}
 create_and_run_task: force push is denied (real tool name)	agent/fixture	deny	{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"push","type":"shell","command":"git","args":["push","--force","origin","main"]},"workspaceFolder":"/repo"}}
 create_and_run_task: bare binary is denied (real tool name)	agent/fixture	deny	{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"lint","type":"shell","command":"ruff","args":["check","src/"]},"workspaceFolder":"/repo"}}
-create_and_run_task: reviewed script allows (real tool name)	agent/fixture	allow	{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"test","type":"shell","command":".github/scripts/run-tests.ps1","args":["-Scope","domain"]},"workspaceFolder":"/repo"}}
+create_and_run_task: reviewed script (real tool name) is denied: the tool is removed (#60)	agent/fixture	deny	{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"test","type":"shell","command":".github/scripts/run-tests.ps1","args":["-Scope","domain"]},"workspaceFolder":"/repo"}}
 
 # Cases below were held inline in the PowerShell suite until #280 measured
 # the bash hook against them: all nine reach the identical verdict. Four use

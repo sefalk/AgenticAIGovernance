@@ -30,7 +30,6 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 | **Execution** | | | | | | | | | | | | |
 | `execute/runTests` | X | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
 | `execute/runTask` | X | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — |
-| `execute/createAndRunTask` | X | ✅ | — | — | — | ✅ | ✅ | ✅ | — | — | — | — |
 | `execute/testFailure` | X | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
 | `execute/runInTerminal` | X | ✅ | — | — | — | — | — | — | — | — | — | — |
 | `execute/getTerminalOutput` | X | ✅ | — | — | — | — | — | — | — | — | — | — |
@@ -68,7 +67,8 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 | `newWorkspace` | Not relevant to development workflows. | Scope creep |
 | `vscode/installExtension` | Extension management is a human decision. | Unreviewed extensions, supply-chain risk |
 | `vscode/runCommand` | Too broad — can invoke any VS Code command. | Bypasses tool restrictions |
-| `execute/runInTerminal` (workers) | Workers reach the same reviewed scripts through `runTests` / `runTask` / `createAndRunTask`. Only coordinator has terminal. | Ad-hoc commands are far harder to review than a named script |
+| `execute/createAndRunTask` | Removed for every agent (#60): it writes an agent-authored task into `tasks.json`, can never be auto-approved, and minted a label per call. Denied by `block-dangerous`. | Label sprawl, an approval prompt per call |
+| `execute/runInTerminal` (workers) | Workers reach the same reviewed scripts through `runTests` / `runTask` / `af-command/run_script`. Only coordinator has terminal. | Ad-hoc commands are far harder to review than a named script |
 | `read/terminalLastCommand` | Only useful with terminal access (coordinator only). Not assigned to avoid encouraging terminal reliance. | — |
 | `read/terminalSelection` | Same as above. | — |
 
@@ -94,8 +94,8 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 1. **Least privilege** — agents get only tools needed for their role
 2. **One reviewed execution surface** — prefer a predefined `run_task` label
    because it is single-sourced and argument-stable, not because it escapes
-   review. `run_task`, `createAndRunTask` and the terminal all pass the same
-   PreToolUse classifier, and the task path may only invoke scripts under
+   review. `run_task`, `af-command/run_script` and the terminal are all
+   gated, and `run_script` runs without a prompt only scripts under
    `AF_TASK_SCRIPT_DIRS`
 3. **Read before write** — critics and planners get read-only subsets
 4. **Dep-tracking integrity** — no tool that installs packages outside the spec file workflow

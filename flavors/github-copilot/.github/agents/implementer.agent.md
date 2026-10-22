@@ -15,7 +15,6 @@ tools:
   - todo
   - execute/runTests
   - execute/runTask
-  - execute/createAndRunTask
   - af-command/run_script
   - af-command/list_scripts
   - execute/testFailure
@@ -162,10 +161,8 @@ changed). One `all` run at the very end only.
 
 **Rule:** Never call pytest directly. Use `run_task` for pre-defined scenarios.
 Use `runTests` with `files` or `testNames` args for file- or test-scoped runs.
-`createAndRunTask` is for invocations a fixed label cannot express — not a
-lighter-scrutiny route around the terminal you do not have. The same PreToolUse
-classifier inspects it, and it may only invoke scripts under
-`AF_TASK_SCRIPT_DIRS`; a bare binary or an inline `-Command` payload is denied.
+An invocation no fixed label expresses goes through `af-command`'s `run_script`;
+`createAndRunTask` is removed and denied (#60).
 Use Pylance MCP for syntax/import checks.
 
 ## Return Format

@@ -15,7 +15,6 @@ tools:
   - todo
   - execute/runTests
   - execute/runTask
-  - execute/createAndRunTask
   - af-command/run_script
   - af-command/list_scripts
   - execute/testFailure
@@ -83,12 +82,10 @@ These apply **always** — during workflows, conversations, and ad-hoc requests.
    file creation happen without knowing where you are.
 
 3. **One reviewed execution surface — not a freedom ladder.** `run_task` (a
-   curated label with fixed arguments) and `createAndRunTask` (a script under
-   `AF_TASK_SCRIPT_DIRS`, with arguments no fixed label expresses) are two ways
-   to call the *same* thing, not escalating degrees of permission. Neither is
-   the lighter-scrutiny path: the same PreToolUse classifier inspects both, and
-   a task naming a bare binary or an inline interpreter payload is denied
-   exactly as the equivalent terminal command would be.
+   curated label with fixed arguments) and `af-command`'s `run_script` (a
+   script under `AF_TASK_SCRIPT_DIRS`, with arguments no fixed label expresses)
+   are two ways to call the *same* thing, not escalating degrees of permission.
+   `createAndRunTask` is removed and denied (#60).
 
    Prefer a predefined task (tests, metrics, pip installs, git queries, lint)
    because it is single-sourced and argument-stable — never because it avoids

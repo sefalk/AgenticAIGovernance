@@ -15,7 +15,6 @@ tools:
   - todo
   - execute/runTests
   - execute/runTask
-  - execute/createAndRunTask
   - execute/testFailure
   - pylance-mcp-server/pylanceFileSyntaxErrors
   - pylance-mcp-server/pylanceImports
@@ -158,11 +157,8 @@ If detected → REJECT regardless of metric values.
 **Rule:** The test log is your primary source. Re-running verified tests wastes
 the workflow's test budget.
 
-You hold both `run_in_terminal` and `createAndRunTask`. They are one reviewed
-surface, not escalating permissions — the same PreToolUse classifier inspects
-both, and the task path may only invoke scripts under `AF_TASK_SCRIPT_DIRS`.
-Never wrap a command in a task to make it look sanctioned; if the command needs
-the terminal, run it there and let it be classified.
+Run checks through `run_task` labels; there is no task-creation tool (#60).
+Never look for another route to a command a gate denied.
 
 ## Return Format
 
