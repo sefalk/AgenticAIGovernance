@@ -16,20 +16,16 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import importlib.util
 import os
 import re
 import shutil
+import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-
-# Curated fallback tiers — keep in sync with deploy.ps1 / deploy.sh $TierDefaults.
-TIER_DEFAULTS: dict[str, str] = {
-    "PREMIUM": "Claude Opus 4.8 (copilot), Claude Opus 4.7 (copilot), Claude Sonnet 5 (copilot)",
-    "BALANCED": "Claude Sonnet 5 (copilot), Claude Sonnet 4.6 (copilot), Claude Sonnet 4.5 (copilot)",
-    "EFFICIENT": "Claude Haiku 4.5 (copilot), Claude Sonnet 5 (copilot)",
-}
 
 _TIER_TOKEN_RE = re.compile(r"__AF_TIER_(PREMIUM|BALANCED|EFFICIENT)__")
 
@@ -51,12 +47,19 @@ def get_af_env_value(af_env_path: Path, key: str) -> str:
     return ""
 
 
-def _tier_models(tier: str, af_env_path: Path) -> list[str]:
-    val = get_af_env_value(af_env_path, f"AF_MODEL_TIER_{tier}") or TIER_DEFAULTS[tier]
-    return [m.strip() for m in val.split(",") if m.strip()]
+def _tier_models(tier: str, af_env_path: Path, default_af_env: Path | None) -> list[str]:
+    """Project override (target ``AF_MODEL_TIER_*``), else the framework default
+    (``AF_MODEL_DEFAULT_*`` in the SOURCE af-env.conf, its only home -- #418)."""
+    val = get_af_env_value(af_env_path, f"AF_MODEL_TIER_{tier}")
+    if not val and default_af_env is not None:
+        val = get_af_env_value(default_af_env, f"AF_MODEL_DEFAULT_{tier}")
+    models = [m.strip() for m in val.split(",") if m.strip()]
+    if not models:
+        raise ValueError(f"no model list for tier {tier}: set AF_MODEL_DEFAULT_{tier} in the framework af-env.conf")
+    return models
 
 
-def resolve_tier_tokens(text: str, af_env_path: Path) -> str:
+def resolve_tier_tokens(text: str, af_env_path: Path, default_af_env: Path | None = None) -> str:
     """Replace ``model: __AF_TIER_X__`` lines with the resolved model list.
 
     Byte-compatible with ``deploy.ps1`` Resolve-TierTokens: preserves the file's
@@ -68,11 +71,8 @@ def resolve_tier_tokens(text: str, af_env_path: Path) -> str:
         token = f"__AF_TIER_{tier}__"
         if token not in text:
             continue
-        models = _tier_models(tier, af_env_path)
-        if len(models) <= 1:
-            repl = f"model: {models[0]}" if models else "model:"
-        else:
-            repl = "model:" + "".join(f"{nl}  - {m}" for m in models)
+        models = _tier_models(tier, af_env_path, default_af_env)
+        repl = f"model: {models[0]}" if len(models) <= 1 else "model:" + "".join(f"{nl}  - {m}" for m in models)
         pattern = re.compile(r"(?m)^model:[ \t]*" + re.escape(token) + r"[ \t]*(?=\r?\n|$)")
         text = pattern.sub(lambda _m, r=repl: r, text)
     return text
@@ -94,7 +94,7 @@ def _canonicalize_text(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def resolved_source_bytes(path: Path, af_env_path: Path) -> bytes:
+def resolved_source_bytes(path: Path, af_env_path: Path, default_af_env: Path | None = None) -> bytes:
     """The canonical bytes that would be deployed.
 
     Canonical = UTF-8 without BOM, LF line endings, with agent model-tier tokens
@@ -110,7 +110,7 @@ def resolved_source_bytes(path: Path, af_env_path: Path) -> bytes:
         return raw  # binary -- never touch
     text = _canonicalize_text(text)
     if _TIER_TOKEN_RE.search(text):
-        text = resolve_tier_tokens(text, af_env_path)
+        text = resolve_tier_tokens(text, af_env_path, default_af_env)
     return text.encode("utf-8")
 
 
@@ -169,10 +169,10 @@ def _merge_target_regions(data: bytes, target: Path) -> bytes:
     return merged.encode("utf-8")
 
 
-def source_hash_resolved(path: Path, af_env_path: Path) -> str:
+def source_hash_resolved(path: Path, af_env_path: Path, default_af_env: Path | None = None) -> str:
     """Classification hash of the deployed content: canonical + tier-resolved, with
     managed-region bodies stripped (region content is project-owned, not framework)."""
-    return _sha256_upper_bytes(_strip_bytes(resolved_source_bytes(path, af_env_path)))
+    return _sha256_upper_bytes(_strip_bytes(resolved_source_bytes(path, af_env_path, default_af_env)))
 
 
 def _target_classify_hash(path: Path) -> str:
@@ -367,15 +367,53 @@ def read_version(source_root: Path) -> str:
     return vf.read_text(encoding="utf-8").strip() if vf.is_file() else ""
 
 
-def read_deployed_version(target_dir: Path) -> str:
+def _deployed_field(target_dir: Path, key: str) -> str:
     vf = target_dir / ".github" / ".af-version"
     if not vf.is_file():
         return ""
     for line in vf.read_text(encoding="utf-8").splitlines():
-        m = re.match(r"^\s*version:\s*(.+)$", line)
+        m = re.match(rf"^\s*{key}:\s*(.+)$", line)
         if m:
             return m.group(1).strip()
     return ""
+
+
+def read_deployed_version(target_dir: Path) -> str:
+    return _deployed_field(target_dir, "version")
+
+
+def read_deployed_commit(target_dir: Path) -> str:
+    return _deployed_field(target_dir, "commit")
+
+
+def source_commit(source_root: Path) -> str:
+    """Commit the payload is read from: ``<sha12>``, ``<sha12>-dirty``, or ``""``.
+
+    VERSION moves only at a release cut, so the commit is what identifies a
+    deploy between releases (#426). Only a payload whose ``VERSION`` is tracked
+    has one: the wheel's copy under ``mcp-deploy/.venv`` sits inside the
+    framework checkout, and that checkout's HEAD is not where the copy came
+    from. Untracked files do not count as dirty -- the payload is what git
+    tracks.
+    """
+
+    def git(*args: str) -> subprocess.CompletedProcess[str] | None:
+        try:
+            return subprocess.run(
+                ["git", "-C", str(source_root), *args], capture_output=True, text=True, timeout=30, check=False
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    tracked = git("ls-files", "--error-unmatch", "--", "VERSION")
+    if tracked is None or tracked.returncode != 0:
+        return ""
+    head = git("rev-parse", "--short=12", "HEAD")
+    if head is None or head.returncode != 0 or not head.stdout.strip():
+        return ""
+    sha = head.stdout.strip()
+    dirty = git("status", "--porcelain", "--untracked-files=no", "--", ".")
+    return f"{sha}-dirty" if dirty is not None and dirty.stdout.strip() else sha
 
 
 def repository_version(package_dir: Path | None = None) -> str:
@@ -412,11 +450,18 @@ def status(source_root: Path, target_dir: Path, package_dir: Path | None = None)
     repository it was built from. A bundled payload cannot notice that the
     repository moved on, so without this a deploy reports success while
     shipping a version older than the fix it was run to deliver (#236).
+
+    When both sides carry a commit, the commits decide: VERSION moves only at
+    a release cut, so two deploys between releases share a version (#426).
     """
     src_v = read_version(source_root)
     dep_v = read_deployed_version(target_dir)
+    src_c = source_commit(source_root)
+    dep_c = read_deployed_commit(target_dir)
     if not dep_v:
         state = "not-deployed"
+    elif src_c and dep_c:
+        state = "up-to-date" if src_c == dep_c else "stale"
     elif dep_v == src_v:
         state = "up-to-date"
     else:
@@ -447,6 +492,8 @@ def status(source_root: Path, target_dir: Path, package_dir: Path | None = None)
     result = {
         "source_version": src_v,
         "deployed_version": dep_v,
+        "source_commit": src_c,
+        "deployed_commit": dep_c,
         "state": state,
         "payload_origin": origin,
         "payload_state": payload_state,
@@ -467,10 +514,10 @@ def _classify(is_custom: bool, src_h: str, tgt_h: str | None, baseline: str | No
     if baseline:
         af_changed = src_h != baseline
         proj_changed = tgt_h != baseline
-        if is_custom:
-            if af_changed and proj_changed:
-                return "CONFLICT"
-            return "PROTECT" if af_changed else "PRESERVE"
+        # A customizable file still equal to its baseline was never customized,
+        # so it takes the update like any other file (#106).
+        if is_custom and proj_changed:
+            return "CONFLICT" if af_changed else "PRESERVE"
         if af_changed and not proj_changed:
             return "UPDATE"
         if not af_changed and proj_changed:
@@ -497,6 +544,127 @@ def _is_deactivated_skill_unit(hash_key: str, target_github: Path) -> bool:
     return (target_github / "skills" / "_available" / parts[1]).is_dir()
 
 
+def _available_unit(u: Unit, target_github: Path) -> Unit:
+    """The ``skills/_available/{name}/`` copy a deactivated skill unit is deployed to.
+
+    Skipping it froze the copy at the version it was moved in, so re-activation
+    restored a stale skill (#384). It is classified like any other file instead.
+    """
+    rel = "skills/_available/" + _norm(u.hash_key)[len("skills/") :]
+    return Unit(
+        source=u.source, target=target_github / rel, hash_key=rel, display=f".github/{rel}", is_custom=u.is_custom
+    )
+
+
+def _target_hash(target: Path) -> str | None:
+    return _target_classify_hash(target) if target.is_file() else None
+
+
+def _activated_unit(u: Unit, target_github: Path) -> Unit | None:
+    """The ``skills/{name}/`` copy an activated library skill is deployed to, or None.
+
+    Activation moves a skill out of ``skills/_available/``, and recreating it there
+    left every activated skill twice while the active copy never got a fix (#110).
+    The mirror of ``_available_unit`` (#384).
+    """
+    parts = _norm(u.hash_key).split("/")
+    if len(parts) < 4 or parts[0] != "skills" or parts[1] != "_available":
+        return None
+    if not (target_github / "skills" / parts[2]).is_dir():
+        return None
+    rel = "skills/" + "/".join(parts[2:])
+    return Unit(
+        source=u.source, target=target_github / rel, hash_key=rel, display=f".github/{rel}", is_custom=u.is_custom
+    )
+
+
+def _effective_key(u: Unit, target_github: Path) -> str:
+    active = _activated_unit(u, target_github)
+    return active.hash_key if active is not None else u.hash_key
+
+
+# ── Baseline content store and 3-way merge (#105) ───────────────────────────────
+# ``.af-hashes`` records only hashes, so a file both sides changed was withheld
+# whole: the common ancestor a merge needs was gone. The store keeps the bytes
+# behind each recorded hash, named by that hash, so an object is verified before
+# it is trusted. It is gitignored; without it a file stays CONFLICT, as before.
+
+_STORE = ".af-baseline"
+
+
+def _store_put(target_github: Path, data: bytes) -> None:
+    store = target_github / _STORE
+    obj = store / _sha256_upper_bytes(data)
+    if not obj.is_file():
+        _write_bytes(obj, data)
+    ignore = store / ".gitignore"
+    if not ignore.is_file():
+        ignore.write_bytes(b"*\n")
+
+
+def _store_get(target_github: Path, digest: str) -> bytes | None:
+    obj = target_github / _STORE / digest
+    if not obj.is_file():
+        return None
+    data = obj.read_bytes()
+    return data if _sha256_upper_bytes(data) == digest else None
+
+
+def _store_prune(target_github: Path, hashes: dict[str, str]) -> None:
+    store = target_github / _STORE
+    if not store.is_dir():
+        return
+    keep = set(hashes.values())
+    for obj in store.iterdir():
+        if obj.is_file() and obj.name != ".gitignore" and obj.name not in keep:
+            obj.unlink()
+
+
+def _git_merge(base: bytes, ours: bytes, theirs: bytes) -> bytes | None:
+    """A clean ``git merge-file`` of three UTF-8 texts, or None on overlap, binary or no git."""
+    git = shutil.which("git")
+    if git is None:
+        return None
+    try:
+        for data in (base, ours, theirs):
+            data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        paths = []
+        for name, data in (("ours", ours), ("base", base), ("theirs", theirs)):
+            path = Path(tmp) / name
+            path.write_bytes(data)
+            paths.append(str(path))
+        try:
+            proc = subprocess.run([git, "merge-file", "-p", *paths], capture_output=True, timeout=30, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def _three_way(u: Unit, data: bytes, baseline_h: str | None, target_github: Path) -> bytes | None:
+    """The bytes to deploy for a both-sides change that merges cleanly, else None.
+
+    All three inputs are canonical LF with managed regions emptied, the form the
+    hashes are taken over: a CRLF target fed in as-is conflicts on every line
+    (#105). The project's region bodies are transplanted back afterwards.
+    """
+    if u.is_custom or not baseline_h or not u.target.is_file():
+        return None
+    base = _store_get(target_github, baseline_h)
+    if base is None:
+        return None
+    try:
+        ours = _canonicalize_text(u.target.read_bytes().decode("utf-8"))
+    except UnicodeDecodeError:
+        return None
+    merged = _git_merge(base, _strip_bytes(ours.encode("utf-8")), _strip_bytes(data))
+    if merged is None:
+        return None
+    return merge_managed_regions(merged.decode("utf-8"), ours).encode("utf-8")
+
+
 def dry_run(source_root: Path, target_dir: Path) -> dict:
     """Classify every deployable file (read-only). Mirrors the deploy dry-run."""
     target_github = target_dir / ".github"
@@ -509,11 +677,25 @@ def dry_run(source_root: Path, target_dir: Path) -> dict:
     results: list[dict] = []
     counts: dict[str, int] = {}
     for u in units:
-        src_h = source_hash_resolved(u.source, target_af_env)
-        tgt_h = _target_classify_hash(u.target) if u.target.is_file() else None
-        cls = _classify(u.is_custom, src_h, tgt_h, baseline.get(u.hash_key), has_baseline)
+        data = resolved_source_bytes(u.source, target_af_env, source_root / ".github" / "af-env.conf")
+        src_h = _sha256_upper_bytes(_strip_bytes(data))
+        moved_from = None
+        active = _activated_unit(u, target_github)
+        if active is not None:
+            counts["ACTIVATED"] = counts.get("ACTIVATED", 0) + 1
+            results.append({"path": u.display, "classification": "ACTIVATED", "customizable": u.is_custom})
+            moved_from, u = u.hash_key, active
+        # A moved file keeps the baseline of the key it was moved from.
+        base_h = baseline.get(u.hash_key) or (baseline.get(moved_from) if moved_from else None)
+        cls = _classify(u.is_custom, src_h, _target_hash(u.target), base_h, has_baseline)
         if cls == "CREATE" and _is_deactivated_skill_unit(u.hash_key, target_github):
-            cls = "DEACTIVATED"
+            counts["DEACTIVATED"] = counts.get("DEACTIVATED", 0) + 1
+            results.append({"path": u.display, "classification": "DEACTIVATED", "customizable": u.is_custom})
+            u = _available_unit(u, target_github)
+            base_h = baseline.get(u.hash_key)
+            cls = _classify(u.is_custom, src_h, _target_hash(u.target), base_h, has_baseline)
+        if cls == "CONFLICT" and _three_way(u, data, base_h, target_github) is not None:
+            cls = "MERGE"
         counts[cls] = counts.get(cls, 0) + 1
         results.append({"path": u.display, "classification": cls, "customizable": u.is_custom})
 
@@ -528,8 +710,8 @@ def dry_run(source_root: Path, target_dir: Path) -> dict:
 
 # ── Write path (Phase 1) ────────────────────────────────────────────────────
 # All writes stay under the target's ``.github/``; existing files are backed up
-# before overwrite; CONFLICT / PROTECT / PRESERVE / [customizable] files are
-# never written by ``apply``.
+# before overwrite; CONFLICT / PROTECT / PRESERVE files, and [customizable] files
+# the project changed, are never written by ``apply``.
 
 
 def _write_bytes(path: Path, data: bytes) -> None:
@@ -547,8 +729,10 @@ def _write_hashes(target_github: Path, hashes: dict[str, str], version: str) -> 
     _write_bytes(target_github / ".af-hashes", ("\n".join(lines) + "\n").encode("utf-8"))
 
 
-def _write_version(target_dir: Path, version: str) -> None:
+def _write_version(target_dir: Path, version: str, commit: str = "") -> None:
     content = f"version: {version}\ndeployed: {datetime.now().isoformat(timespec='seconds')}\nsource: mcp:af-deploy\n"
+    if commit:
+        content += f"commit: {commit}\n"
     _write_bytes(target_dir / ".github" / ".af-version", content.encode("utf-8"))
 
 
@@ -562,10 +746,10 @@ def _safe_join(base: Path, rel: str) -> Path:
 
 
 def apply(source_root: Path, target_dir: Path) -> dict:
-    """Apply CREATE/UPDATE files only. Backs up first; skips everything else.
+    """Apply CREATE/UPDATE/MERGE files only. Backs up first; skips everything else.
 
-    Read-only classes (CONFLICT / PROTECT / PRESERVE / [customizable] / UNCHANGED)
-    are never written. Returns applied/skipped lists and the backup directory.
+    Read-only classes (CONFLICT / PROTECT / PRESERVE / UNCHANGED) are never
+    written. Returns applied/merged/skipped lists and the backup directory.
     """
     source_github = source_root / ".github"
     target_github = target_dir / ".github"
@@ -578,39 +762,93 @@ def apply(source_root: Path, target_dir: Path) -> dict:
 
     backup_dir = target_dir / f".af-backup-{datetime.now():%Y%m%d%H%M%S}"
     applied: list[str] = []
+    merged: list[str] = []
     skipped: list[dict] = []
     made_backup = False
 
     for u in collect_units(source_root, target_dir, manifest):
-        data = resolved_source_bytes(u.source, target_af_env)
+        data = resolved_source_bytes(u.source, target_af_env, source_github / "af-env.conf")
         src_h = _sha256_upper_bytes(_strip_bytes(data))
-        tgt_h = _target_classify_hash(u.target) if u.target.is_file() else None
-        cls = _classify(u.is_custom, src_h, tgt_h, baseline.get(u.hash_key), has_baseline)
+        moved_from = None
+        active = _activated_unit(u, target_github)
+        if active is not None:
+            skipped.append({"path": u.display, "classification": "ACTIVATED"})
+            moved_from, u = u.hash_key, active
+        base_h = baseline.get(u.hash_key) or (baseline.get(moved_from) if moved_from else None)
+        cls = _classify(u.is_custom, src_h, _target_hash(u.target), base_h, has_baseline)
         if cls == "CREATE" and _is_deactivated_skill_unit(u.hash_key, target_github):
-            cls = "DEACTIVATED"
-        if cls in ("CREATE", "UPDATE"):
+            skipped.append({"path": u.display, "classification": "DEACTIVATED"})
+            u = _available_unit(u, target_github)
+            base_h = baseline.get(u.hash_key)
+            cls = _classify(u.is_custom, src_h, _target_hash(u.target), base_h, has_baseline)
+        merge = _three_way(u, data, base_h, target_github) if cls == "CONFLICT" else None
+        if merge is not None:
+            cls = "MERGE"
+        if cls in ("CREATE", "UPDATE", "MERGE"):
             if u.target.is_file():
                 bpath = backup_dir / u.display
                 bpath.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(u.target, bpath)
                 made_backup = True
-            _write_bytes(u.target, _merge_target_regions(data, u.target))
+            _write_bytes(u.target, merge if merge is not None else _merge_target_regions(data, u.target))
             deployed[u.hash_key] = src_h
+            _store_put(target_github, _strip_bytes(data))
             applied.append(u.display)
+            if merge is not None:
+                merged.append(u.display)
         elif cls == "UNCHANGED":
             deployed[u.hash_key] = src_h
+            _store_put(target_github, _strip_bytes(data))
         else:
             skipped.append({"path": u.display, "classification": cls})
+        # The moved-from key outlives the move only while a stale duplicate is on
+        # disk, so that list_orphans can still find and prune it. Its baseline moves
+        # to the active key, or a skipped CONFLICT reads as new-in-AF next run.
+        if moved_from and not (target_github / moved_from).is_file():
+            carried = deployed.pop(moved_from, None)
+            if carried and u.hash_key not in deployed:
+                deployed[u.hash_key] = carried
 
     _write_hashes(target_github, deployed, version)
-    _write_version(target_dir, version)
+    _store_prune(target_github, deployed)
+    _write_version(target_dir, version, source_commit(source_root))
     return {
         "version": version,
         "applied_count": len(applied),
         "applied": applied,
+        "merged": merged,
         "skipped": skipped,
         "backup_dir": str(backup_dir) if made_backup else None,
+        "model_check": model_check(source_root, target_af_env),
+        "test_log_plugin": test_log_plugin_note(target_dir),
     }
+
+
+TEST_LOG_PLUGIN_NOTE = [
+    "  NOTE    runTests / Test Explorer runs are not logged -- load the af_test_log plugin (#180):",
+    '          pyproject.toml [tool.pytest.ini_options]: pythonpath = [".github/scripts"], addopts = "-p af_test_log"',
+]
+
+
+def test_log_plugin_note(target_dir: Path) -> list[str]:
+    """The note a Python project gets while its pyproject.toml does not load the plugin."""
+    pyproject = target_dir / "pyproject.toml"
+    if not pyproject.is_file() or "af_test_log" in pyproject.read_text(encoding="utf-8", errors="replace"):
+        return []
+    return list(TEST_LOG_PLUGIN_NOTE)
+
+
+def model_check(source_root: Path, target_af_env: Path) -> dict:
+    """Tier models vs Copilot's catalogue (#421), via the payload's own checker
+    so all three deploy paths share one implementation. Advisory, never fatal."""
+    script = source_root / ".github" / "scripts" / "check-model-tiers.py"
+    spec = importlib.util.spec_from_file_location("check_model_tiers", script)
+    if not script.is_file() or spec is None or spec.loader is None:
+        return {"exit": 2, "lines": ["  NOTE    tier models not checked -- check-model-tiers.py missing"]}
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    code, lines = module.check(source_root / ".github" / "af-env.conf", target_af_env, module.discover_catalogue())
+    return {"exit": code, "lines": lines}
 
 
 def update_hashes(source_root: Path, target_dir: Path) -> dict:
@@ -619,11 +857,13 @@ def update_hashes(source_root: Path, target_dir: Path) -> dict:
     target_af_env = target_github / "af-env.conf"
     manifest = parse_manifest(source_root / ".github" / ".af-manifest")
     version = read_version(source_root)
-    hashes = {
-        u.hash_key: source_hash_resolved(u.source, target_af_env)
-        for u in collect_units(source_root, target_dir, manifest)
-    }
+    hashes: dict[str, str] = {}
+    for u in collect_units(source_root, target_dir, manifest):
+        stripped = _strip_bytes(resolved_source_bytes(u.source, target_af_env, source_root / ".github" / "af-env.conf"))
+        hashes[u.hash_key] = _sha256_upper_bytes(stripped)
+        _store_put(target_github, stripped)
     _write_hashes(target_github, hashes, version)
+    _store_prune(target_github, hashes)
     return {"entries": len(hashes), "version": version}
 
 
@@ -666,7 +906,13 @@ def conflict_diff(source_root: Path, target_dir: Path, path: str) -> str:
     """
     src_path, tgt_path, display = _resolve_pair(source_root, target_dir, path)
     target_af_env = target_dir / ".github" / "af-env.conf"
-    src_text = resolved_source_bytes(src_path, target_af_env).decode("utf-8", "replace") if src_path.is_file() else ""
+    src_text = (
+        resolved_source_bytes(src_path, target_af_env, source_root / ".github" / "af-env.conf").decode(
+            "utf-8", "replace"
+        )
+        if src_path.is_file()
+        else ""
+    )
     tgt_text = tgt_path.read_text(encoding="utf-8", errors="replace") if tgt_path.is_file() else ""
     return "".join(
         difflib.unified_diff(
@@ -710,7 +956,7 @@ def list_orphans(source_root: Path, target_dir: Path) -> list[dict]:
     """List baselined framework files that are no longer deployable and still on disk."""
     target_github = target_dir / ".github"
     manifest = parse_manifest(source_root / ".github" / ".af-manifest")
-    current = {u.hash_key for u in collect_units(source_root, target_dir, manifest)}
+    current = {_effective_key(u, target_github) for u in collect_units(source_root, target_dir, manifest)}
     baseline = read_baseline_hashes(target_github)
     orphans: list[dict] = []
     for key in sorted(baseline):

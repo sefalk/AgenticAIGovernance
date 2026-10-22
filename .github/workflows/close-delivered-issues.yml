@@ -1,0 +1,53 @@
+# Closes the issues that pull requests merged into dev name with Closes/Fixes/Resolves (#160).
+#
+# `Closes #N` fires only on merges into the default branch, so work delivered to
+# dev looked unfinished until a release -- and closing by hand was forgotten.
+#
+# Why these triggers and not `pull_request: closed`: merges into dev are done by
+# auto-merge armed with GITHUB_TOKEN, and work performed with that token starts
+# no further workflow runs (see prune-merged-branches.yml). So this sweeps
+# instead of reacting: every pull request opened or updated against dev closes
+# what earlier merges delivered, and the schedule catches quiet periods once
+# this file reaches the default branch (schedule runs only from there).
+#
+# SINCE is the cutoff: merges before it are never swept, because older history
+# holds issues deliberately left open past their pull request (e.g. #186).
+
+name: Close delivered issues
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [dev]
+  schedule:
+    - cron: '41 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  close:
+    # A fork's pull request gets a read-only token; skip it rather than fail.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    name: Close issues delivered to dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The script and gh-api.ps1 live in the workspace, so the checkout comes first (#327).
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Close issues named by merged pull requests
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SINCE: '2026-10-07T00:00:00Z'
+        run: |
+          & (Join-Path $env:GITHUB_WORKSPACE '.github/scripts/close-delivered-issues.ps1') -Repo $env:REPO -Since $env:SINCE
+          exit $LASTEXITCODE

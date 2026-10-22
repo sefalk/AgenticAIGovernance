@@ -20,6 +20,13 @@ missing.jsonc   [optional, vscode]
 """
 
 PLANNER = "---\nname: planner\nmodel: __AF_TIER_BALANCED__\ndescription: 'x'\n---\n\n# Planner\n"
+# Fixture line-up, so these tests do not change with the real one (#418).
+SOURCE_ENV = (
+    "SRC_DIR=src\n"
+    "AF_MODEL_DEFAULT_PREMIUM=P1 (copilot)\n"
+    "AF_MODEL_DEFAULT_BALANCED=B1 (copilot), B2 (copilot)\n"
+    "AF_MODEL_DEFAULT_EFFICIENT=E1 (copilot)\n"
+)
 
 
 def _write(p: Path, text: str) -> None:
@@ -33,7 +40,7 @@ def _make_source(root: Path, version: str = "1.0.0") -> Path:
     _write(gh / ".af-manifest", MANIFEST)
     _write(gh / "agents" / "planner.agent.md", PLANNER)
     _write(gh / "instructions" / "architecture.instructions.md", "# arch\n")
-    _write(gh / "af-env.conf", "SRC_DIR=src\n")
+    _write(gh / "af-env.conf", SOURCE_ENV)
     _write(gh / "MANIFEST.md", "# manifest doc\n")
     _write(root / ".vscode" / "tasks.json", '{"version":"2.0.0"}\n')
     _write(root / ".vscode" / "settings.json", '{"editor.tabSize":4}\n')
@@ -43,23 +50,29 @@ def _make_source(root: Path, version: str = "1.0.0") -> Path:
 # ── Tier resolution ────────────────────────────────────────────────────────
 
 
+def _source_env(tmp_path: Path) -> Path:
+    env = tmp_path / "source-af-env.conf"
+    _write(env, SOURCE_ENV)
+    return env
+
+
 def test_tier_resolution_uses_defaults_as_yaml_array(tmp_path: Path) -> None:
-    resolved = deploy_core.resolve_tier_tokens(PLANNER, tmp_path / "af-env.conf")
-    assert "model:\n  - Claude Sonnet 5 (copilot)\n  - Claude Sonnet 4.6 (copilot)" in resolved
+    resolved = deploy_core.resolve_tier_tokens(PLANNER, tmp_path / "af-env.conf", _source_env(tmp_path))
+    assert "model:\n  - B1 (copilot)\n  - B2 (copilot)" in resolved
     assert "__AF_TIER_BALANCED__" not in resolved
 
 
 def test_tier_resolution_single_entry_is_inline(tmp_path: Path) -> None:
     af = tmp_path / "af-env.conf"
     af.write_text("AF_MODEL_TIER_BALANCED=Only One (copilot)\n", encoding="utf-8")
-    resolved = deploy_core.resolve_tier_tokens(PLANNER, af)
+    resolved = deploy_core.resolve_tier_tokens(PLANNER, af, _source_env(tmp_path))
     assert "model: Only One (copilot)\n" in resolved
 
 
 def test_tier_resolution_preserves_crlf(tmp_path: Path) -> None:
     crlf = PLANNER.replace("\n", "\r\n")
-    resolved = deploy_core.resolve_tier_tokens(crlf, tmp_path / "af-env.conf")
-    assert "\r\n  - Claude Sonnet 5 (copilot)\r\n" in resolved
+    resolved = deploy_core.resolve_tier_tokens(crlf, tmp_path / "af-env.conf", _source_env(tmp_path))
+    assert "\r\n  - B1 (copilot)\r\n" in resolved
 
 
 # ── Status ─────────────────────────────────────────────────────────────────
@@ -158,13 +171,14 @@ def _deploy_identically(src: Path, target: Path) -> None:
     """Copy source payload into target and write a matching baseline (resolved)."""
     tgt_gh = target / ".github"
     af_env = tgt_gh / "af-env.conf"
+    src_env = src / ".github" / "af-env.conf"
     manifest = deploy_core.parse_manifest(src / ".github" / ".af-manifest")
     lines = ["# AF deployment baseline hashes"]
     for u in deploy_core.collect_units(src, target, manifest):
-        data = deploy_core.resolved_source_bytes(u.source, af_env)
+        data = deploy_core.resolved_source_bytes(u.source, af_env, src_env)
         u.target.parent.mkdir(parents=True, exist_ok=True)
         u.target.write_bytes(data)
-        lines.append(f"{u.hash_key}={deploy_core.source_hash_resolved(u.source, af_env)}")
+        lines.append(f"{u.hash_key}={deploy_core.source_hash_resolved(u.source, af_env, src_env)}")
     _write(tgt_gh / ".af-hashes", "\n".join(lines) + "\n")
 
 
@@ -202,7 +216,7 @@ def test_dry_run_customizable_both_changed_is_conflict(tmp_path: Path) -> None:
     src = _make_source(tmp_path / "src")
     target = tmp_path / "proj"
     _deploy_identically(src, target)
-    _write(src / ".github" / "af-env.conf", "SRC_DIR=src\nNEW_KEY=1\n")
+    _write(src / ".github" / "af-env.conf", SOURCE_ENV + "NEW_KEY=1\n")
     _write(target / ".github" / "af-env.conf", "SRC_DIR=myproject\n")
     files = {f["path"]: f["classification"] for f in deploy_core.dry_run(src, target)["files"]}
     assert files[".github/af-env.conf"] == "CONFLICT"
@@ -240,7 +254,7 @@ def test_apply_never_writes_customizable_conflict(tmp_path: Path) -> None:
     src = _make_source(tmp_path / "src")
     target = tmp_path / "proj"
     _deploy_identically(src, target)
-    _write(src / ".github" / "af-env.conf", "SRC_DIR=src\nNEW=1\n")
+    _write(src / ".github" / "af-env.conf", SOURCE_ENV + "NEW=1\n")
     _write(target / ".github" / "af-env.conf", "SRC_DIR=myproject\n")
 
     report = deploy_core.apply(src, target)

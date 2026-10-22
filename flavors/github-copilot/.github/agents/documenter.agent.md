@@ -137,6 +137,13 @@ escalation:
 agent_invocations: <appended by your Stop hook>
 ```
 
+**Every `<number>` above may be `unmeasured`, and your Stop hook rejects
+anything else that is not a number or a percentage.** A workflow log once
+reported `tests_added: 122` for a workflow that added 11, and 12 of 84 logs in
+one project carried prose such as `N/A (module not yet implemented)` where a
+number belongs (#173, #102). `step_at_escalation` must name a step the log
+records, or be `null`.
+
 **A step is a record of a call that happened.** Your Stop hook reads which
 subagents the editor actually invoked and appends the counts, then lists any
 agent your `steps` name that has no invocation behind it. A workflow log once
@@ -148,7 +155,7 @@ step is not.
 
 For the `verdict` field in step entries, use the parseable format from
 MANIFEST § 13 (Inter-Agent Contracts → Verdict Format): APPROVED,
-REJECTED, ESCALATE, RESOLVED, or COMPROMISE.
+REJECTED, ESCALATE, RESOLVED, COMPROMISE, or NEEDS_CLARIFICATION.
 
 **`status:` and `verdict:` are closed sets, and your Stop hook now blocks on
 them.** Use `COMPLETED`, `FAILED` or `ESCALATED` for a status and one of the
@@ -224,7 +231,9 @@ case — write the log accurately and the condition follows.
 
 **Filename:** `{RETRO_DIR}/{workflow-id}.md` — read `RETRO_DIR` from
 `af-env.conf`; it defaults to `.github/retros/auto`. Your Stop hook resolves
-the same key, so writing anywhere else is a blocked finalisation.
+the same key, so writing anywhere else — or a second copy at the default — is a
+blocked finalisation. Why retros may be tracked and logs never:
+`.github/retros/README.md`.
 
 **Format:** `Outcome` is the same closed set as the log's `status:`. A run that
 finished with problems is `COMPLETED`; the problems belong in the sections
@@ -272,7 +281,10 @@ The human should review these during periodic governance audits.
 - Never stage or commit anything under `.github/logs/` — it ships a `.gitignore`, it is local instrumentation, and the log embeds the user request verbatim
 - Never stage or commit the retro either. At its default location it is gitignored; a project may point `RETRO_DIR` at a tracked directory, and then the **coordinator** commits it — staging is never yours
 - Do NOT modify production code or test code
-- Never fabricate metrics — use only values reported by the coordinator
+- Never fabricate metrics — use only values reported by the coordinator. A
+  field that describes *what happened* (a count, a step, an agent, a test
+  total) is copied from those facts; when they do not give it, the value is
+  `unmeasured`, never inferred, summed or rounded (#173, #102)
 
 ## Log-Only Invocation
 
@@ -287,6 +299,20 @@ fill the shape — a reader cannot distinguish an invented zero from a measured
 one, and the series is being built precisely to be read later. Set
 `workflow_type` to the workflow that ran and record what the single agent
 returned.
+
+## Content Edits
+
+When asked to move, relocate, deduplicate or reword existing content, the claim
+"moved" is checked by a count, not by your re-read (#273):
+
+1. **Before editing**, measure with a tool: the file's line count and the
+   occurrence count of each heading or marker you will touch.
+2. **After editing**, measure the same quantities again.
+3. Return both sets of numbers. A move leaves every moved marker at
+   exactly one occurrence and a net line change near zero. If your numbers say otherwise,
+   the edit is not done: fix it, or return FAILED with the numbers.
+4. Change nothing you were not asked to change. Dates, numbers and identifiers
+   are facts, not style.
 
 ## Return Format
 
@@ -341,8 +367,12 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 
 | Gate | Type | How to Verify | Tier |
 |---|---|---|---|
-| Plan file status set to COMPLETED | HARD | Verify status field updated | Standard+ |
+| Plan file status set to COMPLETED | HARD | documenter-stop blocks a `COMPLETED` log whose plan is not | Standard+ |
 | YAML workflow log created and valid | HARD | Verify file exists, mandatory fields present | All (`Standard+` if `AF_WORKFLOW_LOG_COVERAGE=standard+`) |
 | Provenance markers verified on all AI-touched files | HARD | Scan changed files for markers | Standard+ |
 | Retro snippet in `RETRO_DIR` when the run had something to teach | HARD | Verify file created with required fields | Standard+ |
 | Architecture docs updated (if new modules/ports) | SOFT | Self-check: applicable only if new elements | Deep |
+
+Only the rows above count toward `HARD gates: {passed}/{total}`. A criterion
+from the delegation prompt is one you checked yourself: list it as SOFT with
+its measured count, evaluated, never as passed.

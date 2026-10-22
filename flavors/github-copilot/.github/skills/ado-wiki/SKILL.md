@@ -134,7 +134,8 @@ reviewer.
   `wiki_upsert_page` `branch`-param bug (`version '{0}' invalid`) —
   if the branch write fails that way, fall back to a DEGRADED handoff with the
   ready page markdown.
-- Never relax the wiki branch policy from an agent; that is a human/UI action.
+- Branch-policy changes: the rule lives in
+  [ado-wiki-manager.agent.md](../../agents/ado-wiki-manager.agent.md).
 
 ## Reference Policy
 

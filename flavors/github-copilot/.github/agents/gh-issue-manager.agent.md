@@ -125,4 +125,5 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Required unavailable => BLOCKED | HARD | Operation halts with escalation | Standard+ |
 | Comments fetched whenever the count is non-zero | HARD | `Read` field shows the `comments` count and a matching `get_comments`; an absent count is reported as an inferred zero, not left silent | Trivial+ |
 | Working-state block updated when the issue's state changed | HARD | `Working state` field is `updated`, or names why no state changed | Standard+ |
+| Body or comment not shrunk unannounced | HARD | Every body or comment write follows a fresh read; a shrink or lost heading above `## Working state` gets the `WI_FIELD_SHRINK_POLICY` verdict; `body` + `state` is refused. Enforced by the PreToolUse hook against the cached read, not by this agent's self-report (#376) | Trivial+ |
 | Report actionable without session context | SOFT | Reviewer checks the body stands alone | Standard+ |

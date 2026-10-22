@@ -40,7 +40,16 @@ Consult these skills when relevant to the task:
    `ADO_DEFAULT_ASSIGNED_TO` — see the **ado-workitem** skill (Work Item Routing).
    Never use `add_child`; create each child and link it.
 2. Apply confidence policy and clarification loop by work item type.
-3. Update items non-destructively.
+3. Update items non-destructively. For a long field (`System.Description`,
+   acceptance criteria, repro steps): read the item with `wit_work_item`
+   `get` first, build the new value from the text you read, change only what
+   was asked, and send `{"op": "test", "path": "/rev", "value": <read rev>}`
+   in the same update. The PreToolUse hook refuses the update otherwise, and
+   asks or refuses on a shrink (`WI_FIELD_SHRINK_POLICY`, #197). If removing
+   text is the task, declare it in the same call as a `System.History` line,
+   `af-shrink: <field>; remove: <heading>, ...; expect: <new length>`. The hook
+   checks it against the diff, so declare exact numbers; never declare after
+   a refusal.
 4. Add branch/plan/reference links where available.
 5. Report degraded mode when capability is optional and unavailable.
 6. For Databricks evidence runs, require explicit profile traceability in comments.
@@ -48,9 +57,9 @@ Consult these skills when relevant to the task:
    (two-stage, post-merge) — never close on acceptance-criteria assumptions.
 8. Model multi-phase specs as a Feature with child User Stories per phase
    (see **Multi-Phase Spec Modeling**); close only the delivered phase.
-9. Before writing a type-specific field (e.g. `AcceptanceCriteria`), run the
-   **Field-Applicability Guard** — never silently write a field the target
-   work-item type does not carry.
+9. Before writing a type-specific field (e.g. `AcceptanceCriteria`) **or the
+   item's body**, run the **Field-Applicability Guard** — never silently write
+   a field the target work-item type does not carry or does not render.
 10. Before any state transition, run the **State-Applicability Guard** —
     resolve the target from the type's own states; never promise a state the
     type does not have.
@@ -80,6 +89,14 @@ cannot see it. The classic case: `Microsoft.VSTS.Common.AcceptanceCriteria`
 written to a **Task** (which has no such field) — accepted by the API, invisible
 in the UI. **Never write a type-specific field silently.**
 
+**The body is a field too (#289).** `System.Description` is on every type, so
+no applicability check ever fires for it, but the stock Bug form does not render
+it. The body of a Bug goes to `Microsoft.VSTS.TCM.ReproSteps`; every other type
+keeps `System.Description`. Write long text as Markdown with `"format":
+"Markdown"` on the field: without it ADO stores HTML and `## Problem` renders as
+literal text. The PreToolUse hook denies both mistakes on `create`. It cannot
+see the type on `update`, so there the rule is yours.
+
 Before writing a type-specific field (e.g. `AcceptanceCriteria`,
 `Microsoft.VSTS.TCM.ReproSteps`, `Microsoft.VSTS.Common.Steps`):
 
@@ -92,8 +109,10 @@ Before writing a type-specific field (e.g. `AcceptanceCriteria`,
      Bug for acceptance criteria) instead of the field-less type.
    - **On an existing item:** recommend a type change; perform it only with
      explicit human confirmation (a retype can drop type-specific data).
-   - **If the type must remain:** mirror the content into a rendered field
-     (`System.Description`) under a clearly labeled heading (e.g.
+   - **If the type must remain:** mirror the content into the field that type
+     renders — `System.Description`, or `Microsoft.VSTS.TCM.ReproSteps` on a
+     Bug; never mirror a Bug body into `System.Description` — under a clearly
+     labeled heading (e.g.
      `## Acceptance Criteria`). You may additionally write the semantic field
      for future retype/queries — but the visible mirror **and** the report are
      mandatory.
@@ -258,14 +277,15 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Optional unavailable => fallback artifact | HARD | If optional and unavailable, fallback/pending-sync output exists | Standard+ |
 | Board routing applied on create | SOFT | New items set Area Path from `ADO_DEFAULT_AREA_PATH` (and Iteration from `ADO_DEFAULT_ITERATION_PATH`), or the run warns that the project default area is used | Standard+ |
 | Owner set on create | HARD | Every created item carries a non-empty `System.AssignedTo` (default `ADO_DEFAULT_ASSIGNED_TO`); if unset, the run asks. Enforced by the PreToolUse hook, which refuses an ownerless `create` and every `add_child` | Standard+ |
-| Type-specific field applicability checked before write | HARD | Before writing a type-specific field (e.g. `AcceptanceCriteria`), the field is confirmed present in the target type's `wit_work_item` (action `get_type`) fields; an absent field is not written silently (a type carrying it is chosen, or the content is mirrored to `System.Description` and the path is reported) | Standard+ |
+| Type-specific field applicability checked before write | HARD | Before writing a type-specific field (e.g. `AcceptanceCriteria`), the field is confirmed present in the target type's `wit_work_item` (action `get_type`) fields; an absent field is not written silently (a type carrying it is chosen, or the content is mirrored to the field the type renders — `ReproSteps` on a Bug — and the path is reported). A Bug body in `System.Description`, or Markdown without `format`, is denied on create by the PreToolUse hook (#289) | Standard+ |
 | Non-destructive update policy followed | SOFT | Reviewer checks append/targeted update behavior | Standard+ |
+| Long field not shrunk unannounced | HARD | Every update of a long field follows a read and carries `test /rev`; a shrink or lost heading gets the `WI_FIELD_SHRINK_POLICY` verdict. Enforced by the PreToolUse hook against the cached read, not by this agent's self-report (#197) | Standard+ |
 | No Close at finalize (delivered state only, pre-merge) | HARD | Finalize never sets a `Completed`-category state; the item is in its type's delivered state, or Active — and Active is never a silent outcome (see the row below) | Standard+ |
 | Transition target resolved from the type, not assumed | HARD | Before any state transition, `wit_work_item` (action `get_type`) supplied the type's states and the target was resolved from them, never from the literal string `Resolved`. A type with no delivered state yields `BLOCKED_NO_DELIVERED_STATE` + the `delivered-pending-verification` tag, never a substituted state | Standard+ |
 | AC coverage map posted before any closure transition | HARD | Verify an AC->evidence map comment exists for the item | Standard+ |
 | Closure only against merged evidence | HARD | Closed only post-merge; otherwise `CLOSE_PENDING_MERGE` or `BLOCKED_CLOSURE` | Standard+ |
 | Working-state block updated when the item's state changed | HARD | `Working state` field is `updated`, or names why no state changed (`skills/work-item-state/SKILL.md` § 5) | Standard+ |
-| Existing comments read before acting on an existing item | SOFT | Reviewer checks the comment trail was fetched, not assumed empty — HARD once the ADO read behaviour in `skills/work-item-state/SKILL.md` § 6 has been probed | Standard+ |
+| Existing comments read before acting on an existing item | HARD | `wit_work_item get` returns `System.CommentCount` but no text: when it is non-zero, a `list_comments` call follows and its result is reported. A count left unread is a partial read (#186) | Standard+ |
 | AC fully covered (map correctness) | SOFT | Reviewer checks each AC maps to real evidence | Standard+ |
 | No bulk-close of linked work items | HARD | Each linked item closed only after its own AC verification | Standard+ |
 | Multi-phase detection is deterministic; child closed not parent | HARD | Feature/tag/child signal used; Feature stays open, delivered phase closed via child story | Standard+ |

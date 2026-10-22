@@ -28,10 +28,10 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 | `edit/createFile` | W | — | — | ✅ | — | ✅ | — | — | ✅ | — | — | — |
 | `edit/createDirectory` | W | — | — | ✅ | — | ✅ | — | — | ✅ | — | — | — |
 | **Execution** | | | | | | | | | | | | |
-| `execute/runTests` | X | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
+| `execute/runTests` | X | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
 | `execute/runTask` | X | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — |
 | `execute/createAndRunTask` | X | ✅ | — | — | — | ✅ | ✅ | ✅ | — | — | — | — |
-| `execute/testFailure` | X | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
+| `execute/testFailure` | X | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
 | `execute/runInTerminal` | X | ✅ | — | — | — | — | — | — | — | — | — | — |
 | `execute/getTerminalOutput` | X | ✅ | — | — | — | — | — | — | — | — | — | — |
 | **Notebook** | | | | | | | | | | | | |
@@ -49,6 +49,9 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 | `pylance-mcp-server/pylanceRunCodeSnippet` | X | — | — | ✅ | — | ✅ | ✅ | — | — | — | — | — |
 | `pylance-mcp-server/pylanceInvokeRefactoring` | X | — | — | — | — | — | ✅ | — | — | — | — | — |
 | `pylance-mcp-server/pylanceWorkspaceUserFiles` | R | — | — | — | — | — | — | ✅ | — | — | — | — |
+| **AF command MCP** | | | | | | | | | | | | |
+| `af-command/run_script` | X | ✅ | — | ✅ | — | ✅ | ✅ | — | — | — | — | — |
+| `af-command/list_scripts` | R | ✅ | — | ✅ | — | ✅ | ✅ | — | — | — | — | — |
 | **Web** | | | | | | | | | | | | |
 | `web/fetch` | R | — | — | — | — | — | — | — | — | — | ✅ | — |
 | **Agent orchestration** | | | | | | | | | | | | |

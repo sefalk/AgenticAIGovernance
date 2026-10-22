@@ -65,13 +65,14 @@ $execSurfacePattern = 'runCodeSnippet|run_notebook_cell|runNotebookCell|run_play
 
 $toolName = $inputData.tool_name
 
-# Ownership of created ADO work items (#36). Matched by suffix: the hook-side
-# spelling of an MCP tool id has not been captured.
-if ([string]$toolName -match 'wit_work_item_write$') {
+# Work-item writes: ADO owner (#36) and field shrink (#197), GitHub body shrink
+# (#376). Matched by suffix: the hook-side spelling of an MCP tool id has not
+# been captured. sub_issue_write only links issues and is not a body write.
+if ([string]$toolName -match '(wit_work_item_write|(?<!sub_)issue_write|update_pull_request|update_issue_comment)$') {
     $ownerCore = Join-Path $PSScriptRoot 'work-item-owner.py'
     if (-not $AfPython -or -not (Test-Path $ownerCore)) {
         @{ hookSpecificOutput = @{ hookEventName = 'PreToolUse'; permissionDecision = 'deny'
-                permissionDecisionReason = 'Policy hard-deny: the work-item-owner gate found no working Python interpreter (tried AF_PYTHON_OVERRIDE, python3, python, py) or work-item-owner.py is missing, and cannot check that the item gets an owner (#36, #251). Install Python 3, or set AF_PYTHON_OVERRIDE.' }
+                permissionDecisionReason = 'Policy hard-deny: the work-item gates found no working Python interpreter (tried AF_PYTHON_OVERRIDE, python3, python, py) or work-item-owner.py is missing, and cannot check this write for an owner or for lost text (#36, #197, #376, #251). Install Python 3, or set AF_PYTHON_OVERRIDE.' }
         } | ConvertTo-Json -Depth 3 -Compress
         exit 0
     }
@@ -83,6 +84,20 @@ if ([string]$toolName -match 'wit_work_item_write$') {
 $isTaskShaped = ($toolName -eq 'create_and_run_task' -or $toolName -eq 'createAndRunTask')
 $isTaskRun = ($toolName -eq 'run_task' -or $toolName -eq 'runTask')
 $isExecSurface = ($toolName -match $execSurfacePattern)
+
+# The command server's trust store (#60): an agent that could edit it would
+# approve its own script. Judged on target paths only, never on content.
+if (Test-AfWriteTool $toolName) {
+    foreach ($target in (Get-AfWritePaths $inputData.tool_input)) {
+        if ([string]$target -match 'af-command-mcp[\\/]+trust([\\/]|$)') {
+            @{ hookSpecificOutput = @{ hookEventName = 'PreToolUse'; permissionDecision = 'deny'
+                    permissionDecisionReason = "Policy hard-deny: '$target' is in the command server's trust store (#60). Approving an agent script is the user's decision, made through the server's prompt; an agent may not write the store." }
+            } | ConvertTo-Json -Depth 3 -Compress
+            exit 0
+        }
+    }
+}
+
 if ($toolName -notmatch 'terminal|Terminal' -and -not $isTaskShaped -and -not $isTaskRun -and -not $isExecSurface) {
     Write-Output '{}'
     exit 0
@@ -294,6 +309,15 @@ if ($isTaskShaped) {
             Emit-Task 'deny' $reason
         }
     }
+    # An identical invocation already has a label, and runTask runs it without
+    # the creation prompt createAndRunTask can never skip (#396).
+    $dupHelper = Join-Path $PSScriptRoot 'task-duplicate.py'
+    if ($AfPython -and (Test-Path $dupHelper)) {
+        $dupLabel = @($raw | & $AfPython $dupHelper $AfCodeRoot 2>$null) | Select-Object -First 1
+        if ($dupLabel) {
+            Emit-Task 'deny' ("Policy deny: this invocation already exists as the task '$dupLabel'. Run it with runTask (id 'shell: $dupLabel'): it needs no creation prompt and can be auto-approved, while createAndRunTask would append a duplicate to tasks.json (#396).")
+        }
+    }
     Emit-Task 'allow' 'Safe: every task scope resolves to a reviewed script under AF_TASK_SCRIPT_DIRS.'
 }
 
@@ -502,10 +526,21 @@ function Remove-QuotedData([string]$seg) {
     return ($seg -replace '"[^"]*"', '' -replace "'[^']*'", '')
 }
 
+# Git's global options sit between `git` and the subcommand, where every rule
+# anchored at `git <subcommand>` could not see past them (#431). Deny-side only:
+# the allow tier still judges the command as written.
+$gitValue = '(?:"[^"]*"|''[^'']*''|\S+)'
+$gitGlobalRe = '^(\s*git)((?:\s+(?:-[Cc]\s+' + $gitValue + '|--(?:git-dir|work-tree|namespace|config-env)\s+' + $gitValue +
+    '|--[A-Za-z][\w-]*=' + $gitValue + '|--(?:no-pager|paginate|bare|no-replace-objects|literal-pathspecs|glob-pathspecs|noglob-pathspecs|icase-pathspecs|no-optional-locks|no-advice)|-[pP]))+)(?=\s|$)'
+function Remove-GitGlobalOptions([string]$seg) {
+    return ($seg -creplace $gitGlobalRe, '$1')
+}
+
 function Get-ScanUnits([string]$cmd) {
     $units = New-Object System.Collections.Generic.List[string]
-    foreach ($seg in (Split-TopLevel $cmd)) {
-        if (-not $seg.Trim()) { continue }
+    foreach ($raw in (Split-TopLevel $cmd)) {
+        if (-not $raw.Trim()) { continue }
+        $seg = Remove-GitGlobalOptions $raw
         $isBareLiteral = $seg -match '^\s*("[^"]*"|''[^'']*'')\s*$'
         if ($isBareLiteral -or $seg -match $dataCarrierRe) {
             $units.Add((Remove-QuotedData $seg))
@@ -543,16 +578,19 @@ function Get-InterpreterPayloads([string]$cmd) {
 #            behind a flag, so blanket stripping would launder the real case.
 function Get-RawTargets([string]$cmd, [string]$Strength) {
     $payloads = Get-InterpreterPayloads $cmd
-    if ($cmd -match '\$\(' -or $cmd -match '`') { return , (@($cmd) + $payloads) }
-    $stripped = if ($Strength -eq 'prose') {
-        ((Split-TopLevel $cmd | ForEach-Object {
-            if ($_ -match $dataCarrierRe -or $_ -match '^\s*("[^"]*"|''[^'']*'')\s*$') { Remove-QuotedData $_ } else { $_ }
-        }) -join ' ; ')
-    } else {
+    if ($Strength -eq 'exec') {
         $t = $cmd
         foreach ($pl in $payloads) { $t = $t.Replace('"' + $pl + '"', ' ').Replace("'" + $pl + "'", ' ') }
-        ($t -replace '"[^"]*"', '' -replace "'[^']*'", '')
+        # An interpolation elsewhere no longer makes every literal a command (#122, 2026-09-29):
+        # single quotes never interpolate; a double-quoted string executes only via $( or a backtick.
+        $t = [regex]::Replace($t, '"[^"]*"|''[^'']*''', {
+                param($m) if ($m.Value.StartsWith('"') -and $m.Value -match '\$\(|`') { $m.Value } else { '' } })
+        return , (@($t) + $payloads)
     }
+    if ($cmd -match '\$\(' -or $cmd -match '`') { return , (@($cmd) + $payloads) }
+    $stripped = ((Split-TopLevel $cmd | ForEach-Object { Remove-GitGlobalOptions $_ } | ForEach-Object {
+                if ($_ -match $dataCarrierRe -or $_ -match '^\s*("[^"]*"|''[^'']*'')\s*$') { Remove-QuotedData $_ } else { $_ }
+            }) -join ' ; ')
     return , (@($stripped) + $payloads)
 }
 
@@ -614,6 +652,21 @@ if ($catPkg -eq 'deny' -and (Test-AnyUnit '(?i)\bpip3?\s+(install|uninstall)\b|(
 }
 if ($catDatabricks -eq 'deny' -and (Test-AnyUnit '(?i)\bdatabricks\b')) {
     Emit 'deny' ("Policy hard-deny: Databricks CLI (AUTONOMY_CAT_DATABRICKS=deny). $denyTail")
+}
+
+# ===========================================================================
+# Foreign work (#120) -- ask before a git command discards a path that was
+# already uncommitted when this session started. Ahead of TIER 2, which
+# auto-allows `git restore`. No interpreter or no baseline: no opinion here.
+# ===========================================================================
+if ($command -match 'git\s.*\b(checkout|restore|stash|clean|switch)\b') {
+    $fgCore = Join-Path $PSScriptRoot '_foreign_guard.py'
+    if ($AfPython -and $AfCodeRoot -and (Test-Path $fgCore)) {
+        $env:AF_FG_COMMAND = $command
+        $env:AF_FG_SESSION = [string]$inputData.session_id
+        $fg = (& $AfPython $fgCore check $AfCodeRoot 2>$null | Out-String).Trim()
+        if ($fg) { Write-Output $fg; exit 0 }
+    }
 }
 
 # ===========================================================================

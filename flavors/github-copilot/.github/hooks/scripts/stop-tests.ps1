@@ -56,15 +56,17 @@ if ($branch -and $branch -match '^agent/(.+)$') {
     # #27). Same condition documenter-stop blocks on, asserted with less force.
     $retroDir = Get-AfRetroDir
     $retroPattern = "$retroDir/$workflowId.md"
-    $legacyRetro = "retros/auto/$workflowId.md"
-    if (-not (Test-Path $retroPattern)) {
+    $strays = @(Get-AfRetroStrays -WorkflowId $workflowId)
+    if (Test-Path $retroPattern) {
+        if ($strays.Count -gt 0) {
+            $missing += "a single retro (also written to '$($strays -join ' ')'; delete the copy outside RETRO_DIR)"
+        }
+    } else {
         $retro = Get-AfRetroRequirement -WorkflowId $workflowId
-        if ($retro.Required) {
-            if ($legacyRetro -ne $retroPattern -and (Test-Path $legacyRetro)) {
-                $missing += "retro snippet at its configured path (found '$legacyRetro', no longer accepted)"
-            } else {
-                $missing += "retro snippet ($retroPattern)"
-            }
+        if ($strays.Count -gt 0) {
+            $missing += "retro snippet at its configured path (found '$($strays[0])', not the configured destination)"
+        } elseif ($retro.Required) {
+            $missing += "retro snippet ($retroPattern)"
         }
     }
 

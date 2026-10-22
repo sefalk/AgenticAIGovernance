@@ -85,7 +85,7 @@ OVERRIDE = "ALLOW_WORKFLOW_LOG_SCHEMA"
 STATUS_VALUES = ("COMPLETED", "FAILED", "ESCALATED")
 
 # MANIFEST § 13, Inter-Agent Contracts -> Verdict Format.
-VERDICT_VALUES = ("APPROVED", "REJECTED", "ESCALATE", "RESOLVED", "COMPROMISE")
+VERDICT_VALUES = ("APPROVED", "REJECTED", "ESCALATE", "RESOLVED", "COMPROMISE", "NEEDS_CLARIFICATION")
 
 # How a log says a field has no value. A step that was not reviewed says so,
 # and so does a workflow whose `completed:` was never stamped.
@@ -97,6 +97,22 @@ BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*\s*$")
 NESTED = re.compile(r"^\s+\S")
 ZONE = re.compile(r"(?P<zone>Z|[+-]\d{2}:?\d{2})$")
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
+
+# Fields that hold a measurement. A value is a number, a percentage, or a
+# stated absence; anything else was composed, not measured (#173, #102).
+METRIC_FIELDS = (
+    "tests_added",
+    "tests_passing",
+    "line_coverage",
+    "branch_coverage",
+    "files_created",
+    "files_modified",
+    "files_checked",
+    "markers_present",
+    "total_steps",
+)
+UNMEASURED = ("UNMEASURED", "UNKNOWN")
+MEASURED = re.compile(r"^-?\d+(\.\d+)?%?$")
 
 
 def _zone(value: str) -> str:
@@ -182,19 +198,31 @@ def _populated(block: list[tuple[int, str]]) -> bool:
     return False
 
 
-def _step_agents(steps: list[tuple[int, str]]) -> list[str]:
-    return [value for _, value in _keys(steps, "agent")]
+def _step_items(steps: list[tuple[int, str]]) -> list[tuple[str, str]]:
+    """(agent, verdict) per `- ` item of `steps`, in order; a missing key is ''."""
+    items: list[dict[str, str]] = []
+    for _, line in steps[1:]:
+        match = KEY.match(line)
+        if line.lstrip().startswith("-"):
+            items.append({})
+        if match and items and match.group("key") in ("agent", "verdict"):
+            items[-1][match.group("key")] = _value(match.group("rest"))
+    return [(i.get("agent", ""), i.get("verdict", "").strip().upper()) for i in items]
 
 
 def _derive(sections: dict[str, list[tuple[int, str]]]) -> tuple[int, int]:
-    """Retries and escalations, counted the way analyze-retry-economy.py counts."""
+    """Retries and escalations, counted the way analyze-retry-economy.py counts.
+
+    The re-run that answers a NEEDS_CLARIFICATION is not a retry (#142): the
+    agent asked instead of guessing, and nothing it produced was rejected.
+    """
     steps = sections.get("steps", [])
-    seen: set[str] = set()
+    last_verdict: dict[str, str] = {}
     retries = 0
-    for agent in _step_agents(steps):
-        if agent in seen:
+    for agent, verdict in _step_items(steps):
+        if agent in last_verdict and not last_verdict[agent].startswith("NEEDS_CLARIFICATION"):
             retries += 1
-        seen.add(agent)
+        last_verdict[agent] = verdict
 
     escalations = sum(1 for _, verdict in _keys(steps, "verdict") if verdict.strip().upper().startswith("ESCALATE"))
     # A recorded `escalation:` block is an escalation the steps may not carry a
@@ -256,23 +284,6 @@ def _findings(text: str) -> tuple[list[str], list[str]]:
                 f"line {number}: verdict {value!r} is outside the MANIFEST closed set ({'/'.join(VERDICT_VALUES)})"
             )
 
-    # A count of escalations needs something that escalated. With no ESCALATE
-    # verdict and no populated `escalation:` block, the number rests on nothing
-    # in the file -- which is the shape a fabricated counter takes.
-    for number, value in _keys(sections.get("summary", []), "escalations"):
-        try:
-            stated = int(value.strip())
-        except ValueError:
-            continue
-        if stated <= 0:
-            continue
-        escalated = any(v.strip().upper().startswith("ESCALATE") for _, v in _keys(steps, "verdict"))
-        if not escalated and not _populated(sections.get("escalation", [])):
-            violations.append(
-                f"line {number}: summary.escalations is {stated} with no ESCALATE verdict "
-                "and no populated `escalation:` block -- nothing in the file escalated"
-            )
-
     # `started:` and `completed:` are stamped by two producers in documenter-stop.
     # One carried the committer's local offset while the other was UTC, so both
     # were individually valid and a reader subtracting them got a workflow that
@@ -309,7 +320,71 @@ def _findings(text: str) -> tuple[list[str], list[str]]:
                 "and put anything you want to say about the version in `af_version_note:`"
             )
 
+    violations.extend(_escalation_findings(sections, steps))
+    violations.extend(_metric_findings(lines))
     return violations, unchecked
+
+
+def _escalation_findings(sections: dict[str, list[tuple[int, str]]], steps: list[tuple[int, str]]) -> list[str]:
+    """An escalation the file states must rest on something the file records."""
+    found: list[str] = []
+    escalation = sections.get("escalation", [])
+    # A count of escalations needs something that escalated. With no ESCALATE
+    # verdict and no populated `escalation:` block, the number rests on nothing
+    # in the file -- which is the shape a fabricated counter takes.
+    for number, value in _keys(sections.get("summary", []), "escalations"):
+        try:
+            stated = int(value.strip())
+        except ValueError:
+            continue
+        if stated <= 0:
+            continue
+        escalated = any(v.strip().upper().startswith("ESCALATE") for _, v in _keys(steps, "verdict"))
+        if not escalated and not _populated(escalation):
+            found.append(
+                f"line {number}: summary.escalations is {stated} with no ESCALATE verdict "
+                "and no populated `escalation:` block -- nothing in the file escalated"
+            )
+    # A fabricated escalation once pointed at step 6 of a log with fewer steps
+    # (#173). The step it names has to be one the log records.
+    recorded = {value.strip() for _, value in _keys(steps, "step")}
+    for number, value in _keys(escalation, "step_at_escalation"):
+        stated = value.strip()
+        if stated.upper() in ABSENT or stated in recorded:
+            continue
+        found.append(
+            f"line {number}: step_at_escalation {stated!r} names no step this log records "
+            f"(steps: {', '.join(sorted(recorded, key=lambda s: (len(s), s))) or 'none'}) -- "
+            "write the step the escalation happened at, or null if you cannot say"
+        )
+    return found
+
+
+def _metric_findings(lines: list[tuple[int, str]]) -> list[str]:
+    """A metric is a number, a percentage, null, or `unmeasured` (#173, #102).
+
+    Measured over 84 MP logs: 12 put prose where a number belongs --
+    `N/A (target module not yet implemented)`, `Verified by test run`, `>75%`.
+    The schema offered no word for "nobody measured this", so one was made up,
+    and a made-up value reads like a measurement to every tool downstream.
+    """
+    found: list[str] = []
+    for number, line in lines:
+        match = KEY.match(line)
+        if not match or match.group("key") not in METRIC_FIELDS:
+            continue
+        rest = match.group("rest").strip()
+        if not rest:
+            continue
+        value = _value(rest).strip()
+        if value.upper() in ABSENT or value.upper() in UNMEASURED or MEASURED.match(value):
+            continue
+        shown = value if len(value) <= 60 else value[:57] + "..."
+        found.append(
+            f"line {number}: {match.group('key')} {shown!r} is not a measurement -- write the number "
+            "you were given, or `unmeasured` when nobody measured it; never a description"
+        )
+    return found
 
 
 def _rewrite_counters(path: Path, text: str) -> list[str]:

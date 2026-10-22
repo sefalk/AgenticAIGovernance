@@ -75,6 +75,23 @@ For file- or test-scoped runs, use `runTests` with `files` and/or `testNames`
 arguments. For one-off tasks not covered by pre-defined tasks (e.g., syntax
 checks, custom lint), use `createAndRunTask`.
 
+`runTests` writes a `.github/test-log.json` entry only when the project loads
+the `af_test_log` pytest plugin (`pythonpath = [".github/scripts"]`,
+`addopts = "-p af_test_log"` in `pyproject.toml`; the deploy warns while it is
+missing, #180). Its entry carries `"run_by": "pytest-plugin"`, and a file- or
+test-scoped run is filed as `partial`, never as a scope. Without the plugin,
+`runTests` writes nothing (measured, #307): iterate with it, and when another
+agent must see the result run the scope through a `tests:` label.
+
+**Lint one file?** Use `lint: changed files` — the file you are working on is in
+the branch delta. Never create a task label for a single file or a single
+workflow: 66 of one consumer's 125 labels were exactly that, and duplicates
+make `run_task` ambiguous.
+
+**Caller-supplied arguments** go through `af-command/run_script`: a reviewed
+script under `AF_SCRIPT_DIRS`, the arguments passed per call, no label minted.
+Where that server is not registered, `createAndRunTask` is the fallback.
+
 Only `code-critic` and `coordinator` have `run_in_terminal` — other agents
 must use `run_task`, `runTests`, or `createAndRunTask`.
 
@@ -129,7 +146,7 @@ workflow. All other test execution must be scoped.
 | implementer | unlimited domain, 1 adapters (if changed), 0× all | domain during dev, adapters only if adapter code changed | Stop hook runs all via canonical script and writes test log — do not pre-run all. |
 | refactorer | unlimited domain, 0 adapters, 0 all | domain after each step | Stop hook runs full suite — do NOT pre-run all yourself. |
 | code-critic | 0–1 scoped runs | domain+coverage or adapters+coverage | Accept implementer results if test log shows < 5 min old. Never re-run what test log shows as current. |
-| test-critic | 0 runs | N/A — review only, do not execute | Always skip. Read test log for context. |
+| test-critic | 0–2 targeted runs | `runTests` with `files`/`testNames`, only to verify a claim the test log cannot back | Read the test log first; never all, never adapters. |
 
 ## Test Log (`.github/test-log.json`)
 

@@ -96,6 +96,38 @@ af_retro_dir() {
     return 0
 }
 
+# af_retro_strays WORKFLOW_ID
+#
+# Retro copies at a known destination other than the configured one, joined by
+# spaces (issue #239). "The configured file exists" cannot see a second copy,
+# and comparing only against the legacy root switched itself off when RETRO_DIR
+# WAS the legacy root -- so MP wrote twins to the default for weeks. Every
+# candidate is checked, whichever one the configuration picked.
+#
+# With a second argument `kept`, it lists the opposite set instead: tracked
+# copies beside a gitignored RETRO_DIR. Those are history, not strays --
+# moving or deleting one takes a record out of git, invisibly to `git status`
+# because the destination is ignored (issue #109). No gate may instruct that.
+af_retro_strays() {
+    local _configured _dir _out="" _kept _want=0
+    if [ "${2:-}" = "kept" ]; then _want=1; fi
+    _configured="$(af_retro_dir)/$1.md"
+    for _dir in .github/retros/auto retros/auto; do
+        if [ "$_dir/$1.md" != "$_configured" ] && [ -f "$_dir/$1.md" ]; then
+            _kept=0
+            if [ -n "$(git ls-files -- "$_dir/$1.md" 2>/dev/null)" ] \
+                && git check-ignore -q -- "$_configured" 2>/dev/null; then
+                _kept=1
+            fi
+            if [ "$_kept" = "$_want" ]; then
+                _out="${_out:+$_out }$_dir/$1.md"
+            fi
+        fi
+    done
+    printf '%s' "$_out"
+    return 0
+}
+
 # af_find_python CANDIDATE...
 #
 # A resolvable interpreter is not a working one. On Windows, `python3` is an

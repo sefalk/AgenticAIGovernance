@@ -228,10 +228,13 @@ if ($logScope) {
 # itself fails, and discarding it is what made this failure mode silent.
 $stderrPath = Join-Path ([IO.Path]::GetTempPath()) ("af-run-tests-$PID.err")
 Push-Location $workspaceRoot
+# The wrapper writes its own entry; the af_test_log plugin stays out of its runs (#180).
+$env:AF_TEST_LOG_BY_WRAPPER = '1'
 try {
     $stdout = & $python $pytestArgs 2>$stderrPath
     $pytestExit = $LASTEXITCODE
 } finally {
+    Remove-Item Env:AF_TEST_LOG_BY_WRAPPER -ErrorAction SilentlyContinue
     Pop-Location
 }
 $stderrText = ''

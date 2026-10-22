@@ -410,6 +410,25 @@ hidden dangerous segment (`… ; rm -rf /`, `Write-Host (git push --force)`) is
 blocked even inside a composite. On any parse ambiguity the hook returns `{}`
 (prompt) — it never accidentally auto-approves.
 
+**Task creation reuses an existing task (#396).** VS Code always asks before
+`createAndRunTask` runs, and the tool refuses a label that already exists, so
+re-running an invocation used to mint a new label every time. When a payload
+would duplicate the `command` and `args` of a task already in
+`.vscode/tasks.json` (with `powershell -File X` treated as `X`), the hook
+denies it and names that task, so the agent runs it with `runTask` instead.
+Both dialects delegate the comparison to `scripts/task-duplicate.py`. A
+missing or unparsable `tasks.json` gives no opinion. To clear what earlier
+sessions minted, run `python .github/scripts/prune-tasks.py` as a dry run,
+then with `--apply`. It removes tasks without `detail` and keeps a backup.
+
+**The command server's trust store is not agent-editable (#60).** An edit tool
+(`create_file`, `replace_string_in_file`, `multi_replace_string_in_file`, ...)
+whose target path lies under `af-command-mcp/trust` is denied in both
+dialects. Otherwise an agent could approve its own script for `run_script`.
+Only the target paths are judged: a file whose content names the store is not
+a write to it. A terminal write to the store is not covered; it stays a
+recorded residual.
+
 #### PreToolUse: Work Item Owner Gate
 
 **Scripts:** `scripts/block-dangerous.ps1` (Windows) / `scripts/block-dangerous.sh`
@@ -419,13 +438,82 @@ Refuses any `*wit_work_item_write` call that would create an unowned ADO work
 item (#36): `action=create` without a non-empty `System.AssignedTo`, and every
 `action=add_child`, whose schema has no assignee field at all. The reason names
 the fix — the `ADO_DEFAULT_ASSIGNED_TO` value to pass, or, when that key is
-empty, that the agent must ask the human. Updates are not judged.
+empty, that the agent must ask the human. Updates go to the field shrink guard
+below.
+
+A `create` is also refused when its body would be stored where no one reads it
+(#289): a `Bug` whose body is in `System.Description` and not in
+`Microsoft.VSTS.TCM.ReproSteps` (the stock Bug form renders only the latter), or
+a long-text field holding Markdown without `"format": "Markdown"` (ADO stores it
+as HTML, so `##` renders literally). An `update` carries no type, so it is not
+judged for this.
 
 **Blocking** — answers `hookSpecificOutput.permissionDecision: "deny"` at exit
 0\. `PreToolUse` is the one event both VS Code Local and GitHub Copilot let a
 hook refuse. It rides in the existing hook rather than registering its own:
 Local ignores matchers, so a separate hook would start another shell on every
 tool call. Without a Python interpreter it refuses the call (#251).
+
+#### PreToolUse: Work Item Field Shrink Guard
+
+**Scripts:** `scripts/work-item-owner.py` (judges, PreToolUse) and
+`scripts/scan-secrets.py` (records reads, PostToolUse), both through
+`scripts/_field_guard.py`
+
+Stops an `update` / `update_batch` from silently shortening a long text field
+(#197, which lost a third of a description that way). The PostToolUse side
+caches, per session, the length and headings of every field a `wit_work_item`
+`get`/`get_batch` or a write response returned, keyed by revision. The
+PreToolUse side compares each field op against that cache:
+
+| Situation | Verdict |
+|---|---|
+| Long field, item never read in this session | deny — read first |
+| Guarded field (read value > `WI_FIELD_GUARD_MIN_CHARS`) without `test /rev` | deny |
+| `test /rev` differs from the cached revision | deny — re-read |
+| Shrink over `WI_FIELD_SHRINK_PCT` % and `WI_FIELD_SHRINK_CHARS`, or a lost heading | `WI_FIELD_SHRINK_POLICY` |
+
+`WI_FIELD_SHRINK_POLICY`: `ask` (default) asks the human; `declared` allows a
+shrink declared in the same call and asks otherwise; `declared-strict` allows a
+declared shrink and denies otherwise; `deny` denies every shrink. The
+declaration is a `System.History` line,
+`af-shrink: <field>; remove: <heading>, ...; expect: <new length>`, checked
+against the diff: the lost headings must equal the declared ones and the new
+length must be within 10 % of `expect`. A declaration written after the hook
+has judged that field at that revision does not count until the item has a new
+revision — the verdict names the loss, and copying it back is not consent.
+
+The read cache lives under the temp directory (`AF_FIELD_CACHE_DIR` overrides)
+and expires after 24 hours. The `System.History` field itself is never judged.
+
+#### PreToolUse: GitHub Body Shrink Guard
+
+**Scripts:** `scripts/work-item-owner.py` (judges, PreToolUse) and
+`scripts/scan-secrets.py` (records, PostToolUse), both through
+`scripts/_body_guard.py`
+
+The #197 guard for GitHub (#376). `issue_write update`, `update_pull_request`
+and `update_issue_comment` replace the text. The PostToolUse side caches length,
+headings and a hash of every body a read returned (any object with a `body` and
+a github.com `html_url`: issue/PR `get`, `get_comments`, search and list
+results). It also caches what a successful write or create stored, so the next
+write is compared with the session's own last write.
+
+| Situation | Verdict |
+|---|---|
+| `body` and `state` in one update | deny: comment first, then a state-only change |
+| Target never read in this session | deny: read first |
+| Read older than `WI_FIELD_READ_MAX_AGE_MIN` (10) | deny: re-read (GitHub has no `If-Match`) |
+| Shrink over `WI_FIELD_SHRINK_PCT` % and `WI_FIELD_SHRINK_CHARS`, or a lost heading | `WI_FIELD_SHRINK_POLICY` |
+
+The declaration is a comment posted before the write on the same issue or PR:
+`af-shrink: body; remove: <heading>, ...; expect: <new body length>`, or
+`af-shrink: comment <id>; ...` for a comment. It is checked against the diff
+like the ADO declaration. It does not count once a verdict has named the loss
+for that text, until the text changes. Issue and PR text from the last
+`## Working state` heading on is not guarded: `work-item-state` sanctions that
+block as the one replaceable part. Reads are taken as verbatim, which holds
+from github-mcp-server 1.12.0 on.
 
 #### PostToolUse: Secret Detection Scan
 

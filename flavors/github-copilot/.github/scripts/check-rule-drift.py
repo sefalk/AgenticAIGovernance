@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Derive the rule-duplication inventory of the always-on and agent set (#304).
+"""Derive the rule-duplication inventory of the always-on, agent and skill set (#304, #354).
 
 A hand-written inventory of duplicated rules was stale before anyone acted on
 it: the files it covered grew by a third to double while #30 sat open. This
@@ -8,7 +8,11 @@ later run can be diffed against a committed baseline rather than re-judged.
 
 Corpus (relative to --root, a `.github` directory):
     MANIFEST.md, copilot-instructions.md, instructions/*.instructions.md,
-    agents/*.agent.md
+    agents/*.agent.md, skills/*/SKILL.md
+
+Skills joined in #354: an agent restating its own skill is the commonest
+duplicate. Only active skills count -- `skills/_available/` is parked and
+loaded by nothing until a project activates it.
 
 A *rule* is a sentence carrying a modal or imperative: must, must not, never,
 always, do not, don't, may only, shall. Frontmatter, fenced code, HTML
@@ -134,6 +138,7 @@ def corpus(root: Path) -> list[Path]:
     files = [root / "MANIFEST.md", root / "copilot-instructions.md"]
     files += sorted((root / "instructions").glob("*.instructions.md"))
     files += sorted((root / "agents").glob("*.agent.md"))
+    files += sorted(p for p in (root / "skills").glob("*/SKILL.md") if p.parent.name != "_available")
     return [f for f in files if f.is_file()]
 
 

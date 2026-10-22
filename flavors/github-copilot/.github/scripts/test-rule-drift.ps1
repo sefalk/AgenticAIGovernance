@@ -30,6 +30,8 @@ function Add-Result([string]$Name, [bool]$Ok, [string]$Detail) {
 $root = Join-Path ([IO.Path]::GetTempPath()) ("af304-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Path (Join-Path $root 'agents') -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $root 'instructions') -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $root 'skills/demo-skill') -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $root 'skills/_available/parked') -Force | Out-Null
 function Write-Fixture([string]$Rel, [string[]]$Lines) {
     [IO.File]::WriteAllText((Join-Path $root $Rel), (($Lines -join "`n") + "`n"))
 }
@@ -71,6 +73,21 @@ Write-Fixture 'agents/demo.agent.md' @(
     '',
     'Tests must always pass before a commit.'
 )
+# #354: an active skill restating a MANIFEST rule, and a parked skill that is not loaded anywhere.
+Write-Fixture 'skills/demo-skill/SKILL.md' @(
+    '---',
+    'name: demo-skill',
+    "description: 'Every commit message must name the agent that wrote it.'",
+    '---',
+    '# Demo skill',
+    '',
+    'Every commit message must name the agent that wrote it.'
+)
+Write-Fixture 'skills/_available/parked/SKILL.md' @(
+    '# Parked skill',
+    '',
+    'Workers never run git commands.'
+)
 
 function Invoke-Detector([string[]]$Extra) {
     $ErrorActionPreference = 'Continue'
@@ -104,6 +121,11 @@ try {
     Add-Result 'R5_a_statement_without_a_modal_is_not_a_rule' (-not ($allLocs -match 'copilot-instructions\.md:4$')) "locations=$($allLocs -join ', ')"
 
     Add-Result 'R6_a_rule_found_only_once_forms_no_cluster' (-not ($allLocs -match 'demo\.agent\.md')) "locations=$($allLocs -join ', ')"
+
+    Add-Result 'R18_an_active_skill_restating_a_rule_joins_its_cluster' `
+        (($allLocs -contains 'MANIFEST.md:5') -and ($allLocs -contains 'skills/demo-skill/SKILL.md:7')) "locations=$($allLocs -join ', ')"
+
+    Add-Result 'R19_a_skill_under__available_is_not_in_the_corpus' (-not ($allLocs -match '^skills/_available/')) "locations=$($allLocs -join ', ')"
 
     $a = (Invoke-Detector @()).Out
     $b = (Invoke-Detector @()).Out
@@ -173,6 +195,120 @@ try {
 } finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+# #295: prose clustering cannot see a permission that one source enumerates and
+# another never names. The three machine-readable ends can be compared: every
+# git subcommand block-dangerous auto-approves under GIT_FEATURE / GIT_MERGE
+# must be named by af-env.conf's category text AND by the git-workflow skill's
+# autonomy table. Measured 2026-10-19: one gap -- `git restore`, auto-approved
+# in both dialects and named in neither document.
+$payload = Split-Path $scriptDir
+function Get-AutoGitOps([string]$Text, [string]$Start, [string]$End) {
+    $i = $Text.IndexOf($Start); $j = $Text.IndexOf($End, [Math]::Max($i, 0))
+    if ($i -lt 0 -or $j -lt 0) { return @() }
+    $block = $Text.Substring($i, $j - $i)
+    $ops = @()
+    foreach ($m in [regex]::Matches($block, 'git(?:\\s\+|\[\[:space:\]\]\+)\(?([a-z|-]+(?:\\s\+agent/)?)')) {
+        foreach ($t in ($m.Groups[1].Value -split '\|')) {
+            $op = ($t -replace '\\s\+agent/', '').Trim()
+            if ($op -match '^[a-z][a-z-]+$') { $ops += $op }
+        }
+    }
+    return @($ops | Sort-Object -Unique)
+}
+$ps1 = Get-Content (Join-Path $payload 'hooks/scripts/block-dangerous.ps1') -Raw
+$sh = Get-Content (Join-Path $payload 'hooks/scripts/block-dangerous.sh') -Raw
+$hookOps = @(
+    (Get-AutoGitOps $ps1 "if (`$catGitFeature -eq 'auto')" '# tests / lint')
+    (Get-AutoGitOps $sh 'if [ "$cat_git_feature" = "auto" ]' 'if [ "$cat_tests" = "auto" ]')
+) | Sort-Object -Unique
+$confText = Get-Content (Join-Path $payload 'af-env.conf') -Raw
+$confDesc = [regex]::Match($confText, '(?s)# GIT_FEATURE.*?AUTONOMY_CAT_GIT_MERGE=').Value
+$skillText = Get-Content (Join-Path $payload 'skills/git-workflow/SKILL.md') -Raw
+$skillTable = (([regex]::Matches($skillText, '(?m)^\| `git [^\n]*') | ForEach-Object { $_.Value }) -join "`n")
+$missing = @()
+foreach ($op in $hookOps) {
+    if ($confDesc -notmatch "\b$op\b") { $missing += "$op (af-env.conf)" }
+    if ($skillTable -notmatch "\b$op\b") { $missing += "$op (git-workflow skill)" }
+}
+Add-Result 'R20_found_the_hook_s_auto_approved_git_operations' ($hookOps.Count -ge 8) "ops=$($hookOps -join ', ')"
+Add-Result 'R21_every_auto_approved_git_operation_is_named_in_config_and_skill' ($missing.Count -eq 0) "unnamed: $($missing -join '; ')"
+
+# #369: a threshold the gatekeeper may not have loaded is advisory in practice.
+# Measured 2026-10-19 over MP: 7 of 7 workflows with a code-critic step record
+# no read of the metrics skill. So the minimal table lives where it is enforced
+# -- and since the skill keeps it too, the two copies must be identical, or the
+# fix becomes the next drift.
+function Get-ThresholdRows([string]$Text) {
+    @([regex]::Matches($Text, '(?m)^\| (Domain core|Ports|Adapters|Utilities) \|[^\n]*') |
+        ForEach-Object { ($_.Value -replace '\s+', ' ').Trim() })
+}
+$skillRows = @(Get-ThresholdRows (Get-Content (Join-Path $payload 'skills/metrics/SKILL.md') -Raw -Encoding UTF8))
+$criticRows = @(Get-ThresholdRows (Get-Content (Join-Path $payload 'agents/code-critic.agent.md') -Raw -Encoding UTF8))
+Add-Result 'R22_code_critic_carries_the_threshold_table_it_enforces' ($criticRows.Count -eq 4) "rows in code-critic: $($criticRows.Count)"
+Add-Result 'R23_the_carried_table_equals_the_metrics_skill' `
+    ($skillRows.Count -eq 4 -and (($criticRows -join "`n") -ceq ($skillRows -join "`n"))) `
+    "skill=$($skillRows -join ' / ') critic=$($criticRows -join ' / ')"
+
+# #284: a tool missing from an agent's set cannot be reached however the payload
+# is spelled, which a gate cannot promise. The sets below were decided from the
+# measured use (comment on #284, 2026-10-20); a widened set fails here rather
+# than changing silently, and so does a new agent that gains an execution tool.
+$execTool = '(?i)^(execute/|af-command/run_script$|pylance-mcp-server/pylanceRunCodeSnippet$)'
+$declaredExec = @{
+    'code-critic'  = 'execute/createAndRunTask execute/runNotebookCell execute/runTask execute/runTests execute/testFailure'
+    'coordinator'  = 'af-command/run_script execute/createAndRunTask execute/getTerminalOutput execute/runInTerminal execute/runTask execute/runTests execute/testFailure'
+    'documenter'   = 'execute/runTask'
+    'implementer'  = 'af-command/run_script execute/createAndRunTask execute/runNotebookCell execute/runTask execute/runTests execute/testFailure pylance-mcp-server/pylanceRunCodeSnippet'
+    'planner'      = 'execute/runTask'
+    'refactorer'   = 'af-command/run_script execute/createAndRunTask execute/runNotebookCell execute/runTask execute/runTests execute/testFailure pylance-mcp-server/pylanceRunCodeSnippet'
+    'test-critic'  = 'execute/runTask execute/runTests execute/testFailure'
+    'test-writer'  = 'af-command/run_script execute/runTask execute/runTests execute/testFailure pylance-mcp-server/pylanceRunCodeSnippet'
+}
+$toolsetDrift = @()
+foreach ($agentFile in Get-ChildItem (Join-Path $payload 'agents') -Filter '*.agent.md') {
+    $name = $agentFile.Name -replace '\.agent\.md$', ''
+    $front = ((Get-Content $agentFile.FullName -Raw -Encoding UTF8) -split '(?m)^---\s*$')[1]
+    $toolsBlock = if ($front -match '(?s)\ntools:\s*\n(.*?)(\n\S|$)') { $Matches[1] } else { '' }
+    $exec = @([regex]::Matches($toolsBlock, '(?m)^\s*-\s*[''"]?([^''"\s#]+)') |
+        ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -match $execTool } | Sort-Object -Unique)
+    $want = if ($declaredExec.ContainsKey($name)) { $declaredExec[$name] } else { '' }
+    if (($exec -join ' ') -cne $want) { $toolsetDrift += "$name has [$($exec -join ' ')] want [$want]" }
+}
+Add-Result 'R28_every_agent_s_execution_tools_are_the_declared_set' ($toolsetDrift.Count -eq 0) ($toolsetDrift -join '; ')
+
+# #284: the test-critic held runTests while its agent file and the test budget
+# said "never run tests" -- and ran them 24 times in 66 logs. A grant and a rule
+# that disagree are decided by whichever one the agent happens to read last.
+$budgetText = Get-Content (Join-Path $payload 'skills/test-execution/SKILL.md') -Raw -Encoding UTF8
+$testToolDrift = @()
+foreach ($name in $declaredExec.Keys) {
+    if ($declaredExec[$name] -notmatch 'execute/runTests') { continue }
+    $agentText = Get-Content (Join-Path $payload "agents/$name.agent.md") -Raw -Encoding UTF8
+    if ($budgetText -match "(?m)^\| $name \| 0 runs") { $testToolDrift += "$name budget row says 0 runs" }
+    if ($agentText -match '(?i)zero test runs|never\*{0,2} run tests') { $testToolDrift += "$name agent file forbids running tests" }
+}
+Add-Result 'R29_an_agent_with_a_test_tool_is_not_told_to_run_no_tests' ($testToolDrift.Count -eq 0) ($testToolDrift -join '; ')
+
+# #142: BLOCKED is wired for missing capability, not for an ambiguous instruction,
+# so a producer facing a contradiction reconciled it with an invented fact. The
+# return, the prompts that offer it and the parsing that acts on it must agree.
+$manifest = Get-Content (Join-Path $payload 'MANIFEST.md') -Raw -Encoding UTF8
+$tdd = Get-Content (Join-Path $payload 'skills/tdd-orchestration/SKILL.md') -Raw -Encoding UTF8
+Add-Result 'R24_manifest_defines_the_clarification_return' `
+    ($manifest -match '(?m)^## Needs Clarification' -and $manifest -match '(?is)candidate interpretations' -and
+     $manifest -match '(?is)resum') `
+    'MANIFEST has no NEEDS_CLARIFICATION return with questions, interpretations and resumption'
+Add-Result 'R25_a_stated_count_that_does_not_reconcile_is_a_question' `
+    ($manifest -match '(?is)count.{0,120}(does not|doesn.t) (match|reconcile).{0,120}NEEDS_CLARIFICATION') `
+    'the mechanical trigger (stated count vs enumerated data) is not written down'
+$producerPrompts = @([regex]::Matches($tdd, '(?s)Use the \*\*(test-writer|implementer|refactorer)\*\* agent as a subagent.*?\n---'))
+Add-Result 'R26_every_producer_prompt_offers_the_clarification_return' `
+    ($producerPrompts.Count -eq 3 -and @($producerPrompts | Where-Object { $_.Value -notmatch 'NEEDS_CLARIFICATION' }).Count -eq 0) `
+    "producer prompts found: $($producerPrompts.Count); prompts without NEEDS_CLARIFICATION: $(@($producerPrompts | Where-Object { $_.Value -notmatch 'NEEDS_CLARIFICATION' }).Count)"
+Add-Result 'R27_parsing_answers_and_reinvokes_without_counting_a_retry' `
+    ($tdd -match '(?is)### Verdict Parsing.{0,1500}NEEDS_CLARIFICATION.{0,400}not count as a retry') `
+    'verdict parsing does not handle NEEDS_CLARIFICATION as answer-and-re-invoke'
 
 Write-Output '===== rule-drift detector tests (issue #304) ====='
 foreach ($n in $notes) { Write-Output "  SKIP  $n" }

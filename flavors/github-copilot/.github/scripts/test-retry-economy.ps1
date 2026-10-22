@@ -150,6 +150,15 @@ try {
     $ok = $false
     try { $ok = ($r.Output | ConvertFrom-Json).retries.'test-writer' -eq 1 } catch { $ok = $false }
     $results['L_json_parses_and_counts'] = $ok
+
+    # M: the re-run that answers a clarification is not a retry, and the verdict
+    #    is canonical (#142) -- or the analyser and the log checker disagree.
+    $clarified = $clean -replace '(?s)  - step: 2\r?\n    agent: "test-writer"\r?\n    verdict: "null"', "  - step: 2`r`n    agent: `"test-writer`"`r`n    verdict: `"NEEDS_CLARIFICATION`"`r`n  - step: 3`r`n    agent: `"test-writer`"`r`n    verdict: `"null`""
+    $d = New-LogDir; Add-Log $d 'clarified' $clarified
+    $r = Invoke-Analyser $d @('--json')
+    $ok = $false
+    try { $j = $r.Output | ConvertFrom-Json; $ok = ($clarified -match 'NEEDS_CLARIFICATION') -and $r.Code -eq 0 -and -not $j.retries.'test-writer' } catch { $ok = $false }
+    $results['M_clarification_rerun_is_not_a_retry'] = $ok
 }
 finally {
     foreach ($d in $dirs) { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue }

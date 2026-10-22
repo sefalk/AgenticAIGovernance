@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any
 
 # MANIFEST S 13 (Inter-Agent Contracts -> Verdict Format) defines the closed set.
-CANONICAL = {"APPROVED", "REJECTED", "ESCALATE", "RESOLVED", "COMPROMISE"}
+CANONICAL = {"APPROVED", "REJECTED", "ESCALATE", "RESOLVED", "COMPROMISE", "NEEDS_CLARIFICATION"}
 # Values that carry the same meaning and are not worth flagging on their own.
 ABSENT = {"NULL", "NONE", "", "N/A"}
 
@@ -124,7 +124,8 @@ class Economy:
                 escalations += 1
                 self.escalations[agent] += 1
                 self.escalated_at[agent].append(runs.get(agent, 0))
-            if agent in runs:
+            # The re-run that answers a NEEDS_CLARIFICATION is not a retry (#142).
+            if agent in runs and verdicts[last_index[agent]] != "NEEDS_CLARIFICATION":
                 retries += 1
                 self.retries[agent] += 1
                 self.workflows_retried[agent].add(workflow)

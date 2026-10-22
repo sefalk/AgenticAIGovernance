@@ -132,19 +132,30 @@ fi
 
 retro_dir=$(af_retro_dir)
 retro_note=""
-if [ ! -f "${retro_dir}/${workflow_id}.md" ]; then
+retro_strays=$(af_retro_strays "$workflow_id")
+retro_kept=$(af_retro_strays "$workflow_id" kept)
+kept_note=""
+if [ -n "$retro_kept" ]; then
+    kept_note=" -- left '${retro_kept}' in place: it is tracked and RETRO_DIR is gitignored, so moving or deleting it would take it out of version control (#109)"
+fi
+if [ -f "${retro_dir}/${workflow_id}.md" ]; then
+    if [ -n "$retro_strays" ]; then
+        missing+=("a single retro -- it was written twice, also at '${retro_strays}'; delete the copy outside RETRO_DIR, ${retro_dir}/${workflow_id}.md is the one that counts")
+    fi
+else
     retro_verdict=$(af_retro_required "$workflow_id")
     retro_reason="${retro_verdict#*|}"
-    if [ "${retro_verdict%%|*}" = "1" ]; then
-        if [ "$retro_dir" != "retros/auto" ] && [ -f "retros/auto/${workflow_id}.md" ]; then
-            missing+=("retro snippet at its configured path -- found 'retros/auto/${workflow_id}.md', which is no longer accepted; move it to ${retro_dir}/${workflow_id}.md")
-        else
-            missing+=("retro snippet (${retro_dir}/${workflow_id}.md), required because ${retro_reason}")
-        fi
+    # A misplaced retro is a defect whether or not one was owed: the default
+    # location is gitignored, so it would be written, counted and lost (#176).
+    if [ -n "$retro_strays" ]; then
+        missing+=("retro snippet at its configured path -- found '${retro_strays%% *}', which is not the configured destination; move it to ${retro_dir}/${workflow_id}.md")
+    elif [ "${retro_verdict%%|*}" = "1" ]; then
+        missing+=("retro snippet (${retro_dir}/${workflow_id}.md), required because ${retro_reason}${kept_note}")
     else
         retro_note=" -- no retro required (${retro_reason})"
     fi
 fi
+retro_note="${retro_note}${kept_note}"
 
 # ---------- Verdict ----------
 
@@ -185,7 +196,7 @@ if [ -f "$schema_checker" ]; then
         fi
         if [ "$schema_code" -eq 1 ]; then
             detail=$(echo "$schema_out" | grep -v 'derived ' | af_json_escape)
-            echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Workflow log schema violation for '${workflow_id}': ${detail}. Fix the log, then finish. Use the vocabulary in your Workflow Log Schema: status is COMPLETED, FAILED or ESCALATED; a step verdict is APPROVED, REJECTED, ESCALATE, RESOLVED, COMPROMISE or null. Do not invent a value to describe a state the schema has no word for — say it in 'action:' instead.\"}}"
+            echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Workflow log schema violation for '${workflow_id}': ${detail}. Fix the log, then finish. Use the vocabulary in your Workflow Log Schema: status is COMPLETED, FAILED or ESCALATED; a step verdict is APPROVED, REJECTED, ESCALATE, RESOLVED, COMPROMISE, NEEDS_CLARIFICATION or null. Do not invent a value to describe a state the schema has no word for — say it in 'action:' instead.\"}}"
             exit 0
         fi
     fi
@@ -391,6 +402,16 @@ if [ -f "$checker" ] && [ -f ".vscode/tasks.json" ]; then
             scratch_note=" + scratch tasks to prune (${count}): ${joined}"
         fi
     fi
+fi
+
+# The plan-status HARD gate in documenter.agent.md had no checker but its maker
+# (#252 remainder). This is the checker. It runs LAST: the stamps, cost block
+# and invocation census above are already written, so blocking here loses no
+# measurement. FAILED/ESCALATED logs stay a note -- the plan has no such status.
+if [ "$plan_status" != "COMPLETED" ] && [ "${log_status:-}" = "COMPLETED" ]; then
+    reason="Plan status gate: plan status is ${plan_status:-unset} but the workflow log reports COMPLETED -- set the plan's Status line to COMPLETED (or correct the log if the workflow did not finish). Measurements were already written.${retro_note}${schema_note}${stamp_note}${cost_note}${invocation_note}"
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"$(af_json_escape "$reason")\"}}"
+    exit 0
 fi
 
 echo "{\"systemMessage\": \"documenter:Stop — artifact gate PASS for '${workflow_id}'${lifecycle_note}${retro_note}${schema_note}${stamp_note}${cost_note}${invocation_note}${scratch_note}\"}"

@@ -10,14 +10,17 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 # Lower bound is load-bearing: server.py imports mcp.server.mcpserver, which does
-# not exist before mcp 2.x (#274).
-dependencies = ["mcp>=2"]
+# not exist before mcp 2.x (#274). The upper bound keeps a clean install from
+# resolving the next breaking major; Dependabot proposes it as a pull request
+# instead (#275, asserted by .github/scripts/test-dependency-bounds.py).
+dependencies = ["mcp>=2,<3"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "build>=1"]
 
 [project.scripts]
 af-deploy-mcp = "af_deploy_mcp.server:main"
+af-command-mcp = "af_deploy_mcp.command_server:main"
 
 # Package version tracks the AF framework VERSION, so a wheel's version equals the
 # bundled payload version (af-deploy-mcp@X == AF payload X). Rebuild + reinstall

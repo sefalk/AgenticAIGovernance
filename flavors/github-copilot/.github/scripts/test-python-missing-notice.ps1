@@ -120,8 +120,26 @@ try {
         Add-Result 'N5_sh_names_refusing_and_degraded_hooks' `
             ((Compare-List $expected.sh.degraded $shNotice.Degraded) -and (Compare-List $expected.sh.refused $shNotice.Refused)) `
             "expected degraded=[$($expected.sh.degraded -join ', ')] refused=[$($expected.sh.refused -join ', ')]; got degraded=[$($shNotice.Degraded -join ', ')] refused=[$($shNotice.Refused -join ', ')]"
+
+        # #168: the git pre-commit stays fail-open without Python (#331), but must
+        # name every guard it skipped -- a skipped guard otherwise looks like a pass.
+        $gitHook = Join-Path (Split-Path -Parent $hookDir) 'git/pre-commit'
+        $dispatch = [regex]::Match((Get-Content $gitHook -Raw), 'for checker in ([^;\r\n]+);').Groups[1].Value
+        $guards = @($dispatch -split '\s+' | Where-Object { $_ -like '*.py' })
+        $repo = Join-Path $tmp 'repo'
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        $ErrorActionPreference = 'Continue'
+        git -C $repo init -q 2>&1 | Out-Null
+        $ErrorActionPreference = 'Stop'
+        $commitRunner = Join-Path $tmp 'commit.sh'
+        [IO.File]::WriteAllText($commitRunner, "export PATH=/usr/bin:/bin:/mingw64/bin`ncd `"$($repo -replace '\\', '/')`"`nsh `"$($gitHook -replace '\\', '/')`" 2>&1`necho `"EXIT=`$?`"`n")
+        $commitOut = & $bash ($commitRunner -replace '\\', '/') 2>&1 | Out-String
+        $missing = @($guards | Where-Object { $commitOut -notmatch [regex]::Escape($_) })
+        Add-Result 'N6_git_precommit_names_every_skipped_guard_and_stays_open' `
+            ($guards.Count -gt 0 -and $missing.Count -eq 0 -and $commitOut -match 'did NOT run' -and $commitOut -match 'EXIT=0') `
+            "guards=[$($guards -join ', ')] missing=[$($missing -join ', ')] output=$($commitOut.Trim())"
     } else {
-        Write-Output '  SKIP  N4/N5 -- no bash on this machine'
+        Write-Output '  SKIP  N4/N5/N6 -- no bash on this machine'
     }
 } finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue

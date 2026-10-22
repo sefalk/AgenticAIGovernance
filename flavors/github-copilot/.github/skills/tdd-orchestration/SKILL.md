@@ -193,7 +193,8 @@ Use the **test-writer** agent as a subagent (apply the Delegation Contract):
 > Pay special attention to skills: unit-testing, property-testing.
 > Create tests in the appropriate tests/ subdirectory.
 > Run the tests and confirm they FAIL for the right reason.
-> If blocked, return your partial tests and the specific blocker — do not guess."
+> If blocked, return your partial tests and the specific blocker — do not guess.
+> If the instruction admits two readings, return NEEDS_CLARIFICATION (MANIFEST § 13)."
 
 ---
 
@@ -231,7 +232,8 @@ delegate **one subtask at a time**, not the whole plan):
 > Pay special attention to skills: hexagonal-architecture, error-handling.
 > Run tests after implementation to confirm all pass.
 > If blocked after a reasonable attempt, return your partial work and the
-> specific blocker — do NOT widen scope or guess."
+> specific blocker — do NOT widen scope or guess.
+> If the instruction admits two readings, return NEEDS_CLARIFICATION (MANIFEST § 13)."
 
 **If tests still fail:** Re-invoke **implementer** with the failure details:
 
@@ -255,7 +257,8 @@ Use the **refactorer** agent as a subagent (apply the Delegation Contract):
 > In-scope files: {file_list}. Non-goals: no behaviour changes, no new
 > features, no new files.
 > Run tests to confirm they still pass.
-> If a cleanup step breaks tests, undo it and continue — never leave tests red."
+> If a cleanup step breaks tests, undo it and continue — never leave tests red.
+> If the instruction admits two readings, return NEEDS_CLARIFICATION (MANIFEST § 13)."
 
 Skip this step if the implementation is already clean (implementer reports
 no cleanup needed).
@@ -315,6 +318,14 @@ Cross-reference producer Gate Summary claims against actual subagent output
 If a HARD gate claim cannot be corroborated, downgrade to **BLOCKED** and
 narrate: `⚠️ Step {N}: gate claim '{gate}' unverifiable — treating as BLOCKED`.
 SOFT enforcement for Standard tier, HARD for Deep tier.
+
+**Measured claims (#273, #175).** A mechanical claim (moved, removed, marker
+added, advisory resolved) without its measurement is unverifiable: treat it as
+above. A measurement that contradicts the delegation's own criterion (a move
+that grew the file by 153 lines) is a REJECTED, whatever the Gate Summary says.
+The documenter has no critic, so for its content edits
+re-measure one claimed quantity yourself (line count, occurrence count) before
+accepting them.
 
 ---
 
@@ -439,6 +450,20 @@ Parse critic/arbiter verdicts defensively: search case-insensitively for
 `ESCALATE`, `RESOLVED`, `COMPROMISE`. If no verdict found → treat as
 **BLOCKED** (never default to APPROVED). Missing Gate Summary → warn but
 proceed. Missing metrics → record `N/A`.
+
+A producer that returns no text is BLOCKED, not done (#175). Its Stop hook
+only warns (`RETURN EMPTY`), so the decision is yours. Run
+`git status --porcelain` to see what it touched, then re-invoke the same agent
+once, asking only for its return. That does not count as a retry. A second
+empty return → escalate with the file list.
+
+A return headed `## Needs Clarification` (MANIFEST § 13) is NEEDS_CLARIFICATION:
+a question, not a failure. Answer it from the plan or the request, then
+re-invoke the same agent with the original prompt plus the answer and its
+`resume` notes. That does not count as a retry. Record the step with
+`verdict: "NEEDS_CLARIFICATION"` in the workflow log, because each one names
+an ambiguity your own prompt produced. If neither the plan nor the request
+answers it, ask the human.
 
 ### Rejection Feedback Validation
 

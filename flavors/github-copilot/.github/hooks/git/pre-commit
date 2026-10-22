@@ -21,7 +21,9 @@
 #                            criteria    (override: ALLOW_PLAN_STRUCTURE=1)
 #
 # Fail-open if a checker or a Python interpreter is missing; the checkers
-# themselves are fail-closed on git errors.
+# themselves are fail-closed on git errors. Without Python the commit goes
+# through (#331: degrade, do not block) but every skipped guard is named, so a
+# skipped guard cannot pass for one that ran (#168).
 #
 # Enable once per clone (bootstrap does this):
 #   git config core.hooksPath .github/hooks/git
@@ -60,16 +62,24 @@ try_python "$repo_root/.venv/Scripts/python.exe" "" \
     || try_python python "" \
     || try_python py "-3" \
     || true
-if [ -z "$python_bin" ]; then
-    echo "[pre-commit] WARN: no python interpreter found -- skipping guards." >&2
-    exit 0
-fi
 
 status=0
+skipped=""
 for checker in check-large-files.py check-strict-json.py check-context-budget-staged.py check-plan-budget.py check-plan-structure.py; do
     [ -f "$scripts_dir/$checker" ] || continue  # fail-open if checker missing
+    if [ -z "$python_bin" ]; then
+        skipped="$skipped $checker"
+        continue
+    fi
     if ! "$python_bin" $python_bin_extra_args "$scripts_dir/$checker"; then
         status=1
     fi
 done
+if [ -n "$skipped" ]; then
+    echo "[pre-commit] WARN: no working Python interpreter -- these commit guards did NOT run:" >&2
+    for checker in $skipped; do
+        echo "[pre-commit]   - $checker" >&2
+    done
+    echo "[pre-commit] This commit was not checked. Install Python 3 (or create .venv) to enable them." >&2
+fi
 exit "$status"

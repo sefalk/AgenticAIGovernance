@@ -21,7 +21,8 @@ two workflow prompts (``deploy``, ``resolve_conflicts``) that surface as
 not see MCP tool calls):** write tools require ``confirm=True`` (a production
 server would use MCP *elicitation* instead), all writes stay under the target's
 ``.github/``, existing files are backed up before overwrite, and CONFLICT /
-PROTECT / PRESERVE / ``[customizable]`` files are never written by ``apply``.
+PROTECT / PRESERVE files are never written by ``apply`` (a ``[customizable]``
+file is written only while it still equals its baseline, #106).
 
 The framework payload is resolved from ``AF_SOURCE_ROOT`` if set, else from the
 in-repo flavor directory (dev mode). A packaged build would bundle the payload
@@ -73,7 +74,9 @@ def status(workspace_root: str) -> dict:
         workspace_root: Absolute path to the target project (``${workspaceFolder}``).
 
     Returns a dict with ``source_version``, ``deployed_version`` and ``state``
-    (``up-to-date`` | ``stale`` | ``not-deployed``), plus ``payload_origin`` and
+    (``up-to-date`` | ``stale`` | ``not-deployed``), plus ``source_commit`` and
+    ``deployed_commit`` -- when both are set they decide ``state``, since VERSION
+    moves only at a release cut -- and ``payload_origin`` and
     ``payload_state`` (``current`` | ``behind-repository`` | ``unverifiable`` |
     ``not-applicable``) saying whether the payload this server serves is itself
     current — a bundled payload is a build-time copy and goes stale silently.
@@ -94,9 +97,10 @@ def dry_run(workspace_root: str) -> dict:
     Args:
         workspace_root: Absolute path to the target project (``${workspaceFolder}``).
 
-    Returns per-file classifications (UPDATE / CONFLICT / PRESERVE / PROTECT /
+    Returns per-file classifications (UPDATE / MERGE / CONFLICT / PRESERVE / PROTECT /
     UNCHANGED / CREATE) plus summary counts — the same decisions the deploy
-    script would make, computed read-only.
+    script would make, computed read-only. MERGE is a both-sides change that
+    merges without overlap; the scripts still report it as CONFLICT (#105).
     """
     src = _source_root()
     if err := _validate_source(src):
@@ -127,11 +131,12 @@ def conflict_diff(workspace_root: str, path: str) -> dict:
 
 @mcp.tool()
 def apply(workspace_root: str, confirm: bool = False) -> dict:
-    """Apply the pending CREATE/UPDATE files (backs up first).
+    """Apply the pending CREATE/UPDATE files and clean MERGEs (backs up first).
 
     With ``confirm=False`` (default) this returns the dry-run preview and writes
     nothing — re-call with ``confirm=True`` to apply. CONFLICT / PROTECT /
-    PRESERVE / ``[customizable]`` files are never written.
+    PRESERVE files are never written; a ``[customizable]`` file only while it
+    still equals its baseline.
     """
     src, target, err = _prep(workspace_root)
     if err:

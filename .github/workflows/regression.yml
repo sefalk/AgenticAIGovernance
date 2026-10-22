@@ -49,11 +49,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      # test-hooks-integration.ps1 is excluded from the sweep below because a
-      # hosted runner cannot run it. That left the hooks -- the most
-      # safety-critical part of the payload -- covered by nothing once the
-      # hand-run sweep was replaced by CI. This step does not close that hole;
-      # it makes the hole visible at the moment it matters.
+      # What CI covers for the hooks, and what it cannot (#184). The sweep
+      # below runs test-hooks.ps1 on every pull request: it pipes JSON into
+      # each hook script and checks the decision, so hook *logic* is covered
+      # here. What a hosted runner cannot answer is whether the hooks fire in a
+      # live VS Code session -- it has no %APPDATA%\Code\logs. That is what
+      # test-hooks-integration.ps1 reads, and why it is excluded from the sweep.
+      #
+      # The trigger stays on every path under hooks/, scripts included. A body
+      # change can break a hook only in the live environment -- interpreter
+      # resolution, the working directory VS Code starts it in, an output
+      # shape VS Code ignores -- and the live log records that as
+      # `Completed (Failure)` while test-hooks.ps1 stays green. The cost of the
+      # gate is one line in the pull request body (decision recorded on #184).
       #
       # It is attestation, not verification. It records that someone states
       # they ran the suite. It cannot prove they did, and nothing built on it
@@ -74,12 +82,11 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           $marker = 'local-check: test-hooks-integration.ps1'
+          $ghApi = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/gh-api.ps1'
 
-          $files = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER/files" --paginate --jq '.[].filename'
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::Could not list the changed files. Failing rather than passing on an unanswered question."
-            exit 1
-          }
+          $files = & $ghApi -Step 'Attestation gate: list changed files' -Mode Read `
+            -Arguments @("repos/$env:REPO/pulls/$env:PR_NUMBER/files", '--paginate', '--jq', '.[].filename')
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
           $hookFiles = @($files | Where-Object { $_ -like 'flavors/github-copilot/.github/hooks/*' })
           if ($hookFiles.Count -eq 0) {
@@ -91,11 +98,9 @@ jobs:
           # adding the marker and re-running this job is enough to clear the
           # check. A re-run replays the original payload, which would still
           # carry the body as it was when the run was triggered.
-          $body = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER" --jq '.body'
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::Could not read the pull request body. Failing rather than passing on an unanswered question."
-            exit 1
-          }
+          $body = & $ghApi -Step 'Attestation gate: read the pull request body' -Mode Read `
+            -Arguments @("repos/$env:REPO/pulls/$env:PR_NUMBER", '--jq', '.body')
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
           # Matching lives in match-local-check.ps1, invoked by this gate and
           # by the promotion check below. It strips HTML comments before it
@@ -117,7 +122,7 @@ jobs:
             Write-Host "::error::This pull request changes files under flavors/github-copilot/.github/hooks/. The body has a 'local-check:' line, but not one this gate can read -- most often because the line names the suite in bold, as a link, or inside a fenced code block. Backticks around the filename are fine. Write it as: $marker"
             exit 1
           }
-          Write-Host "::error::This pull request changes files under flavors/github-copilot/.github/hooks/. test-hooks-integration.ps1 covers them and CI cannot run it. Run it locally, then add this line to the pull request body and re-run this job: $marker"
+          Write-Host "::error::This pull request changes files under flavors/github-copilot/.github/hooks/. CI ran test-hooks.ps1 on their logic; whether they still fire in a live VS Code session is what test-hooks-integration.ps1 checks, and CI cannot run it. Run it locally after a session with the change deployed, then add this line to the pull request body and re-run this job: $marker"
           exit 1
 
       # The files that govern this repository's own development -- editor
@@ -148,12 +153,11 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           $prefixes = @('.vscode/', '.githooks/', '.github/')
+          $ghApi = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/gh-api.ps1'
 
-          $files = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER/files" --paginate --jq '.[].filename'
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::Could not list the changed files. Failing rather than passing on an unanswered question."
-            exit 1
-          }
+          $files = & $ghApi -Step 'Env-change gate: list changed files' -Mode Read `
+            -Arguments @("repos/$env:REPO/pulls/$env:PR_NUMBER/files", '--paginate', '--jq', '.[].filename')
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
           $envFiles = @($files | Where-Object {
             $path = $_
@@ -167,11 +171,9 @@ jobs:
           # Read the body from the API rather than the event payload, so that
           # adding the line and re-running this job is enough to clear the
           # check. A re-run replays the payload as it was when triggered.
-          $bodyLines = gh api "repos/$env:REPO/pulls/$env:PR_NUMBER" --jq '.body'
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::Could not read the pull request body. Failing rather than passing on an unanswered question."
-            exit 1
-          }
+          $bodyLines = & $ghApi -Step 'Env-change gate: read the pull request body' -Mode Read `
+            -Arguments @("repos/$env:REPO/pulls/$env:PR_NUMBER", '--jq', '.body')
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
           # PowerShell hands back a native command's multi-line output as an
           # array of lines, and casting that array to a string joins it with
@@ -246,6 +248,7 @@ jobs:
           # that the two checks cannot drift into separate notions of what an
           # attestation looks like, which is how #313 happened.
           $matcher = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/match-local-check.ps1'
+          $ghApi = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/gh-api.ps1'
 
           foreach ($ref in @($env:BASE_SHA, $env:HEAD_SHA)) {
             git cat-file -e "$ref^{commit}" 2>$null
@@ -269,11 +272,9 @@ jobs:
           $bodyCache = @{}
           function Get-PrBody($number) {
             if ($bodyCache.ContainsKey($number)) { return $bodyCache[$number] }
-            $raw = gh api "repos/$env:REPO/pulls/$number" --jq '.body'
-            if ($LASTEXITCODE -ne 0) {
-              Write-Host "::error::Could not read the body of pull request #$number. Failing rather than passing on an unanswered question."
-              exit 1
-            }
+            $raw = & $ghApi -Step "Promotion check: read the body of pull request #$number" -Mode Read `
+              -Arguments @("repos/$env:REPO/pulls/$number", '--jq', '.body')
+            if ($LASTEXITCODE -ne 0) { exit 1 }
             # Out-String restores the newlines a native command's line array
             # loses when cast to a string; without it every line anchor below
             # matches nothing (measured on #165).
@@ -399,6 +400,14 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-env-change-gate.py
 
+      # Every gate above reads the pull request through gh-api.ps1, which asks
+      # again on a transient answer and fails at once on a real one. A single
+      # 5xx used to fail the build with a sentence two gates shared (#323). The
+      # suite also fails when any workflow calls `gh api` around the helper.
+      - name: Test the gh api helper and that no workflow bypasses it
+        shell: powershell
+        run: python .github\scripts\test-gh-api.py
+
       # The promotion gate decides whether a release may merge, and it is the
       # only gate that runs on no ordinary pull request -- so without this it
       # would first execute on the release it is supposed to protect. The
@@ -430,6 +439,15 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-suite-timeout.py
 
+      # `mcp` went a full major out of date unnoticed until a clean install
+      # could not import the server (#274): `>=1.2` with no upper bound. This
+      # asserts the Dependabot configuration and that every runtime dependency
+      # carries an upper bound or a recorded reason, with negative controls
+      # on temporary copies (#275).
+      - name: Test dependency notification and upper bounds
+        shell: powershell
+        run: python .github\scripts\test-dependency-bounds.py
+
       # The always-on payload is read on every chat request in every project,
       # so a record copied into it is paid for forever. #126 shipped a skills
       # table under a line declaring another file canonical, and four prompts
@@ -457,6 +475,34 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-precommit-format-gate.py
 
+      # The per-commit VERSION bump and the CHANGELOG top-insert made any two
+      # open pull requests conflict by construction (#426). The hook now
+      # refuses a top-insert instead of bumping; this drives it both ways.
+      - name: Test the pre-commit version gate
+        shell: powershell
+        run: python .github\scripts\test-precommit-version-gate.py
+
+      - name: Test the changelog fragment tool
+        shell: powershell
+        run: python .github\scripts\test-changelog-fragments.py
+
+      # The hook runs only in a clone that enabled it, so the pull request is
+      # held to the same rule: entries arrive as changelog.d/ fragments, and
+      # CHANGELOG.md changes only together with VERSION, at a release cut.
+      # Exempt on a dev -> main promotion, which carries what dev already holds.
+      - name: Check that changelog entries are fragments
+        shell: powershell
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          IS_PROMOTION: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref == 'dev' }}
+        run: |
+          if ($env:BASE_REF -and $env:IS_PROMOTION -ne 'true') {
+            python .github\scripts\changelog-fragments.py check --against "origin/$env:BASE_REF"
+          } else {
+            python .github\scripts\changelog-fragments.py check
+          }
+          exit $LASTEXITCODE
+
       # The delivery paths are a skill, not prose, precisely so that they can be
       # checked (#236). This asserts every path still ends in a verification, that
       # the hotfix path still names the checkout trap, that the release cut still
@@ -466,6 +512,13 @@ jobs:
       - name: Test the deployment skill contract
         shell: powershell
         run: python .github\scripts\test-deployment-skill.py
+
+      # Closing an issue that was left open on purpose hides work, so the
+      # sweep that closes issues delivered to dev (#160) is driven against a
+      # stubbed gh: what must close, and everything that must not.
+      - name: Test closing issues delivered to dev
+        shell: powershell
+        run: python .github\scripts\test-close-delivered-issues.py
 
       # The framework mandated a transition to `Resolved`, the ADO `Task` type
       # has no such state, and nothing could notice -- items were unclosable by
@@ -514,6 +567,10 @@ jobs:
         shell: powershell
         run: python .github\scripts\test-workflow-checkout-order.py
 
+      - name: Test that the sweep is scoped only on pull requests into dev
+        shell: powershell
+        run: python .github\scripts\test-ci-scoped-sweep.py
+
       # #124 made `ruff format` blocking for consumers while the framework's
       # own Python went unformatted (#167). The file list comes from git rather
       # than a hardcoded glob, so a new file is covered the moment it is
@@ -551,12 +608,33 @@ jobs:
       # developer's machine. A hosted runner has no such log, so it exits 2.
       # Excluding it is honest; leaving it in would fail every run for a reason
       # unrelated to the code under review.
+      #
+      # test-deploy-engine.ps1 is excluded because it only delegates to
+      # run-deploy-suite.py, which the dedicated step above already runs. It
+      # exists for the LOCAL scoped run, which otherwise never reached the
+      # deploy pytest suite (#395); here it would double that step's cost.
+      # A pull request into dev runs only the suites its diff needs, chosen by
+      # the same suite-scope.json local runs use; an unmapped path widens to
+      # every suite (#427). The push to dev after the merge and the promotion
+      # keep the full sweep, so a gap in the map never reaches main.
       - name: Run all regression suites
         shell: powershell
+        env:
+          SCOPED_SWEEP: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' }}
         run: |
-          .\flavors\github-copilot\.github\scripts\run-all-tests.ps1 `
-            -FailOnSkip `
-            -Exclude test-hooks-integration.ps1
+          $runner = '.\flavors\github-copilot\.github\scripts\run-all-tests.ps1'
+          $exclude = @('test-hooks-integration.ps1', 'test-deploy-engine.ps1')
+          if ($env:SCOPED_SWEEP -eq 'true') {
+            $selection = & $runner -ListSelection -Since 'origin/dev' -Exclude $exclude | Out-String
+            Write-Host $selection
+            if ($env:GITHUB_STEP_SUMMARY) {
+              "### Scoped regression sweep`n`n``````text`n$selection`n```````n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            }
+            & $runner -FailOnSkip -Exclude $exclude -Changed -Since 'origin/dev'
+          } else {
+            & $runner -FailOnSkip -Exclude $exclude
+          }
+          exit $LASTEXITCODE
 
       # run-all-tests.ps1 sweeps `test-*.ps1` only, so the one suite covering
       # the shipped bash hooks has never been executed by anything (#190) --
@@ -614,3 +692,29 @@ jobs:
             exit 1
           }
           Write-Host "Bash deploy non-repo suite: $($passed.Groups[1].Value) assertions passed."
+
+      # The pytest parity cases for deploy.sh skip on Windows (a full deploy
+      # outlasts their 300s limit, #260), so the bash half of #384 -- keeping a
+      # deactivated skill's _available/ copy current -- runs here against a
+      # minimal one-skill source instead.
+      - name: Run the bash deactivated-skill sync suite
+        shell: powershell
+        run: |
+          $bash = 'C:\Program Files\Git\bin\bash.exe'
+          if (-not (Test-Path $bash)) {
+            Write-Error "No bash at $bash -- this step would prove nothing."
+            exit 1
+          }
+          $out = & $bash -c 'bash flavors/github-copilot/.github/scripts/test-deploy-available-sync.sh 2>&1' | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $out
+          if ($code -ne 0) {
+            Write-Error "The bash deactivated-skill sync suite failed (exit $code)."
+            exit 1
+          }
+          $passed = [regex]::Match($out, 'Passed:\s*(\d+)')
+          if (-not $passed.Success -or [int]$passed.Groups[1].Value -lt 7) {
+            Write-Error 'Fewer than 7 passing assertions reported -- the suite did not run in full.'
+            exit 1
+          }
+          Write-Host "Bash deactivated-skill sync suite: $($passed.Groups[1].Value) assertions passed."

@@ -15,6 +15,8 @@ tools:
   - todo
   - execute/runTests
   - execute/runTask
+  - af-command/run_script
+  - af-command/list_scripts
   - execute/testFailure
   - edit/editFiles
   - edit/createFile
@@ -71,6 +73,8 @@ Consult these skills when relevant to the task:
 - Tests must **fail** when you return. If they pass, no test-first work needed.
 - Tests must fail because the **feature is missing**, not because of import
   errors, syntax errors, or setup problems.
+- Linting is not your gate: never report or assert a lint outcome. The
+  implementer's `lint: changed files` gate measures your tests too.
 
 ## Key Test Principles
 
@@ -179,6 +183,10 @@ structure below.
 ### Files Changed
 - `{path}` — {description}
 ```
+
+A claim of a mechanical change (marker added, occurrence removed, advisory
+resolved) carries the measurement that proves it, taken after the edit: the
+command and its count. Without one it is unverified (#175).
 
 ## Exit Gates
 

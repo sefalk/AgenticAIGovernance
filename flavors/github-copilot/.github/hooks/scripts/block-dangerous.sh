@@ -61,6 +61,8 @@ bd_is_gated_tool() {
         create_and_run_task|createAndRunTask) return 0 ;;
         run_task|runTask) return 0 ;;
         *wit_work_item_write) return 0 ;;
+        *sub_issue_write) return 1 ;;
+        *issue_write|*update_pull_request|*update_issue_comment) return 0 ;;
     esac
     bd_is_exec_surface "$1" && return 0
     return 1
@@ -73,14 +75,26 @@ af_require_python "$raw" bd_is_gated_tool "dangerous-command"
 
 tool_name=$(echo "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_name',''))" 2>/dev/null)
 
+# The command server's trust store (#60): an agent that could edit it would
+# approve its own script. Judged on target paths only, never on content.
+if af_is_write_tool "$tool_name"; then
+    _bd_targets=$(printf '%s' "$raw" | af_write_paths)
+    if grep -qiE -e 'af-command-mcp[\\/]+trust([\\/]|$)' <<<"$_bd_targets"; then
+        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Policy hard-deny: the target is in the command server trust store (#60). Approving an agent script is the user decision, made through the server prompt; an agent may not write the store."}}\n'
+        exit 0
+    fi
+fi
+
 if ! bd_is_gated_tool "$tool_name"; then
     echo '{}'
     exit 0
 fi
 
-# Ownership of created ADO work items (#36); the check lives in the shared core.
+# Work-item writes: ADO owner (#36) and field shrink (#197), GitHub body shrink
+# (#376); the checks live in the shared core. bd_is_gated_tool has already
+# turned sub_issue_write away.
 case "$tool_name" in
-    *wit_work_item_write)
+    *wit_work_item_write|*issue_write|*update_pull_request|*update_issue_comment)
         _bd_conf=""
         [ "$AF_CONF_FOUND" = 1 ] && _bd_conf="$AF_CONF"
         if [ ! -f "$AF_SCRIPT_DIR/work-item-owner.py" ]; then
@@ -309,9 +323,14 @@ print("ALLOW|Safe: every task scope resolves to a reviewed script under AF_TASK_
     decision_reason="${decision#*|}"
     if [ "$decision_word" = "DENY" ]; then
         emit_task deny "$decision_reason"
-    else
-        emit_task allow "$decision_reason"
     fi
+    # An identical invocation already has a label, and runTask runs it without
+    # the creation prompt createAndRunTask can never skip (#396).
+    dup_label=$(printf '%s' "$raw" | "$PYTHON" "$AF_SCRIPT_DIR/task-duplicate.py" "$task_repo" 2>/dev/null | head -n 1)
+    if [ -n "$dup_label" ]; then
+        emit_task deny "Policy deny: this invocation already exists as the task '$dup_label'. Run it with runTask (id 'shell: $dup_label'): it needs no creation prompt and can be auto-approved, while createAndRunTask would append a duplicate to tasks.json (#396)."
+    fi
+    emit_task allow "$decision_reason"
 fi
 
 command_str=$(echo "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_input',{}).get('command',''))" 2>/dev/null)
@@ -548,6 +567,15 @@ DATA = re.compile(r"^\s*(echo|printf|Write-Host|Write-Output|Write-Error|Write-V
 PAYLOAD = re.compile(r"(?:^|\s)(?:-c|--command|-Command|-e|--eval|-ScriptBlock|-ArgumentList|-Args|/c|/k|iex|Invoke-Expression|eval)\s+(?:\"([^\"]*)\"|\x27([^\x27]*)\x27)", re.I)
 BARE = re.compile(r"^\s*(\"[^\"]*\"|\x27[^\x27]*\x27)\s*$")
 
+# Git global options sit between git and the subcommand, where every rule
+# anchored at git <subcommand> could not see past them (#431). Deny side only.
+GV = r"(?:\"[^\"]*\"|\x27[^\x27]*\x27|\S+)"
+GIT_GLOBAL = re.compile(r"^(\s*git)((?:\s+(?:-[Cc]\s+" + GV + r"|--(?:git-dir|work-tree|namespace|config-env)\s+" + GV
+    + r"|--[A-Za-z][\w-]*=" + GV + r"|--(?:no-pager|paginate|bare|no-replace-objects|literal-pathspecs|glob-pathspecs|noglob-pathspecs|icase-pathspecs|no-optional-locks|no-advice)|-[pP]))+)(?=\s|$)")
+
+def no_git_globals(seg):
+    return GIT_GLOBAL.sub(r"\1", seg)
+
 def strip_quoted(seg):
     if "$(" in seg or "`" in seg:
         return seg
@@ -568,22 +596,27 @@ def payloads_of(text):
 # statement positionally as well as behind a flag.
 def build_raw(strength):
     pls = payloads_of(s)
-    if "$(" in s or "`" in s:
-        return [s] + pls
     if strength == "exec":
         t = s
         for p in pls:
             t = t.replace("\"" + p + "\"", " ").replace("\x27" + p + "\x27", " ")
-        t = re.sub(r"\x27[^\x27]*\x27", "", re.sub(r"\"[^\"]*\"", "", t))
+        # An interpolation elsewhere no longer makes every literal a command (#122, 2026-09-29):
+        # single quotes never interpolate; a double-quoted string executes only via $( or a backtick.
+        t = re.sub(r"\"[^\"]*\"|\x27[^\x27]*\x27",
+                   lambda m: m.group(0) if m.group(0).startswith("\"") and ("$(" in m.group(0) or "`" in m.group(0)) else "",
+                   t)
         return [t] + pls
-    parts = [strip_quoted(seg) if (BARE.match(seg) or DATA.search(seg)) else seg for seg in segs]
+    if "$(" in s or "`" in s:
+        return [s] + pls
+    parts = [strip_quoted(seg) if (BARE.match(seg) or DATA.search(seg)) else seg for seg in map(no_git_globals, segs)]
     return [" ; ".join(parts)] + pls
 
 def build_units():
     units=[]
-    for seg in segs:
-        if not seg.strip():
+    for raw in segs:
+        if not raw.strip():
             continue
+        seg = no_git_globals(raw)
         units.append(strip_quoted(seg) if (BARE.match(seg) or DATA.search(seg)) else seg)
         for m in PAYLOAD.finditer(seg):
             payload = m.group(1) if m.group(1) is not None else m.group(2)
@@ -685,6 +718,19 @@ if [ "$cat_pkg" = "deny" ] && matches_unit '\bpip3?\s+(install|uninstall)\b|\bco
 fi
 if [ "$cat_databricks" = "deny" ] && matches_unit '\bdatabricks\b'; then
     emit deny "$deny_msg"
+fi
+
+# ===================== Foreign work (#120) =====================
+# Ask before a git command discards a path that was already uncommitted when
+# this session started. Ahead of TIER 2, which auto-allows `git restore`.
+# No interpreter or no baseline: no opinion here. POSIX classes only (#194).
+if printf '%s' "$command_str" | grep -qE 'git[[:space:]].*(checkout|restore|stash|clean|switch)'; then
+    fg_core="$(dirname -- "${BASH_SOURCE[0]}")/_foreign_guard.py"
+    if [ -n "$PYTHON" ] && [ -n "$AF_CODE_ROOT" ] && [ -f "$fg_core" ]; then
+        fg_sid=$(printf '%s' "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
+        fg_out=$(AF_FG_COMMAND="$command_str" AF_FG_SESSION="$fg_sid" "$PYTHON" "$fg_core" check "$AF_CODE_ROOT" 2>/dev/null)
+        if [ -n "$fg_out" ]; then printf '%s\n' "$fg_out"; exit 0; fi
+    fi
 fi
 
 # ===================== TIER 2 -- ALLOW (segment-based) =====================

@@ -21,7 +21,16 @@ suggestions. You stay in control through mandatory escalation points.
 ## Prerequisites
 
 - VS Code with GitHub Copilot extension (agent mode enabled)
-- Python 3.10+ with `pytest` and `hypothesis` (for property-based tests)
+- **Python 3.10+, required by the hooks.** Gate logic lives in Python cores
+  behind thin `.ps1`/`.sh` wrappers (#287): secret scan, quality and lint
+  gates, plan and context-budget checks, the work-item owner gate and the
+  commit guards. Without a working interpreter the framework degrades
+  rather than blocks (#331), and says so:
+  - PreToolUse gates refuse the calls they guard (#251)
+  - the other Python-backed hooks run without their check
+  - SessionStart names both groups once per session (#342)
+  - the git pre-commit commits unchecked and lists every guard it skipped (#168)
+- `pytest` and `hypothesis` (for property-based tests)
 - `ruff` (required for refactorer linting hard gate)
 - Optional: `radon` (complexity), `mutmut` (mutation testing)
 - Optional: cost tracking — see below
@@ -90,8 +99,9 @@ If you prefer running each phase separately:
 ### Updating the AF
 
 Re-run the deploy script after pulling AF updates. Customizable files
-(`copilot-instructions.md`, `architecture.instructions.md`) are protected —
-they won't be overwritten unless you use `-Force` / `--force`.
+(`copilot-instructions.md`, `architecture.instructions.md`) are protected once
+you change them — they won't be overwritten unless you use `-Force` / `--force`.
+One you never changed takes the framework update like any other file.
 
 Use `-Diff` / `--diff` to compare source vs deployed before updating:
 ```powershell
@@ -244,8 +254,17 @@ Agents are deployed with a **model tier**, configured once in
 - Format is `Model Name (vendor)`; comma-separated entries become a
   **prioritized array**, and VS Code falls back down the list when a model is
   unavailable — so a model line-up change does not break the deployment.
-- Leave a tier **blank** to use the deploy's curated built-in default.
+- Leave a tier **blank** to use the framework default: `AF_MODEL_DEFAULT_*`
+  in the framework's own `af-env.conf`, the line-up's only home. Every deploy
+  path reads it from the payload being deployed, so a re-deploy always brings
+  the current line-up.
 - Re-deploy after editing the tiers to propagate them into the agent files.
+- Every deploy checks the tier models against Copilot's model catalogue
+  (`.github/scripts/check-model-tiers.py`) and prints a `WARN` per unknown
+  model. VS Code itself only greys such an entry out. The catalogue is the
+  `models.json` Copilot Chat writes into its debug-log directory (needs
+  `github.copilot.chat.agentDebugLog.fileLogging.enabled`). It is a snapshot,
+  so its age is printed too; without it the check says "not checked".
 
 **History:** v1.18.6 removed the hardcoded per-agent model lists in favour of
 pure user selection; tiers were reintroduced as *deploy-resolved configuration*

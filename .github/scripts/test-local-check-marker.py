@@ -273,12 +273,40 @@ def check_gate(work: Path) -> int:
     return failures
 
 
+def check_rationale() -> int:
+    """#184: the comment above the gate must say what CI covers, not less.
+
+    It once claimed the hooks were "covered by nothing" without it, while the
+    sweep in the same job runs test-hooks.ps1 on every pull request. A gate whose
+    stated reason is wrong invites removing it for the wrong reason, too.
+    """
+    lines = (REPO / ".github/workflows/regression.yml").read_text(encoding="utf-8").splitlines()
+    at = next((i for i, line in enumerate(lines) if line.strip() == f"- name: {STEP_NAME}"), None)
+    if at is None:
+        print(f"FAIL: no step named '{STEP_NAME}' in regression.yml.")
+        return 3
+    start = at
+    while start > 0 and lines[start - 1].strip().startswith("#"):
+        start -= 1
+    comment = " ".join(line.strip().lstrip("#").strip() for line in lines[start:at])
+    checks = [
+        ("does not claim the hooks are covered by nothing", "covered by nothing" not in comment),
+        ("names test-hooks.ps1 as running in CI", "test-hooks.ps1" in comment),
+        ("names what CI cannot see: live firing", "live" in comment.lower()),
+    ]
+    failures = 0
+    for name, ok in checks:
+        failures += 0 if ok else 1
+        print(f"[{'PASS' if ok else 'FAIL'}] rationale {name}")
+    return failures
+
+
 def main() -> int:
     if not MATCHER.is_file():
         print(f"FAIL: {MATCHER} does not exist. Both gates in regression.yml depend on it.")
         return 2
 
-    total = len(MATCHER_CASES) + 2 + 6
+    total = len(MATCHER_CASES) + 2 + 6 + 3
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         failures = check_matcher(work)
@@ -286,6 +314,8 @@ def main() -> int:
         failures += check_real_template(work)
         print()
         failures += check_gate(work)
+        print()
+        failures += check_rationale()
 
     print()
     print(f"=== {total - failures}/{total} passed ===")

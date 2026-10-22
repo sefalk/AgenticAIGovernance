@@ -57,28 +57,40 @@ introduced.
 In the framework repository.
 
 1. Confirm what is being released: `git log --oneline origin/main..origin/dev`.
-2. Bump `flavors/github-copilot/VERSION` yourself for a minor/major (staging
-   `VERSION` makes the auto-patch pre-commit hook stand down); let the hook
-   handle a patch.
-3. Move the `[Unreleased]` section of `flavors/github-copilot/CHANGELOG.md`
-   under the new version heading.
+2. Fold the changelog and set the version in one step, on a branch off `dev`.
+   Between cuts nothing changes `VERSION` or `CHANGELOG.md`: each pull request
+   adds a `changelog.d/<issue>-<slug>.md` fragment, and a deploy is identified
+   by the `commit:` it records in `.af-version` (#426).
+
+   ```powershell
+   python .github/scripts/changelog-fragments.py assemble --version X.Y.Z --dry-run
+   python .github/scripts/changelog-fragments.py assemble --version X.Y.Z
+   ```
+
+3. Commit `VERSION`, `CHANGELOG.md` and the deleted fragments together — the
+   pre-commit hook and CI refuse a `CHANGELOG.md` change without `VERSION` —
+   and merge that pull request into `dev`.
 4. Open the promotion pull request `dev -> main`. Leave both declaration lines
    in the template commented out — CI checks the contributing pull requests
    instead (#234).
 5. **Rebuild and reinstall the MCP wheel.** The payload is copied in at build
    time; skipping this ships the previous version from every `af_apply` until
-   someone notices.
+   someone notices. Build with `--wheel`: a bare `-m build` goes through the
+   sdist, which cannot carry the payload from outside `mcp-deploy/` (#368).
 
    ```powershell
    cd flavors/github-copilot/mcp-deploy
-   .\.venv\Scripts\python.exe -m build
+   .\.venv\Scripts\python.exe -m build --wheel
    .\.venv\Scripts\python.exe -m pip install --force-reinstall (Get-ChildItem dist\*.whl | Sort-Object LastWriteTime | Select-Object -Last 1).FullName
    ```
 
-**Verification.** `af_status` on any project must report the new number as
-`source_version` and `payload_state` as `current`. If it reports
-`behind-repository`, step 5 did not take effect — the wheel in the environment
-the MCP server actually launches from is not the one you just built.
+**Verification.** In the environment the MCP server launches from, the
+installed `af_deploy_mcp/payload/VERSION` must equal
+`flavors/github-copilot/VERSION`, and `af_status` must report that number as
+`source_version`. `payload_state` reads `unverifiable` for an installed wheel —
+expected, since no checkout is visible from `site-packages`. It reads `current`
+only for an editable install or a run from source, and `behind-repository`
+there means step 5 did not take effect.
 
 ## 2 · Routine upgrade
 
@@ -88,7 +100,9 @@ In the consumer project.
    `behind-repository`; upgrading to a stale payload is a downgrade in
    disguise.
 2. `af_dry_run` — read the classification. `PRESERVE` and `CONFLICT` entries
-   are the only ones that need a decision.
+   are the only ones that need a decision. `MERGE` needs none: both sides
+   changed the file without overlapping, and `af_apply` writes the merge with a
+   backup. Read the merged file in the diff before committing.
 3. `af_apply`.
 4. Commit the framework files as their own commit, separate from project work.
 

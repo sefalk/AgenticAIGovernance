@@ -16,6 +16,8 @@ tools:
   - execute/runTests
   - execute/runTask
   - execute/createAndRunTask
+  - af-command/run_script
+  - af-command/list_scripts
   - execute/testFailure
   - edit/editFiles
   - pylance-mcp-server/pylanceFileSyntaxErrors
@@ -182,6 +184,10 @@ complete structure below.
 A skipped refactoring is never omitted — it is the record of a structural
 problem someone still has to decide about.
 
+A claim of a mechanical change (marker added, occurrence removed, advisory
+resolved) carries the measurement that proves it, taken after the edit: the
+command and its count. Without one it is unverified (#175).
+
 ## Exit Gates
 
 Verify these before returning. Gate types, complexity tiers, and the Gate
@@ -196,6 +202,6 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Ignore statements justified | HARD | Reject `# noqa` / `# type: ignore` / `# pyright: ignore` without explicit rule code and justification comment, across `SRC_DIR/**/*.py` **and** `tests/**/*.py` — the acknowledgement path for inherited lint debt runs through test files. Same rule for a new `ignore` / `per-file-ignores` entry in the project's ruff config — the linting gate honours those, so each needs a comment stating why. | Standard+ |
 | No new files created (refactoring only) | HARD | Self-check: only existing files modified | Standard+ |
 | Provenance markers on files you authored | HARD | Your Stop hook checks them against the authorship query — you do not self-certify, and reporting a marker you did not write is caught there | Standard+ |
-| Linting clean (branch delta, source **and** tests) | HARD | Run `check-python-linting.py` on `SRC_DIR/**/*.py` **and** `tests/**/*.py` across the branch delta (`merge-base(HEAD, BASE_BRANCH)..HEAD`), not just the current step. Rule set determined by `LINTING_STRICTNESS` in `af-env.conf` (`minimal`/`standard`/`strict`). Gate is BLOCKED (not fail) if `ruff` is not installed. | Standard+ |
+| Linting clean (branch delta, source **and** tests) | HARD | `run_task` → `lint: changed files` — it runs `check-python-linting.py` on `SRC_DIR/**/*.py` **and** `tests/**/*.py` across the branch delta (`merge-base(HEAD, BASE_BRANCH)..HEAD`), not just the current step. Rule set determined by `LINTING_STRICTNESS` in `af-env.conf` (`minimal`/`standard`/`strict`). Gate is BLOCKED (not fail) if `ruff` is not installed. A gate you did not run is BLOCKED, never PASS — never argue an outcome by inspection; `lint: ruff fix` applies the safe fixes. | Standard+ |
 | Skills read declaration | SOFT | `Skills Read:` line in Gate Summary (critic flags if missing) | Standard+ |
 | Complexity reduced or unchanged | ADVISORY | Run complexity tool, compare before/after | Standard+ |

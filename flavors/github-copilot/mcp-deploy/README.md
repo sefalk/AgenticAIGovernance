@@ -10,7 +10,8 @@ cloning the AF repository next to the target project**.
 > **Phase 2** (`[vscode]` file coverage) are implemented. Write tools require
 > `confirm=true` (a production server would use MCP *elicitation*); all writes
 > stay under the target `.github/` or `.vscode/`, back up before overwrite, and
-> never touch CONFLICT / PROTECT / PRESERVE / `[customizable]` files.
+> never touch CONFLICT / PROTECT / PRESERVE files or a `[customizable]` file the
+> project changed.
 
 > **Status: experimental — runs in parallel to `deploy.ps1` / `deploy.sh` for
 > now, not yet a replacement.** The scripts remain the supported, CI-integrated
@@ -34,7 +35,7 @@ cloning the AF repository next to the target project**.
 | Tool (R) | `status(workspace_root)` | Bundled framework version vs. the version deployed in the target repo. |
 | Tool (R) | `dry_run(workspace_root)` | Classify every deployable file (3-way), read-only. |
 | Tool (R) | `conflict_diff(workspace_root, path)` | Unified diff between a deployed file and the resolved source. |
-| Tool (W) | `apply(workspace_root, confirm)` | Apply CREATE/UPDATE files; back up first; skip conflicts/customizable. |
+| Tool (W) | `apply(workspace_root, confirm)` | Apply CREATE/UPDATE files and clean 3-way MERGEs; back up first; skip conflicts/customizable. |
 | Tool (W) | `write_resolved(workspace_root, path, content, confirm)` | Write an agent-merged file (conflict resolution). |
 | Tool (W) | `update_hashes(workspace_root, confirm)` | Re-baseline `.af-hashes` after resolving conflicts. |
 | Tool (R) | `list_orphans(workspace_root)` | List baselined framework files a rename/manifest change left behind, read-only. |
@@ -146,13 +147,52 @@ workspace path; the server only reads.
 pytest            # unit tests for the read-only deploy logic (no MCP needed)
 ```
 
+## Command server (`af-command-mcp`, #60)
+
+A second stdio server from the same wheel. It runs project scripts with
+agent-supplied arguments, so agents need neither `createAndRunTask` nor a new
+`tasks.json` entry per argument set. Register it under the key `af-command`,
+because the agent files grant `af-command/run_script` and `af-command/list_scripts`:
+
+```jsonc
+{ "servers": { "af-command": { "type": "stdio", "command": "af-command-mcp" } } }
+```
+
+- **Where scripts may live:** `AF_SCRIPT_DIRS` (default `.github/scripts/agent`,
+  `dir:mode` per folder) plus `AF_TASK_SCRIPT_DIRS` in mode `reviewed`.
+  `.py` runs with the project venv, `.ps1` with PowerShell, `.sh` with bash;
+  arguments are an argv list, never a shell string.
+- **Approval:** `AF_SCRIPT_APPROVAL` = `off | ask | ask-always | autonomous`.
+  `ask` prompts once per script content through MCP elicitation and remembers
+  the answer in a per-user store outside the workspace
+  (`%LOCALAPPDATA%\af-command-mcp\trust`, XDG state elsewhere). Without
+  elicitation the asking modes refuse. Every mode but `reviewed` first runs
+  the script text through the project's `block-dangerous` hook.
+- **Walltime:** an upper bound, not a duration: the call returns when the
+  script exits. Default: twice the slowest of the last five passing runs
+  (floor 30 s), else the suite budget, else `AF_SCRIPT_WALLTIME_DEFAULT`;
+  capped at `AF_SCRIPT_WALLTIME_MAX`. Past it the process tree is killed and
+  the verdict is `TIMEOUT`.
+- **Output:** the tail (60 lines, 6000 chars) in the result; the full log in
+  `.github/logs/command-runs/`, one JSONL line per run in
+  `.github/logs/command-runs.jsonl`.
+- **VS Code confirmation:** `run_script` executes code, so it carries no
+  `readOnlyHint`; answer the confirmation with "always allow" for the tool.
+
 ## Scope & safety (PoC)
 
 - **Guarded writes.** Write tools require `confirm=true`; all writes stay under
   the target `.github/` (or `.vscode/`); existing files are backed up before
-  overwrite; CONFLICT / PROTECT / PRESERVE / `[customizable]` files are never
+  overwrite; CONFLICT / PROTECT / PRESERVE files and `[customizable]` files the
+  project changed are never
   written by `apply`. The terminal `block-dangerous` hook does **not** see MCP
   tool calls, so these guards *are* the safety boundary (see the spec).
+- **3-way merge (#105).** A non-customizable file both sides changed is merged
+  with `git merge-file` against the content stored in `.github/.af-baseline/`
+  (gitignored, one object per recorded hash, verified before use). A clean merge
+  is `MERGE` and is applied with a backup. Overlap, a missing or tampered object,
+  a binary file, or no `git` on `PATH` keep it `CONFLICT`. `deploy.ps1` /
+  `deploy.sh` do not merge yet and report such files as `CONFLICT`.
 - **Full payload.** Both the `.github/` tree and manifest `[vscode]` files
   (deployed to `.vscode/`) are covered.
 - **Payload parity.** Tier resolution and hashing match `deploy.ps1`; keys are

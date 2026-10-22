@@ -127,6 +127,13 @@ Rules:
 ## 5. Non-Destructive Update Rules
 
 - Read before update (`issue_read`) — never overwrite a body you have not read.
+  The PreToolUse hook enforces it for bodies and comments (#376): no read in
+  this session, or one older than `WI_FIELD_READ_MAX_AGE_MIN` (10 min), is
+  refused; `body` with `state` in one call is refused; a shrink or lost heading
+  above `## Working state` gets `WI_FIELD_SHRINK_POLICY`. To remove text on
+  purpose, post a comment first: `af-shrink: body; remove: <heading>, ...;
+  expect: <new body length>` (or `af-shrink: comment <id>; ...`). The hook checks
+  it against the diff; a declaration posted after a refusal does not count.
 - **Read the comments too.** `method: get` returns the body plus a `comments`
   count — omitted entirely when it is zero. Non-zero means `method: get_comments`
   is mandatory; an absent field means you inferred zero and must say so in the

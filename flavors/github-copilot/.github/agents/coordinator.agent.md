@@ -16,6 +16,8 @@ tools:
   - execute/runTests
   - execute/runTask
   - execute/createAndRunTask
+  - af-command/run_script
+  - af-command/list_scripts
   - execute/testFailure
   - execute/runInTerminal
   - execute/getTerminalOutput
@@ -138,6 +140,13 @@ only what is genuinely N/A):
 - **Non-goals** — what to explicitly NOT change or expand into.
 - **Acceptance criteria** — copied **verbatim** from the plan, never summarized.
   A weak executor cannot reconstruct acceptance criteria from a summary.
+- **Literals** — one block, marked verbatim, holding every file path,
+  identifier, work-item id, URL, name and number the result must contain.
+  Protecting one class ("copy the numbers as given") leaves the rest free: a
+  backticked skill path was once swapped for a catalogue name (#141).
+- **Counts with their arithmetic** — a count that must match supplied data
+  states the relationship ("4 groups × 2 sources = 8 rows"), never the count
+  alone; a bare "four" beside eight rows got an invented split (#141).
 - **Required output** — what to return (verdict, file list, test result…).
 - **Abort condition** — "If blocked after a reasonable attempt, return your
   partial state and the specific blocker — do NOT improvise, widen scope, or
@@ -175,6 +184,10 @@ compliance-checker(pre) → implementer → code-critic → documenter
 Skips the planning document — the YAML workflow log suffices. Complexity tier
 **Trivial**. Boundary heuristic: if you could explain the fix in a commit
 message and lose nothing, it's Trivial Fix.
+
+**Doc-only change: read the staged diff before committing.** The prose is the
+deliverable and no test backstops it, so check every literal from the
+Literals block against `git diff --staged`. It is a step, not a habit (#141).
 
 ### Quick Fix (investigation-documented, ≤ 5 files, root cause matters)
 
@@ -339,6 +352,9 @@ When it applies, follow `skills/git-worktrees/SKILL.md` § 2 — `WORKTREE_DIR`
 resolution, the stale-worktree check, creation, the `.github/.active-worktree`
 sentinel that redirects hook quality gates to the worktree, the
 `WORKTREE_VENV_MODE` interpreter decision, and the VS Code workspace entry.
+If that file is absent (curated to `skills/_available/`), halt and ask the
+human to activate the skill or set `WORKTREE_ENABLED=false` — never improvise
+the runbook or run from the `_available/` copy, which deploy does not refresh (#384).
 Record `worktree: {absolute_path}` in the plan metadata; every subsequent
 subagent call carries the path — see Subagent Context Injection.
 
@@ -410,11 +426,11 @@ Three things happen on every return — full protocols in
 `skills/tdd-orchestration/SKILL.md` § 13:
 
 1. **Parse the verdict** defensively (case-insensitive search for `verdict:`).
-   **No verdict found → BLOCKED. Never default to APPROVED.** Before retrying a
+   **No verdict found → BLOCKED. Never default to APPROVED.**
+   An empty producer return is BLOCKED too (§ 13). Before retrying a
    REJECTED, check the critic gave actionable findings; if not, re-ask the same
    critic — that does not consume a retry.
 2. **Narrate** one line: `[Step {N}/{total}] {emoji} {agent} — {outcome} | Next → {next}`.
-   Never skip this — it is the user's only visibility into a multi-step workflow.
 3. **Self-assess context budget.** ≥ 7 subagent calls → 🟡 YELLOW (compress prior
    summaries); ≥ 10 calls or context-confusion errors → 🔴 RED, which is a **HARD
    gate**: checkpoint to `WIP.md`, report, and stop.

@@ -38,7 +38,7 @@ Changes to L0/L1 documents **require all** of:
 flowchart LR
     C["Change core/<br/>(governance behavior)"] --> CL["Record in<br/>GOVERNANCE_CHANGELOG.md"]
     CL --> T["Trickle down manually<br/>into each flavor's native syntax"]
-    T --> V["Version bump + flavor CHANGELOG<br/>(auto-version hook)"]
+    T --> V["Changelog fragment<br/>(version set at the release cut)"]
 ```
 
 - Generic governance behavior is changed in **`core/` first**, then recorded in
@@ -46,9 +46,9 @@ flowchart LR
 - Changes are then **manually trickled down** into each flavor's native
   structures (agents, instructions, skills). There is intentionally no automatic
   propagation — flavors adapt semantics to host-specific syntax.
-- In the [Copilot flavor](09-flavor-github-copilot.md), the change lands in the
-  flavor `CHANGELOG.md`, and the [auto-version hook](12-deployment.md) bumps the
-  patch version on commit.
+- In the [Copilot flavor](09-flavor-github-copilot.md), the change lands as a
+  changelog fragment in `changelog.d/`; the [release cut](12-deployment.md)
+  folds the fragments into `CHANGELOG.md` and sets the version.
 
 ## Artifact conventions
 

@@ -13,13 +13,14 @@ Supports two use cases:
   UC2 (coupled):  Re-run to sync updates from AF source to project.
 
 The .af-manifest supports annotations:
-  [customizable] -- file contains project-specific content; protected on update
+  [customizable] -- file contains project-specific content; protected once the project changes it
   [optional]     -- directory may not exist in AF source; no warning if missing
   [vscode]       -- file deployed to .vscode/ instead of .github/
 
-Customizable files are protected on update. When AF has changes to a
-customizable file, a PROTECT message with "review manually" guidance is
-shown. Use --force to overwrite.
+A customizable file the project changed is never overwritten unless --force
+is used: an AF change to it is a CONFLICT. One still identical to its
+baseline was never customized and takes the AF update (#106). A
+customizable file with no baseline entry is reported PROTECT.
 
 An ephemeral backup directory (.af-backup-{timestamp}) is created before
 files are overwritten. If no conflicts remain after deploy, the backup is
@@ -143,6 +144,15 @@ target_is_git_repo() {
     git -C "$repo_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1
 }
 
+# The .gitignore rule that ignores a payload tree in the target, or nothing
+# (#104). --no-index asks the rules, so already-tracked files do not mask it.
+payload_ignore_rule() {
+    local repo_dir="$1" probe="$2" line
+    target_is_git_repo "$repo_dir" || return 0
+    line="$(git -C "$repo_dir" check-ignore -v --no-index -- "$probe" 2>/dev/null)" || return 0
+    printf '%s' "${line%%$'\t'*}"
+}
+
 get_current_git_branch() {
     local repo_dir="$1"
     if ! command -v git >/dev/null 2>&1; then
@@ -159,6 +169,23 @@ if [[ -f "$VERSION_PATH" ]]; then
     AF_VERSION="$(tr -d '[:space:]' < "$VERSION_PATH")"
 fi
 
+# VERSION moves only at a release cut, so the commit identifies a deploy between
+# releases (#426). Only a tracked payload has one -- a copy inside some other
+# checkout would otherwise report that checkout's HEAD. Same rule as
+# deploy_core.source_commit and deploy.ps1 Get-SourceCommit.
+source_commit() {
+    local root="$1" sha
+    command -v git >/dev/null 2>&1 || return 0
+    git -C "$root" ls-files --error-unmatch -- VERSION >/dev/null 2>&1 || return 0
+    sha="$(git -C "$root" rev-parse --short=12 HEAD 2>/dev/null)" || return 0
+    [[ -n "$sha" ]] || return 0
+    if [[ -n "$(git -C "$root" status --porcelain --untracked-files=no -- . 2>/dev/null)" ]]; then
+        sha="$sha-dirty"
+    fi
+    printf '%s' "$sha"
+}
+AF_COMMIT="$(source_commit "$AF_ROOT")"
+
 DEPLOYED_VERSION_FILE="$TARGET_GITHUB/.af-version"
 DEPLOYED_INFO=""
 if [[ -f "$DEPLOYED_VERSION_FILE" ]]; then
@@ -167,7 +194,7 @@ fi
 
 # ── Parse manifest with annotations ───────────────────────────────────────
 # Format: path  [annotation1, annotation2]
-#   [customizable] — project may modify; protected on update
+#   [customizable] — project may modify; protected once the project changes it
 #   [optional]     — may not exist in AF source; no warning if missing
 #   [vscode]       — deployed to .vscode/ instead of .github/
 
@@ -281,6 +308,8 @@ STAT_PROTECTED=0
 STAT_CONFLICT=0
 STAT_PRESERVED=0
 STAT_DEACTIVATED=0
+STAT_ACTIVATED=0
+STAT_MERGED=0
 BACKUP_DIR=""
 BACKUP_COUNT=0
 
@@ -304,19 +333,31 @@ file_hash() {
 }
 # ── Agent model tier resolution ────────────────────────────────────────
 # Subagent .agent.md files carry a tier placeholder (__AF_TIER_PREMIUM__ etc.)
-# resolved at deploy time from the target af-env.conf (AF_MODEL_TIER_*) or the
-# curated defaults below. Multiple comma-separated entries become a prioritized
-# YAML array (VS Code tries each until available). Keep in sync with deploy.ps1.
-declare -A TIER_DEFAULTS=(
-    [PREMIUM]='Claude Opus 4.8 (copilot), Claude Opus 4.7 (copilot), Claude Sonnet 5 (copilot)'
-    [BALANCED]='Claude Sonnet 5 (copilot), Claude Sonnet 4.6 (copilot), Claude Sonnet 4.5 (copilot)'
-    [EFFICIENT]='Claude Haiku 4.5 (copilot), Claude Sonnet 5 (copilot)'
-)
+# resolved at deploy time: the target's AF_MODEL_TIER_* override, else
+# AF_MODEL_DEFAULT_* from the SOURCE af-env.conf -- the line-up's only home
+# (#418). Multiple comma-separated entries become a prioritized YAML array.
+SOURCE_AF_ENV="$SOURCE_GITHUB/af-env.conf"
+tier_value() {
+    local tier="$1" val line
+    val="$(get_af_env_value "AF_MODEL_TIER_$tier" "")"
+    if [[ -z "$val" && -f "$SOURCE_AF_ENV" ]]; then
+        line="$(grep -E "^AF_MODEL_DEFAULT_${tier}=" "$SOURCE_AF_ENV" | head -1 || true)"
+        val="$(printf '%s' "${line#*=}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    fi
+    printf '%s' "$val"
+}
+if grep -rqlE '__AF_TIER_' "$SOURCE_GITHUB/agents" 2>/dev/null; then
+    for _tier in PREMIUM BALANCED EFFICIENT; do
+        if [[ -z "$(tier_value "$_tier" | tr -d ', ')" ]]; then
+            echo "Error: no model list for tier $_tier: set AF_MODEL_DEFAULT_$_tier in the framework af-env.conf" >&2
+            exit 1
+        fi
+    done
+fi
 tier_yaml() {
     # $1 = tier name; prints a `model:` line or a multi-line YAML array
     local tier="$1" val
-    val="$(get_af_env_value "AF_MODEL_TIER_$tier" "")"
-    [[ -z "$val" ]] && val="${TIER_DEFAULTS[$tier]}"
+    val="$(tier_value "$tier")"
     local IFS=',' arr m count=0
     read -ra arr <<< "$val"
     for m in "${arr[@]}"; do
@@ -542,6 +583,21 @@ is_deactivated_skill_unit() {
         *) return 1 ;;
     esac
 }
+
+activated_skill_key() {
+    # #110: an optional skill the project activated by *moving* it from
+    # skills/_available/{name}/ to skills/{name}/. Prints the active key so the
+    # deploy updates that copy instead of re-creating the library one. Parity with
+    # deploy_core _activated_unit and deploy.ps1 Get-ActivatedSkillKey.
+    local key="${1//\\//}" rest name
+    case "$key" in
+        skills/_available/*/*)
+            rest="${key#skills/_available/}"; name="${rest%%/*}"
+            [[ -d "$TARGET_GITHUB/skills/$name" ]] || return 1
+            printf 'skills/%s' "$rest" ;;
+        *) return 1 ;;
+    esac
+}
 # ── Hash-based 3-way merge ────────────────────────────────────────────────
 HASH_FILE="$TARGET_GITHUB/.af-hashes"
 declare -A BASELINE_HASHES
@@ -579,6 +635,75 @@ write_hash_file() {
 }
 
 read_hash_file
+
+# ── Baseline content store (#105, #393) ──────────────────────────────────────
+# The canonical, region-stripped content behind every recorded hash, so a later
+# deploy can 3-way merge a file both sides changed. Gitignored; an object is
+# verified against its name before use. Parity with deploy_core _store_* and
+# deploy.ps1 Save-BaselineObject.
+STORE_DIR="$TARGET_GITHUB/.af-baseline"
+store_put_file() {
+    # $1 = file whose bytes are the object
+    local h; h="$(file_hash "$1")"
+    mkdir -p "$STORE_DIR"
+    [[ -f "$STORE_DIR/$h" ]] || cp "$1" "$STORE_DIR/$h"
+    [[ -f "$STORE_DIR/.gitignore" ]] || printf '*\n' >"$STORE_DIR/.gitignore"
+}
+store_put_source() {
+    # $1 = source path; stores its canonical, region-stripped bytes
+    local tmp strip
+    tmp="$(mktemp)"
+    canonical_write "$1" "$tmp"
+    if _has_region_marker "$tmp"; then
+        strip="$(mktemp)"; strip_regions_to "$tmp" "$strip"; store_put_file "$strip"; rm -f "$strip"
+    else
+        store_put_file "$tmp"
+    fi
+    rm -f "$tmp"
+}
+store_get() {
+    # $1 = hash, $2 = out file; 1 if the object is missing or does not match its name
+    [[ -f "$STORE_DIR/$1" ]] || return 1
+    [[ "$(file_hash "$STORE_DIR/$1")" == "$1" ]] || return 1
+    cp "$STORE_DIR/$1" "$2"
+}
+store_prune() {
+    [[ -d "$STORE_DIR" ]] || return 0
+    local -A keep=()
+    local v obj
+    for v in "${DEPLOYED_HASHES[@]}"; do keep["$v"]=1; done
+    for obj in "$STORE_DIR"/*; do
+        [[ -f "$obj" ]] || continue
+        [[ -n "${keep[$(basename "$obj")]+x}" ]] || rm -f "$obj"
+    done
+}
+three_way_merge() {
+    # $1 = source, $2 = target, $3 = baseline hash, $4 = out file. 0 on a clean
+    # merge. All three inputs are canonical LF with managed regions emptied; the
+    # project's region bodies are transplanted back. Parity with deploy_core
+    # _three_way: binary, no git, a missing or tampered object, or overlap fail.
+    local src="$1" tgt="$2" bh="$3" out="$4" d e=0 f
+    command -v git >/dev/null 2>&1 || return 1
+    LC_ALL=C grep -Iq . "$src" 2>/dev/null || return 1
+    if [[ -s "$tgt" ]] && ! LC_ALL=C grep -Iq . "$tgt" 2>/dev/null; then return 1; fi
+    d="$(mktemp -d)"
+    if ! store_get "$bh" "$d/base"; then rm -rf "$d"; return 1; fi
+    _strip_bom_cr "$tgt" >"$d/ours.canon"
+    canonical_write "$src" "$d/theirs.canon"
+    for f in ours theirs; do
+        if _has_region_marker "$d/$f.canon"; then strip_regions_to "$d/$f.canon" "$d/$f"; else cp "$d/$f.canon" "$d/$f"; fi
+    done
+    if ! git merge-file -p "$d/ours" "$d/base" "$d/theirs" >"$d/merged" 2>/dev/null; then
+        rm -rf "$d"; return 1
+    fi
+    if _has_region_marker "$d/merged" && _has_region_marker "$d/ours.canon"; then
+        _ends_with_nl "$d/merged" && e=1
+        awk -v endnl="$e" "$_AWK_MERGE" "$d/ours.canon" "$d/merged" >"$out"
+    else
+        cp "$d/merged" "$out"
+    fi
+    rm -rf "$d"
+}
 
 # Copy baseline into deployed hashes
 for k in "${!BASELINE_HASHES[@]}"; do
@@ -795,29 +920,52 @@ if [[ "$UPDATE_HASHES" == "true" ]]; then
     while IFS= read -r rel; do
         src="$SOURCE_GITHUB/$rel"
         DEPLOYED_HASHES["$rel"]="$(source_hash_resolved "$src")"
+        if [[ "$DRY_RUN" != "true" ]]; then store_put_source "$src"; fi
     done < <(get_af_source_files)
     for f in "${MANIFEST_VSCODE_FILES[@]}"; do
         src="$SOURCE_VSCODE/$f"
         if [[ -f "$src" ]]; then
             DEPLOYED_HASHES["vscode/$f"]="$(source_hash_resolved "$src")"
+            if [[ "$DRY_RUN" != "true" ]]; then store_put_source "$src"; fi
         fi
     done
     if [[ "$DRY_RUN" != "true" ]]; then
         write_hash_file
+        store_prune
         echo "  Wrote .af-hashes with ${#DEPLOYED_HASHES[@]} entries (v$AF_VERSION)"
     else
         echo "  [DRY RUN] Would write .af-hashes with ${#DEPLOYED_HASHES[@]} entries"
     fi
-    cleanup_conflict_backups "$TARGET_DIR"
+    payload_ignore="$(payload_ignore_rule "$TARGET_DIR" .github/.af-version)"
+    if [[ -n "$payload_ignore" ]]; then
+        echo "  KEEP    conflict backups -- .github/ is gitignored ($payload_ignore), so they are the only rollback"
+    else
+        cleanup_conflict_backups "$TARGET_DIR"
+    fi
     echo ""
     exit 0
 fi
 
 # ── Deploy a single file ──────────────────────────────────────────────────
 deploy_file() {
-    local src="$1" tgt="$2" display="$3" hash_key="${4:-}"
+    local src="$1" tgt="$2" display="$3" hash_key="${4:-}" moved_from="${5:-}"
     if [[ -z "$hash_key" ]]; then
         hash_key="${display#.github/}"
+    fi
+    local active_key
+    if [[ -z "$moved_from" ]] && active_key="$(activated_skill_key "$hash_key")"; then
+        echo "  ACTIVATED $display  (skill moved to skills/)"
+        ((STAT_ACTIVATED++)) || true
+        deploy_file "$src" "$TARGET_GITHUB/$active_key" ".github/$active_key" "$active_key" "$hash_key"
+        # The moved-from key outlives the move only while a stale duplicate is on
+        # disk; its baseline moves to the active key, or a skipped CONFLICT reads as
+        # new-in-AF next run. Parity with deploy_core apply.
+        if [[ ! -f "$tgt" && -n "${DEPLOYED_HASHES[$hash_key]+x}" ]]; then
+            local carried="${DEPLOYED_HASHES[$hash_key]}"
+            unset 'DEPLOYED_HASHES[$hash_key]'
+            [[ -n "${DEPLOYED_HASHES[$active_key]+x}" ]] || DEPLOYED_HASHES["$active_key"]="$carried"
+        fi
+        return
     fi
     local is_custom=false
     if is_customizable "$hash_key"; then
@@ -831,6 +979,9 @@ deploy_file() {
         if is_deactivated_skill_unit "$hash_key"; then
             echo "  DEACTIVATED $display  (skill moved to _available/)"
             ((STAT_DEACTIVATED++)) || true
+            # Keep the _available/ copy current, or re-activation restores a stale skill (#384).
+            local avail_key="skills/_available/${hash_key#skills/}"
+            deploy_file "$src" "$TARGET_GITHUB/$avail_key" ".github/$avail_key" "$avail_key"
             return
         fi
         echo "  CREATE  $display"
@@ -844,26 +995,29 @@ deploy_file() {
         if [[ "$source_hash" == "$target_hash" ]]; then
             DEPLOYED_HASHES["$hash_key"]="$source_hash"
             ((STAT_UNCHANGED++)) || true
+            if [[ "$DRY_RUN" != "true" ]]; then store_put_source "$src"; fi
             return
         fi
 
         # ── 3-way merge detection ──
         local baseline_hash="${BASELINE_HASHES[$hash_key]:-}"
+        if [[ -z "$baseline_hash" && -n "$moved_from" ]]; then
+            baseline_hash="${BASELINE_HASHES[$moved_from]:-}"
+        fi
 
         if [[ -n "$baseline_hash" ]]; then
             local af_changed=false proj_changed=false
             [[ "$source_hash" != "$baseline_hash" ]] && af_changed=true
             [[ "$target_hash" != "$baseline_hash" ]] && proj_changed=true
 
-            # Customizable files: never auto-overwrite (unless --force)
-            if $is_custom && [[ "$FORCE" != "true" ]]; then
-                if $af_changed && $proj_changed; then
+            # Customizable files the project changed: never auto-overwrite (unless
+            # --force). One still equal to its baseline was never customized, so it
+            # takes the update below like any other file (#106).
+            if $is_custom && $proj_changed && [[ "$FORCE" != "true" ]]; then
+                if $af_changed; then
                     echo "  CONFLICT $display  (both AF and project changed)"
                     show_content_diff "$src" "$tgt"
                     ((STAT_CONFLICT++)) || true
-                elif $af_changed; then
-                    echo "  PROTECT $display  (AF has changes -- review manually)"
-                    ((STAT_PROTECTED++)) || true
                 else
                     echo "  PRESERVE $display  (project customization)"
                     ((STAT_PRESERVED++)) || true
@@ -881,6 +1035,22 @@ deploy_file() {
                 ((STAT_PRESERVED++)) || true
                 return
             else
+                # [customizable] files belong to the project and are never merged (#105).
+                local merged
+                merged="$(mktemp)"
+                if ! $is_custom && three_way_merge "$src" "$tgt" "$baseline_hash" "$merged"; then
+                    echo "  MERGE   $display  (both sides changed, merged without overlap)"
+                    ((STAT_MERGED++)) || true
+                    DEPLOYED_HASHES["$hash_key"]="$source_hash"
+                    if [[ "$DRY_RUN" != "true" ]]; then
+                        backup_before_overwrite "$tgt" "$display"
+                        cp "$merged" "$tgt"
+                        store_put_source "$src"
+                    fi
+                    rm -f "$merged"
+                    return
+                fi
+                rm -f "$merged"
                 echo "  CONFLICT $display  (both AF and project changed)"
                 show_content_diff "$src" "$tgt"
                 ((STAT_CONFLICT++)) || true
@@ -915,6 +1085,7 @@ deploy_file() {
         backup_before_overwrite "$tgt" "$display"
         mkdir -p "$(dirname "$tgt")"
         write_deployed "$src" "$tgt"
+        store_put_source "$src"
     fi
 }
 
@@ -1053,6 +1224,12 @@ if target_is_git_repo "$TARGET_DIR"; then
     if [[ "$CURRENT_BRANCH" == agent/* ]]; then
         echo "  WARNING: Target repo is on '$CURRENT_BRANCH'. Prefer running framework rollouts on dev/main."
     fi
+    for probe in .github/.af-version .vscode/tasks.json; do
+        rule="$(payload_ignore_rule "$TARGET_DIR" "$probe")"
+        if [[ -n "$rule" ]]; then
+            echo "  WARNING: ${probe%%/*}/ is gitignored in the target ($rule) -- this deploy leaves no diff, history or revert in git. Ignore .github/logs/*.yaml instead of the whole tree."
+        fi
+    done
 else
     CURRENT_BRANCH=""
     echo "  Note: Target is not a git repository -- branch checks skipped."
@@ -1095,6 +1272,7 @@ fi
 # Write .af-hashes
 if [[ "$DRY_RUN" != "true" ]]; then
     write_hash_file
+    store_prune
 fi
 echo ""
 echo "  WRITE   .github/.af-hashes"
@@ -1107,6 +1285,9 @@ version: $AF_VERSION
 deployed: $(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S')
 source: $AF_ROOT
 EOF
+    if [[ -n "$AF_COMMIT" ]]; then
+        printf 'commit: %s\n' "$AF_COMMIT" >> "$DEPLOYED_VERSION_FILE"
+    fi
 fi
 echo "  WRITE   .github/.af-version"
 
@@ -1157,6 +1338,12 @@ fi
 if [[ "$STAT_DEACTIVATED" -gt 0 ]]; then
     echo "  Deactivated: $STAT_DEACTIVATED -- skills moved to _available/, not deployed"
 fi
+if [[ "$STAT_ACTIVATED" -gt 0 ]]; then
+    echo "  Activated: $STAT_ACTIVATED -- library skills deployed to the active copy in skills/"
+fi
+if [[ "$STAT_MERGED" -gt 0 ]]; then
+    echo "  Merged:    $STAT_MERGED -- both sides changed, merged without overlap (backups kept)"
+fi
 if [[ "$STAT_CONFLICT" -gt 0 ]]; then
     echo "  Conflict:  $STAT_CONFLICT -- both sides changed, use agent to merge"
     echo ""
@@ -1198,6 +1385,23 @@ if [[ -f "$curated_json" ]]; then
     fi
 fi
 
+# ── Tier models vs Copilot's catalogue ────────────────────────────────────────
+# VS Code only greys out an unknown model, which no agent sees (#421).
+# Advisory only -- the catalogue is a snapshot and never fails the deploy.
+model_probe="$SOURCE_GITHUB/scripts/check-model-tiers.py"
+if [[ -f "$model_probe" ]]; then
+    model_python=""
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1; then model_python="$candidate"; break; fi
+    done
+    echo ""
+    if [[ -n "$model_python" ]]; then
+        "$model_python" "$model_probe" --source-env "$SOURCE_AF_ENV" --target-env "$TARGET_AF_ENV" 2>&1 || true
+    else
+        echo "  NOTE    tier models not checked -- no Python interpreter"
+    fi
+fi
+
 # ── Cost tracking source ───────────────────────────────────────────────────
 # A workflow log records `cost: available: false` when VS Code's agent debug
 # log is off, and that file is not one anybody opens unprompted. A deploy is
@@ -1214,12 +1418,20 @@ if [[ -f "$cost_probe" ]]; then
     fi
 fi
 
+# ── Test-log plugin ────────────────────────────────────────────────────────────
+# pyproject.toml belongs to the project, so the deploy only says what is missing (#180).
+if [[ -f "$TARGET_DIR/pyproject.toml" ]] && ! grep -qF 'af_test_log' "$TARGET_DIR/pyproject.toml"; then
+    echo ""
+    echo "  NOTE    runTests / Test Explorer runs are not logged -- load the af_test_log plugin (#180):"
+    echo '          pyproject.toml [tool.pytest.ini_options]: pythonpath = [".github/scripts"], addopts = "-p af_test_log"'
+fi
+
 # Prune stale backups from previous deploy runs
 prune_old_backups "$TARGET_DIR" "$BACKUP_PRUNE_DAYS" "$BACKUP_DIR"
 
 if [[ "$DRY_RUN" == "true" ]]; then
     echo ""
-    echo "  DRYRUN_JSON {\"mode\":\"dry-run\",\"created\":$STAT_CREATED,\"updated\":$STAT_UPDATED,\"unchanged\":$STAT_UNCHANGED,\"protected\":$STAT_PROTECTED,\"preserved\":$STAT_PRESERVED,\"deactivated\":$STAT_DEACTIVATED,\"conflict\":$STAT_CONFLICT,\"backup_prune_days\":$BACKUP_PRUNE_DAYS}"
+    echo "  DRYRUN_JSON {\"mode\":\"dry-run\",\"created\":$STAT_CREATED,\"updated\":$STAT_UPDATED,\"unchanged\":$STAT_UNCHANGED,\"protected\":$STAT_PROTECTED,\"preserved\":$STAT_PRESERVED,\"merged\":$STAT_MERGED,\"deactivated\":$STAT_DEACTIVATED,\"conflict\":$STAT_CONFLICT,\"backup_prune_days\":$BACKUP_PRUNE_DAYS}"
 fi
 
 # Backup cleanup

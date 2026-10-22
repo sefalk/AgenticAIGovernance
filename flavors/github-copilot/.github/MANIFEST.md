@@ -363,8 +363,8 @@ until one is available. This optimises cost and speed:
 
 ```yaml
 model:
-  - Claude Sonnet 4 (copilot)
-  - GPT-4.1 (copilot)
+  - Claude Sonnet 5.5 (copilot)
+  - Claude Haiku 5.5 (copilot)
 ```
 
 If no model is specified, the user's currently selected model is used.
@@ -498,6 +498,35 @@ budget and lead to identical retries.
 
 If the coordinator receives a REJECTED verdict missing any of these fields,
 it re-requests the review with specifics before counting a retry attempt.
+
+### Clarification Return (#142)
+
+`BLOCKED` is for a missing capability: a tool, a service, a denied command. An
+instruction that is ambiguous or contradicts itself is a different case. An
+agent that holds every tool it needs has no other way out but to guess, and a
+confident guess is the cheapest exit. In 2026-08 a producer reconciled a
+contradictory prompt with an invented fact (#141, #142).
+
+When an instruction admits more than one reading that would change the
+result, stop before acting on it and return, as the first `##` heading:
+
+```markdown
+## Needs Clarification
+```
+
+| Field | Content |
+|---|---|
+| `questions` | Each question with the candidate interpretations you are choosing between |
+| `done_so_far` | Files touched and partial state, or "nothing changed" |
+| `resume` | What a fresh invocation needs to continue once the question is answered |
+
+**Mechanical trigger:** a stated count that does not match the enumerated data
+it describes ("four groups" beside an eight-row table) is NEEDS_CLARIFICATION,
+never a split you invent to make the numbers agree.
+
+This covers only the ambiguity an agent notices. A confident substitution
+raises no question, so the Literals field of the Delegation Contract and
+the diff review stay the other half of the defence.
 
 ### Test & Metrics Reporting Format
 

@@ -57,6 +57,10 @@ ALLOWED_SKIPS: dict[str, str] = {
     "bash/git or deploy.sh not available": (
         "same measurement, plus a git repository the bash path builds through MSYS"
     ),
+    "symlinks need a privilege this account lacks": (
+        "Windows grants symlink creation only to admins or Developer Mode; the hosted runner has it and runs "
+        "the case, a developer account often does not (measured 2026-10-19 on the first local run, #395)"
+    ),
 }
 
 # A floor under tests actually executed. Raise it when the suite grows.

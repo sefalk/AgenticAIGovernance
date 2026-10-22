@@ -12,13 +12,14 @@
     - UC2 (coupled):  Re-run to sync updates from AF source to project.
 
     The .af-manifest supports annotations:
-    - [customizable] -- file contains project-specific content; protected on update
+    - [customizable] -- file contains project-specific content; protected once the project changes it
     - [optional]     -- directory may not exist in AF source; no warning if missing
     - [vscode]       -- file deployed to .vscode/ instead of .github/
 
-    Customizable files are protected on update -- they won't be overwritten
-    unless -Force is used. When AF has changes to a customizable file, a
-    PROTECT message with "review manually" guidance is shown.
+    A customizable file the project changed is never overwritten unless -Force
+    is used: an AF change to it is a CONFLICT. One still identical to its
+    baseline was never customized and takes the AF update (#106). A
+    customizable file with no baseline entry is reported PROTECT.
 
     An ephemeral backup directory (.af-backup-{timestamp}) is created before
     files are overwritten. If no conflicts remain after deploy, the backup
@@ -156,20 +157,24 @@ function Get-AFEnvValue {
 # ── Agent model tier resolution ────────────────────────────────────────────
 # Subagent .agent.md files carry a tier placeholder (__AF_TIER_PREMIUM__ etc.)
 # in their `model:` frontmatter. At deploy time it is replaced with the concrete
-# model list for that tier, resolved from the TARGET project's af-env.conf
-# (AF_MODEL_TIER_*) or, if unset, the curated defaults below. A multi-entry list
-# becomes a YAML array so VS Code tries each model until one is available
-# (drift-resilient). Curate these defaults when the model line-up changes.
-$script:TierDefaults = @{
-    PREMIUM   = 'Claude Opus 4.8 (copilot), Claude Opus 4.7 (copilot), Claude Sonnet 5 (copilot)'
-    BALANCED  = 'Claude Sonnet 5 (copilot), Claude Sonnet 4.6 (copilot), Claude Sonnet 4.5 (copilot)'
-    EFFICIENT = 'Claude Haiku 4.5 (copilot), Claude Sonnet 5 (copilot)'
-}
+# model list for that tier: the TARGET project's AF_MODEL_TIER_* override, else
+# AF_MODEL_DEFAULT_* from the SOURCE af-env.conf -- the line-up's only home
+# (#418). A multi-entry list becomes a YAML array so VS Code tries each model
+# until one is available.
+$SourceAFEnv = Join-Path $SourceGitHub 'af-env.conf'
 function Get-TierModels([string]$Tier) {
     $val = Get-AFEnvValue -Key "AF_MODEL_TIER_$Tier" -Default ''
-    if (-not $val) { $val = $script:TierDefaults[$Tier] }
-    return @($val -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if (-not $val -and (Test-Path $SourceAFEnv)) {
+        $m = Select-String -Path $SourceAFEnv -Pattern "^AF_MODEL_DEFAULT_$Tier=(.+)$" -ErrorAction SilentlyContinue
+        if ($m) { $val = $m.Matches[0].Groups[1].Value.Trim() }
+    }
+    $models = @($val -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($models.Count -eq 0) { throw "no model list for tier ${Tier}: set AF_MODEL_DEFAULT_$Tier in the framework af-env.conf" }
+    return $models
 }
+$tierSources = @(Get-ChildItem (Join-Path $SourceGitHub 'agents') -Filter '*.agent.md' -ErrorAction SilentlyContinue |
+    Where-Object { Select-String -Path $_.FullName -Pattern '__AF_TIER_' -Quiet })
+if ($tierSources.Count -gt 0) { foreach ($t in 'PREMIUM', 'BALANCED', 'EFFICIENT') { $null = Get-TierModels $t } }
 function Resolve-TierTokens([string]$Text) {
     $nl = if ($Text.Contains("`r`n")) { "`r`n" } else { "`n" }
     foreach ($tier in 'PREMIUM', 'BALANCED', 'EFFICIENT') {
@@ -283,6 +288,18 @@ function Get-TargetClassifyHash([string]$Target) {
     return (Get-BytesHashUpper (Get-RegionStrippedBytes ([System.IO.File]::ReadAllBytes($Target))))
 }
 
+function Get-ActivatedSkillKey([string]$HashKey) {
+    # An optional skill the project activated by *moving* skills/_available/{name}/
+    # to skills/{name}/. Recreating the _available/ copy left every activated skill
+    # twice while the active copy never got a fix (#110), so the library source is
+    # deployed onto the active copy instead. Mirror of Test-DeactivatedSkillUnit;
+    # parity with deploy_core _activated_unit and deploy.sh activated_skill_key.
+    $parts = ($HashKey -replace '\\', '/') -split '/'
+    if ($parts.Count -lt 4 -or $parts[0] -ne 'skills' -or $parts[1] -ne '_available') { return $null }
+    if (-not (Test-Path (Join-Path $TargetGitHub "skills/$($parts[2])") -PathType Container)) { return $null }
+    return 'skills/' + (($parts[2..($parts.Count - 1)]) -join '/')
+}
+
 function Test-DeactivatedSkillUnit([string]$HashKey) {
     # Measure #3: an active-by-default skill the project deactivated by *moving* it
     # to skills/_available/{name}/. When the framework still ships skills/{name}/ but
@@ -332,10 +349,42 @@ function Get-CurrentGitBranch {
     }
 }
 
+# The .gitignore rule that ignores a payload tree in the target, or '' (#104).
+# A consumer ignoring .github/ received 81 changed files and git showed none of
+# them. --no-index asks the rules, so already-tracked files do not mask it.
+function Get-PayloadIgnoreRule {
+    param([string]$RepoDir, [string]$Probe)
+
+    if (-not (Test-TargetIsGitRepo -RepoDir $RepoDir)) { return '' }
+    $ErrorActionPreference = 'Continue'
+    $line = & git -C $RepoDir check-ignore -v --no-index -- $Probe 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $line) { return '' }
+    return (([string]$line) -split "`t")[0]
+}
+
 # ── Read versions ──────────────────────────────────────────────────────────
 $AFVersion = if (Test-Path $VersionPath) {
     (Get-Content $VersionPath -Raw).Trim()
 } else { 'unknown' }
+
+# VERSION moves only at a release cut, so the commit identifies a deploy between
+# releases (#426). Only a tracked payload has one -- a copy inside some other
+# checkout would otherwise report that checkout's HEAD. Same rule as
+# deploy_core.source_commit and deploy.sh source_commit.
+function Get-SourceCommit {
+    param([string]$Root)
+
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return '' }
+    $ErrorActionPreference = 'Continue'
+    & git -C $Root ls-files --error-unmatch -- VERSION *> $null
+    if ($LASTEXITCODE -ne 0) { return '' }
+    $sha = [string](& git -C $Root rev-parse --short=12 HEAD 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $sha.Trim()) { return '' }
+    $dirty = & git -C $Root status --porcelain --untracked-files=no -- . 2>$null
+    if ($dirty) { return "$($sha.Trim())-dirty" }
+    return $sha.Trim()
+}
+$AFCommit = Get-SourceCommit -Root $AFRoot
 
 $DeployedVersionFile = Join-Path $TargetGitHub '.af-version'
 $DeployedInfo = $null
@@ -345,7 +394,7 @@ if (Test-Path $DeployedVersionFile) {
 
 # ── Parse manifest with annotations ───────────────────────────────────────
 # Format: path  [annotation1, annotation2]
-#   [customizable] — project may modify; protected on update
+#   [customizable] — project may modify; protected once the project changes it
 #   [optional]     — may not exist in AF source; no warning if missing
 #   [vscode]       — deployed to .vscode/ instead of .github/
 
@@ -433,7 +482,7 @@ foreach ($f in $ManifestVSCodeFiles) {
 }
 
 # ── Counters ───────────────────────────────────────────────────────────────
-$script:Stats = @{ Created = 0; Updated = 0; Unchanged = 0; Protected = 0; Conflict = 0; Preserved = 0; Deactivated = 0 }
+$script:Stats = @{ Created = 0; Updated = 0; Unchanged = 0; Protected = 0; Conflict = 0; Preserved = 0; Deactivated = 0; Activated = 0; Merged = 0 }
 $script:BackupDir = $null
 $script:BackupCount = 0
 
@@ -489,6 +538,90 @@ function Write-HashFile {
         $lines += "$($_.Key)=$($_.Value)"
     }
     [System.IO.File]::WriteAllText($path, (($lines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# ── Baseline content store (#105, #393) ───────────────────────────────────────
+# The canonical, region-stripped content behind every recorded hash, so a later
+# deploy can 3-way merge a file both sides changed. Gitignored; an object is
+# verified against its name before use. Parity with deploy_core _store_*.
+$script:StoreDir = Join-Path $TargetGitHub '.af-baseline'
+function Save-BaselineObject([byte[]]$Bytes) {
+    if ($null -eq $Bytes) { return }
+    if (-not (Test-Path $script:StoreDir)) { New-Item -ItemType Directory -Path $script:StoreDir -Force | Out-Null }
+    $obj = Join-Path $script:StoreDir (Get-BytesHashUpper $Bytes)
+    if (-not (Test-Path $obj)) { [System.IO.File]::WriteAllBytes($obj, $Bytes) }
+    $ignore = Join-Path $script:StoreDir '.gitignore'
+    if (-not (Test-Path $ignore)) {
+        [System.IO.File]::WriteAllText($ignore, "*`n", (New-Object System.Text.UTF8Encoding($false)))
+    }
+}
+function Save-SourceBaseline([string]$Source, [byte[]]$Canon) {
+    if ($null -ne $Canon) { Save-BaselineObject (Get-RegionStrippedBytes $Canon) }
+    else { Save-BaselineObject ([System.IO.File]::ReadAllBytes($Source)) }
+}
+function Get-BaselineObject([string]$Digest) {
+    $obj = Join-Path $script:StoreDir $Digest
+    if (-not (Test-Path $obj -PathType Leaf)) { return $null }
+    $bytes = [System.IO.File]::ReadAllBytes($obj)
+    if ((Get-BytesHashUpper $bytes) -ne $Digest) { return $null }
+    return ,$bytes
+}
+function Remove-UnreferencedBaselineObjects([hashtable]$Hashes) {
+    if (-not (Test-Path $script:StoreDir)) { return }
+    $keep = @{}
+    foreach ($value in $Hashes.Values) { $keep[[string]$value] = $true }
+    Get-ChildItem $script:StoreDir -File |
+        Where-Object { $_.Name -ne '.gitignore' -and -not $keep.ContainsKey($_.Name) } |
+        Remove-Item -Force
+}
+
+function Invoke-ThreeWayMerge([string]$Target, [string]$BaselineHash, [byte[]]$Canon) {
+    # The bytes to deploy for a both-sides change that merges cleanly, else $null.
+    # All three inputs are canonical LF with managed regions emptied, the form the
+    # hashes are taken over; the project's region bodies are transplanted back.
+    # Parity with deploy_core _three_way: binary, no git, a missing or tampered
+    # store object, or overlap all keep the file CONFLICT.
+    if ($null -eq $Canon) { return $null }
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $git) { return $null }
+    $base = Get-BaselineObject $BaselineHash
+    if ($null -eq $base) { return $null }
+    $strict = New-Object System.Text.UTF8Encoding($false, $true)
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    try {
+        $oursText = $strict.GetString([System.IO.File]::ReadAllBytes($Target))
+        $null = $strict.GetString($base)
+    } catch { return $null }
+    if ($oursText.Length -gt 0 -and $oursText[0] -eq [char]0xFEFF) { $oursText = $oursText.Substring(1) }
+    $oursText = ($oursText -replace "`r`n", "`n") -replace "`r", "`n"
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "af-merge-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $tmp | Out-Null
+    try {
+        [System.IO.File]::WriteAllBytes((Join-Path $tmp 'ours'), [byte[]](Get-RegionStrippedBytes $utf8.GetBytes($oursText)))
+        [System.IO.File]::WriteAllBytes((Join-Path $tmp 'base'), [byte[]]$base)
+        [System.IO.File]::WriteAllBytes((Join-Path $tmp 'theirs'), [byte[]](Get-RegionStrippedBytes $Canon))
+        # Raw bytes from stdout: `& git` would decode and re-encode the merge.
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $git.Source
+        $psi.Arguments = 'merge-file -p ours base theirs'
+        $psi.WorkingDirectory = $tmp
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $stderr = $proc.StandardError.ReadToEndAsync()
+        $buffer = New-Object System.IO.MemoryStream
+        $proc.StandardOutput.BaseStream.CopyTo($buffer)
+        $proc.WaitForExit()
+        $null = $stderr.Result
+        if ($proc.ExitCode -ne 0) { return $null }
+        $mergedText = $strict.GetString($buffer.ToArray())
+    } catch {
+        return $null
+    } finally {
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    return ,$utf8.GetBytes((Merge-ManagedRegions $mergedText $oursText))
 }
 
 $script:BaselineHashes = Read-HashFile
@@ -771,21 +904,30 @@ if ($UpdateHashes) {
     foreach ($rel in $sourceFiles) {
         $src = Join-Path $SourceGitHub $rel
         $hashEntries[$rel] = Get-SourceHashResolved $src
+        if (-not $DryRun) { Save-SourceBaseline $src (Get-CanonicalBytes $src) }
     }
     foreach ($f in $ManifestVSCodeFiles) {
         $src = Join-Path $SourceVSCode $f
         if (Test-Path $src) {
             $hashEntries["vscode/$f"] = Get-SourceHashResolved $src
+            if (-not $DryRun) { Save-SourceBaseline $src (Get-CanonicalBytes $src) }
         }
     }
     if (-not $DryRun) {
         Write-HashFile $hashEntries
+        Remove-UnreferencedBaselineObjects $hashEntries
         Write-Host "  Wrote .af-hashes with $($hashEntries.Count) entries (v$AFVersion)" -ForegroundColor Green
     } else {
         Write-Host "  [DRY RUN] Would write .af-hashes with $($hashEntries.Count) entries" -ForegroundColor Yellow
     }
-    # When hashes are refreshed, previous conflict backups are no longer needed.
-    Invoke-CleanupConflictBackups -RootDir $TargetDir
+    # When hashes are refreshed, previous conflict backups are no longer needed --
+    # unless the payload is gitignored: then the backup is the only rollback (#104).
+    $payloadIgnore = Get-PayloadIgnoreRule -RepoDir $TargetDir -Probe '.github/.af-version'
+    if ($payloadIgnore) {
+        Write-Host "  KEEP    conflict backups -- .github/ is gitignored ($payloadIgnore), so they are the only rollback" -ForegroundColor Yellow
+    } else {
+        Invoke-CleanupConflictBackups -RootDir $TargetDir
+    }
     Write-Host ""
     exit 0
 }
@@ -796,10 +938,26 @@ function Publish-SingleFile {
         [string]$Source,
         [string]$Target,
         [string]$DisplayPath,
-        [string]$HashKey
+        [string]$HashKey,
+        [string]$MovedFrom
     )
     if (-not $HashKey) {
         $HashKey = $DisplayPath -replace '^\.github/', ''
+    }
+    $activeKey = Get-ActivatedSkillKey $HashKey
+    if ($activeKey) {
+        Write-Host "  ACTIVATED $DisplayPath  (skill moved to skills/)" -ForegroundColor DarkGray
+        $script:Stats.Activated++
+        Publish-SingleFile -Source $Source -Target (Join-Path $TargetGitHub $activeKey) -DisplayPath ".github/$activeKey" -HashKey $activeKey -MovedFrom $HashKey
+        # The moved-from key outlives the move only while a stale duplicate is on disk;
+        # its baseline moves to the active key, or a skipped CONFLICT reads as
+        # new-in-AF next run. Parity with deploy_core apply.
+        if (-not (Test-Path $Target -PathType Leaf) -and $script:DeployedHashes.ContainsKey($HashKey)) {
+            $carried = $script:DeployedHashes[$HashKey]
+            $script:DeployedHashes.Remove($HashKey)
+            if (-not $script:DeployedHashes.ContainsKey($activeKey)) { $script:DeployedHashes[$activeKey] = $carried }
+        }
+        return
     }
     $isCustom = $script:CustomizableFiles.Contains($HashKey)
     $exists = Test-Path $Target
@@ -812,6 +970,9 @@ function Publish-SingleFile {
         if (Test-DeactivatedSkillUnit $HashKey) {
             Write-Host "  DEACTIVATED $DisplayPath  (skill moved to _available/)" -ForegroundColor DarkGray
             $script:Stats.Deactivated++
+            # Keep the _available/ copy current, or re-activation restores a stale skill (#384).
+            $availKey = 'skills/_available/' + $HashKey.Substring('skills/'.Length)
+            Publish-SingleFile -Source $Source -Target (Join-Path $TargetGitHub $availKey) -DisplayPath ".github/$availKey" -HashKey $availKey
             return
         }
         Write-Host "  CREATE  $DisplayPath" -ForegroundColor Green
@@ -824,25 +985,27 @@ function Publish-SingleFile {
         if ($sourceHash -eq $targetHash) {
             $script:DeployedHashes[$HashKey] = $sourceHash
             $script:Stats.Unchanged++
+            if (-not $DryRun) { Save-SourceBaseline $Source $canon }
             return
         }
 
         # ── 3-way merge detection ──
         $baselineHash = $script:BaselineHashes[$HashKey]
+        # A moved file keeps the baseline of the key it was moved from (#110).
+        if (-not $baselineHash -and $MovedFrom) { $baselineHash = $script:BaselineHashes[$MovedFrom] }
 
         if ($baselineHash) {
             $afChanged   = $sourceHash -ne $baselineHash
             $projChanged = $targetHash -ne $baselineHash
 
-            # Customizable files: never auto-overwrite (unless -Force)
-            if ($isCustom -and -not $Force) {
-                if ($afChanged -and $projChanged) {
+            # Customizable files the project changed: never auto-overwrite (unless
+            # -Force). One still equal to its baseline was never customized, so it
+            # takes the update below like any other file (#106).
+            if ($isCustom -and $projChanged -and -not $Force) {
+                if ($afChanged) {
                     Write-Host "  CONFLICT $DisplayPath  (both AF and project changed)" -ForegroundColor Red
                     Show-ContentDiff $Source $Target
                     $script:Stats.Conflict++
-                } elseif ($afChanged) {
-                    Write-Host "  PROTECT $DisplayPath  (AF has changes -- review manually)" -ForegroundColor Yellow
-                    $script:Stats.Protected++
                 } else {
                     Write-Host "  PRESERVE $DisplayPath  (project customization)" -ForegroundColor Magenta
                     $script:Stats.Preserved++
@@ -860,6 +1023,19 @@ function Publish-SingleFile {
                 $script:Stats.Preserved++
                 return
             } else {
+                # [customizable] files belong to the project and are never merged (#105).
+                $merged = if ($isCustom) { $null } else { Invoke-ThreeWayMerge $Target $baselineHash $canon }
+                if ($null -ne $merged) {
+                    Write-Host "  MERGE   $DisplayPath  (both sides changed, merged without overlap)" -ForegroundColor Cyan
+                    $script:Stats.Merged++
+                    $script:DeployedHashes[$HashKey] = $sourceHash
+                    if (-not $DryRun) {
+                        Backup-BeforeOverwrite -TargetFile $Target -DisplayPath $DisplayPath
+                        [System.IO.File]::WriteAllBytes($Target, [byte[]]$merged)
+                        Save-SourceBaseline $Source $canon
+                    }
+                    return
+                }
                 Write-Host "  CONFLICT $DisplayPath  (both AF and project changed)" -ForegroundColor Red
                 Show-ContentDiff $Source $Target
                 $script:Stats.Conflict++
@@ -900,6 +1076,7 @@ function Publish-SingleFile {
         } else {
             Copy-Item $Source $Target -Force
         }
+        Save-SourceBaseline $Source $canon
     }
 }
 
@@ -1033,6 +1210,12 @@ if (Test-TargetIsGitRepo -RepoDir $TargetDir) {
     if ($currentBranch -like 'agent/*') {
         Write-Host "  WARNING: Target repo is on '$currentBranch'. Prefer running framework rollouts on dev/main." -ForegroundColor Yellow
     }
+    foreach ($probe in @(@{ Tree = '.github/'; Path = '.github/.af-version' }, @{ Tree = '.vscode/'; Path = '.vscode/tasks.json' })) {
+        $rule = Get-PayloadIgnoreRule -RepoDir $TargetDir -Probe $probe.Path
+        if ($rule) {
+            Write-Host "  WARNING: $($probe.Tree) is gitignored in the target ($rule) -- this deploy leaves no diff, history or revert in git. Ignore .github/logs/*.yaml instead of the whole tree." -ForegroundColor Yellow
+        }
+    }
 } else {
     Write-Host '  Note: Target is not a git repository -- branch checks skipped.'
 }
@@ -1082,6 +1265,7 @@ if ($ManifestVSCodeFiles.Count -gt 0) {
 # Write .af-hashes
 if (-not $DryRun) {
     Write-HashFile $script:DeployedHashes
+    Remove-UnreferencedBaselineObjects $script:DeployedHashes
 }
 Write-Host ""
 Write-Host "  WRITE   .github/.af-hashes" -ForegroundColor Cyan
@@ -1092,6 +1276,7 @@ version: $AFVersion
 deployed: $(Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
 source: $AFRoot
 "@
+if ($AFCommit) { $versionContent += "`ncommit: $AFCommit" }
 if (-not $DryRun) {
     if (-not (Test-Path $TargetGitHub)) {
         New-Item -ItemType Directory -Path $TargetGitHub -Force | Out-Null
@@ -1139,24 +1324,18 @@ if ($script:AFEnvWasAbsent -and -not $DryRun) {
     }
 }
 
-# ── Stale activation check ─────────────────────────────────────────────────
-# Warn when a project has activated a skill (skills/{name}/) but the
-# _available/{name}/SKILL.md copy is newer. This happens when AF updates
-# a skill and deploy syncs _available/ but can't know about activated copies.
+# ── Duplicate activation check ─────────────────────────────────────────────
+# Activation is a move, and the deploy now updates the active copy in place
+# (#110). A skill still present in both places predates that: name it so the
+# stale _available/ copy can be removed.
 $staleSkills = @()
 $targetAvailable = Join-Path $TargetGitHub 'skills\_available'
 $targetSkills    = Join-Path $TargetGitHub 'skills'
 if ((Test-Path $targetAvailable) -and (Test-Path $targetSkills)) {
     foreach ($activeDir in (Get-ChildItem $targetSkills -Directory)) {
         if ($activeDir.Name -eq '_available' -or $activeDir.Name.StartsWith('.')) { continue }
-        $availCopy = Join-Path $targetAvailable "$($activeDir.Name)\SKILL.md"
-        $activeCopy = Join-Path $activeDir.FullName 'SKILL.md'
-        if ((Test-Path $availCopy) -and (Test-Path $activeCopy)) {
-            $availHash  = (Get-FileHash $availCopy).Hash
-            $activeHash = (Get-FileHash $activeCopy).Hash
-            if ($availHash -ne $activeHash) {
-                $staleSkills += $activeDir.Name
-            }
+        if (Test-Path (Join-Path $targetAvailable $activeDir.Name) -PathType Container) {
+            $staleSkills += $activeDir.Name
         }
     }
 }
@@ -1189,6 +1368,12 @@ if ($script:Stats.Preserved -gt 0) {
 if ($script:Stats.Deactivated -gt 0) {
     Write-Host "  Deactivated: $($script:Stats.Deactivated) -- skills moved to _available/, not deployed" -ForegroundColor DarkGray
 }
+if ($script:Stats.Activated -gt 0) {
+    Write-Host "  Activated: $($script:Stats.Activated) -- library skills deployed to the active copy in skills/" -ForegroundColor DarkGray
+}
+if ($script:Stats.Merged -gt 0) {
+    Write-Host "  Merged:    $($script:Stats.Merged) -- both sides changed, merged without overlap (backups kept)" -ForegroundColor Cyan
+}
 if ($script:Stats.Conflict -gt 0) {
     Write-Host "  Conflict:  $($script:Stats.Conflict) -- both sides changed, use agent to merge" -ForegroundColor Red
     Write-Host ""
@@ -1200,9 +1385,9 @@ if ($DryRun) {
 }
 if ($staleSkills.Count -gt 0) {
     Write-Host ""
-    Write-Host "  Stale activations ($($staleSkills.Count)): _available/ has newer SKILL.md" -ForegroundColor Yellow
+    Write-Host "  Duplicate activations ($($staleSkills.Count)): active in skills/ and still in skills/_available/" -ForegroundColor Yellow
     foreach ($s in $staleSkills | Sort-Object) {
-        Write-Host "    - skills/$s/  (re-copy from skills/_available/$s/ to update)" -ForegroundColor Yellow
+        Write-Host "    - skills/_available/$s/  (stale copy -- remove it; skills/$s/ is the one kept current)" -ForegroundColor Yellow
     }
 }
 
@@ -1248,19 +1433,21 @@ if (Test-Path $curatedJsonPath) {
     }
 }
 
-# ── Version-stale detection ────────────────────────────────────────────────
-# Warn when files were updated/created but VERSION hasn't changed since last
-# deploy. This catches the common mistake of forgetting to bump VERSION.
-$filesChanged = $script:Stats.Created + $script:Stats.Updated
-if ($filesChanged -gt 0 -and $DeployedInfo) {
-    $deployedVerLine = ($DeployedInfo -split "`n") | Where-Object { $_ -match '^version:\s*(.+)' } | Select-Object -First 1
-    if ($deployedVerLine -match '^version:\s*(.+)') {
-        $previousVer = $Matches[1].Trim()
-        if ($previousVer -eq $AFVersion) {
-            Write-Host ""
-            Write-Host "  WARNING: VERSION is still $AFVersion but $filesChanged file(s) changed." -ForegroundColor Red
-            Write-Host "  Did you forget to bump VERSION and update CHANGELOG.md?" -ForegroundColor Red
-        }
+# ── Tier models vs Copilot's catalogue ────────────────────────────────────────
+# VS Code only greys out an unknown model, which no agent sees (#421).
+# Advisory only -- the catalogue is a snapshot and never fails the deploy.
+$modelProbe = Join-Path $SourceGitHub 'scripts\check-model-tiers.py'
+if (Test-Path $modelProbe) {
+    $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $pythonCmd) { $pythonCmd = Get-Command python3 -ErrorAction SilentlyContinue }
+    Write-Host ""
+    if ($pythonCmd) {
+        $modelLines = @(& $pythonCmd.Source $modelProbe --source-env $SourceAFEnv --target-env $TargetAFEnv 2>&1 |
+            ForEach-Object { $_.ToString() })
+        $color = if ($LASTEXITCODE -eq 1) { 'Yellow' } else { 'Cyan' }
+        foreach ($line in $modelLines) { Write-Host $line -ForegroundColor $color }
+    } else {
+        Write-Host "  NOTE    tier models not checked -- no Python interpreter" -ForegroundColor Cyan
     }
 }
 
@@ -1282,6 +1469,15 @@ if (Test-Path $costProbe) {
     }
 }
 
+# ── Test-log plugin ────────────────────────────────────────────────────────────
+# pyproject.toml belongs to the project, so the deploy only says what is missing (#180).
+$targetPyproject = Join-Path $TargetDir 'pyproject.toml'
+if ((Test-Path $targetPyproject) -and -not (Select-String -Path $targetPyproject -Pattern 'af_test_log' -SimpleMatch -Quiet)) {
+    Write-Host ""
+    Write-Host "  NOTE    runTests / Test Explorer runs are not logged -- load the af_test_log plugin (#180):" -ForegroundColor Cyan
+    Write-Host '          pyproject.toml [tool.pytest.ini_options]: pythonpath = [".github/scripts"], addopts = "-p af_test_log"' -ForegroundColor Cyan
+}
+
 # Prune stale backups from previous deploy runs
 Invoke-PruneOldBackups -RootDir $TargetDir -Days $resolvedBackupPruneDays -ActiveBackupDir $script:BackupDir
 
@@ -1293,6 +1489,7 @@ if ($DryRun) {
         unchanged = $script:Stats.Unchanged
         protected = $script:Stats.Protected
         preserved = $script:Stats.Preserved
+        merged = $script:Stats.Merged
         conflict = $script:Stats.Conflict
         backup_prune_days = $resolvedBackupPruneDays
     }

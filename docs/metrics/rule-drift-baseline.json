@@ -1,13 +1,13 @@
 {
   "corpus": {
-    "files": 26,
-    "rules": 228
+    "files": 56,
+    "rules": 405
   },
   "similarity": 0.6,
   "summary": {
-    "clusters": 11,
-    "agree": 6,
-    "diverge": 5
+    "clusters": 13,
+    "agree": 7,
+    "diverge": 6
   },
   "clusters": [
     {
@@ -72,12 +72,12 @@
       "locations": [
         {
           "file": "agents/implementer.agent.md",
-          "line": 159,
+          "line": 155,
           "text": "**Do NOT run `tests: all`** — the stop hook runs the full suite automatically when you finish."
         },
         {
           "file": "agents/refactorer.agent.md",
-          "line": 135,
+          "line": 131,
           "text": "**Do NOT run `tests: all`** — the stop hook runs the full suite automatically when you finish."
         }
       ]
@@ -90,12 +90,12 @@
       "locations": [
         {
           "file": "agents/implementer.agent.md",
-          "line": 166,
+          "line": 162,
           "text": "`createAndRunTask` is for invocations a fixed label cannot express — not a lighter-scrutiny route around the terminal you do not have."
         },
         {
           "file": "agents/refactorer.agent.md",
-          "line": 139,
+          "line": 135,
           "text": "`createAndRunTask` is for invocations a fixed label cannot express — not a lighter-scrutiny route around the terminal you do not have."
         }
       ]
@@ -108,13 +108,31 @@
       "locations": [
         {
           "file": "agents/implementer.agent.md",
-          "line": 167,
+          "line": 163,
           "text": "The same PreToolUse classifier inspects it, and it may only invoke scripts under `AF_TASK_SCRIPT_DIRS`; a bare binary or an inline `-Command` payload is denied."
         },
         {
           "file": "agents/refactorer.agent.md",
-          "line": 140,
+          "line": 136,
           "text": "The same PreToolUse classifier inspects it, and it may only invoke scripts under `AF_TASK_SCRIPT_DIRS`; a bare binary or an inline `-Command` payload is denied."
+        }
+      ]
+    },
+    {
+      "decision": "keep",
+      "reason": "Both skills cite core rule R-SD-04 by ID in their Governance References list; the canonical text lives in core L2, so each line is a pointer to it, not a second wording of a framework rule.",
+      "verdict": "agree",
+      "statement": "- **R-SD-04** — Quality gates must be automated and verifiable",
+      "locations": [
+        {
+          "file": "skills/code-review/SKILL.md",
+          "line": 167,
+          "text": "- **R-SD-04** — Quality gates must be automated and verifiable"
+        },
+        {
+          "file": "skills/static-analysis/SKILL.md",
+          "line": 196,
+          "text": "- **R-SD-04** — Quality gates must be automated and verifiable"
         }
       ]
     },
@@ -167,17 +185,17 @@
         },
         {
           "file": "agents/implementer.agent.md",
-          "line": 61,
+          "line": 57,
           "text": "- **notebook-execution** (`skills/notebook-execution/SKILL.md`) — use the notebook tools for `.ipynb`, never terminal scripts"
         },
         {
           "file": "agents/refactorer.agent.md",
-          "line": 62,
+          "line": 58,
           "text": "- **notebook-execution** (`skills/notebook-execution/SKILL.md`) — use the notebook tools for `.ipynb`, never terminal scripts"
         },
         {
           "file": "agents/test-writer.agent.md",
-          "line": 60,
+          "line": 56,
           "text": "- **notebook-execution** (`skills/notebook-execution/SKILL.md`) — inspect `.ipynb` via the notebook tools, never terminal scripts"
         }
       ]
@@ -195,12 +213,12 @@
         },
         {
           "file": "agents/documenter.agent.md",
-          "line": 278,
+          "line": 274,
           "text": "- Do NOT modify production code or test code"
         },
         {
           "file": "agents/test-writer.agent.md",
-          "line": 74,
+          "line": 70,
           "text": "Do NOT write or modify production code."
         }
       ]
@@ -218,8 +236,26 @@
         },
         {
           "file": "agents/documenter.agent.md",
-          "line": 274,
+          "line": 270,
           "text": "- Do NOT run tests or check coverage (that's the critic's job)"
+        }
+      ]
+    },
+    {
+      "decision": "keep",
+      "reason": "copilot-instructions.md is the project's always-on coding standard, owned and reworded by each consumer, and reaches every code writer including the refactorer and plain chat; error-handling is consulted only by implementer and test-writer. Removing either copy loses a reader (#354).",
+      "verdict": "diverge",
+      "statement": "- Raise specific exceptions, never bare `except:`",
+      "locations": [
+        {
+          "file": "copilot-instructions.md",
+          "line": 59,
+          "text": "- Raise specific exceptions, never bare `except:`"
+        },
+        {
+          "file": "skills/error-handling/SKILL.md",
+          "line": 56,
+          "text": "- Never bare `except:` — always catch specific exceptions"
         }
       ]
     }
