@@ -2225,7 +2225,8 @@ function New-ConfWith {
     } else {
         $REAL_CONF.TrimEnd() + "`nRETRO_DIR=$Dir`n"
     }
-    if ($out -eq $REAL_CONF) { throw "RETRO_DIR not substituted -- the override would be untested" }
+    # Assert the target state, not a change: a consumer may already carry the value (#436).
+    if ($out -notmatch ('(?m)^RETRO_DIR=' + [regex]::Escape($Dir) + '\r?$')) { throw "RETRO_DIR not substituted -- the override would be untested" }
     return $out
 }
 
