@@ -79,7 +79,7 @@ workflow_id: "<workflow-id>"
 trigger: "<user request>"
 status: "COMPLETED"  # COMPLETED | FAILED | ESCALATED
 git_branch: "agent/<workflow-id>"
-# af_version: stamped by your Stop hook -- do not write it.
+# af_version, af_commit: stamped by your Stop hook -- do not write them.
 af_version_note: "<optional -- a caveat qualifying the stamped version, or omit>"
 
 steps:
@@ -183,8 +183,8 @@ oldest commit dates the start. Never estimate them — a documenter once wrote a
 fabricated data, and every gate downstream accepted it, because they check that
 the field is present and an invented value is present (issue #91).
 
-**Do not write `af_version:`.** Your Stop hook reads `.github/.af-version` and
-stamps it, or stamps `null` when there is no version file to read. It was the
+**Do not write `af_version:` or `af_commit:`.** Your Stop hook reads `.github/.af-version` and
+stamps both, or `null` when there is nothing to read. It was the
 last header field transcribed by hand, out of a file with three lines you had
 to pick one of, and across 68 logs 23 carried no value at all while 7 carried
 something that was not a version — `n/a`, `not measured`, and in one case the

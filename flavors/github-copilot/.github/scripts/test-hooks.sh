@@ -1521,6 +1521,18 @@ unversioned=$(stamp_log "$PLAN_DONE" "$LOG_BAD_VERSION")
 assert_contains "no .af-version stamps an explicit null rather than a guess" \
     "$unversioned" "af_version: null" "got: $unversioned"
 
+# Between release cuts the commit is what identifies a deploy (#426, #429).
+committed=$(stamp_log "$PLAN_DONE" "$LOG_BAD_VERSION" 'version: 1.25.0\ncommit: 0123456789ab-dirty\ndeployed: 2026-10-22T10:00:00\n')
+assert_contains "af_commit is the commit line of .af-version" \
+    "$committed" 'af_commit: "0123456789ab-dirty"' "got: $committed"
+commit_count=$(printf '%s\n' "$committed" | grep -c '^af_commit:')
+assert_true "af_commit appears exactly once" \
+    "$([ "$commit_count" -eq 1 ] && echo 1 || echo 0)" "af_commit lines=$commit_count in: $committed"
+assert_contains "a version file without a commit line stamps af_commit null" \
+    "$versioned" "af_commit: null" "got: $versioned"
+assert_contains "no .af-version stamps af_commit null too" \
+    "$unversioned" "af_commit: null" "got: $unversioned"
+
 case "$doc_agent" in
     *'Do not write `af_version:`'*)
         assert_true "the documenter is told the version is not its to write" 1 ;;

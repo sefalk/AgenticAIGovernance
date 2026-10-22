@@ -2617,6 +2617,17 @@ $unversioned = Get-VersionStampedLog
 Assert-Contains "no .af-version stamps an explicit null rather than a guess" `
     $unversioned '(?m)^af_version: null\s*$'
 
+# Between release cuts the commit is what identifies a deploy (#426, #429).
+$committed = Get-VersionStampedLog @{ '.github/.af-version' = "version: 1.25.0`ncommit: 0123456789ab-dirty`ndeployed: 2026-10-22T10:00:00`n" }
+Assert-Contains "af_commit is the commit line of .af-version" `
+    $committed '(?m)^af_commit: "0123456789ab-dirty"\s*$'
+Assert-True "af_commit appears exactly once" `
+    (([regex]::Matches($committed, '(?m)^af_commit:')).Count -eq 1) "got: $committed" -Subject $committed
+Assert-Contains "a version file without a commit line stamps af_commit null" `
+    $versioned '(?m)^af_commit: null\s*$'
+Assert-Contains "no .af-version stamps af_commit null too" `
+    $unversioned '(?m)^af_commit: null\s*$'
+
 # ── documenter-stop.ps1 — which agents actually ran (issue #173) ─────────
 #
 # A workflow log carried a complete `agent: arbiter` step -- action, verdict,
