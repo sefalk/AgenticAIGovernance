@@ -25,6 +25,7 @@ hooks:
     - type: command
       command: 'bash .github/hooks/scripts/documenter-stop.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/documenter-stop.ps1'
+      timeout: 30
 ---
 
 # Documenter Agent (Worker)

@@ -34,10 +34,12 @@ hooks:
     - type: command
       command: 'bash .github/hooks/scripts/test-writer-stop.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/test-writer-stop.ps1'
+      timeout: 300
   PreToolUse:
     - type: command
       command: 'bash .github/hooks/scripts/test-writer-pretooluse.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/test-writer-pretooluse.ps1'
+      timeout: 15
 ---
 
 # Test Writer Agent (Worker)
