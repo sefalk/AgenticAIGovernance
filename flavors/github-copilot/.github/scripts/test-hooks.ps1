@@ -818,6 +818,32 @@ Assert-Deny "git reset --hard is denied" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"git reset --hard HEAD~1"}}'
 
+# --- Git global options before the subcommand (issue #431) -----------------
+# Every git rule was anchored at `git <subcommand>`, so `git -C <path> ...` --
+# the form agents are told to use in multi-root windows -- passed them all.
+$globalOptionDenies = [ordered]@{
+    'git -C <path> push --force'          = 'git -C C:/repo push --force origin x'
+    'git -C <path> branch -D'             = 'git -C C:/repo branch -D foo'
+    'git -c k=v reset --hard'             = 'git -c core.pager=less reset --hard'
+    'git -C <path> add .'                 = 'git -C C:/repo add .'
+    'git --no-pager -C <path> rebase'     = 'git --no-pager -C C:/repo rebase main'
+    'git -C <quoted path> push to main'   = 'git -C \"C:/my repo\" push origin main'
+    'git --work-tree= --git-dir= reset'   = 'git --work-tree=C:/x --git-dir=C:/x/.git reset --hard'
+}
+foreach ($name in $globalOptionDenies.Keys) {
+    Assert-Deny "$name is denied (#431)" `
+        "block-dangerous.ps1" `
+        ('{"tool_name":"runInTerminal","tool_input":{"command":"' + $globalOptionDenies[$name] + '"}}')
+}
+# Control: the normalised unit is still recognised as a data carrier, so a
+# commit message quoting a dangerous command stays data (was a false deny).
+Assert-Silent "git -C <path> commit quoting a dangerous command is not denied (#431)" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"git -C C:/repo commit -m \"docs: never git push --force\""}}'
+Assert-Silent "git -C <path> branch -d is not denied (#431)" `
+    "block-dangerous.ps1" `
+    '{"tool_name":"runInTerminal","tool_input":{"command":"git -C C:/repo branch -d merged"}}'
+
 Assert-Deny "rm -rf broad path is denied" `
     "block-dangerous.ps1" `
     '{"tool_name":"runInTerminal","tool_input":{"command":"rm -rf /tmp/data"}}'
