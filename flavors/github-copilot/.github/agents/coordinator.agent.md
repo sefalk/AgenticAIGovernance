@@ -46,14 +46,17 @@ hooks:
     - type: command
       command: 'bash .github/hooks/scripts/coordinator-pretooluse.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\coordinator-pretooluse.ps1'
+      timeout: 15
   PostToolUse:
     - type: command
       command: 'bash .github/hooks/scripts/coordinator-posttooluse.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\coordinator-posttooluse.ps1'
+      timeout: 15
   Stop:
     - type: command
       command: 'bash .github/hooks/scripts/coordinator-postmerge.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\coordinator-postmerge.ps1'
+      timeout: 30
 ---
 
 # Coordinator Agent

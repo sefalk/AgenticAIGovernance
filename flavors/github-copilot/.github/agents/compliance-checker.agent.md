@@ -13,6 +13,7 @@ hooks:
     - type: command
       command: 'bash .github/hooks/scripts/compliance-checker-stop.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/compliance-checker-stop.ps1'
+      timeout: 30
 ---
 
 # Compliance Checker Agent (Worker)

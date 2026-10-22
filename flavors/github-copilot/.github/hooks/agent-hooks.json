@@ -5,13 +5,13 @@
         "type": "command",
         "command": "bash .github/hooks/scripts/session-context.sh",
         "windows": "powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\session-context.ps1",
-        "timeout": 10
+        "timeout": 15
       },
       {
         "type": "command",
         "command": "bash .github/hooks/scripts/session-mcp-readiness.sh",
         "windows": "powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\session-mcp-readiness.ps1",
-        "timeout": 10
+        "timeout": 15
       }
     ],
     "PreToolUse": [
@@ -19,7 +19,7 @@
         "type": "command",
         "command": "bash .github/hooks/scripts/block-dangerous.sh",
         "windows": "powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\block-dangerous.ps1",
-        "timeout": 5
+        "timeout": 15
       }
     ],
     "PostToolUse": [
@@ -27,7 +27,7 @@
         "type": "command",
         "command": "bash .github/hooks/scripts/scan-secrets.sh",
         "windows": "powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\scan-secrets.ps1",
-        "timeout": 10
+        "timeout": 20
       }
     ],
     "Stop": [

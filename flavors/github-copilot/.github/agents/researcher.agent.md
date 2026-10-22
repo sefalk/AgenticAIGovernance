@@ -17,6 +17,7 @@ hooks:
     - type: command
       command: 'bash .github/hooks/scripts/researcher-pretooluse.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/researcher-pretooluse.ps1'
+      timeout: 15
 ---
 
 # Researcher Agent

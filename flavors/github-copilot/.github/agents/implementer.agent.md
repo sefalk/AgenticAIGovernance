@@ -37,6 +37,7 @@ hooks:
     - type: command
       command: 'bash .github/hooks/scripts/implementer-stop.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/implementer-stop.ps1'
+      timeout: 300
 ---
 
 # Implementer Agent (Worker)

@@ -36,10 +36,12 @@ hooks:
     - type: command
       command: 'bash .github/hooks/scripts/refactorer-stop.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/refactorer-stop.ps1'
+      timeout: 300
   PreToolUse:
     - type: command
       command: 'bash .github/hooks/scripts/refactorer-pretooluse.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/refactorer-pretooluse.ps1'
+      timeout: 15
 ---
 
 # Refactorer Agent (Worker)
