@@ -38,8 +38,8 @@ the chat debug log of the current session:
 
 ```yaml
 cost:
-  schema_version: 6
-  collector: "collect-session-cost.py@6"
+  schema_version: 7
+  collector: "collect-session-cost.py@7"
   available: true
   coverage: full            # full | partial | truncated
   sessions: ["<session-id>"]
@@ -119,6 +119,12 @@ Reading it:
   does not depend on the mechanism, so the claim is dropped rather than
   replaced with another guess. `partial` means the session began after the
   workflow did, so earlier phases were never logged.
+  Truncation is judged on `main.jsonl` alone: its first line must parse and be
+  a `session_start` (#450). Every subagent log carries its own `session_start`
+  and a window reload writes another one mid-log, so a later one certifies
+  nothing; measured, a 163 MB log began with a 469,188-character fragment and
+  was reported `full`. A truncated block adds `earliest_ts`, the epoch-ms
+  timestamp of the first event that survived, so the withheld total can be dated.
 - **The block is a snapshot taken when the documenter finishes.** The
   coordinator's closing turns are not in it.
 - **`requests` counts billed requests only**; requests without the billing
@@ -158,6 +164,13 @@ Reading it:
   fact. The split is computed from the `models.json` price dump the editor
   writes next to the log, named in `rate_card`; without it the kinds are not
   guessed — everything lands in `unexplained` and `rate_card` is `null`.
+  A model can carry several price tiers. Each request is priced at the
+  cheapest tier whose `max_prompt_tokens` holds its prompt (uncached + cached
+  input), and the facts row names it in `price_tier` (#451). On one model
+  `long_context` cost five times `default`; pricing everything at `default`
+  had put 82% of that model's long-prompt bill into `unexplained`. The rule is
+  inferred from a fit on billed requests, not from a specification — which is
+  why the tier is recorded.
 - **`unexplained` is a named field, never a rounding.** Cache-*write* tokens are
   billed and never reported, so on models that charge for them the known kinds
   do not reach the invoice — measured at roughly 19% of a real session. That

@@ -49,11 +49,12 @@ import sys
 from collections.abc import Callable, Iterator
 from typing import Any
 
-SCHEMA_VERSION = 6
-COLLECTOR_VERSION = 6
+SCHEMA_VERSION = 7
+COLLECTOR_VERSION = 7
 # v2: the file accumulates instead of being replaced, so it carries one header
 # per session and every row names the session it came from.
-FACTS_SCHEMA_VERSION = 2
+# v3: every row names the price tier it was priced at (#451).
+FACTS_SCHEMA_VERSION = 3
 ENTITY_SCHEMA_VERSION = 2
 
 NANO_AIU_PER_CREDIT = 1_000_000_000
@@ -229,12 +230,15 @@ def prompt_entities(text: str) -> list[dict[str, Any]] | None:
     return rows
 
 
-def rate_card(session_dir: str) -> dict[str, dict[str, float]] | None:
-    """Per-model token prices, or None when the dump is absent or unusable.
+def rate_card(session_dir: str) -> dict[str, list[dict[str, Any]]] | None:
+    """Per-model price tiers, smallest prompt ceiling first, or None when unusable.
 
     `cache_write_price` is read but unusable: cache-write tokens are billed and
     never reported, which is what leaves a residual on every model that charges
     for them. Inferring the count would mean inventing a rounding rule.
+
+    A model can carry more than `default` -- `long_context` was five times the
+    default on one model (#451) -- and each tier states its `max_prompt_tokens`.
     """
     try:
         with open(os.path.join(session_dir, RATE_CARD_FILE), encoding="utf-8", errors="replace") as handle:
@@ -244,26 +248,49 @@ def rate_card(session_dir: str) -> dict[str, dict[str, float]] | None:
     if not isinstance(models, list):
         return None
 
-    cards: dict[str, dict[str, float]] = {}
+    cards: dict[str, list[dict[str, Any]]] = {}
     for entry in models:
         if not isinstance(entry, dict) or not entry.get("id"):
             continue
         billing = entry.get("billing") or {}
         prices = billing.get("token_prices") or {}
-        default = prices.get("default")
-        if not isinstance(default, dict):
+        if not isinstance(prices.get("default"), dict):
             continue
-        try:
-            cards[str(entry["id"])] = {
-                "input": float(default["input_price"]),
-                "cache_read": float(default["cache_read_price"]),
-                "output": float(default["output_price"]),
-                "batch": float(prices.get("batch_size") or 1_000_000) or 1_000_000.0,
-                "discount": float(billing.get("auto_discount") or 0.0),
-            }
-        except (KeyError, TypeError, ValueError):
-            continue
+        tiers = []
+        for tier_name, tier in prices.items():
+            if not isinstance(tier, dict):
+                continue
+            try:
+                ceiling = tier.get("max_prompt_tokens")
+                tiers.append(
+                    {
+                        "tier": str(tier_name),
+                        "input": float(tier["input_price"]),
+                        "cache_read": float(tier["cache_read_price"]),
+                        "output": float(tier["output_price"]),
+                        "ceiling": float(ceiling) if ceiling is not None else float("inf"),
+                        "batch": float(prices.get("batch_size") or 1_000_000) or 1_000_000.0,
+                        "discount": float(billing.get("auto_discount") or 0.0),
+                    }
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+        if any(t["tier"] == "default" for t in tiers):
+            cards[str(entry["id"])] = sorted(tiers, key=lambda t: (t["ceiling"], t["tier"] != "default"))
     return cards or None
+
+
+def tier_for(tiers: list[dict[str, Any]], prompt_tokens: int) -> dict[str, Any]:
+    """The cheapest tier whose ceiling holds the prompt; the largest if none does.
+
+    Prompt = uncached + cached input. Inferred from a fit on billed requests
+    (#451), not from a specification -- the tier is recorded on the row so the
+    choice can be checked against the invoice.
+    """
+    for tier in tiers:
+        if prompt_tokens <= tier["ceiling"]:
+            return tier
+    return tiers[-1]
 
 
 def _shape_message_count(shape: Any) -> int | None:
@@ -428,7 +455,7 @@ def build_fact(event: dict[str, Any], session: str, log: str, agent: str) -> dic
     }
 
 
-def price(fact: dict[str, Any], cards: dict[str, dict[str, float]] | None) -> None:
+def price(fact: dict[str, Any], cards: dict[str, list[dict[str, Any]]] | None) -> None:
     """Split a request's charge across token kinds, in place.
 
     Verified as an exact identity against `copilotUsageNanoAiu` on every
@@ -436,17 +463,20 @@ def price(fact: dict[str, Any], cards: dict[str, dict[str, float]] | None) -> No
     remainder lands in `nano_unexplained` rather than being spread across the
     kinds that *are* known -- the parts must not appear to sum to the whole.
     """
-    for key in ("nano_input_uncached", "nano_cache_read", "nano_output", "nano_unexplained"):
+    for key in ("nano_input_uncached", "nano_cache_read", "nano_output", "nano_unexplained", "price_tier"):
         fact[key] = None
     nano = fact["nano_aiu"]
     if nano is None:
         return
 
-    card = (cards or {}).get(fact["model"])
-    if card is None:
+    tiers = (cards or {}).get(fact["model"])
+    if not tiers:
         # An unpriced model is fully unexplained, never silently zero.
         fact["nano_unexplained"] = nano
         return
+
+    card = tier_for(tiers, fact["input_uncached"] + fact["cached"])
+    fact["price_tier"] = card["tier"]
 
     scale = NANO_AIU_PER_CREDIT * (1.0 - card["discount"]) / card["batch"]
     fact["nano_input_uncached"] = fact["input_uncached"] * card["input"] * scale
@@ -457,10 +487,12 @@ def price(fact: dict[str, Any], cards: dict[str, dict[str, float]] | None) -> No
     fact["nano_unexplained"] = nano - (fact["nano_input_uncached"] + fact["nano_cache_read"] + fact["nano_output"])
 
 
-def iter_events(path: str) -> Iterator[dict[str, Any]]:
+def iter_events(path: str, head: dict[str, Any] | None = None) -> Iterator[dict[str, Any]]:
     """Yield parsed JSONL entries, skipping unparseable lines.
 
-    Streams the file: a single session log reached 25 MB within a few hours.
+    Streams the file: a single session log reached 163 MB. When ``head`` is
+    given it records whether the first non-empty line parsed and what it was:
+    the size cap cuts mid-line, so a fragment there means the start is gone (#450).
     """
     with open(path, encoding="utf-8", errors="replace") as handle:
         for line in handle:
@@ -470,8 +502,12 @@ def iter_events(path: str) -> Iterator[dict[str, Any]]:
             try:
                 event = json.loads(line)
             except (ValueError, TypeError):
-                continue
+                event = None
+            if head is not None and "type" not in head:
+                head["type"] = event.get("type") if isinstance(event, dict) else None
             if isinstance(event, dict):
+                if head is not None and "earliest_ts" not in head and isinstance(event.get("ts"), int):
+                    head["earliest_ts"] = event["ts"]
                 yield event
 
 
@@ -579,6 +615,7 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
     no_usage = 0
     drifted: dict[str, int] = {}
     drifted_logs: set[str] = set()
+    main_head: dict[str, Any] = {}
 
     for path in log_files(session_dir):
         if not os.path.isfile(path):
@@ -588,13 +625,16 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
         # request still shows up as one -- it happened either way.
         agent_files.append(agent)
         log = os.path.basename(path)
-        for event in iter_events(path):
+        is_main = agent == PARENT
+        for event in iter_events(path, main_head if is_main else None):
             parsed += 1
             span = event.get("spanId")
             if isinstance(span, str):
                 span_kind[span] = str(event.get("type"))
             kind = event.get("type")
-            if kind == "session_start" and session_start is None:
+            # Subagent logs and window reloads write their own session_start;
+            # only main.jsonl's says when the session began (#450).
+            if kind == "session_start" and is_main and session_start is None:
                 session_start = event
             elif kind == "llm_request":
                 requests_seen += 1
@@ -666,11 +706,13 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
             "logs": sorted(drifted_logs),
         }
 
-    if session_start is None:
+    if main_head.get("type") != "session_start":
         # The size cap drops the OLDEST entries, i.e. the plan and Red phases.
         # A total would look complete while being biased downward, so emit none.
-        # The per-agent split inherits that bias and is withheld with it.
+        # The per-agent split inherits that bias and is withheld with it. A
+        # session_start further down is a reload, not the start (#450).
         result["coverage"] = "truncated"
+        result["earliest_ts"] = main_head.get("earliest_ts")
         result["totals"] = None
         result["by_agent"] = None
         # Each entity row is still accurate; only the set of requests behind
@@ -751,6 +793,9 @@ def render(result: dict[str, Any], facts_path: str | None = None, entities_path:
     env = result["environment"]
 
     lines.append(f"  coverage: {result['coverage']}")
+    if "earliest_ts" in result:
+        # Only on a truncated log: dates the first event that survived the cap.
+        lines.append(f"  earliest_ts: {_scalar(result['earliest_ts'])}")
     lines.append(f"  sessions: [{sessions}]")
     lines.append(f"  requests: {_scalar(totals.requests if totals else None)}")
     lines.append(f"  unbilled_requests: {_scalar(totals.unbilled if totals else None)}")
