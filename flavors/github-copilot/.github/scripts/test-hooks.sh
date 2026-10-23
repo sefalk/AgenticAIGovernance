@@ -575,6 +575,41 @@ foreign_case "test-writer denied in the edited repo's own SRC_DIR" \
 foreign_case "test-writer allowed outside the edited repo's own SRC_DIR" \
     test-writer-pretooluse.sh agent/fixture agent/foreign-2 lib src/helper.py silent
 
+# cost-snapshot refreshes the session cost store on every Stop and SubagentStop
+# (issue #457). It never decides anything; the store it wrote is the subject.
+echo "## cost-snapshot.sh"
+if [ -f "$HOOK_DIR/cost-snapshot.sh" ]; then
+    cs_dir=$(mktemp -d) || { echo "FATAL  no fixture directory" >&2; exit 1; }
+    cs_sid=1c0ffee0-0000-4000-8000-000000000457
+    cs_chat="$cs_dir/ws/GitHub.copilot-chat"
+    mkdir -p "$cs_chat/debug-logs/$cs_sid" "$cs_chat/transcripts" "$cs_dir/repo/.github/hooks/scripts" "$cs_dir/repo/.github/scripts"
+    printf '%s\n%s\n' \
+        '{"ts":1785760263230,"type":"session_start","spanId":"s0","attrs":{"copilotVersion":"0.71.0","vscodeVersion":"1.143.1"}}' \
+        '{"ts":1785760264230,"type":"llm_request","spanId":"r1","parentSpanId":"s0","status":"ok","attrs":{"model":"claude-opus-5","debugName":"panel/editAgent","inputTokens":1000,"cachedTokens":400,"outputTokens":50,"copilotUsageNanoAiu":1500000000}}' \
+        > "$cs_chat/debug-logs/$cs_sid/main.jsonl"
+    cp "$HOOK_DIR/cost-snapshot.sh" "$HOOK_DIR/_common.sh" "$cs_dir/repo/.github/hooks/scripts/"
+    cp "$GITHUB_DIR/scripts/collect-session-cost.py" "$cs_dir/repo/.github/scripts/"
+    cs_run() {
+        ( cd "$cs_dir/repo" && printf '%s' "$1" | AF_COST_SNAPSHOT_SYNC=1 bash .github/hooks/scripts/cost-snapshot.sh )
+    }
+    cs_state="$cs_dir/repo/.github/logs/cost/sessions/$cs_sid.state.json"
+
+    cs_out=$(cs_run '{"hook_event_name":"Stop","session_id":"'"$cs_sid"'","transcript_path":"'"$cs_chat/transcripts/$cs_sid.jsonl"'"}')
+    assert_true "cost-snapshot never decides anything" "$([ "$cs_out" = '{}' ] && echo 1 || echo 0)" "got: $cs_out"
+    assert_contains "cost-snapshot refreshes the session store" "$(cat "$cs_state" 2>/dev/null)" '"store_version"' "no state file"
+
+    rm -rf "$cs_dir/repo/.github/logs"
+    cs_out=$(cs_run '{"hook_event_name":"Stop","session_id":"../'"$cs_sid"'","transcript_path":"'"$cs_chat/transcripts/$cs_sid.jsonl"'"}')
+    assert_true "a session id carrying a path writes nothing" \
+        "$([ "$cs_out" = '{}' ] && [ ! -e "$cs_state" ] && echo 1 || echo 0)" "got: $cs_out"
+
+    cs_out=$(cs_run '{"hook_event_name":"Stop"}')
+    assert_true "cost-snapshot without session information stays silent" "$([ "$cs_out" = '{}' ] && echo 1 || echo 0)" "got: $cs_out"
+    rm -rf "$cs_dir"
+else
+    assert_true "cost-snapshot.sh ships" 0 "hooks/scripts/cost-snapshot.sh is missing"
+fi
+
 # The planner gained `editFiles` so it can answer the plan review by revising
 # its own document (issue #235). That widens the write surface of the agent
 # with the narrowest charter, and this allowlist is the only thing holding it
