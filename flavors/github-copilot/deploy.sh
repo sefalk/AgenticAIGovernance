@@ -186,6 +186,15 @@ source_commit() {
 }
 AF_COMMIT="$(source_commit "$AF_ROOT")"
 
+# Files git ignores in a tracked source are runtime state, not payload (#454).
+# Same rule as deploy_core.git_ignored_files and deploy.ps1 Get-SourceIgnoredFiles.
+declare -A SOURCE_IGNORED
+if command -v git >/dev/null 2>&1 && git -C "$AF_ROOT" ls-files --error-unmatch -- VERSION >/dev/null 2>&1; then
+    while IFS= read -r -d '' _ignored; do
+        SOURCE_IGNORED["$AF_ROOT/$_ignored"]=1
+    done < <(git -C "$AF_ROOT" ls-files --others --ignored --exclude-standard -z -- .github .vscode 2>/dev/null)
+fi
+
 DEPLOYED_VERSION_FILE="$TARGET_GITHUB/.af-version"
 DEPLOYED_INFO=""
 if [[ -f "$DEPLOYED_VERSION_FILE" ]]; then
@@ -839,7 +848,11 @@ test_notebook_git_filter_config() {
 # Python bytecode caches regenerate whenever a hook/script test runs; they must
 # never enter the deploy payload. Emit only deployable files (null-delimited).
 find_deployable_files() {
-    find "$1" -type f -not -path '*/__pycache__/*' -not -name '*.pyc' -not -name '*.pyo' -print0
+    local f
+    while IFS= read -r -d '' f; do
+        [[ -n "${SOURCE_IGNORED[$f]+x}" ]] && continue
+        printf '%s\0' "$f"
+    done < <(find "$1" -type f -not -path '*/__pycache__/*' -not -name '*.pyc' -not -name '*.pyo' -print0)
 }
 get_af_source_files() {
     # Outputs relative paths under .github/ (one per line)

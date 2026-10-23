@@ -489,8 +489,25 @@ $script:BackupCount = 0
 # ── Collect all source files ───────────────────────────────────────────────
 # Python bytecode caches regenerate whenever a hook/script test runs; they must
 # never enter the deploy payload. Exclude them from every file enumeration.
+# Files git ignores in a tracked source are runtime state, not payload (#454):
+# same rule as deploy_core.git_ignored_files, judged only when VERSION is tracked.
+function Get-SourceIgnoredFiles([string]$Root) {
+    $set = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return ,$set }
+    $ErrorActionPreference = 'Continue'
+    & git -C $Root ls-files --error-unmatch -- VERSION *> $null
+    if ($LASTEXITCODE -ne 0) { return ,$set }
+    $out = & git -C $Root -c core.quotePath=false ls-files --others --ignored --exclude-standard -- .github .vscode 2>$null
+    if ($LASTEXITCODE -ne 0) { return ,$set }
+    foreach ($rel in @($out)) {
+        if ($rel) { [void]$set.Add([System.IO.Path]::GetFullPath((Join-Path $Root $rel))) }
+    }
+    return ,$set
+}
+$script:SourceIgnored = Get-SourceIgnoredFiles -Root $AFRoot
 function Test-DeployIgnored([string]$FullPath) {
-    return ($FullPath -match '[\\/]__pycache__[\\/]') -or ($FullPath -match '\.py[co]$')
+    return ($FullPath -match '[\\/]__pycache__[\\/]') -or ($FullPath -match '\.py[co]$') -or
+        $script:SourceIgnored.Contains($FullPath)
 }
 function Get-AFSourceFiles {
     # Returns relative paths under .github/ (excludes vscode files)
