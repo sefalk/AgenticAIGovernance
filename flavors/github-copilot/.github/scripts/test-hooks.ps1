@@ -3943,6 +3943,70 @@ Assert-True "the compliance-checker registers the hook as SubagentStop" `
 
 Write-Output ""
 
+# ── 6h. The session cost store keeps up with the log (issue #457) ────────
+#
+# The debug log loses its head at a moment nobody controls, and the only
+# extraction used to run when a workflow finished. cost-snapshot refreshes the
+# session store on every Stop and SubagentStop. It never decides anything, so
+# its verdict is always silence; what is asserted is that the store was written.
+
+Write-Output "## cost-snapshot.ps1"
+
+$csSid = '1c0ffee0-0000-4000-8000-000000000457'
+$csBase = Join-Path ([System.IO.Path]::GetTempPath()) "af457-$(Get-Random)"
+$csChat = Join-Path $csBase 'ws/GitHub.copilot-chat'
+$csLogDir = Join-Path $csChat "debug-logs/$csSid"
+New-Item -ItemType Directory -Path $csLogDir -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $csChat 'transcripts') -Force | Out-Null
+$csStart = '{"ts":1785760263230,"type":"session_start","spanId":"s0","attrs":{"copilotVersion":"0.71.0","vscodeVersion":"1.143.1"}}'
+$csReq = '{"ts":1785760264230,"type":"llm_request","spanId":"r1","parentSpanId":"s0","status":"ok","attrs":{"model":"claude-opus-5","debugName":"panel/editAgent","inputTokens":1000,"cachedTokens":400,"outputTokens":50,"copilotUsageNanoAiu":1500000000}}'
+[IO.File]::WriteAllText((Join-Path $csLogDir 'main.jsonl'), "$csStart`n$csReq`n")
+$csJson = @{
+    hook_event_name = 'Stop'
+    session_id      = $csSid
+    transcript_path = (Join-Path $csChat "transcripts/$csSid.jsonl")
+} | ConvertTo-Json -Compress
+$csCollector = @{
+    '.github/scripts/collect-session-cost.py' = (Get-Content (Join-Path $githubDir 'scripts/collect-session-cost.py') -Raw)
+    '.github/hooks/scripts/cost-snapshot.py'  = (Get-Content (Join-Path $scriptDir 'cost-snapshot.py') -Raw -ErrorAction SilentlyContinue)
+}
+
+$csShips = Test-Path (Join-Path $scriptDir 'cost-snapshot.ps1')
+Assert-True "cost-snapshot.ps1 ships" $csShips "hooks/scripts/cost-snapshot.ps1 is missing"
+if ($csShips) {
+$env:AF_COST_SNAPSHOT_SYNC = '1'
+try {
+    $cs = Invoke-Hook -Script 'cost-snapshot.ps1' -JsonInput $csJson -Branch 'agent/fixture' `
+        -StubFiles $csCollector -ReadBack ".github/logs/cost/sessions/$csSid.state.json"
+    Assert-True "cost-snapshot never decides anything" `
+        ((Resolve-Decision $cs.Output $cs.ExitCode) -eq 'silent') "got: $($cs.Output) (exit $($cs.ExitCode))"
+    Assert-Contains "cost-snapshot refreshes the session store" `
+        $cs.ReadBack '"store_version"' "no state file under .github/logs/cost/sessions"
+
+    # The session id becomes a file name; one carrying a path must not.
+    $csEvil = @{ hook_event_name = 'Stop'; session_id = "..\$csSid"; transcript_path = (Join-Path $csChat "transcripts/$csSid.jsonl") } | ConvertTo-Json -Compress
+    $cs = Invoke-Hook -Script 'cost-snapshot.ps1' -JsonInput $csEvil -Branch 'agent/fixture' `
+        -StubFiles $csCollector -ReadBack ".github/logs/cost/sessions/$csSid.state.json"
+    Assert-True "a session id carrying a path writes nothing" `
+        ((Resolve-Decision $cs.Output $cs.ExitCode) -eq 'silent' -and $null -eq $cs.ReadBack) "got: $($cs.Output); store: $($cs.ReadBack)"
+} finally {
+    Remove-Item Env:AF_COST_SNAPSHOT_SYNC -ErrorAction SilentlyContinue
+    Remove-Item $csBase -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Assert-Silent "cost-snapshot without session information stays silent" `
+    "cost-snapshot.ps1" '{"hook_event_name":"Stop"}'
+}
+Remove-Item $csBase -Recurse -Force -ErrorAction SilentlyContinue
+
+$csHooks = Get-Content (Join-Path $githubDir 'hooks/agent-hooks.json') -Raw | ConvertFrom-Json
+foreach ($csEvent in @('Stop', 'SubagentStop')) {
+    $csDeclared = @($csHooks.hooks.$csEvent | Where-Object { [string]$_.windows -match 'cost-snapshot\.ps1' -and [string]$_.command -match 'cost-snapshot\.sh' })
+    Assert-True "cost-snapshot is declared globally on $csEvent" ($csDeclared.Count -eq 1) "agent-hooks.json declares it $($csDeclared.Count) time(s) on $csEvent"
+}
+
+Write-Output ""
+
 # ── 7. Edge cases ────────────────────────────────────────────────────────
 
 Write-Output "## Edge cases"

@@ -360,6 +360,9 @@ try {
             $costDir = Join-Path (Split-Path -Parent $logPath) 'cost'
             $collectorArgs += @('--facts-out', (Join-Path $costDir "$workflowId.facts.ndjson"))
             $collectorArgs += @('--entities-out', (Join-Path $costDir "$workflowId.entities.ndjson"))
+            # The block is the union of every snapshot cost-snapshot took, so a
+            # log that lost its head since then still yields its total (#457).
+            $collectorArgs += @('--store', (Join-Path $costDir 'sessions'))
 
             $block = & $python $collector @collectorArgs 2>$null
             if ($LASTEXITCODE -eq 0 -and $block) {

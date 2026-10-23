@@ -42,9 +42,9 @@ $ps = 'powershell -ExecutionPolicy Bypass -File '
 $good = @()
 $good += New-Invocation 1 'PreToolUse' @(($ps + '.github\\hooks\\scripts\\block-dangerous.ps1'))
 $good += New-Invocation 2 'PostToolUse' @(($ps + '.github\\\\hooks\\\\scripts\\\\scan-secrets.ps1'))
-$good += New-Invocation 3 'SubagentStop' @(($ps + '.github/hooks/scripts/implementer-stop.ps1'))
+$good += New-Invocation 3 'SubagentStop' @(($ps + '.github/hooks/scripts/implementer-stop.ps1'), ($ps + '.github/hooks/scripts/cost-snapshot.ps1'))
 $good += New-Invocation 4 'PreToolUse' @(($ps + '.github/hooks/scripts/test-writer-pretooluse.ps1'), 'bash .github/hooks/scripts/block-dangerous.sh')
-$good += New-Invocation 5 'Stop' @(($ps + '.github\\hooks\\scripts\\stop-tests.ps1'))
+$good += New-Invocation 5 'Stop' @(($ps + '.github\\hooks\\scripts\\stop-tests.ps1'), ($ps + '.github\\hooks\\scripts\\cost-snapshot.ps1'))
 $goodLog = Join-Path $fixtureDir 'good.log'
 [IO.File]::WriteAllLines($goodLog, $good)
 
