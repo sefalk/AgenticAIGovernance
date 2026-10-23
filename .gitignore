@@ -14,3 +14,7 @@ __pycache__/
 # invocation here, so this file is a cache, not an artifact. Root-anchored on
 # purpose: the payload's own flavors/github-copilot/.vscode/ stays tracked.
 /.vscode/
+
+# This repository's own working config, read by producer hooks deployed in a
+# consumer when they judge an edit landing here (#456). Per machine, not payload.
+/.github/af-env.conf

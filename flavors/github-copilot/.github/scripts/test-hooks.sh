@@ -538,6 +538,43 @@ run_case "existing file allowed on agent branch" refactorer-pretooluse.sh agent/
 run_case "file creation denied on agent branch" refactorer-pretooluse.sh agent/fixture  "$SRC_CREATE" deny
 run_case "running a task is not a file creation" refactorer-pretooluse.sh agent/fixture '{"tool_name":"run_task","tool_input":{"id":"shell: tests: all","workspaceFolder":"/repo"}}' silent
 
+# In a multi-root workspace the deployed hooks of one repository fire for edits
+# in another. They used to prove the branch, and resolve SRC_DIR, of the
+# repository the hook script lives in (issue #456). Each case pairs the hook's
+# own fixture (the branch argument) with a foreign repository the edit lands in.
+#
+# foreign_case <name> <hook> <hook-branch> <foreign-branch> <foreign-SRC_DIR|-> <rel path> <expect>
+foreign_case() {
+    local name="$1" hook="$2" hook_branch="$3" foreign_branch="$4" src="$5" rel="$6" expect="$7"
+    local foreign json
+    foreign=$(mktemp -d) || { echo "FATAL  no foreign fixture directory" >&2; exit 1; }
+    git -C "${foreign:?}" init -q
+    git -C "$foreign" checkout -q -b "$foreign_branch"
+    if [ "$src" != "-" ]; then
+        mkdir -p "$foreign/.github"
+        printf 'SRC_DIR=%s\n' "$src" > "$foreign/.github/af-env.conf"
+    fi
+    json='{"tool_name":"replace_string_in_file","tool_input":{"filePath":"'"$foreign/$rel"'","oldString":"a","newString":"b"}}'
+    run_case "$name" "$hook" "$hook_branch" "$json" "$expect"
+    rm -rf "$foreign"
+}
+
+echo "## producer gates judge the edited file's repository (#456)"
+foreign_case "test-writer denied when the edited repo is on dev" \
+    test-writer-pretooluse.sh agent/fixture dev - tests/test_x.py deny
+foreign_case "refactorer denied when the edited repo is on dev" \
+    refactorer-pretooluse.sh agent/fixture dev - src/main.py deny
+foreign_case "test-writer allowed when the edited repo is on agent/*" \
+    test-writer-pretooluse.sh dev agent/foreign-1 - tests/test_x.py silent
+foreign_case "refactorer allowed when the edited repo is on agent/*" \
+    refactorer-pretooluse.sh dev agent/foreign-1 - src/main.py silent
+foreign_case "test-writer denied in the inherited SRC_DIR" \
+    test-writer-pretooluse.sh agent/fixture agent/foreign-1 - src/main.py deny
+foreign_case "test-writer denied in the edited repo's own SRC_DIR" \
+    test-writer-pretooluse.sh agent/fixture agent/foreign-2 lib lib/core.py deny
+foreign_case "test-writer allowed outside the edited repo's own SRC_DIR" \
+    test-writer-pretooluse.sh agent/fixture agent/foreign-2 lib src/helper.py silent
+
 # The planner gained `editFiles` so it can answer the plan review by revising
 # its own document (issue #235). That widens the write surface of the agent
 # with the narrowest charter, and this allowlist is the only thing holding it

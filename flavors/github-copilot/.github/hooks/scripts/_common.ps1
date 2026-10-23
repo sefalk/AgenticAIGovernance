@@ -340,6 +340,134 @@ function Get-AfWritePaths {
     return @($paths | Select-Object -Unique)
 }
 
+# ── Repository of an edited file (issue #456) ────────────────────────────
+#
+# In a multi-root workspace the deployed hooks of one repository fire for edits
+# in every other one. Proving the branch of the repository the hook script sits
+# in then judges the wrong checkout: an edit in a second repository on `dev`
+# passed because the first was on agent/*, and the reverse was refused. The
+# edited file names its own repository, so that is the one a producer gate asks.
+#
+# The path inside the repository comes from git (--show-prefix), not from
+# comparing two absolute paths: a short 8.3 name or a different drive-letter
+# case would make a string prefix test miss a file that is plainly inside.
+
+$script:AfFileRepoCache = @{}
+$script:AfDeployingTops = $null
+
+function Get-AfFileRepo {
+    <#
+    .SYNOPSIS
+        Root and repository-relative path of the file a write targets, or $null.
+    .DESCRIPTION
+        The file may not exist yet (create_file), so the nearest existing
+        ancestor directory is asked. $null when the path does not parse or
+        lies outside any repository; the caller falls back to the deploying
+        repository, which is what every gate did before.
+    #>
+    param([string]$Path)
+
+    try { $full = [System.IO.Path]::GetFullPath($Path) } catch { return $null }
+    if ($full.Length -gt 3) { $full = $full.TrimEnd('\', '/') }
+    $dir = Split-Path -Parent $full
+    $tail = @(Split-Path -Leaf $full)
+    while ($dir -and -not (Test-Path -LiteralPath $dir -PathType Container)) {
+        $tail = @(Split-Path -Leaf $dir) + $tail
+        $dir = Split-Path -Parent $dir
+    }
+    if (-not $dir) { return $null }
+
+    if (-not $script:AfFileRepoCache.ContainsKey($dir)) {
+        $out = @(git -C $dir rev-parse --show-toplevel --show-prefix 2>$null)
+        $script:AfFileRepoCache[$dir] = if ($LASTEXITCODE -eq 0 -and $out.Count -ge 1 -and $out[0]) { $out } else { $null }
+    }
+    $hit = $script:AfFileRepoCache[$dir]
+    if (-not $hit) { return $null }
+    $prefix = if ($hit.Count -ge 2 -and $hit[1]) { $hit[1] } else { '' }
+    return [pscustomobject]@{ Root = $hit[0]; Rel = $prefix + ($tail -join '/') }
+}
+
+function Test-AfDeployingRepo {
+    <#
+    .SYNOPSIS
+        True if Root is the repository this hook is deployed in, or its active worktree.
+    #>
+    param([string]$Root)
+
+    if (-not $Root) { return $true }
+    if ($null -eq $script:AfDeployingTops) {
+        $script:AfDeployingTops = @(
+            foreach ($base in @($script:AfMainRoot, $script:AfCodeRoot)) {
+                git -C $base rev-parse --show-toplevel 2>$null
+            }
+        )
+    }
+    foreach ($top in $script:AfDeployingTops) {
+        if ([string]::Equals($top, $Root, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
+function Get-AfRepoConfig {
+    <#
+    .SYNOPSIS
+        A config value for the repository at Root.
+    .DESCRIPTION
+        The deploying repository reads Get-AfConfig, so AF_CONF_PATH keeps its
+        meaning. Any other repository reads its own .github/af-env.conf; one
+        without a config inherits the deploying repository's, so a gate is never
+        weaker in a second repository than it was before this lookup existed.
+    #>
+    param(
+        [string]$Root,
+        [Parameter(Mandatory = $true)][string]$Key,
+        [string]$Default = ''
+    )
+    $conf = if ($Root) { Join-Path $Root '.github/af-env.conf' } else { '' }
+    if ((Test-AfDeployingRepo $Root) -or -not (Test-Path -LiteralPath $conf)) {
+        return Get-AfConfig -Key $Key -Default $Default
+    }
+    $pattern = '^{0}=(.+)$' -f [regex]::Escape($Key)
+    $m = Select-String -LiteralPath $conf -Pattern $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($m) {
+        $v = $m.Matches[0].Groups[1].Value.Trim()
+        if ($v) { return $v }
+    }
+    return $Default
+}
+
+function Get-AfBranchLabel {
+    <#
+    .SYNOPSIS
+        Current branch of the repository at Root, '(detached HEAD)', or '' outside a repository.
+    #>
+    param([string]$Root)
+    $branch = git -C $Root branch --show-current 2>$null
+    if (-not $branch -and (git -C $Root rev-parse --is-inside-work-tree 2>$null) -eq 'true') {
+        $branch = '(detached HEAD)'
+    }
+    return $branch
+}
+
+function Get-AfWriteTargets {
+    <#
+    .SYNOPSIS
+        Every path a write-tool payload refers to, with the repository it lands in.
+    .DESCRIPTION
+        Root falls back to the deploying code root when the path is outside any
+        repository; Rel is then $null and the caller keeps its old comparison.
+    #>
+    param($ToolInput)
+    foreach ($p in @(Get-AfWritePaths $ToolInput)) {
+        $repo = Get-AfFileRepo $p
+        [pscustomobject]@{
+            Path = $p
+            Root = if ($repo) { $repo.Root } else { $script:AfCodeRoot }
+            Rel  = if ($repo) { $repo.Rel } else { $null }
+        }
+    }
+}
+
 # ── Provenance marker detection ──────────────────────────────────────────
 #
 # `instructions/provenance.instructions.md` puts a Python marker *after* the
