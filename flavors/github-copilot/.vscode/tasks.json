@@ -257,6 +257,15 @@
       "runOptions": { "instanceLimit": 1 }
     },
     {
+      "label": "metrics: session cost",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python.exe",
+      "args": [".github/scripts/collect-session-cost.py", "--report", ".github/logs/cost/sessions"],
+      "detail": "Total cost across the session store: credits_complete apart from credits_lower_bound (#457)",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
       "label": "pip: install dev",
       "type": "shell",
       "command": ".github/scripts/run-deps.ps1",
