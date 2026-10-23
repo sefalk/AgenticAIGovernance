@@ -1623,6 +1623,76 @@ Assert-Silent "refactorer can run_task" `
 
 Write-Output ""
 
+# ── 4a. Multi-root jurisdiction (issue #456) ─────────────────────────────
+
+Write-Output "## producer gates judge the edited file's repository (#456)"
+
+# In a multi-root workspace the deployed hooks of one repository fire for
+# edits in another. They used to prove the branch, and resolve SRC_DIR, of the
+# repository the hook script lives in -- so an edit in a second repository was
+# judged by the first one's checkout. Every case pairs the hook's own fixture
+# (-Branch) with a second, foreign repository the edit actually lands in.
+function New-ForeignRepo {
+    param([string]$Branch, [string]$SrcDir)
+    $dir = Join-Path ([System.IO.Path]::GetTempPath()) "af-foreign-$(Get-Random)"
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    git -C $dir init -q 2>&1 | Out-Null
+    git -C $dir checkout -q -b $Branch 2>&1 | Out-Null
+    if ($SrcDir) {
+        New-Item -ItemType Directory -Path (Join-Path $dir '.github') -Force | Out-Null
+        Set-Content -Path (Join-Path $dir '.github/af-env.conf') -Value "SRC_DIR=$SrcDir" -Encoding ASCII
+    }
+    return $dir
+}
+
+function New-EditJson {
+    param([string]$Path)
+    @{ tool_name = 'replace_string_in_file'; tool_input = @{ filePath = $Path; oldString = 'a'; newString = 'b' } } |
+        ConvertTo-Json -Compress
+}
+
+$foreign = New-ForeignRepo -Branch 'dev'
+try {
+    $foreignTest = New-EditJson (Join-Path $foreign 'tests/test_x.py')
+    Assert-Deny "test-writer denied when the edited repo is on dev, though the hook's repo is on agent/*" `
+        "test-writer-pretooluse.ps1" $foreignTest -Branch $agentBranch
+    Assert-Deny "refactorer denied when the edited repo is on dev, though the hook's repo is on agent/*" `
+        "refactorer-pretooluse.ps1" $foreignTest -Branch $agentBranch
+} finally {
+    Remove-Item $foreign -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# The control: the fix is "judge the right repository", not "deny more".
+$foreign = New-ForeignRepo -Branch 'agent/foreign-1'
+try {
+    $foreignTest = New-EditJson (Join-Path $foreign 'tests/test_x.py')
+    Assert-Silent "test-writer allowed when the edited repo is on agent/*, though the hook's repo is on dev" `
+        "test-writer-pretooluse.ps1" $foreignTest -Branch 'dev'
+    Assert-Silent "refactorer allowed when the edited repo is on agent/*, though the hook's repo is on dev" `
+        "refactorer-pretooluse.ps1" $foreignTest -Branch 'dev'
+
+    # Without a config of its own, the foreign repo inherits the deploying
+    # repo's SRC_DIR -- never weaker than before.
+    Assert-Deny "test-writer denied in the edited repo's SRC_DIR inherited from the deploying config" `
+        "test-writer-pretooluse.ps1" (New-EditJson (Join-Path $foreign "$srcDir/main.py")) -Branch $agentBranch
+} finally {
+    Remove-Item $foreign -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+$foreign = New-ForeignRepo -Branch 'agent/foreign-2' -SrcDir 'lib'
+try {
+    Assert-Deny "test-writer denied in the SRC_DIR the edited repo's own config names" `
+        "test-writer-pretooluse.ps1" (New-EditJson (Join-Path $foreign 'lib/core.py')) -Branch $agentBranch
+    # The control: the repo's own config replaces the deploying one, so the
+    # deploying SRC_DIR is not production code there.
+    Assert-Silent "test-writer allowed outside the edited repo's own SRC_DIR" `
+        "test-writer-pretooluse.ps1" (New-EditJson (Join-Path $foreign "$srcDir/helper.py")) -Branch $agentBranch
+} finally {
+    Remove-Item $foreign -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Output ""
+
 # ── 4b. planner-pretooluse.ps1 ───────────────────────────────────────────
 
 Write-Output "## planner-pretooluse.ps1"
