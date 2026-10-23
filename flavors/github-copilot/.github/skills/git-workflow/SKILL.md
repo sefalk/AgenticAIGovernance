@@ -306,9 +306,9 @@ trigger for adding this guard.
 Blocks commits that stage a `.vscode/tasks.json` which is not parseable as
 strict JSON (comments, trailing commas).
 
-**Rationale:** VS Code accepts JSONC there, but the `createAndRunTask` agent
-tool does not — a single `//` line silently disables the documented fallback
-execution path for agents without terminal access. Authoring rules and where
+**Rationale:** VS Code accepts JSONC there, but the `run_task` gate in
+`block-dangerous` does not — a single `//` line makes every task launch
+unresolvable, so each one asks for a human decision. Authoring rules and where
 the knowledge belongs instead: `instructions/tooling.instructions.md`.
 
 - **Override (one-off):** `ALLOW_JSONC=1 git commit -m "..."`.

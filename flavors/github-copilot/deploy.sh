@@ -1426,6 +1426,27 @@ if [[ -f "$TARGET_DIR/pyproject.toml" ]] && ! grep -qF 'af_test_log' "$TARGET_DI
     echo '          pyproject.toml [tool.pytest.ini_options]: pythonpath = [".github/scripts"], addopts = "-p af_test_log"'
 fi
 
+# ── af-command registration (#445) ─────────────────────────────────────────────────────────
+# Agents reference `af-command/...`, so the key decides; .code-workspace is JSONC, so text, not a parser.
+af_command_found=false
+for f in "$TARGET_DIR/.vscode/mcp.json" "$TARGET_DIR"/*.code-workspace "$(dirname "$TARGET_DIR")"/*.code-workspace; do
+    if [[ -f "$f" ]] && grep -qE -e '"af-command"[[:space:]]*:[[:space:]]*\{' "$f"; then
+        af_command_found=true
+        break
+    fi
+done
+if [[ "$af_command_found" == "false" ]]; then
+    echo ""
+    echo "  NOTE    af-command is not registered -- argument-bearing script runs have no route (#445, #60):"
+    echo '          add "af-command": {"type": "stdio", "command": "<venv>/Scripts/af-command-mcp.exe"} under'
+    echo '          servers in .vscode/mcp.json or settings.mcp.servers in your .code-workspace'
+    echo '          (a user-level registration is not visible from here)'
+fi
+
+echo ""
+echo "  NOTE    AF supports the VS Code Local harness only: in the Copilot harness its hooks and guards"
+echo "          are unverified (#443, #447). Pick Local in the chat's session target."
+
 # Prune stale backups from previous deploy runs
 prune_old_backups "$TARGET_DIR" "$BACKUP_PRUNE_DAYS" "$BACKUP_DIR"
 

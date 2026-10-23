@@ -5,7 +5,6 @@ description: 'Workflow compliance watchdog. Invoked as mandatory bookend (pre-fl
 user-invocable: false
 tools:
   - search/listDirectory
-  - search/changes
   - read/readFile
   - read/problems
 hooks:
@@ -13,6 +12,7 @@ hooks:
     - type: command
       command: 'bash .github/hooks/scripts/compliance-checker-stop.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/compliance-checker-stop.ps1'
+      timeout: 30
 ---
 
 # Compliance Checker Agent (Worker)

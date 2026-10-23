@@ -68,6 +68,7 @@ $script:hookCounts = @{}        # EventName -> set of hook counts seen
 $script:unattributed = @()      # Running: lines that named no hook script
 $script:perCall = @{}           # log|event|seq -> script names run in that one invocation
 $script:begun = @{}             # log|event|seq -> invocation whose Executing line is in the log
+$script:timeouts = @()          # 'script after Ns' per HookExecutor timeout line
 
 foreach ($logFile in $hookLogs) {
     $sessionDir = $logFile.Directory.Parent.Parent.Parent.Name  # session timestamp
@@ -83,6 +84,15 @@ foreach ($logFile in $hookLogs) {
     }
 
     foreach ($line in $lines) {
+        # A timed-out hook let the tool call through with no decision; its own
+        # completion line can still read Success, so only this line is reliable (#434).
+        if ($line -match '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+ \[info\] \[HookExecutor\] Hook command timed out after (\d+)s: (.+)$') {
+            $limit = $Matches[1]
+            $timedOut = $Matches[2] -replace '\\+', '/'
+            $name = if ($timedOut -match 'hooks/scripts/([^/\s"]+\.(?:ps1|sh))') { $Matches[1] } else { $timedOut }
+            $script:timeouts += "$name after ${limit}s"
+            continue
+        }
         # Parse: YYYY-MM-DD HH:MM:SS.mmm [level] [#NNN] [EventName] message
         if ($line -match '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+ \[info\] \[#(\d+)\] \[(\w+)\] (.+)$') {
             $seqNum = $Matches[1]
@@ -240,6 +250,18 @@ if ($script:failures -eq 0) {
     $checksPassed++
 } else {
     Write-Output "  FAIL  $($script:failures) hook failure(s) detected"
+    $checksFailed++
+}
+
+# Check 4b: No timeouts -- a guard that ran out of time decided nothing (#434)
+if ($script:timeouts.Count -eq 0) {
+    Write-Output "  PASS  No hook timed out"
+    $checksPassed++
+} else {
+    Write-Output "  FAIL  $($script:timeouts.Count) hook run(s) timed out; each let its tool call through unchecked:"
+    foreach ($t in ($script:timeouts | Group-Object | Sort-Object Count -Descending | Select-Object -First 5)) {
+        Write-Output "        $($t.Name) ($($t.Count)x)"
+    }
     $checksFailed++
 }
 

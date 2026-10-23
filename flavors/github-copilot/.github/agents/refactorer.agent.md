@@ -8,14 +8,12 @@ tools:
   - search/textSearch
   - search/fileSearch
   - search/listDirectory
-  - search/changes
   - search/usages
   - read/readFile
   - read/problems
   - todo
   - execute/runTests
   - execute/runTask
-  - execute/createAndRunTask
   - af-command/run_script
   - af-command/list_scripts
   - execute/testFailure
@@ -36,10 +34,12 @@ hooks:
     - type: command
       command: 'bash .github/hooks/scripts/refactorer-stop.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/refactorer-stop.ps1'
+      timeout: 300
   PreToolUse:
     - type: command
       command: 'bash .github/hooks/scripts/refactorer-pretooluse.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/refactorer-pretooluse.ps1'
+      timeout: 15
 ---
 
 # Refactorer Agent (Worker)
@@ -134,10 +134,8 @@ Consult the **human-escalation** skill for the full halt protocol.
    when you finish. Running it yourself wastes ~20 minutes.
 
 **Rule:** Use `run_task` for `tests: domain`. Use `runTests` for file-scoped
-runs. `createAndRunTask` is for invocations a fixed label cannot express — not a
-lighter-scrutiny route around the terminal you do not have. The same PreToolUse
-classifier inspects it, and it may only invoke scripts under
-`AF_TASK_SCRIPT_DIRS`; a bare binary or an inline `-Command` payload is denied.
+runs. An invocation no fixed label expresses goes through `af-command`'s
+`run_script`; `createAndRunTask` is removed and denied (#60).
 Accept the stop hook as your full-suite validation.
 
 The SubagentStop hard gate also enforces Python quality on changed source files

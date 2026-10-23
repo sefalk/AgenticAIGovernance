@@ -7,6 +7,12 @@
 >
 > Tool identifiers match the official VS Code built-in tools reference:
 > https://code.visualstudio.com/docs/copilot/reference/copilot-vscode-features#_chat-tools
+>
+> **Local harness only (#443).** These are Local-harness names, verified by
+> probing what a Local subagent receives. The Agent Customizations editor may
+> flag the `pylance-mcp-server/*` names: in Local they resolve (as
+> `mcp_pylance_mcp_s_*`), so the flag is cosmetic. `search/changes` does not
+> resolve and is assigned to no agent. The Copilot harness is unverified (#447).
 
 ## Tool-Agent Matrix
 
@@ -19,7 +25,7 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 | `search/textSearch` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `search/fileSearch` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `search/listDirectory` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `search/changes` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ |
+| `search/changes` | R | — | — | — | — | — | — | — | — | — | — | — |
 | `search/usages` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
 | `read/readFile` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `read/problems` | R | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -30,7 +36,6 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 | **Execution** | | | | | | | | | | | | |
 | `execute/runTests` | X | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
 | `execute/runTask` | X | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — |
-| `execute/createAndRunTask` | X | ✅ | — | — | — | ✅ | ✅ | ✅ | — | — | — | — |
 | `execute/testFailure` | X | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — |
 | `execute/runInTerminal` | X | ✅ | — | — | — | — | — | — | — | — | — | — |
 | `execute/getTerminalOutput` | X | ✅ | — | — | — | — | — | — | — | — | — | — |
@@ -68,7 +73,8 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 | `newWorkspace` | Not relevant to development workflows. | Scope creep |
 | `vscode/installExtension` | Extension management is a human decision. | Unreviewed extensions, supply-chain risk |
 | `vscode/runCommand` | Too broad — can invoke any VS Code command. | Bypasses tool restrictions |
-| `execute/runInTerminal` (workers) | Workers reach the same reviewed scripts through `runTests` / `runTask` / `createAndRunTask`. Only coordinator has terminal. | Ad-hoc commands are far harder to review than a named script |
+| `execute/createAndRunTask` | Removed for every agent (#60): it writes an agent-authored task into `tasks.json`, can never be auto-approved, and minted a label per call. Denied by `block-dangerous`. | Label sprawl, an approval prompt per call |
+| `execute/runInTerminal` (workers) | Workers reach the same reviewed scripts through `runTests` / `runTask` / `af-command/run_script`. Only coordinator has terminal. | Ad-hoc commands are far harder to review than a named script |
 | `read/terminalLastCommand` | Only useful with terminal access (coordinator only). Not assigned to avoid encouraging terminal reliance. | — |
 | `read/terminalSelection` | Same as above. | — |
 
@@ -94,8 +100,8 @@ Legend: **W** = Write/Edit, **R** = Read, **X** = Execute, **—** = not assigne
 1. **Least privilege** — agents get only tools needed for their role
 2. **One reviewed execution surface** — prefer a predefined `run_task` label
    because it is single-sourced and argument-stable, not because it escapes
-   review. `run_task`, `createAndRunTask` and the terminal all pass the same
-   PreToolUse classifier, and the task path may only invoke scripts under
+   review. `run_task`, `af-command/run_script` and the terminal are all
+   gated, and `run_script` runs without a prompt only scripts under
    `AF_TASK_SCRIPT_DIRS`
 3. **Read before write** — critics and planners get read-only subsets
 4. **Dep-tracking integrity** — no tool that installs packages outside the spec file workflow

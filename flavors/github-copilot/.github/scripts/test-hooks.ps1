@@ -1254,11 +1254,9 @@ Assert-RunTask "run_task: unknown task id asks" `
 Assert-RunTask "run_task: missing tasks.json asks" `
     'ask' '' 'shell: anything' -NoTasksFile
 
-# ── create_and_run_task: an identical invocation is reused, not re-minted (#396) ──
-# createAndRunTask refuses an existing label and can never be auto-approved, so
-# re-running an invocation minted a new label each time: the MP project held
-# 227 tasks for 118 distinct invocations. runTask on the existing label runs the
-# same command without a creation prompt.
+# ── create_and_run_task is removed, not classified (#60) ──────────────────
+# A reviewed script with a matching label, a new invocation, no tasks.json: the
+# tool is denied in every shape, and the reason names the two routes that remain.
 function Get-CreateTaskVerdict {
     param([string]$TasksJson, [hashtable]$Task, [switch]$NoTasksFile)
     $dir = Join-Path ([System.IO.Path]::GetTempPath()) "af-tasks-$(Get-Random)"
@@ -1282,26 +1280,16 @@ $mintLint = @{ label = 'lint: changed scope (wit9999)'; type = 'shell'; command 
 $v = Get-CreateTaskVerdict $tasksLint $mintLint
 Assert-True "create_and_run_task: an invocation that already has a task is denied" `
     ($v.Decision -eq 'deny') "got '$($v.Decision)': $($v.Output)"
-Assert-True "create_and_run_task: the deny names the existing label and runTask" `
-    ($v.Output -match 'lint: changed files' -and $v.Output -match 'runTask') "output: $($v.Output)"
+Assert-True "create_and_run_task: the deny names runTask and run_script as the routes left" `
+    ($v.Output -match 'runTask' -and $v.Output -match 'run_script' -and $v.Output -match '#60') "output: $($v.Output)"
 
-$v = Get-CreateTaskVerdict $tasksLint @{ label = 'lint via shell'; type = 'shell'; command = 'powershell'; args = @('-NoProfile', '-File', '.github\scripts\run-lint.ps1', '-Scope', 'changed') }
-Assert-True "create_and_run_task: the same script behind powershell -File is the same invocation" `
+$v = Get-CreateTaskVerdict $tasksLint @{ label = 'lint: all'; type = 'shell'; command = '.github/scripts/run-lint.ps1'; args = @('-Scope', 'all') }
+Assert-True "create_and_run_task: a new reviewed-script invocation is denied too" `
     ($v.Decision -eq 'deny') "got '$($v.Decision)': $($v.Output)"
 
-# False deny costs as much as a false allow: new arguments are a new invocation.
-$v = Get-CreateTaskVerdict $tasksLint @{ label = 'lint: all'; type = 'shell'; command = '.github/scripts/run-lint.ps1'; args = @('-Scope', 'all') }
-Assert-True "create_and_run_task: different arguments are still allowed" `
-    ($v.Decision -eq 'allow') "got '$($v.Decision)': $($v.Output)"
-
 $v = Get-CreateTaskVerdict '' $mintLint -NoTasksFile
-Assert-True "create_and_run_task: no tasks.json is still allowed" `
-    ($v.Decision -eq 'allow') "got '$($v.Decision)': $($v.Output)"
-
-# Hygiene, not a security gate: a tasks.json it cannot parse gives it no opinion.
-$v = Get-CreateTaskVerdict ("// comment`n" + $tasksLint) $mintLint
-Assert-True "create_and_run_task: an unparsable tasks.json does not deny" `
-    ($v.Decision -eq 'allow') "got '$($v.Decision)': $($v.Output)"
+Assert-True "create_and_run_task: no tasks.json is denied too" `
+    ($v.Decision -eq 'deny') "got '$($v.Decision)': $($v.Output)"
 
 # ── The command server's trust store is not agent-editable (#60) ──────────
 # An agent that could write the store would approve its own script. Judged on
@@ -2225,8 +2213,27 @@ function New-ConfWith {
     } else {
         $REAL_CONF.TrimEnd() + "`nRETRO_DIR=$Dir`n"
     }
-    if ($out -eq $REAL_CONF) { throw "RETRO_DIR not substituted -- the override would be untested" }
+    # Assert the target state, not a change: a consumer may already carry the value (#436).
+    if ($out -notmatch ('(?m)^RETRO_DIR=' + [regex]::Escape($Dir) + '\r?$')) { throw "RETRO_DIR not substituted -- the override would be untested" }
     return $out
+}
+
+# A consumer whose real value already equals the requested one (MP: retros/auto)
+# must get its config back, not an abort of every later case (issue #436).
+$savedConf = $REAL_CONF
+try {
+    $REAL_CONF = "AF_X=1`nRETRO_DIR=retros/auto`n"
+    $sameErr = $null; $same = $null
+    try { $same = New-ConfWith 'retros/auto' } catch { $sameErr = $_.Exception.Message }
+    Assert-True "New-ConfWith returns a config already set to the requested RETRO_DIR" `
+        ($null -eq $sameErr -and $same -match '(?m)^RETRO_DIR=retros/auto\s*$') `
+        "got error: $sameErr"
+    $REAL_CONF = "AF_X=1`nRETRO_DIR=.github/retros/auto`n"
+    Assert-True "and still substitutes a different value" `
+        ((New-ConfWith 'retros/auto') -match '(?m)^RETRO_DIR=retros/auto\s*$') `
+        "the override must reach the config it is meant for"
+} finally {
+    $REAL_CONF = $savedConf
 }
 
 $CONF_DOCS = New-ConfWith 'docs/retros'
@@ -2609,6 +2616,17 @@ Assert-Contains "af_version_note survives the stamp" `
 $unversioned = Get-VersionStampedLog
 Assert-Contains "no .af-version stamps an explicit null rather than a guess" `
     $unversioned '(?m)^af_version: null\s*$'
+
+# Between release cuts the commit is what identifies a deploy (#426, #429).
+$committed = Get-VersionStampedLog @{ '.github/.af-version' = "version: 1.25.0`ncommit: 0123456789ab-dirty`ndeployed: 2026-10-22T10:00:00`n" }
+Assert-Contains "af_commit is the commit line of .af-version" `
+    $committed '(?m)^af_commit: "0123456789ab-dirty"\s*$'
+Assert-True "af_commit appears exactly once" `
+    (([regex]::Matches($committed, '(?m)^af_commit:')).Count -eq 1) "got: $committed" -Subject $committed
+Assert-Contains "a version file without a commit line stamps af_commit null" `
+    $versioned '(?m)^af_commit: null\s*$'
+Assert-Contains "no .af-version stamps af_commit null too" `
+    $unversioned '(?m)^af_commit: null\s*$'
 
 # ── documenter-stop.ps1 — which agents actually ran (issue #173) ─────────
 #
@@ -4077,6 +4095,11 @@ Assert-Contains "session-context announces the event it answers" `
 Assert-NotContains "session-context claims no test state when none was recorded" `
     $scBare.Output 'Tests:' `
     "an invented summary is worse than none, because it is acted on"
+
+# The guards were built and measured in the Local harness only (#443, owner decision A).
+Assert-Contains "session-context states that only the Local harness is supported" `
+    $scBare.Output 'Local harness only' `
+    "a Copilot-harness session must learn that its guards are unverified"
 
 $scPass = Invoke-Hook -Script 'session-context.ps1' -JsonInput $scStart -Branch 'agent/263-x' `
     -Files @{ '.github/test-log.json' = $scPassLog }

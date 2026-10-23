@@ -407,13 +407,25 @@ def source_commit(source_root: Path) -> str:
 
     tracked = git("ls-files", "--error-unmatch", "--", "VERSION")
     if tracked is None or tracked.returncode != 0:
-        return ""
+        return bundled_commit(source_root)
     head = git("rev-parse", "--short=12", "HEAD")
     if head is None or head.returncode != 0 or not head.stdout.strip():
         return ""
     sha = head.stdout.strip()
     dirty = git("status", "--porcelain", "--untracked-files=no", "--", ".")
     return f"{sha}-dirty" if dirty is not None and dirty.stdout.strip() else sha
+
+
+_COMMIT_STAMP = re.compile(r"^[0-9a-f]{12}(-dirty)?$")
+
+
+def bundled_commit(source_root: Path) -> str:
+    """The commit ``hatch_build.py`` stamped into a wheel's payload, or ``""`` (#429)."""
+    stamp = source_root / "SOURCE_COMMIT"
+    if not stamp.is_file():
+        return ""
+    value = stamp.read_text(encoding="utf-8", errors="replace").strip()
+    return value if _COMMIT_STAMP.match(value) else ""
 
 
 def repository_version(package_dir: Path | None = None) -> str:
@@ -821,6 +833,8 @@ def apply(source_root: Path, target_dir: Path) -> dict:
         "backup_dir": str(backup_dir) if made_backup else None,
         "model_check": model_check(source_root, target_af_env),
         "test_log_plugin": test_log_plugin_note(target_dir),
+        "af_command": af_command_note(target_dir),
+        "harness": list(HARNESS_NOTE),
     }
 
 
@@ -836,6 +850,32 @@ def test_log_plugin_note(target_dir: Path) -> list[str]:
     if not pyproject.is_file() or "af_test_log" in pyproject.read_text(encoding="utf-8", errors="replace"):
         return []
     return list(TEST_LOG_PLUGIN_NOTE)
+
+
+HARNESS_NOTE = [
+    "  NOTE    AF supports the VS Code Local harness only: in the Copilot harness its hooks and guards",
+    "          are unverified (#443, #447). Pick Local in the chat's session target.",
+]
+
+AF_COMMAND_NOTE = [
+    "  NOTE    af-command is not registered -- argument-bearing script runs have no route (#445, #60):",
+    '          add "af-command": {"type": "stdio", "command": "<venv>/Scripts/af-command-mcp.exe"} under',
+    "          servers in .vscode/mcp.json or settings.mcp.servers in your .code-workspace",
+    "          (a user-level registration is not visible from here)",
+]
+
+# The agent files reference `af-command/...`, so the key decides; JSONC rules out a parser.
+_AF_COMMAND_KEY = re.compile(r'"af-command"\s*:\s*\{')
+
+
+def af_command_note(target_dir: Path) -> list[str]:
+    """The note a project gets while no file it is likely opened with registers af-command."""
+    candidates = [target_dir / ".vscode" / "mcp.json"]
+    candidates += sorted(target_dir.glob("*.code-workspace")) + sorted(target_dir.parent.glob("*.code-workspace"))
+    for path in candidates:
+        if path.is_file() and _AF_COMMAND_KEY.search(path.read_text(encoding="utf-8", errors="replace")):
+            return []
+    return list(AF_COMMAND_NOTE)
 
 
 def model_check(source_root: Path, target_af_env: Path) -> dict:

@@ -717,6 +717,10 @@ assert_true "session-context makes exactly one statement" \
 assert_not_contains "session-context claims no test state when none was recorded" \
     "$sc_out" 'Tests:'
 
+# The guards were built and measured in the Local harness only (#443, owner decision A).
+assert_contains "session-context states that only the Local harness is supported" \
+    "$sc_out" 'Local harness only'
+
 sc_pass=$(hook_output session-context.sh agent/72-x "$SC_START" \
     ".github/test-log.json=$TEST_LOG_PASS")
 assert_contains "session-context folds the recorded test state into the context" \
@@ -1516,6 +1520,18 @@ assert_contains "af_version_note survives the stamp" \
 unversioned=$(stamp_log "$PLAN_DONE" "$LOG_BAD_VERSION")
 assert_contains "no .af-version stamps an explicit null rather than a guess" \
     "$unversioned" "af_version: null" "got: $unversioned"
+
+# Between release cuts the commit is what identifies a deploy (#426, #429).
+committed=$(stamp_log "$PLAN_DONE" "$LOG_BAD_VERSION" 'version: 1.25.0\ncommit: 0123456789ab-dirty\ndeployed: 2026-10-22T10:00:00\n')
+assert_contains "af_commit is the commit line of .af-version" \
+    "$committed" 'af_commit: "0123456789ab-dirty"' "got: $committed"
+commit_count=$(printf '%s\n' "$committed" | grep -c '^af_commit:')
+assert_true "af_commit appears exactly once" \
+    "$([ "$commit_count" -eq 1 ] && echo 1 || echo 0)" "af_commit lines=$commit_count in: $committed"
+assert_contains "a version file without a commit line stamps af_commit null" \
+    "$versioned" "af_commit: null" "got: $versioned"
+assert_contains "no .af-version stamps af_commit null too" \
+    "$unversioned" "af_commit: null" "got: $unversioned"
 
 case "$doc_agent" in
     *'Do not write `af_version:`'*)
@@ -2933,10 +2949,8 @@ except Exception: print("unparsable")' 2>/dev/null)
 assert_true "a task command with backslashes and quotes still produces parsable JSON" \
     "$([ "$task_dec" = "deny" ] && echo 1 || echo 0)" "got '$task_dec' from: $task_out"
 
-# --- create_and_run_task: an identical invocation is reused (#396) ----------
-# createAndRunTask refuses an existing label and can never be auto-approved, so
-# re-running an invocation minted a new label each time (MP: 227 tasks for 118
-# distinct invocations). runTask on the existing label needs no creation prompt.
+# --- create_and_run_task is removed, not classified (#60) --------------------
+# Denied in every shape; the reason names the two routes that remain.
 dup_dir=$(mktemp -d)
 dup_win=$(cygpath -m "$dup_dir" 2>/dev/null || printf '%s' "$dup_dir")
 mkdir -p "$dup_dir/.vscode"
@@ -2955,26 +2969,17 @@ except Exception: print("none")' 2>/dev/null
 dup_out=$(create_out '.github/scripts/run-lint.ps1' '["-Scope","changed"]')
 assert_true "create_and_run_task: an invocation that already has a task is denied" \
     "$([ "$(verdict_of "$dup_out")" = "deny" ] && echo 1 || echo 0)" "got: $dup_out"
-assert_true "create_and_run_task: the deny names the existing label and runTask" \
-    "$(printf '%s' "$dup_out" | grep -q 'lint: changed files' && printf '%s' "$dup_out" | grep -q 'runTask' && echo 1 || echo 0)" "got: $dup_out"
-
-dup_out=$(create_out 'powershell' '["-NoProfile","-File",".github/scripts/run-lint.ps1","-Scope","changed"]')
-assert_true "create_and_run_task: the same script behind powershell -File is the same invocation" \
-    "$([ "$(verdict_of "$dup_out")" = "deny" ] && echo 1 || echo 0)" "got: $dup_out"
+assert_true "create_and_run_task: the deny names runTask and run_script as the routes left" \
+    "$(printf '%s' "$dup_out" | grep -q 'runTask' && printf '%s' "$dup_out" | grep -q 'run_script' && printf '%s' "$dup_out" | grep -q '#60' && echo 1 || echo 0)" "got: $dup_out"
 
 dup_out=$(create_out '.github/scripts/run-lint.ps1' '["-Scope","all"]')
-assert_true "create_and_run_task: different arguments are still allowed" \
-    "$([ "$(verdict_of "$dup_out")" = "allow" ] && echo 1 || echo 0)" "got: $dup_out"
-
-printf '// comment\n%s' "$dup_tasks" >"$dup_dir/.vscode/tasks.json"
-dup_out=$(create_out '.github/scripts/run-lint.ps1' '["-Scope","changed"]')
-assert_true "create_and_run_task: an unparsable tasks.json does not deny" \
-    "$([ "$(verdict_of "$dup_out")" = "allow" ] && echo 1 || echo 0)" "got: $dup_out"
+assert_true "create_and_run_task: a new reviewed-script invocation is denied too" \
+    "$([ "$(verdict_of "$dup_out")" = "deny" ] && echo 1 || echo 0)" "got: $dup_out"
 
 rm -f "$dup_dir/.vscode/tasks.json"
 dup_out=$(create_out '.github/scripts/run-lint.ps1' '["-Scope","changed"]')
-assert_true "create_and_run_task: no tasks.json is still allowed" \
-    "$([ "$(verdict_of "$dup_out")" = "allow" ] && echo 1 || echo 0)" "got: $dup_out"
+assert_true "create_and_run_task: no tasks.json is denied too" \
+    "$([ "$(verdict_of "$dup_out")" = "deny" ] && echo 1 || echo 0)" "got: $dup_out"
 rm -rf "$dup_dir"
 
 # --- The command server's trust store is not agent-editable (#60) -----------

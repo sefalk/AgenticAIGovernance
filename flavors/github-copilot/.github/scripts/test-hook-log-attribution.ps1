@@ -76,6 +76,19 @@ $cutLog = Join-Path $fixtureDir 'cut.log'
 $cutGapLog = Join-Path $fixtureDir 'cut-gap.log'
 [IO.File]::WriteAllLines($cutGapLog, $cutHead + $gap)
 
+# A hook that ran out of time: VS Code let the tool call through with no
+# decision, and the completion line may still read Success (#434, measured).
+$tsOut = '2026-10-09 09:13:02.896 [info]'
+$timeout = $good + @(
+    "$tsOut [#10] [PreToolUse] Executing 1 hook(s)",
+    "$tsOut [#10] [PreToolUse] Running: {`"command`":`"$($ps + '.github\\hooks\\scripts\\block-dangerous.ps1')`",$cwd}",
+    "$tsOut [#10] [PreToolUse] Input: {`"tool_name`":`"run_in_terminal`"}",
+    "$tsOut [HookExecutor] Hook command timed out after 5s: powershell -ExecutionPolicy Bypass -File .github\hooks\scripts\block-dangerous.ps1",
+    "$tsOut [#10] [PreToolUse] Completed (Success) in 5174ms, no output"
+)
+$timeoutLog = Join-Path $fixtureDir 'timeout.log'
+[IO.File]::WriteAllLines($timeoutLog, $timeout)
+
 function Invoke-Subject([string]$Log) {
     $ErrorActionPreference = 'Continue'
     $out = & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $subject -LogPath $Log 2>&1 | Out-String
@@ -124,6 +137,13 @@ try {
     Add-Result 'W1_an_unattributable_run_fails_loudly_and_is_quoted' `
         ($r.Exit -eq 1 -and $r.Out -match 'FAIL\s+.*not attributed' -and $r.Out.Contains('custom-gate.js')) `
         "exit=$($r.Exit)"
+
+    $r = Invoke-Subject $goodLog
+    Add-Result 'T1_a_log_without_timeouts_reports_none' ($r.Out -match 'PASS\s+No hook timed out') 'expected the timeout check to pass'
+    $r = Invoke-Subject $timeoutLog
+    Add-Result 'T2_a_timed_out_hook_fails_the_run_and_is_named' `
+        ($r.Exit -eq 1 -and $r.Out -match 'FAIL\s+1 hook run\(s\) timed out' -and $r.Out -match 'block-dangerous\.ps1 after 5s') `
+        "exit=$($r.Exit) out=$($r.Out.Substring([Math]::Max(0, $r.Out.IndexOf('## Integration Checks'))))"
 } finally {
     Remove-Item $fixtureDir -Recurse -Force -ErrorAction SilentlyContinue
 }

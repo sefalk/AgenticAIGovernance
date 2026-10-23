@@ -103,6 +103,80 @@ try {
     Remove-Item $fx -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# -- Timeouts (#434) -------------------------------------------------------
+# A hook that outlives its timeout decides nothing: VS Code lets the tool call
+# through. Measured on 4 logs: block-dangerous p99 6.7 s / max 8.6 s against 5 s
+# (85 of 1976 runs unchecked); implementer-stop 45-80 s against the implicit
+# 30 s frontmatter default (8 of 11 unchecked). Every declaration therefore
+# carries an explicit timeout, and the measured hooks keep their floor.
+$floors = @{
+    'block-dangerous'  = 15; 'scan-secrets' = 20; 'stop-tests' = 120
+    'implementer-stop' = 300; 'refactorer-stop' = 300; 'test-writer-stop' = 300
+}
+$defaultFloor = 15
+
+# One record per declaration: source, event, stem, timeout ($null = implicit default).
+function Get-HookTimeouts([string]$JsonPath, [string]$AgentsDir) {
+    $rows = @()
+    $json = Get-Content $JsonPath -Raw | ConvertFrom-Json
+    foreach ($ev in $json.hooks.PSObject.Properties) {
+        foreach ($h in @($ev.Value)) {
+            $t = if ($h.PSObject.Properties['timeout']) { [int]$h.timeout } else { $null }
+            $rows += [pscustomobject]@{ Source = 'agent-hooks.json'; Event = $ev.Name; Stem = (Get-Stem ([string]$h.command)); Timeout = $t }
+        }
+    }
+    foreach ($agent in Get-ChildItem $AgentsDir -Filter '*.agent.md') {
+        $fm = [regex]::Match((Get-Content $agent.FullName -Raw), '(?s)\A---\r?\n(.*?)\r?\n---').Groups[1].Value
+        $inHooks = $false; $event = $null; $cur = $null
+        foreach ($line in ($fm -split '\r?\n')) {
+            if ($line -match '^hooks:\s*$') { $inHooks = $true; continue }
+            if (-not $inHooks) { continue }
+            if ($line -match '^\S') { break }
+            if ($line -match '^  (\w+):\s*$') { $event = $Matches[1]; continue }
+            if ($line -match '^\s+- ') {
+                if ($cur) { $rows += $cur }
+                $cur = [pscustomobject]@{ Source = $agent.Name; Event = $event; Stem = $null; Timeout = $null }
+            }
+            if (-not $cur) { continue }
+            if ($line -match '^\s+(?:- )?(command|windows):' -and -not $cur.Stem) { $cur.Stem = Get-Stem $line }
+            if ($line -match '^\s+(?:- )?timeout:\s*(\d+)') { $cur.Timeout = [int]$Matches[1] }
+        }
+        if ($cur) { $rows += $cur }
+    }
+    return $rows
+}
+
+function Find-ShortTimeouts([object[]]$Rows) {
+    $short = @()
+    foreach ($r in $Rows) {
+        $floor = if ($floors.ContainsKey($r.Stem)) { $floors[$r.Stem] } else { $defaultFloor }
+        if ($null -eq $r.Timeout) { $short += "$($r.Source): $($r.Event) $($r.Stem) has no timeout (implicit 30 s)" }
+        elseif ($r.Timeout -lt $floor) { $short += "$($r.Source): $($r.Event) $($r.Stem) timeout $($r.Timeout) s < floor $floor s" }
+    }
+    return $short
+}
+
+$timeoutRows = @(Get-HookTimeouts (Join-Path $githubDir 'hooks/agent-hooks.json') (Join-Path $githubDir 'agents'))
+$agentRows = @($timeoutRows | Where-Object { $_.Source -ne 'agent-hooks.json' })
+Add-Result 'H4_every_declaration_is_read_for_its_timeout' ($agentRows.Count -ge 10 -and @($timeoutRows | Where-Object { -not $_.Stem }).Count -eq 0) "agent declarations: $($agentRows.Count)"
+$short = @(Find-ShortTimeouts $timeoutRows)
+Add-Result 'H5_every_hook_declares_a_timeout_at_or_above_its_measured_floor' ($short.Count -eq 0) "short: $($short -join '; ')"
+
+# The floor check must see a short and a missing timeout, or H5 passes by reading nothing.
+$fx = Join-Path ([IO.Path]::GetTempPath()) ("af434-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+New-Item -ItemType Directory -Path $fx -Force | Out-Null
+try {
+    [IO.File]::WriteAllText((Join-Path $fx 'hooks.json'), '{"hooks":{"PreToolUse":[{"type":"command","command":"bash .github/hooks/scripts/block-dangerous.sh","timeout":5}]}}')
+    [IO.File]::WriteAllText((Join-Path $fx 'probe.agent.md'), (@(
+        '---', 'name: probe', 'hooks:', '  SubagentStop:', '    - type: command',
+        "      command: 'bash .github/hooks/scripts/implementer-stop.sh'", '---', '# Probe') -join "`n"))
+    $probe = @(Find-ShortTimeouts @(Get-HookTimeouts (Join-Path $fx 'hooks.json') $fx))
+    Add-Result 'H6_the_floor_check_finds_a_short_and_a_missing_timeout' `
+        ($probe.Count -eq 2 -and ($probe -join ';') -match 'block-dangerous timeout 5 s' -and ($probe -join ';') -match 'implementer-stop has no timeout') "found: $($probe -join '; ')"
+} finally {
+    Remove-Item $fx -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Write-Output '===== hook declaration tests (issue #345) ====='
 $failed = 0
 foreach ($k in $results.Keys) {

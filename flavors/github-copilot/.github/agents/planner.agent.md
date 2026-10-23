@@ -8,7 +8,6 @@ tools:
   - search/textSearch
   - search/fileSearch
   - search/listDirectory
-  - search/changes
   - search/usages
   - read/readFile
   - read/problems
@@ -25,6 +24,7 @@ hooks:
     - type: command
       command: 'bash .github/hooks/scripts/planner-pretooluse.sh'
       windows: 'powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/planner-pretooluse.ps1'
+      timeout: 15
 ---
 
 # Planner Agent (Worker)

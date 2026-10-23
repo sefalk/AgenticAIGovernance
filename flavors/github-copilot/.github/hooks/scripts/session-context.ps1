@@ -87,7 +87,7 @@ if ($AfPython -and $AfCodeRoot -and (Test-Path $fgCore)) {
 }
 
 # Build context string
-$context = "Project: $project | Branch: $branch | Last commit: $commit | $pyVer$testLogSummary$pythonNotice$foreignNotice"
+$context = "Project: $project | Branch: $branch | Last commit: $commit | $pyVer$testLogSummary$pythonNotice$foreignNotice | AF: Local harness only; in the Copilot harness its guards are unverified (#443)"
 
 # Return JSON
 @{
