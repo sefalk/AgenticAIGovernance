@@ -14,6 +14,48 @@ still fails the build for a repeated `###` kind inside one section (#322).
 
 ## [Unreleased]
 
+## [1.26.0] -- 2026-10-23
+
+### Added
+
+- **A wheel's bundled payload and every workflow log now name the source commit (#429).** Since #426 `VERSION` moves only at a release cut, so a mid-cycle wheel and a mid-cycle deploy were indistinguishable from the cut. A hatch build hook (`mcp-deploy/hatch_build.py`) stamps `af_deploy_mcp/payload/SOURCE_COMMIT` at build time, and `source_commit()` falls back to that stamp when the payload is not a tracked checkout. `af_apply` from an installed wheel therefore writes `commit:` to `.af-version`, and `af_status` compares it. `documenter-stop` (both dialects) stamps `af_commit` from that `commit:` line next to `af_version`, `null` when absent. `check-workflow-log.py` accepts only `<sha12>`, `<sha12>-dirty` or `null` there.
+
+- **`test-hooks-integration.ps1` fails on hook timeouts (#434).** Each
+  `[HookExecutor] Hook command timed out` line counts as a failure naming the
+  script and its limit. The completion line of a timed-out hook can still read
+  `Success`, so the old failure check never saw one.
+
+- **The deploy notes a project without an `af-command` registration (#445).** Since #60, argument-bearing script runs have one route, `af-command/run_script`; without the server an agent can only report BLOCKED. All three deploy paths now look for the `"af-command"` server key in `.vscode/mcp.json` and in any `*.code-workspace` in the target or its parent folder (where MP keeps it), and print the registration snippet when none is found. A text match, because workspace files are JSONC. Advisory: the result stays `ok`, and a user-level registration cannot be seen from the repository.
+
+### Changed
+
+- **`AF_SCRIPT_APPROVAL=ask` documents that chat "Allow all" answers the prompt (#60).** Measured in the 2026-10-22 live check: with "Allow all" VS Code answers the server's elicitation itself, so `ask` gives no human gate. Keep default chat permissions with `af-command`.
+
+- **The framework states that it supports the VS Code Local harness only (#443, owner decision A).** VS Code now offers a Copilot harness as well, and the framework's hooks, guards and tool names were built and measured in Local only. All three deploy paths and `session-context` (both dialects) now say so. Supporting the Copilot harness is parked as #447.
+
+### Removed
+
+- **`createAndRunTask` is removed from every agent and denied by `block-dangerous` (#60).** The coordinator, implementer, refactorer and code-critic no longer hold it. It wrote an agent-authored task into `.vscode/tasks.json`, could never be auto-approved, and minted a new label for every argument set (one consumer: 227 tasks for 118 invocations, #396). Fixed invocations run with `runTask`; argument-bearing ones go through `af-command`'s `run_script`. Where `af-command` is not registered, agents report BLOCKED instead of falling back. Both hook dialects drop the creation allowlist and the #396 duplicate check (about 170 lines each) and `hooks/scripts/task-duplicate.py`; every task-creation payload now denies with a reason that names the two routes left.
+
+- **`search/changes` is no longer assigned to any agent (#443).** A probe on 2026-10-22 showed that a Local subagent does not receive it, so ten agents believed they had a capability they lacked. `test-rule-drift.ps1` R30 keeps it out. The `pylance-mcp-server/*` names stay: the same probe showed all of them resolving in Local, so the Agent Customizations editor's flag on them is cosmetic (documented in `TOOLS.md`).
+
+### Fixed
+
+- **Guards no longer time out into "allow" (#434).** A hook that outlives its
+  `timeout` decides nothing: VS Code lets the tool call through. Measured on four
+  logs, `block-dangerous` ran past its 5 s limit in 85 of 1976 calls (p99 6.7 s,
+  max 8.6 s), and `implementer-stop` -- which declared no timeout and so got the
+  30 s default -- in 8 of 11 runs (45-80 s). Every hook declaration now carries an
+  explicit timeout: `block-dangerous` 15 s, `scan-secrets` 20 s, session hooks 15 s,
+  agent pre/post hooks 15 s, documenter/compliance/post-merge 30 s, and the
+  implementer, refactorer and test-writer stop gates 300 s.
+  `test-hook-declarations.ps1` pins each value at or above its measured floor.
+
+- **`test-hooks.ps1` no longer aborts in a consumer whose `RETRO_DIR` is `retros/auto` (#436).** The fixture helper `New-ConfWith` threw when its substitution left the config unchanged, which is exactly what happens when the project already carries the requested value (MP). The whole suite stopped there, so every later case went unexecuted in that consumer. The helper now asserts that the config carries the requested value instead of asserting that something changed; a regression case drives it with a config already set to `retros/auto`.
+
+- **`collect-session-cost` no longer certifies a head-truncated log as `coverage: full` (#450).** It took `session_start` from the first such event in any log, and every subagent log carries its own, as does a window reload mid-`main.jsonl`. Truncation detection therefore never fired once a session had delegated once. Measured on this session's own 81.5 MB log, which begins with an 895,709-character fragment, the old collector reported `full` with 2304 credits. Truncation is now judged on `main.jsonl` alone: its first line must parse and be a `session_start`. A truncated block adds `earliest_ts` so the withheld total can still be dated.
+- **Long prompts are priced at their tier (#451).** `rate_card()` read only `token_prices.default`, so requests above `default.max_prompt_tokens` were priced too low and the gap landed in `unexplained`. On one model that was 82% of its long-prompt bill, at a 5x tier. All tiers are loaded now, each request is priced at the cheapest tier whose ceiling holds its prompt, and the facts row names it in `price_tier` (facts schema 3, block schema 7).
+
 ## [1.25.0] -- 2026-10-22
 
 ### Added
