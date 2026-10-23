@@ -2,8 +2,9 @@
 # Asserts deploy.sh keeps the _available/ copy of a deactivated skill current
 # (#384), the bash counterpart of test_skill_deactivation.py, updates a
 # customizable file the project never changed (#106), keeps an activated
-# optional skill where the project moved it (#110), and keeps the baseline
-# store and merges a both-sides change like deploy_core (#393).
+# optional skill where the project moved it (#110), keeps the baseline
+# store and merges a both-sides change like deploy_core (#393), and skips
+# files git ignores in the source (#454).
 #
 # The pytest parity cases for deploy.sh skip on Windows: a full deploy of the
 # real payload outlasts their 300s limit under Git-for-Windows bash (#260). This
@@ -201,6 +202,32 @@ git init -q "$WORK/m"
 bash "$SRC/deploy.sh" -t "$WORK/m" </dev/null >"$WORK/m.log" 2>&1
 assert_contains "$WORK/m/.github/.af-version" "commit: $HEAD12-dirty" "An edited tracked file marks the commit dirty"
 
+echo "== N: a file git ignores in the source is not deployed; an untracked one is (#454) =="
+mkdir -p "$SRC/.github/logs" "$SRC/.github/instructions"
+printf '*\n!.gitignore\n' >"$SRC/.github/logs/.gitignore"
+git_t add -- .github/logs/.gitignore
+git_t commit -q --no-verify -m "logs ignore"
+printf '# head deadbeef\n M foreign/path\n' >"$SRC/.github/logs/.worktree-baseline-shared"
+printf 'untracked, not ignored\n' >"$SRC/.github/instructions/zz-untracked.instructions.md"
+mkdir -p "$WORK/n"
+git init -q "$WORK/n"
+bash "$SRC/deploy.sh" -t "$WORK/n" </dev/null >"$WORK/n.log" 2>&1
+if [[ ! -e "$WORK/n/.github/logs/.worktree-baseline-shared" ]] && ! grep -q 'worktree-baseline' "$WORK/n.log"; then
+    pass "The ignored runtime file is neither listed nor written"
+else
+    fail "The ignored runtime file is neither listed nor written"
+fi
+if [[ -f "$WORK/n/.github/logs/.gitignore" ]]; then
+    pass "The tracked logs/.gitignore is still deployed"
+else
+    fail "The tracked logs/.gitignore is still deployed"
+fi
+if [[ -f "$WORK/n/.github/instructions/zz-untracked.instructions.md" ]]; then
+    pass "An untracked, not ignored file is still deployed"
+else
+    fail "An untracked, not ignored file is still deployed"
+fi
+
 echo ""
 echo "=== Summary ==="
 echo "  Passed: $passed"
@@ -213,7 +240,7 @@ if [[ "$failed" -gt 0 ]]; then
     echo "--- deploy output E ---"; cat "$WORK/e.log"
     echo "--- deploy output F ---"; cat "$WORK/f.log"
     echo "--- deploy output G ---"; cat "$WORK/g.log"
-    for c in h i j l m; do echo "--- deploy output ${c^^} ---"; cat "$WORK/$c.log"; done
+    for c in h i j l m n; do echo "--- deploy output ${c^^} ---"; cat "$WORK/$c.log"; done
     exit 1
 fi
 echo "  All deploy.sh minimal-source tests passed."
