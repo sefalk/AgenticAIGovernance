@@ -230,7 +230,7 @@ try {
     $results['A_session_reported'] = ($r.Output -match [regex]::Escape($SID))
     $results['A_environment']      = ($r.Output -match 'vscode:\s*"?1\.131\.0' -and
                                       $r.Output -match 'copilot_chat:\s*"?0\.59\.0')
-    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*6\s*$')
+    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*7\s*$')
     $results['A_collector_named']  = ($r.Output -match 'collector:\s*"?collect-session-cost\.py@')
 
     # --- B: subagent child file is summed, per model ------------------------
@@ -365,7 +365,7 @@ try {
         # One header plus one row per request. An aggregate cannot be
         # un-aggregated, so a missing row is a question never askable again.
         $results['Q_facts_row_per_request'] = ($factLines.Count -eq 3)
-        $results['Q_facts_header_versioned'] = ($factLines[0] -match '"facts_schema_version":\s*2' -and
+        $results['Q_facts_header_versioned'] = ($factLines[0] -match '"facts_schema_version":\s*3' -and
                                                 $factLines[0] -match '"record":\s*"header"')
         # The facts file is meant to be keepable; a prompt in it would make it
         # exactly as unshareable as the debug log it replaces.
@@ -517,6 +517,71 @@ try {
         $results['F_facts_rows_kept']     = ($tl.Count -eq 3)
         $results['F_facts_header_coverage'] = ($tl[0] -match '"coverage":\s*"truncated"')
     }
+
+    # --- F2: truncation is judged on main.jsonl alone (#450) -----------------
+    # Every subagent log carries its own session_start, and a window reload
+    # writes another into main.jsonl. Neither is the start of the session.
+    $dir = New-SessionFixture -Main @(
+        (New-LlmRequest -NanoAiu 1500000000)
+    ) -Child @(
+        (New-SessionStart),
+        (New-LlmRequest -Model 'claude-haiku-4.5' -NanoAiu 1000000000)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['F2_subagent_start_does_not_vouch_for_main'] = ($r.Output -match '(?m)^\s*coverage:\s*truncated\s*$')
+
+    # The size cap cuts mid-line: the first line is a fragment, and a reload
+    # session_start further down must not certify what was cut.
+    $dir = New-SessionFixture -Main @(
+        '"attrs":{"model":"claude-opus-5","inputTokens":9}},"cut-off fragment',
+        (New-SessionStart -Ts ($T0 + 500)),
+        (New-LlmRequest -NanoAiu 1500000000)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['F2_fragment_head_is_truncated'] = ($r.Output -match '(?m)^\s*coverage:\s*truncated\s*$')
+    # A withheld total can still be dated by the first event that survived.
+    $results['F2_earliest_surviving_event_dated'] = ($r.Output -match "(?m)^\s*earliest_ts:\s*$($T0 + 500)\s*$")
+
+    # Control: a genuine start followed by a reload start is a complete log.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1500000000),
+        (New-SessionStart -Ts ($T0 + 5000)),
+        (New-LlmRequest -NanoAiu 2500000000 -Ts ($T0 + 6000))
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['F2_reload_start_keeps_full'] = ($r.Output -match '(?m)^\s*coverage:\s*full\s*$' -and
+                                              $r.Output -match '(?m)^\s*credits:\s*4(\.0+)?\s*$' -and
+                                              $r.Output -notmatch 'earliest_ts')
+
+    # --- W: the long_context price tier (#451) --------------------------------
+    # A prompt above default.max_prompt_tokens is billed at long_context. 200k
+    # uncached * 50 + 1000 out * 250 per 1e6 = 10.25 credits; 50k * 10 + 100 *
+    # 50 per 1e6 = 0.505 credits at default. Exact bills leave no residual.
+    $dir = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -Model 'claude-haiku-x' -InputTokens 200000 -CachedTokens 0 -OutputTokens 1000 -NanoAiu 10250000000),
+        (New-LlmRequest -Model 'claude-haiku-x' -InputTokens 50000 -CachedTokens 0 -OutputTokens 100 -NanoAiu 505000000)
+    )
+    $fixtures += $dir
+    $tiered = @(
+        [ordered]@{ id = 'claude-haiku-x'; billing = [ordered]@{ auto_discount = 0; token_prices = [ordered]@{
+            batch_size = 1000000
+            default      = [ordered]@{ input_price = 10; cache_read_price = 1; cache_write_price = 0; output_price = 50; max_prompt_tokens = 100000 }
+            long_context = [ordered]@{ input_price = 50; cache_read_price = 5; cache_write_price = 0; output_price = 250; max_prompt_tokens = 936000 } } } },
+        [ordered]@{ id = 'unused'; billing = [ordered]@{ token_prices = [ordered]@{ default = [ordered]@{ input_price = 1; cache_read_price = 1; output_price = 1 } } } }
+    )
+    [IO.File]::WriteAllText((Join-Path $dir 'models.json'), ($tiered | ConvertTo-Json -Depth 8))
+    $wf = Join-Path $dir 'tier-facts.ndjson'
+    $r = Invoke-Collector @('--session-dir', $dir, '--facts-out', $wf)
+    $results['W_long_context_priced'] = ($r.Output -match
+        'credits_by_kind:\s*\{\s*input_uncached:\s*10\.5,\s*cache_read:\s*0(\.0+)?,\s*output:\s*0\.255,\s*unexplained:\s*0(\.0+)?\s*\}')
+    $wraw = if (Test-Path $wf) { [IO.File]::ReadAllText($wf) } else { '' }
+    # The applied tier is on the row, so the choice stays auditable.
+    $results['W_tier_recorded'] = ($wraw -match '"price_tier":\s*"long_context"' -and $wraw -match '"price_tier":\s*"default"')
 
     # --- G: workflow started before this session ----------------------------
     $dir = New-SessionFixture -Main @(
