@@ -587,19 +587,21 @@ if [ -f "$HOOK_DIR/cost-snapshot.sh" ]; then
         '{"ts":1785760263230,"type":"session_start","spanId":"s0","attrs":{"copilotVersion":"0.71.0","vscodeVersion":"1.143.1"}}' \
         '{"ts":1785760264230,"type":"llm_request","spanId":"r1","parentSpanId":"s0","status":"ok","attrs":{"model":"claude-opus-5","debugName":"panel/editAgent","inputTokens":1000,"cachedTokens":400,"outputTokens":50,"copilotUsageNanoAiu":1500000000}}' \
         > "$cs_chat/debug-logs/$cs_sid/main.jsonl"
-    cp "$HOOK_DIR/cost-snapshot.sh" "$HOOK_DIR/_common.sh" "$cs_dir/repo/.github/hooks/scripts/"
+    cp "$HOOK_DIR/cost-snapshot.sh" "$HOOK_DIR/cost-snapshot.py" "$HOOK_DIR/_common.sh" "$cs_dir/repo/.github/hooks/scripts/"
     cp "$GITHUB_DIR/scripts/collect-session-cost.py" "$cs_dir/repo/.github/scripts/"
+    # The core is Python: under Git Bash it needs the Windows spelling of the path.
+    cs_chat_native=$(if command -v cygpath >/dev/null 2>&1; then cygpath -m "$cs_chat"; else printf '%s' "$cs_chat"; fi)
     cs_run() {
         ( cd "$cs_dir/repo" && printf '%s' "$1" | AF_COST_SNAPSHOT_SYNC=1 bash .github/hooks/scripts/cost-snapshot.sh )
     }
     cs_state="$cs_dir/repo/.github/logs/cost/sessions/$cs_sid.state.json"
 
-    cs_out=$(cs_run '{"hook_event_name":"Stop","session_id":"'"$cs_sid"'","transcript_path":"'"$cs_chat/transcripts/$cs_sid.jsonl"'"}')
+    cs_out=$(cs_run '{"hook_event_name":"Stop","session_id":"'"$cs_sid"'","transcript_path":"'"$cs_chat_native/transcripts/$cs_sid.jsonl"'"}')
     assert_true "cost-snapshot never decides anything" "$([ "$cs_out" = '{}' ] && echo 1 || echo 0)" "got: $cs_out"
     assert_contains "cost-snapshot refreshes the session store" "$(cat "$cs_state" 2>/dev/null)" '"store_version"' "no state file"
 
     rm -rf "$cs_dir/repo/.github/logs"
-    cs_out=$(cs_run '{"hook_event_name":"Stop","session_id":"../'"$cs_sid"'","transcript_path":"'"$cs_chat/transcripts/$cs_sid.jsonl"'"}')
+    cs_out=$(cs_run '{"hook_event_name":"Stop","session_id":"../'"$cs_sid"'","transcript_path":"'"$cs_chat_native/transcripts/$cs_sid.jsonl"'"}')
     assert_true "a session id carrying a path writes nothing" \
         "$([ "$cs_out" = '{}' ] && [ ! -e "$cs_state" ] && echo 1 || echo 0)" "got: $cs_out"
 

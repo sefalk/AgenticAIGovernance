@@ -3966,7 +3966,10 @@ $csJson = @{
     session_id      = $csSid
     transcript_path = (Join-Path $csChat "transcripts/$csSid.jsonl")
 } | ConvertTo-Json -Compress
-$csCollector = @{ '.github/scripts/collect-session-cost.py' = (Get-Content (Join-Path $githubDir 'scripts/collect-session-cost.py') -Raw) }
+$csCollector = @{
+    '.github/scripts/collect-session-cost.py' = (Get-Content (Join-Path $githubDir 'scripts/collect-session-cost.py') -Raw)
+    '.github/hooks/scripts/cost-snapshot.py'  = (Get-Content (Join-Path $scriptDir 'cost-snapshot.py') -Raw -ErrorAction SilentlyContinue)
+}
 
 $csShips = Test-Path (Join-Path $scriptDir 'cost-snapshot.ps1')
 Assert-True "cost-snapshot.ps1 ships" $csShips "hooks/scripts/cost-snapshot.ps1 is missing"
