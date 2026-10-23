@@ -14,23 +14,6 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 . "$PSScriptRoot/_common.ps1"
 
-# Worktree-aware path resolution (see ideas/feature-git-worktrees.md §12).
-$mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
-$codeRoot = $mainRoot
-$sentinel = Join-Path $mainRoot '.github/.active-worktree'
-if (Test-Path $sentinel) {
-    $p = (Get-Content $sentinel -Raw -ErrorAction SilentlyContinue).Trim()
-    if ($p -and (Test-Path $p)) { $codeRoot = $p }
-}
-
-# Load project config
-$SRC_DIR = 'src'
-$confPath = Join-Path $mainRoot '.github/af-env.conf'
-if (Test-Path $confPath) {
-    $m = Select-String -Path $confPath -Pattern '^SRC_DIR=(.+)$'
-    if ($m) { $SRC_DIR = $m.Matches[0].Groups[1].Value.Trim() }
-}
-
 # Read and parse stdin
 $raw = [Console]::In.ReadToEnd()
 try {
@@ -47,47 +30,56 @@ if (-not (Test-AfWriteTool $toolName)) {
     exit 0
 }
 
-# Branch context proof -- block file edits if not on an agent/* branch
-$currentBranch = git -C $codeRoot branch --show-current 2>$null
-if (-not $currentBranch) {
-    # Detached HEAD is not an agent branch either; outside a repo there is
-    # nothing to prove, so stay silent there.
-    if ((git -C $codeRoot rev-parse --is-inside-work-tree 2>$null) -eq 'true') {
-        $currentBranch = '(detached HEAD)'
+# Every file the call refers to, with the repository it lands in (issue #456).
+# A batched edit names several, and one production path among them is still a
+# production edit. In a multi-root workspace they need not share a repository.
+$targets = @(Get-AfWriteTargets $inputData.tool_input)
+
+# Branch context proof -- block file edits unless each repository written to is
+# on an agent/* branch. A call naming no path is judged by the deploying
+# repository, as before.
+$roots = if ($targets.Count -gt 0) { @($targets | ForEach-Object { $_.Root } | Select-Object -Unique) } else { @($script:AfCodeRoot) }
+foreach ($root in $roots) {
+    # Outside a repo there is nothing to prove, so the label stays empty there.
+    $currentBranch = Get-AfBranchLabel $root
+    if ($currentBranch -and $currentBranch -notmatch '^agent/') {
+        @{
+            hookSpecificOutput = @{
+                hookEventName      = 'PreToolUse'
+                permissionDecision = 'deny'
+                permissionDecisionReason = "Branch context violation: test-writer is running on branch '$currentBranch' in $root, not on an agent/* branch. Ensure the coordinator created a worktree for this task (Step 0d). Expected branch: agent/{workflow-id}."
+            }
+        } | ConvertTo-Json -Depth 3 -Compress
+        exit 0
     }
 }
-if ($currentBranch -and $currentBranch -notmatch '^agent/') {
-    @{
-        hookSpecificOutput = @{
-            hookEventName      = 'PreToolUse'
-            permissionDecision = 'deny'
-            permissionDecisionReason = "Branch context violation: test-writer is running on branch '$currentBranch', not on an agent/* branch. Ensure the coordinator created a worktree for this task (Step 0d). Expected branch: agent/{workflow-id}."
-        }
-    } | ConvertTo-Json -Depth 3 -Compress
-    exit 0
-}
 
-# Extract every file path the call refers to. A batched edit names several,
-# and one production path among them is still a production edit.
-$filePaths = @(Get-AfWritePaths $inputData.tool_input)
-if ($filePaths.Count -eq 0) {
+if ($targets.Count -eq 0) {
     Write-Output '{}'
     exit 0
 }
 
-# Resolve to absolute paths and check against the production source directory
+# Check each path against the production source directory of its repository
 try {
-    $prodRoot = [System.IO.Path]::GetFullPath($SRC_DIR)
-
-    foreach ($filePath in $filePaths) {
-        $resolved = [System.IO.Path]::GetFullPath($filePath)
-        if (-not $resolved.StartsWith($prodRoot, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+    foreach ($target in $targets) {
+        $SRC_DIR = Get-AfRepoConfig -Root $target.Root -Key 'SRC_DIR' -Default 'src'
+        if ($null -ne $target.Rel) {
+            $src = (($SRC_DIR -replace '\\', '/') -replace '^\./', '').TrimEnd('/')
+            $rel = $target.Rel -replace '\\', '/'
+            $isProd = (-not $src) -or ($src -eq '.') -or ($rel -eq $src) -or
+                $rel.StartsWith("$src/", [System.StringComparison]::OrdinalIgnoreCase)
+        } else {
+            # Outside any repository: the comparison every release before #456 made.
+            $prodRoot = [System.IO.Path]::GetFullPath($SRC_DIR)
+            $isProd = [System.IO.Path]::GetFullPath($target.Path).StartsWith($prodRoot, [System.StringComparison]::OrdinalIgnoreCase)
+        }
+        if (-not $isProd) { continue }
 
         @{
             hookSpecificOutput = @{
                 hookEventName      = 'PreToolUse'
                 permissionDecision = 'deny'
-                permissionDecisionReason = "TDD phase isolation: test-writer cannot modify production code under $SRC_DIR/ (offending path: $filePath). Only test files should be created or edited during the Red phase."
+                permissionDecisionReason = "TDD phase isolation: test-writer cannot modify production code under $SRC_DIR/ (offending path: $($target.Path)). Only test files should be created or edited during the Red phase."
             }
         } | ConvertTo-Json -Depth 3 -Compress
         exit 0

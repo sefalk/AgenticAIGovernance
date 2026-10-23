@@ -410,6 +410,90 @@ for path in found:
 ' 2>/dev/null
 }
 
+# --- Repository of an edited file (issue #456) ------------------------------
+#
+# In a multi-root workspace the deployed hooks of one repository fire for edits
+# in every other one. Proving the branch of the repository the hook script sits
+# in then judges the wrong checkout, so a producer gate asks the repository the
+# edited file lands in. See _common.ps1 for the full reasoning.
+
+# af_file_repo PATH -- prints "ROOT<TAB>REL" for the repository PATH lands in,
+# or nothing when it lies outside any repository. The file may not exist yet
+# (create_file), so the nearest existing ancestor directory is asked, and the
+# path inside the repository comes from git (--show-prefix) rather than from
+# comparing two absolute spellings of it.
+af_file_repo() {
+    local _p="${1//\\//}" _dir _tail _parent _out _top _prefix
+    case "$_p" in
+        /*|[A-Za-z]:/*) ;;
+        *) _p="$PWD/$_p" ;;
+    esac
+    while [ "${#_p}" -gt 1 ] && [ "${_p%/}" != "$_p" ]; do _p=${_p%/}; done
+    _dir=$(dirname -- "$_p")
+    _tail=$(basename -- "$_p")
+    while [ ! -d "$_dir" ]; do
+        _parent=$(dirname -- "$_dir")
+        [ "$_parent" != "$_dir" ] || return 0
+        _tail="$(basename -- "$_dir")/$_tail"
+        _dir=$_parent
+    done
+    _out=$(git -C "$_dir" rev-parse --show-toplevel --show-prefix 2>/dev/null) || return 0
+    _top=$(printf '%s\n' "$_out" | sed -n 1p)
+    _prefix=$(printf '%s\n' "$_out" | sed -n 2p)
+    [ -n "$_top" ] || return 0
+    printf '%s\t%s%s\n' "$_top" "$_prefix" "$_tail"
+    return 0
+}
+
+# af_is_deploying_repo ROOT -- status 0 if ROOT is the repository this hook is
+# deployed in, or its active worktree. Both sides come from git, so they are
+# spelled the same way.
+af_is_deploying_repo() {
+    local _root="$1" _base _top
+    [ -n "$_root" ] || return 0
+    for _base in "$AF_MAIN_ROOT" "$AF_CODE_ROOT"; do
+        _top=$(git -C "$_base" rev-parse --show-toplevel 2>/dev/null) || continue
+        [ "$_top" = "$_root" ] && return 0
+    done
+    return 1
+}
+
+# af_repo_conf_get ROOT KEY [DEFAULT]
+#
+# The deploying repository reads af_conf_get, so AF_CONF_PATH keeps its
+# meaning. Any other repository reads its own .github/af-env.conf; one without
+# a config inherits the deploying repository's, so a gate is never weaker in a
+# second repository than it was before this lookup existed. Always returns 0.
+af_repo_conf_get() {
+    local _root="$1" _key="$2" _default="${3:-}" _conf _val
+    _conf="$_root/.github/af-env.conf"
+    if af_is_deploying_repo "$_root" || [ ! -f "$_conf" ]; then
+        af_conf_get "$_key" "$_default"
+        return 0
+    fi
+    _val=$(grep -E "^${_key}=" "$_conf" 2>/dev/null | head -1 | cut -d= -f2-)
+    _val=${_val%$'\r'}
+    _val=$(printf '%s' "$_val" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    if [ -n "$_val" ]; then
+        printf '%s\n' "$_val"
+    else
+        printf '%s\n' "$_default"
+    fi
+    return 0
+}
+
+# af_branch_label ROOT -- current branch, "(detached HEAD)", or nothing outside
+# a repository, where there is no branch to prove. Always returns 0.
+af_branch_label() {
+    local _branch
+    _branch=$(git -C "$1" branch --show-current 2>/dev/null || true)
+    if [ -z "$_branch" ] && [ "$(git -C "$1" rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ]; then
+        _branch="(detached HEAD)"
+    fi
+    printf '%s' "$_branch"
+    return 0
+}
+
 # --- Provenance marker detection -------------------------------------------
 #
 # instructions/provenance.instructions.md puts a Python marker *after* the
