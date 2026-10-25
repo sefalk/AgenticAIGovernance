@@ -147,6 +147,21 @@ def test_validate_skills_names_an_overlap(tmp_path: Path) -> None:
     assert f"'{NAME}' is active and also in _available/" in res.stdout, res.stdout
 
 
+def test_validate_skills_ignores_an_empty_available_folder(tmp_path: Path) -> None:
+    # git rm leaves the folder behind on OneDrive; no SKILL.md means no copy to drift (#464).
+    github = tmp_path / ".github"
+    _write(github / ACTIVE, f"---\nname: {NAME}\ndescription: 'x'\n---\n\n# Demo\n")
+    (github / AVAIL).parent.mkdir(parents=True)
+    _write(github / "skills" / "INDEX.md", "# Skills\n")
+    res = subprocess.run(
+        [sys.executable, str(AF_ROOT / ".github" / "scripts" / "validate-skills.py"), "--root", str(github)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert "also in _available/" not in res.stdout, res.stdout
+
+
 # ── deploy.ps1 ──────────────────────────────────────────────────────────────
 
 
@@ -189,10 +204,28 @@ def test_deploy_ps1_keeps_an_unresolved_conflict_on_the_next_run(tmp_path: Path)
     assert (target / ".github" / ACTIVE).read_text(encoding="utf-8") == OURS
 
 
-def _run_ps1(src: Path, target: Path) -> subprocess.CompletedProcess[str]:
+@pytest.mark.skipif(_powershell() is None, reason="PowerShell not available")
+@pytest.mark.parametrize(
+    ("with_skill_md", "reported"),
+    [(True, True), (False, False)],
+    ids=["copy-with-skill-md-is-a-duplicate", "empty-folder-is-not-a-duplicate"],
+)
+def test_deploy_ps1_duplicate_warning_needs_a_skill_md(tmp_path: Path, with_skill_md: bool, reported: bool) -> None:
+    src = _source(tmp_path / "src")
+    shutil.copy2(AF_ROOT / "deploy.ps1", src / "deploy.ps1")
+    target = _activated(tmp_path / "proj", OLD, duplicate=with_skill_md)
+    (target / ".github" / AVAIL).parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", str(target)], check=True)
+
+    res = _run_ps1(src, target, "-DryRun")
+
+    assert ("Duplicate activations" in res.stdout) is reported, res.stdout + res.stderr
+
+
+def _run_ps1(src: Path, target: Path, *extra: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [_powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(src / "deploy.ps1")]
-        + ["-TargetDir", str(target)],
+        + ["-TargetDir", str(target), *extra],
         capture_output=True,
         text=True,
         timeout=300,
