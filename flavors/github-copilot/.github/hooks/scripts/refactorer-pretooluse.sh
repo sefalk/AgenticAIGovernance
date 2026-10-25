@@ -18,7 +18,6 @@ set -uo pipefail
 # against the agent process's cwd, which silently reports no branch whenever
 # that cwd is not the repo.
 . "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
-MAIN_ROOT="$AF_MAIN_ROOT"
 CODE_ROOT="$AF_CODE_ROOT"
 PYTHON="$AF_PYTHON"
 
@@ -32,16 +31,30 @@ af_require_python "$raw" af_is_write_tool "refactorer branch-context"
 # Extract tool name
 tool_name=$(echo "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('tool_name',''))" 2>/dev/null)
 
-# Branch context proof -- block file edits if not on agent/* branch
+# Branch context proof -- block file edits unless each repository written to is
+# on an agent/* branch. In a multi-root workspace the edited file need not live
+# in the repository this hook is deployed in, so the file names the repository
+# to ask (issue #456); a call naming no path is judged by the deploying one.
 if af_is_write_tool "$tool_name"; then
-    current_branch=$(git -C "$CODE_ROOT" branch --show-current 2>/dev/null || true)
-    if [ -z "$current_branch" ] && [ "$(git -C "$CODE_ROOT" rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ]; then
-        current_branch="(detached HEAD)"
-    fi
-    if [ -n "$current_branch" ] && ! echo "$current_branch" | grep -qE '^agent/'; then
-        echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Branch context violation: refactorer is running on branch '${current_branch}', not on an agent/* branch. Ensure the coordinator created a worktree for this task (Step 0d). Expected branch: agent/{workflow-id}.\"}}"
-        exit 0
-    fi
+    check_roots=()
+    while IFS= read -r file_path; do
+        [ -n "$file_path" ] || continue
+        repo=$(af_file_repo "$file_path")
+        if [ -n "$repo" ]; then
+            check_roots+=("${repo%%$'\t'*}")
+        else
+            check_roots+=("$CODE_ROOT")
+        fi
+    done <<< "$(printf '%s' "$raw" | af_write_paths)"
+    [ "${#check_roots[@]}" -gt 0 ] || check_roots=("$CODE_ROOT")
+    for root in "${check_roots[@]}"; do
+        current_branch=$(af_branch_label "$root")
+        if [ -n "$current_branch" ] && ! grep -qE '^agent/' <<< "$current_branch"; then
+            root_json=$(af_json_escape "$root")
+            echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Branch context violation: refactorer is running on branch '${current_branch}' in ${root_json}, not on an agent/* branch. Ensure the coordinator created a worktree for this task (Step 0d). Expected branch: agent/{workflow-id}.\"}}"
+            exit 0
+        fi
+    done
 fi
 
 # Block file and directory creation. Editing an existing file is the whole

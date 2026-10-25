@@ -14,15 +14,6 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 . "$PSScriptRoot/_common.ps1"
 
-# Worktree-aware path resolution (see ideas/feature-git-worktrees.md §12).
-$mainRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
-$codeRoot = $mainRoot
-$sentinel = Join-Path $mainRoot '.github/.active-worktree'
-if (Test-Path $sentinel) {
-    $p = (Get-Content $sentinel -Raw -ErrorAction SilentlyContinue).Trim()
-    if ($p -and (Test-Path $p)) { $codeRoot = $p }
-}
-
 # Read and parse stdin
 $raw = [Console]::In.ReadToEnd()
 try {
@@ -32,26 +23,27 @@ try {
     exit 0
 }
 
-# Branch context proof -- block file edits if not on agent/* branch
+# Branch context proof -- block file edits unless each repository written to is
+# on an agent/* branch. In a multi-root workspace the edited file need not live
+# in the repository this hook is deployed in, so the file names the repository
+# to ask (issue #456); a call naming no path is judged by the deploying one.
 $toolName = $inputData.tool_name
 if (Test-AfWriteTool $toolName) {
-    $currentBranch = git -C $codeRoot branch --show-current 2>$null
-    if (-not $currentBranch) {
-        # Detached HEAD is not an agent branch either; outside a repo there is
-        # nothing to prove, so stay silent there.
-        if ((git -C $codeRoot rev-parse --is-inside-work-tree 2>$null) -eq 'true') {
-            $currentBranch = '(detached HEAD)'
+    $targets = @(Get-AfWriteTargets $inputData.tool_input)
+    $roots = if ($targets.Count -gt 0) { @($targets | ForEach-Object { $_.Root } | Select-Object -Unique) } else { @($script:AfCodeRoot) }
+    foreach ($root in $roots) {
+        # Outside a repo there is nothing to prove, so the label stays empty there.
+        $currentBranch = Get-AfBranchLabel $root
+        if ($currentBranch -and $currentBranch -notmatch '^agent/') {
+            @{
+                hookSpecificOutput = @{
+                    hookEventName      = 'PreToolUse'
+                    permissionDecision = 'deny'
+                    permissionDecisionReason = "Branch context violation: refactorer is running on branch '$currentBranch' in $root, not on an agent/* branch. Ensure the coordinator created a worktree for this task (Step 0d). Expected branch: agent/{workflow-id}."
+                }
+            } | ConvertTo-Json -Depth 3 -Compress
+            exit 0
         }
-    }
-    if ($currentBranch -and $currentBranch -notmatch '^agent/') {
-        @{
-            hookSpecificOutput = @{
-                hookEventName      = 'PreToolUse'
-                permissionDecision = 'deny'
-                permissionDecisionReason = "Branch context violation: refactorer is running on branch '$currentBranch', not on an agent/* branch. Ensure the coordinator created a worktree for this task (Step 0d). Expected branch: agent/{workflow-id}."
-            }
-        } | ConvertTo-Json -Depth 3 -Compress
-        exit 0
     }
 }
 

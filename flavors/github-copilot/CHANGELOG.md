@@ -14,6 +14,29 @@ still fails the build for a repeated `###` kind inside one section (#322).
 
 ## [Unreleased]
 
+## [1.27.0] -- 2026-10-25
+
+### Fixed
+
+- **Files git ignores in the source checkout are no longer payload (#454).** The foreign-work guard writes `.github/logs/.worktree-baseline-*` next to the payload, where they are ignored. Every deploy path and the wheel build still copied them: a 1.26.0 dry run from the framework checkout listed `CREATE .github/logs/.worktree-baseline-s1` and `UPDATE .github/logs/.worktree-baseline-shared` against a consumer. An apply would have replaced the consumer's live guard state with this repository's dirty-path list, and the dry run still reported `conflict: 0`. A wheel built from that checkout carried both files as well. `deploy.ps1`, `deploy.sh` and `deploy_core.collect_source_files` now drop what `git ls-files --others --ignored` reports under `.github`/`.vscode`. They apply this only when the payload's `VERSION` is tracked, the same rule as the source commit. The wheel's own copy sits inside an ignored `.venv`, and it still deploys in full (262 files). `hatch_build.py` adds the payload trees file by file under the same rule. Measured on a real build: the new wheel differs from the old one by exactly those two files. Tracked files and untracked, not ignored files stay payload, so a hotfix from an uncommitted tree still ships.
+
+- **Producer gates now check the repository the edited file belongs to, not the repository the hook is deployed in (#456).** In a multi-root workspace only one repository ships agents, so its `test-writer-pretooluse` and `refactorer-pretooluse` fire for edits in every root, and each proved the branch of its own checkout. In the MP + AF workspace, a test-writer editing AF tests on `agent/454-…` was refused because MP sat on `dev`. The reverse case, an edit in a second repository on `dev`, passed whenever the deploying repository was on an `agent/*` branch.
+  - Both hooks, in both dialects, now resolve each written path's repository with `git rev-parse --show-toplevel --show-prefix`, asking the nearest existing ancestor so new files work too. They prove that repository's branch.
+  - The test-writer also takes `SRC_DIR` from the edited repository's `.github/af-env.conf`. A repository without one inherits the deploying repository's value, so a second repository is never guarded more weakly than before.
+  - Calls that name no path, and paths outside any repository, keep the old behaviour.
+  - An edit in the main checkout while a worktree sentinel is active is now judged by the main checkout's branch, as the edited file dictates.
+  - The deny reason names the repository root.
+  - The stop gates are not yet repo-aware; they follow with #101.
+
+- **Session cost is read out as often as the session allows, and its completeness is proven over every read (#457).** The cost collector ran only when a workflow finished. By then a long session's debug log had often lost its head: on one machine 18 of 43 logs no longer started with `session_start`, at sizes from 1 to 231 MB. Every such session was then reported `truncated` with its total withheld, and sessions without a documenter run were never read at all.
+  - A new global hook, `cost-snapshot`, runs on every `Stop` and `SubagentStop`. It refreshes a per-session store under `.github/logs/cost/sessions/` in the background and answers `{}` at once.
+  - The collector's new `--store` mode reads only what each log gained since the last run. A log whose first 4 KB still hash the same was only appended to. A full pass over a 92 MB log took 2.8 s; a tail read takes milliseconds.
+  - When a log's head changed, the last line read is looked up in the new file by hash. Found, nothing was lost. Not found, the store records a gap with `after_ts` and `resumed_ts`. Only hashes are kept, never log text.
+  - `documenter-stop` aggregates the store's union. A session the store saw from its start is now `full` even after the log has lost its head. The workflow's facts artifact then includes the rows the log has since dropped.
+  - New report mode: `collect-session-cost.py --report .github/logs/cost/sessions` gives the total across sessions. `credits_complete` (sessions with every request held) is kept apart from `credits_lower_bound` (every row held).
+  - A withheld block no longer renders `by_model: {}` / `by_purpose: {}`, which read as zero cost. Both are now `null`. The rows that survived are summed under `surviving:`, a lower bound, never `totals`.
+  - Coverage gains `gapped`. The block schema is version 8.
+
 ## [1.26.0] -- 2026-10-23
 
 ### Added

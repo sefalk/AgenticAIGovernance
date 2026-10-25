@@ -36,6 +36,20 @@
         "command": "bash .github/hooks/scripts/stop-tests.sh",
         "windows": "powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\stop-tests.ps1",
         "timeout": 120
+      },
+      {
+        "type": "command",
+        "command": "bash .github/hooks/scripts/cost-snapshot.sh",
+        "windows": "powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\cost-snapshot.ps1",
+        "timeout": 15
+      }
+    ],
+    "SubagentStop": [
+      {
+        "type": "command",
+        "command": "bash .github/hooks/scripts/cost-snapshot.sh",
+        "windows": "powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\cost-snapshot.ps1",
+        "timeout": 15
       }
     ]
   }

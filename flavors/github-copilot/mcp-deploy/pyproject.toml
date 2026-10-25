@@ -35,12 +35,12 @@ packages = ["af_deploy_mcp"]
 # Bundle the framework payload INTO the wheel only (never committed to git, so no
 # duplicate/drift). At runtime resolve_source_root() prefers this bundled copy,
 # so an installed server needs no AF clone next to the target project.
+# ../.github and ../.vscode are added file by file in hatch_build.py, which drops
+# what git ignores there (#454).
 [tool.hatch.build.targets.wheel.force-include]
-"../.github" = "af_deploy_mcp/payload/.github"
-"../.vscode" = "af_deploy_mcp/payload/.vscode"
 "../VERSION" = "af_deploy_mcp/payload/VERSION"
 
-# Stamps af_deploy_mcp/payload/SOURCE_COMMIT: the bundled copy is no checkout (#429).
+# Stamps af_deploy_mcp/payload/SOURCE_COMMIT and adds the payload trees (#429, #454).
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "hatch_build.py"
 

@@ -38,10 +38,10 @@ the chat debug log of the current session:
 
 ```yaml
 cost:
-  schema_version: 7
-  collector: "collect-session-cost.py@7"
+  schema_version: 8
+  collector: "collect-session-cost.py@8"
   available: true
-  coverage: full            # full | partial | truncated
+  coverage: full            # full | partial | truncated | gapped
   sessions: ["<session-id>"]
   requests: 205             # billed requests only
   unbilled_requests: 9
@@ -125,6 +125,19 @@ Reading it:
   nothing; measured, a 163 MB log began with a 469,188-character fragment and
   was reported `full`. A truncated block adds `earliest_ts`, the epoch-ms
   timestamp of the first event that survived, so the withheld total can be dated.
+- **Withheld is never empty (#457).** Under `truncated` or `gapped`, `credits`,
+  `credits_by_kind`, `by_model`, `by_purpose`, `by_agent` and `by_entity` are
+  all `null`. `{}` would read as "cost nothing". What the requests that did
+  survive add up to is still a fact, and it is rendered under a name that says
+  what it is: `surviving: { requests, unbilled_requests, credits }`, a lower
+  bound, never `totals`.
+- **`gapped` is a store verdict.** With `--store` (below) the block aggregates
+  everything the session store has read, not the log as it is now, so a log
+  that lost its head *after* a snapshot is still `full`. `gapped` means the cut
+  went past the last line the store had read: the lines in between are lost,
+  and `gaps` dates each hole with `after_ts` (last request read) and
+  `resumed_ts` (first one after the cut). `truncated` under `--store` means the
+  head was already gone when the store first saw the log.
 - **The block is a snapshot taken when the documenter finishes.** The
   coordinator's closing turns are not in it.
 - **`requests` counts billed requests only**; requests without the billing
@@ -269,6 +282,49 @@ Reading it:
 - **The numbers never pass through a language model.** The hook appends the
   script's output verbatim; no agent reads the debug log (a session log reaches
   tens of megabytes and contains every prompt verbatim).
+
+### The session store (#457)
+
+Extracted once, when a workflow finishes, a long session was gone before anyone
+read it: the log loses its head at a moment nobody controls, and 18 of 43 logs
+on one machine no longer started with `session_start`, at sizes from 1 to 231 MB.
+No safe interval follows from the size, so the store is refreshed as often as
+the session gives a chance to:
+
+- **`cost-snapshot`** runs on every `Stop` and `SubagentStop` (global hooks in
+  `agent-hooks.json`). It starts the collector with `--store
+  .github/logs/cost/sessions --snapshot` in the background and answers `{}` at
+  once, so no turn waits for it. `documenter-stop` passes `--store` too: its
+  block is the union, and its `--facts-out` rows include what the log has
+  since lost.
+- **Incremental.** A log whose first 4 KB still hash the same was only
+  appended to, so only the bytes past the stored offset are read. A full pass
+  over a 92 MB log took 2.8 s; a tail takes milliseconds. A line without its
+  newline is still being written and is left for the next run.
+- **Continuity is proven, not assumed.** When a log's head changed, the last
+  line read is looked for in the new file, by hash. Found, nothing in between
+  was lost and reading resumes after it; a cut that landed inside that line is
+  recognised by the hash of its last 256 bytes. Not found, the store records a
+  gap. Only hashes are kept: a line is a prompt. Measured on a live session:
+  its log was cut from 99.8 MB to 81.7 MB between two snapshots, the last line
+  read survived, and the next snapshot read only the 23 MB after it, no gap.
+- **One store per session**, `{session}.facts.ndjson` beside
+  `{session}.state.json` (offsets, hashes, gaps, coverage). Rows are keyed on
+  the request, as in the workflow artifact, so a re-read adds nothing. A lock
+  file keeps two hooks firing at once from both appending; a lock older than
+  five minutes belongs to a crashed run and is taken over.
+- **The total across sessions** comes from the store, not from the workflow
+  artifacts, which overlap when two workflows share a chat session:
+
+  ```
+  python .github/scripts/collect-session-cost.py --report .github/logs/cost/sessions
+  ```
+
+  (VS Code task `metrics: session cost`.)
+
+  `credits_complete` sums only sessions whose every request is in the store;
+  `credits_lower_bound` sums every row held, including sessions with a gap or a
+  lost head. The two are never merged into one number.
 
 Regression tests: `scripts/test-session-cost.ps1`.
 

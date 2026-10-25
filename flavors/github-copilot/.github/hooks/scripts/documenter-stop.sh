@@ -320,6 +320,9 @@ if [ -n "$sid" ] && [ -n "$transcript" ]; then
         cost_dir="$(dirname "$log_path")/cost"
         args+=(--facts-out "${cost_dir}/${workflow_id}.facts.ndjson")
         args+=(--entities-out "${cost_dir}/${workflow_id}.entities.ndjson")
+        # The block is the union of every snapshot cost-snapshot took, so a log
+        # that lost its head since then still yields its total (#457).
+        args+=(--store "${cost_dir}/sessions")
 
         if block=$("$python_exe" "$collector" "${args[@]}" 2>/dev/null) && [ -n "$block" ]; then
             # Appending twice would produce a duplicate YAML key; first write

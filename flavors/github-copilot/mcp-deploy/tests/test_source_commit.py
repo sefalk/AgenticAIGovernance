@@ -147,7 +147,8 @@ def test_the_build_hook_stamps_the_payload(tmp_path: Path, monkeypatch: pytest.M
     hook = module.SourceCommitHook(str(src / "mcp-deploy"))
     build_data: dict = {"force_include": {}}
     hook.initialize("standard", build_data)
-    [(stamp, dest)] = build_data["force_include"].items()
+    # The hook also adds the payload trees file by file (#454); the stamp is one entry among them.
+    [(stamp, dest)] = [(s, d) for s, d in build_data["force_include"].items() if d.endswith("/SOURCE_COMMIT")]
     assert dest == "af_deploy_mcp/payload/SOURCE_COMMIT"
     assert Path(stamp).read_text(encoding="utf-8").strip() == head
 

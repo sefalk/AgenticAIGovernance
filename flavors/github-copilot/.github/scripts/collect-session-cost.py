@@ -41,16 +41,21 @@ evidence -- everything below is verified here.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import glob
+import hashlib
 import json
 import os
 import re
 import sys
+import time
 from collections.abc import Callable, Iterator
 from typing import Any
 
-SCHEMA_VERSION = 7
-COLLECTOR_VERSION = 7
+# v8: `surviving` and `gaps` when the total is withheld, coverage `gapped`, and
+# `by_model`/`by_purpose` render `null` rather than `{}` when withheld (#457).
+SCHEMA_VERSION = 8
+COLLECTOR_VERSION = 8
 # v2: the file accumulates instead of being replaced, so it carries one header
 # per session and every row names the session it came from.
 # v3: every row names the price tier it was priced at (#451).
@@ -593,6 +598,78 @@ class Totals:
         return {k: round(v / NANO_AIU_PER_CREDIT, 3) for k, v in self.by_kind.items()}
 
 
+class _Sink:
+    """What one pass over log events accumulates, whether a whole log or a tail."""
+
+    def __init__(self, session: str, cards: dict[str, list[dict[str, Any]]] | None) -> None:
+        self.session = session
+        self.cards = cards
+        self.facts: list[dict[str, Any]] = []
+        self.span_kind: dict[str, str] = {}
+        self.invoked: dict[str, int] = {}
+        self.customizations: dict[str, dict[str, Any]] = {}
+        self.session_start: dict[str, Any] | None = None
+        self.parsed = 0
+        self.requests_seen = 0
+        self.no_usage = 0
+        self.drifted: dict[str, int] = {}
+        self.drifted_logs: set[str] = set()
+
+    def take(self, event: dict[str, Any], log: str, agent: str, is_main: bool) -> None:
+        self.parsed += 1
+        span = event.get("spanId")
+        if isinstance(span, str):
+            self.span_kind[span] = str(event.get("type"))
+        kind = event.get("type")
+        # Subagent logs and window reloads write their own session_start;
+        # only main.jsonl's says when the session began (#450).
+        if kind == "session_start" and is_main and self.session_start is None:
+            self.session_start = event
+        elif kind == "llm_request":
+            self.requests_seen += 1
+            if reports_no_usage(event):
+                self.no_usage += 1
+                return
+            try:
+                fact = build_fact(event, self.session, log, agent)
+            except Drift as missing:
+                # One unreadable record is a hole in the total, not a
+                # reason to discard the records that read cleanly.
+                self.drifted[str(missing)] = self.drifted.get(str(missing), 0) + 1
+                # A session is many logs; drift in one subagent's log is a
+                # different finding from drift in main.jsonl (issue #238).
+                self.drifted_logs.add(log)
+                return
+            price(fact, self.cards)
+            self.facts.append(fact)
+        elif kind == "tool_call":
+            # Only the name. `attrs.args` and `attrs.result` are the call's
+            # payload and carry whatever the user put in front of it.
+            called = event.get("name")
+            if isinstance(called, str) and called:
+                self.invoked[called] = self.invoked.get(called, 0) + 1
+        elif kind == "generic":
+            _record_customizations(event, self.customizations)
+
+    def resolve_parents(self, known: dict[str, str] | None = None) -> None:
+        """Every request has a parent span: the subagent, user message or hook that caused it."""
+        for fact in self.facts:
+            parent = fact["parent_span"]
+            if isinstance(parent, str):
+                fact["parent_kind"] = self.span_kind.get(parent) or (known or {}).get(parent)
+
+
+def _tally(facts: list[dict[str, Any]], agent_files: list[str]) -> tuple[Totals, dict[str, Totals]]:
+    totals = Totals()
+    per_agent: dict[str, Totals] = {name: Totals() for name in agent_files}
+    for name in agent_files:
+        per_agent[name].invocations += 1
+    for fact in facts:
+        totals.add(fact)
+        per_agent.setdefault(fact["agent"], Totals()).add(fact)
+    return totals, per_agent
+
+
 def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
     """Validate the session directory and aggregate it, or explain why not."""
     if not os.path.isdir(session_dir):
@@ -603,18 +680,8 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
         return {"available": False, "reason": "main_log_missing"}
 
     session = os.path.basename(os.path.normpath(session_dir))
-    cards = rate_card(session_dir)
-    session_start: dict[str, Any] | None = None
-    facts: list[dict[str, Any]] = []
-    span_kind: dict[str, str] = {}
+    sink = _Sink(session, rate_card(session_dir))
     agent_files: list[str] = []
-    invoked: dict[str, int] = {}
-    customizations: dict[str, dict[str, Any]] = {}
-    parsed = 0
-    requests_seen = 0
-    no_usage = 0
-    drifted: dict[str, int] = {}
-    drifted_logs: set[str] = set()
     main_head: dict[str, Any] = {}
 
     for path in log_files(session_dir):
@@ -627,108 +694,490 @@ def collect(session_dir: str, workflow_start: int | None) -> dict[str, Any]:
         log = os.path.basename(path)
         is_main = agent == PARENT
         for event in iter_events(path, main_head if is_main else None):
-            parsed += 1
-            span = event.get("spanId")
-            if isinstance(span, str):
-                span_kind[span] = str(event.get("type"))
-            kind = event.get("type")
-            # Subagent logs and window reloads write their own session_start;
-            # only main.jsonl's says when the session began (#450).
-            if kind == "session_start" and is_main and session_start is None:
-                session_start = event
-            elif kind == "llm_request":
-                requests_seen += 1
-                if reports_no_usage(event):
-                    no_usage += 1
-                    continue
-                try:
-                    fact = build_fact(event, session, log, agent)
-                except Drift as missing:
-                    # One unreadable record is a hole in the total, not a
-                    # reason to discard the records that read cleanly.
-                    drifted[str(missing)] = drifted.get(str(missing), 0) + 1
-                    # A session is many logs; drift in one subagent's log is a
-                    # different finding from drift in main.jsonl (issue #238).
-                    drifted_logs.add(log)
-                    continue
-                price(fact, cards)
-                facts.append(fact)
-            elif kind == "tool_call":
-                # Only the name. `attrs.args` and `attrs.result` are the call's
-                # payload and carry whatever the user put in front of it.
-                called = event.get("name")
-                if isinstance(called, str) and called:
-                    invoked[called] = invoked.get(called, 0) + 1
-            elif kind == "generic":
-                _record_customizations(event, customizations)
+            sink.take(event, log, agent, is_main)
 
-    if parsed == 0:
+    if sink.parsed == 0:
         return {"available": False, "reason": "log_unparseable"}
 
     # Every request drifted and none survived: there is no total to degrade,
     # only one to withhold.
-    if drifted and not facts:
+    if sink.drifted and not sink.facts:
         return {"available": False, "reason": "schema_drift"}
 
-    # The trace states what the filename only implies: every request has a
-    # parent span, resolving to the subagent, user message or hook that caused it.
-    for fact in facts:
-        parent = fact["parent_span"]
-        if isinstance(parent, str):
-            fact["parent_kind"] = span_kind.get(parent)
-
-    totals = Totals()
-    per_agent: dict[str, Totals] = {name: Totals() for name in agent_files}
-    for name in agent_files:
-        per_agent[name].invocations += 1
-    for fact in facts:
-        totals.add(fact)
-        per_agent[fact["agent"]].add(fact)
-
-    result: dict[str, Any] = {
-        "available": True,
-        "sessions": [session],
-        "environment": _environment(session_start),
-        "facts": facts,
-        "rate_card": RATE_CARD_FILE if cards else None,
-        "entities": collect_entities(session_dir, facts, invoked),
-        "customizations": customizations,
-        "no_usage_requests": no_usage,
-    }
-
-    # Only when something was lost. A key that is always present stops being
-    # read; one that appears only on a hole is a signal.
-    if drifted:
-        result["drift"] = {
-            "records": sum(drifted.values()),
-            "of": requests_seen,
-            "fields": sorted(drifted),
-            "logs": sorted(drifted_logs),
-        }
+    sink.resolve_parents()
+    result = _result(session_dir, sink, agent_files)
 
     if main_head.get("type") != "session_start":
-        # The size cap drops the OLDEST entries, i.e. the plan and Red phases.
-        # A total would look complete while being biased downward, so emit none.
-        # The per-agent split inherits that bias and is withheld with it. A
-        # session_start further down is a reload, not the start (#450).
-        result["coverage"] = "truncated"
+        # The log lost its head before it was read, so the OLDEST entries --
+        # the plan and Red phases -- are gone. A session_start further down is
+        # a reload, not the start (#450).
         result["earliest_ts"] = main_head.get("earliest_ts")
-        result["totals"] = None
-        result["by_agent"] = None
-        # Each entity row is still accurate; only the set of requests behind
-        # the weighting is incomplete, so the rows survive and the mean does not.
-        result["by_entity"] = None
-        return result
+        return _withhold(result, "truncated")
 
-    started = session_start.get("ts")
+    started = (sink.session_start or {}).get("ts")
+    return _certify(result, _coverage(started, workflow_start))
+
+
+def _result(session_dir: str, sink: _Sink, agent_files: list[str]) -> dict[str, Any]:
+    """The parts of a result every coverage verdict shares."""
+    totals, per_agent = _tally(sink.facts, agent_files)
+    result: dict[str, Any] = {
+        "available": True,
+        "sessions": [sink.session],
+        "environment": _environment(sink.session_start),
+        "facts": sink.facts,
+        "rate_card": RATE_CARD_FILE if sink.cards else None,
+        "entities": collect_entities(session_dir, sink.facts, sink.invoked),
+        "customizations": sink.customizations,
+        "no_usage_requests": sink.no_usage,
+        "_totals": totals,
+        "_per_agent": per_agent,
+    }
+    # Only when something was lost. A key that is always present stops being
+    # read; one that appears only on a hole is a signal.
+    if sink.drifted:
+        result["drift"] = {
+            "records": sum(sink.drifted.values()),
+            "of": sink.requests_seen,
+            "fields": sorted(sink.drifted),
+            "logs": sorted(sink.drifted_logs),
+        }
+    return result
+
+
+def _coverage(started: Any, workflow_start: int | None) -> str:
     if workflow_start is not None and isinstance(started, int) and started > workflow_start:
-        result["coverage"] = "partial"
-    else:
-        result["coverage"] = "full"
-    result["totals"] = totals
-    result["by_agent"] = per_agent
+        return "partial"
+    return "full"
+
+
+def _certify(result: dict[str, Any], coverage: str) -> dict[str, Any]:
+    result["coverage"] = coverage
+    result["totals"] = result.pop("_totals")
+    result["by_agent"] = result.pop("_per_agent")
     result["by_entity"] = result["entities"]
     return result
+
+
+def _withhold(result: dict[str, Any], coverage: str) -> dict[str, Any]:
+    """A set of requests known to be incomplete yields no total (#450).
+
+    A total over it would look complete while being biased downward, and the
+    per-agent split and the entity weighting inherit that bias. What the rows
+    that did survive add up to is still a fact, so it is rendered under a name
+    that says what it is -- `surviving`, a lower bound -- and never as `totals`
+    (#457). Each entity row stays accurate; only the weighting behind the mean
+    does not, so the rows survive and the mean does not.
+    """
+    result["coverage"] = coverage
+    result["surviving"] = result.pop("_totals")
+    result.pop("_per_agent")
+    result["totals"] = None
+    result["by_agent"] = None
+    result["by_entity"] = None
+    return result
+
+
+# ── The session store (issue #457) ─────────────────────────────────────────
+#
+# The debug log loses its head at a moment nobody controls: 18 of 43 logs on one
+# machine no longer started with session_start, at sizes from 1 to 231 MB, so no
+# safe interval can be derived from the size. Extracted once, when a workflow
+# finishes, a long session is gone before anyone reads it. The store is
+# refreshed on every Stop and SubagentStop instead, and three properties make
+# that affordable and trustworthy:
+#
+#   * Incremental. A log whose first bytes are unchanged was only appended to,
+#     so only the bytes past the last offset are read. A full pass over a 92 MB
+#     log took 2.8 s; a tail is milliseconds.
+#   * Union, not snapshot. Completeness is judged over everything the store has
+#     ever read. The log losing its head after a snapshot loses nothing.
+#   * Proven continuity. When the head changed, the last line read is looked
+#     for in the new file. Found, nothing between was lost. Not found, the cut
+#     went past it, and the store records a gap with both timestamps instead of
+#     certifying a total. Only hashes are kept: a line is a prompt.
+
+STORE_VERSION = 1
+# A run that crashed leaves its lock behind; one older than this is taken over.
+LOCK_STALE_SECONDS = 300
+# How much of a log's head is hashed to prove the file was only appended to.
+HEAD_PROBE = 4096
+# How much of the last line read is hashed to recognise it when a cut lands inside it.
+TAIL_PROBE = 256
+# Waited for by a caller that renders a block, so it reads a store that is not mid-write.
+LOCK_WAIT_SECONDS = 20.0
+
+
+def _sig(data: bytes) -> str:
+    return hashlib.sha1(data).hexdigest()
+
+
+def _store_paths(store: str, session: str) -> dict[str, str]:
+    return {
+        "facts": os.path.join(store, f"{session}.facts.ndjson"),
+        "state": os.path.join(store, f"{session}.state.json"),
+        "lock": os.path.join(store, f"{session}.lock"),
+    }
+
+
+def _acquire(lock: str) -> bool:
+    """Take the session lock, or report that another run holds it."""
+    for _ in range(2):
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                age = time.time() - os.path.getmtime(lock)
+            except OSError:
+                continue
+            if age < LOCK_STALE_SECONDS:
+                return False
+            try:
+                os.remove(lock)
+            except OSError:
+                return False
+            continue
+        os.write(fd, str(os.getpid()).encode("ascii"))
+        os.close(fd)
+        return True
+    return False
+
+
+def _load_state(path: str, session: str) -> dict[str, Any]:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            state = json.load(handle)
+        if isinstance(state, dict) and state.get("store_version") == STORE_VERSION:
+            return state
+    except (OSError, ValueError):
+        pass
+    return {
+        "store_version": STORE_VERSION,
+        "session": session,
+        # None until main.jsonl is first seen: True when it then still began
+        # with session_start, False when its head was already gone.
+        "head_seen": None,
+        "started_ts": None,
+        "earliest_ts": None,
+        "gaps": [],
+        "logs": {},
+        "spans": {},
+        "invoked": {},
+        "customizations": {},
+        "environment": None,
+        "no_usage_requests": 0,
+        "requests_seen": 0,
+        "drift": {},
+        "drift_logs": [],
+    }
+
+
+def _save_state(path: str, state: dict[str, Any]) -> None:
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as handle:
+        json.dump(state, handle, sort_keys=True)
+    os.replace(tmp, path)
+
+
+def _complete_lines(handle: Any, start: int) -> Iterator[tuple[int, bytes]]:
+    """(offset after line, line) for every newline-terminated line from start.
+
+    A line without its newline is still being written. Consuming it half would
+    either lose it or count it twice once it is complete, so it is left for the
+    next run, and the offset stays in front of it.
+    """
+    handle.seek(start)
+    offset = start
+    for raw in handle:
+        if not raw.endswith(b"\n"):
+            return
+        offset += len(raw)
+        yield offset, raw
+
+
+def _parse(raw: bytes) -> dict[str, Any] | None:
+    try:
+        event = json.loads(raw.decode("utf-8", errors="replace"))
+    except (ValueError, TypeError):
+        return None
+    return event if isinstance(event, dict) else None
+
+
+def _read_log(path: str, prev: dict[str, Any] | None) -> dict[str, Any]:
+    """Decide where reading resumes in one log, and whether anything was lost.
+
+    Returns the start offset, the lines to skip at the front (already read
+    before the head was cut), and a gap when continuity cannot be shown.
+    """
+    with open(path, "rb") as handle:
+        if prev:
+            head = handle.read(int(prev["head_len"]))
+            size = os.path.getsize(path)
+            if _sig(head) == prev["head_sig"] and size >= int(prev["offset"]):
+                return {"start": int(prev["offset"]), "skip": 0, "gap": None, "rescan": False}
+
+        if not prev or not prev.get("tail_sig"):
+            return {"start": 0, "skip": 0, "gap": None, "rescan": prev is not None}
+
+        # The head changed: find the last line read. A cut that landed inside
+        # it leaves its tail as the first line, which still proves continuity.
+        skip = None
+        for index, (_, raw) in enumerate(_complete_lines(handle, 0)):
+            line = raw.rstrip(b"\r\n")
+            if _sig(line) == prev["tail_sig"]:
+                skip = index + 1
+                break
+            if index == 0 and len(line) >= TAIL_PROBE and _sig(line[-TAIL_PROBE:]) == prev.get("tail_end_sig"):
+                skip = 1
+                break
+        if skip is not None:
+            return {"start": 0, "skip": skip, "gap": None, "rescan": True}
+        return {"start": 0, "skip": 0, "gap": {"after_ts": prev.get("max_ts")}, "rescan": True}
+
+
+def update_store(session_dir: str, store: str) -> dict[str, Any] | None:
+    """Read what the logs gained since the last run into the store.
+
+    Returns the state, or None when another run holds the lock or there is no
+    log to read. Never raises for a missing or unreadable log: the store is
+    advisory, and the next Stop tries again.
+    """
+    main = os.path.join(session_dir, "main.jsonl")
+    if not os.path.isfile(main):
+        return None
+    session = os.path.basename(os.path.normpath(session_dir))
+    os.makedirs(store, exist_ok=True)
+    paths = _store_paths(store, session)
+    if not _acquire(paths["lock"]):
+        return None
+    try:
+        return _update_locked(session_dir, session, paths)
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(paths["lock"])
+
+
+def _update_locked(session_dir: str, session: str, paths: dict[str, str]) -> dict[str, Any]:
+    state = _load_state(paths["state"], session)
+    cards = rate_card(session_dir)
+    sink = _Sink(session, cards)
+
+    for path in log_files(session_dir):
+        if not os.path.isfile(path):
+            continue
+        log = os.path.basename(path)
+        agent = agent_from(path)
+        is_main = agent == PARENT
+        prev = state["logs"].get(log)
+        plan = _read_log(path, prev)
+        entry = dict(prev or {"max_ts": None, "tail_sig": None, "tail_end_sig": None})
+        first_ts: int | None = None
+        read_bytes = 0
+        offset = plan["start"]
+
+        with open(path, "rb") as handle:
+            for index, (end, raw) in enumerate(_complete_lines(handle, plan["start"])):
+                offset = end
+                if index < plan["skip"]:
+                    continue
+                read_bytes += len(raw)
+                line = raw.rstrip(b"\r\n")
+                entry["tail_sig"] = _sig(line)
+                entry["tail_end_sig"] = _sig(line[-TAIL_PROBE:]) if len(line) >= TAIL_PROBE else None
+                event = _parse(raw)
+                if is_main and state["head_seen"] is None and plan["start"] == 0 and index == 0:
+                    # First line ever read from main.jsonl: did it still begin at the start?
+                    state["head_seen"] = bool(event and event.get("type") == "session_start")
+                if event is None:
+                    continue
+                ts = event.get("ts")
+                if isinstance(ts, int):
+                    first_ts = ts if first_ts is None else first_ts
+                    entry["max_ts"] = ts if entry["max_ts"] is None else max(int(entry["max_ts"]), ts)
+                    if is_main and state["head_seen"] is False and state["earliest_ts"] is None:
+                        state["earliest_ts"] = ts
+                sink.take(event, log, agent, is_main)
+
+            handle.seek(0)
+            entry["head_len"] = min(HEAD_PROBE, offset)
+            entry["head_sig"] = _sig(handle.read(entry["head_len"]))
+
+        if plan["gap"] is not None:
+            state["gaps"].append({"log": log, "after_ts": plan["gap"]["after_ts"], "resumed_ts": first_ts})
+        entry["offset"] = offset
+        entry["agent"] = agent
+        entry["last_read_bytes"] = read_bytes
+        state["logs"][log] = entry
+
+    if sink.session_start is not None and state["started_ts"] is None and state["head_seen"]:
+        state["started_ts"] = sink.session_start.get("ts")
+        state["environment"] = _environment(sink.session_start)
+    sink.resolve_parents(state["spans"])
+    state["spans"].update(sink.span_kind)
+    for name, count in sink.invoked.items():
+        state["invoked"][name] = state["invoked"].get(name, 0) + count
+    for name, bucket in sink.customizations.items():
+        merged = state["customizations"].setdefault(name, {"applying": 0, "skipped": 0, "listed": 0, "reason": None})
+        for status in ("applying", "skipped", "listed"):
+            merged[status] += bucket[status]
+        merged["reason"] = merged["reason"] or bucket["reason"]
+    state["no_usage_requests"] += sink.no_usage
+    state["requests_seen"] += sink.requests_seen
+    for field, count in sink.drifted.items():
+        state["drift"][field] = state["drift"].get(field, 0) + count
+    state["drift_logs"] = sorted(set(state["drift_logs"]) | sink.drifted_logs)
+    state["rate_card"] = RATE_CARD_FILE if cards else state.get("rate_card")
+    state["updated"] = int(time.time() * 1000)
+
+    if sink.facts:
+        header = {
+            "record": "header",
+            "facts_schema_version": FACTS_SCHEMA_VERSION,
+            "collector": f"collect-session-cost.py@{COLLECTOR_VERSION}",
+            "session": session,
+            # The store's coverage changes with every snapshot; the state file
+            # carries it, a header written once could only carry a stale one.
+            "coverage_in": os.path.basename(paths["state"]),
+            "rate_card": state["rate_card"],
+        }
+        _append_ndjson(paths["facts"], header, sink.facts, _fact_key)
+    _save_state(paths["state"], state)
+    return state
+
+
+def _store_rows(path: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(record, dict) and record.get("record") != "header":
+                    rows.append(record)
+    except OSError:
+        pass
+    return rows
+
+
+def _store_coverage(state: dict[str, Any]) -> str:
+    if not state.get("head_seen"):
+        return "truncated"
+    if state.get("gaps"):
+        return "gapped"
+    return "full"
+
+
+def collect_store(session_dir: str, store: str, workflow_start: int | None) -> dict[str, Any]:
+    """Refresh the store, then aggregate the union of everything it has read."""
+    if not os.path.isdir(session_dir):
+        return {"available": False, "reason": "session_dir_missing"}
+    if not os.path.isfile(os.path.join(session_dir, "main.jsonl")):
+        return {"available": False, "reason": "main_log_missing"}
+
+    session = os.path.basename(os.path.normpath(session_dir))
+    paths = _store_paths(store, session)
+    deadline = time.time() + LOCK_WAIT_SECONDS
+    while update_store(session_dir, store) is None and time.time() < deadline:
+        # A background snapshot holds the lock; its result is what we want too.
+        time.sleep(0.2)
+    state = _load_state(paths["state"], session)
+    if not state["logs"]:
+        return {"available": False, "reason": "log_unparseable"}
+
+    facts = _store_rows(paths["facts"])
+    if state["drift"] and not facts:
+        return {"available": False, "reason": "schema_drift"}
+
+    sink = _Sink(session, None)
+    sink.facts = facts
+    sink.invoked = dict(state["invoked"])
+    sink.customizations = dict(state["customizations"])
+    sink.no_usage = int(state["no_usage_requests"])
+    sink.requests_seen = int(state["requests_seen"])
+    sink.drifted = dict(state["drift"])
+    sink.drifted_logs = set(state["drift_logs"])
+    agent_files = [entry.get("agent") or agent_from(log) for log, entry in sorted(state["logs"].items())]
+    result = _result(session_dir, sink, agent_files)
+    result["rate_card"] = state.get("rate_card")
+    result["environment"] = state.get("environment") or _environment(None)
+
+    coverage = _store_coverage(state)
+    if coverage == "truncated":
+        result["earliest_ts"] = state.get("earliest_ts")
+        return _withhold(result, coverage)
+    if coverage == "gapped":
+        result["gaps"] = state["gaps"]
+        return _withhold(result, coverage)
+    return _certify(result, _coverage(state.get("started_ts"), workflow_start))
+
+
+def report(store: str) -> str:
+    """The total across every session in the store, complete and lower bound kept apart."""
+    sessions: list[dict[str, Any]] = []
+    for path in sorted(glob.glob(os.path.join(store, "*.state.json"))):
+        session = os.path.basename(path)[: -len(".state.json")]
+        state = _load_state(path, session)
+        if not state["logs"]:
+            continue
+        rows = _store_rows(_store_paths(store, session)["facts"])
+        totals, _ = _tally(rows, [])
+        stamps = [row["ts"] for row in rows if isinstance(row.get("ts"), int)]
+        sessions.append(
+            {
+                "session": session,
+                "coverage": _store_coverage(state),
+                "totals": totals,
+                "first_ts": min(stamps) if stamps else None,
+                "last_ts": max(stamps) if stamps else None,
+            }
+        )
+
+    complete = [s for s in sessions if s["coverage"] == "full"]
+    every = Totals()
+    for s in sessions:
+        every.requests += s["totals"].requests
+        every.unbilled += s["totals"].unbilled
+        every.nano_aiu += s["totals"].nano_aiu
+        for model, bucket in s["totals"].by_model.items():
+            merged = every.by_model.setdefault(model, {"requests": 0, "nano_aiu": 0})
+            merged["requests"] += bucket["requests"]
+            merged["nano_aiu"] += bucket["nano_aiu"]
+    credits_complete = round(sum(s["totals"].nano_aiu for s in complete) / NANO_AIU_PER_CREDIT, 3)
+
+    lines = [
+        "cost_report:",
+        f"  schema_version: {SCHEMA_VERSION}",
+        f'  collector: "collect-session-cost.py@{COLLECTOR_VERSION}"',
+        f"  sessions: {len(sessions)}",
+        f"  complete: {len(complete)}",
+        # Only sessions whose every request is in the store sum to a number.
+        f"  credits_complete: {credits_complete}",
+        # Every row the store holds, including sessions with a gap or a lost
+        # head: what was spent at least, never what was spent.
+        f"  credits_lower_bound: {every.credits}",
+        f"  requests: {every.requests}",
+        f"  unbilled_requests: {every.unbilled}",
+        "  by_model:",
+    ]
+    for model, bucket in sorted(every.by_model.items()):
+        lines.append(
+            f"    {model}: {{ requests: {bucket['requests']}, "
+            f"credits: {round(bucket['nano_aiu'] / NANO_AIU_PER_CREDIT, 3)} }}"
+        )
+    if not every.by_model:
+        lines[-1] = "  by_model: {}"
+    lines.append("  by_session:")
+    for s in sorted(sessions, key=lambda s: (s["first_ts"] or 0, s["session"])):
+        lines.append(
+            f"    - {{ session: {_scalar(s['session'])}, coverage: {s['coverage']}, "
+            f"requests: {s['totals'].requests}, credits: {s['totals'].credits}, "
+            f"first_ts: {_scalar(s['first_ts'])}, last_ts: {_scalar(s['last_ts'])} }}"
+        )
+    if not sessions:
+        lines[-1] = "  by_session: []"
+    return "\n".join(lines) + "\n"
 
 
 def _record_customizations(event: dict[str, Any], sink: dict[str, dict[str, Any]]) -> None:
@@ -796,6 +1245,21 @@ def render(result: dict[str, Any], facts_path: str | None = None, entities_path:
     if "earliest_ts" in result:
         # Only on a truncated log: dates the first event that survived the cap.
         lines.append(f"  earliest_ts: {_scalar(result['earliest_ts'])}")
+    if result.get("gaps"):
+        # Where the log was cut past the last line the store had read.
+        lines.append("  gaps:")
+        for gap in result["gaps"]:
+            lines.append(
+                f"    - {{ log: {_scalar(gap.get('log'))}, after_ts: {_scalar(gap.get('after_ts'))},"
+                f" resumed_ts: {_scalar(gap.get('resumed_ts'))} }}"
+            )
+    surviving: Totals | None = result.get("surviving")
+    if surviving is not None:
+        # What the rows that did survive add up to: a lower bound, never a total.
+        lines.append(
+            f"  surviving: {{ requests: {surviving.requests}, unbilled_requests: {surviving.unbilled},"
+            f" credits: {surviving.credits} }}"
+        )
     lines.append(f"  sessions: [{sessions}]")
     lines.append(f"  requests: {_scalar(totals.requests if totals else None)}")
     lines.append(f"  unbilled_requests: {_scalar(totals.unbilled if totals else None)}")
@@ -828,8 +1292,9 @@ def render(result: dict[str, Any], facts_path: str | None = None, entities_path:
         credits = round(bucket["nano_aiu"] / NANO_AIU_PER_CREDIT, 3)
         lines.append(f"    {model}: {{ requests: {bucket['requests']}, credits: {credits} }}")
     if not (totals and totals.by_model):
-        lines[-1] = "  by_model: {}"
-    lines.extend(_by_purpose(totals.by_purpose if totals else {}, "  "))
+        # Withheld is not empty: `{}` would read as "cost nothing" (#457).
+        lines[-1] = "  by_model: {}" if totals else "  by_model: null"
+    lines.extend(_by_purpose(totals.by_purpose, "  ") if totals else ["  by_purpose: null"])
     lines.extend(_by_agent(result.get("by_agent")))
     lines.extend(_by_entity(result, entities_path))
     # Names the artifact a third party can re-aggregate, not just this summary.
@@ -1114,7 +1579,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--session-dir",
-        required=True,
+        default=None,
         help="Session log directory (VS Code: VSCODE_TARGET_SESSION_LOG).",
     )
     parser.add_argument(
@@ -1133,9 +1598,42 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Write the payload-by-entity rows as NDJSON here. Different grain from --facts-out.",
     )
+    parser.add_argument(
+        "--store",
+        default=None,
+        help="Session store directory. Refreshed incrementally; the block aggregates its union.",
+    )
+    parser.add_argument(
+        "--snapshot",
+        action="store_true",
+        help="With --store: refresh the store and print nothing. What the Stop hook runs.",
+    )
+    parser.add_argument(
+        "--report",
+        default=None,
+        metavar="STORE",
+        help="Print the total across every session in this store, instead of one session's block.",
+    )
     args = parser.parse_args(argv)
 
-    result = collect(args.session_dir, args.workflow_start)
+    if args.report:
+        sys.stdout.write(report(args.report))
+        return 0
+    if not args.session_dir:
+        parser.error("--session-dir is required (or --report STORE)")
+    if args.snapshot:
+        if not args.store:
+            parser.error("--snapshot needs --store")
+        # One attempt: a held lock means another run is reading the same bytes.
+        # Advisory: on an I/O error the next Stop tries again from the same offset.
+        with contextlib.suppress(OSError):
+            update_store(args.session_dir, args.store)
+        return 0
+
+    if args.store:
+        result = collect_store(args.session_dir, args.store, args.workflow_start)
+    else:
+        result = collect(args.session_dir, args.workflow_start)
     written = write_facts(args.facts_out, result) if args.facts_out else None
     entities = write_entities(args.entities_out, result) if args.entities_out else None
     sys.stdout.write(render(result, written, entities))

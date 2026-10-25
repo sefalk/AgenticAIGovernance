@@ -538,6 +538,80 @@ run_case "existing file allowed on agent branch" refactorer-pretooluse.sh agent/
 run_case "file creation denied on agent branch" refactorer-pretooluse.sh agent/fixture  "$SRC_CREATE" deny
 run_case "running a task is not a file creation" refactorer-pretooluse.sh agent/fixture '{"tool_name":"run_task","tool_input":{"id":"shell: tests: all","workspaceFolder":"/repo"}}' silent
 
+# In a multi-root workspace the deployed hooks of one repository fire for edits
+# in another. They used to prove the branch, and resolve SRC_DIR, of the
+# repository the hook script lives in (issue #456). Each case pairs the hook's
+# own fixture (the branch argument) with a foreign repository the edit lands in.
+#
+# foreign_case <name> <hook> <hook-branch> <foreign-branch> <foreign-SRC_DIR|-> <rel path> <expect>
+foreign_case() {
+    local name="$1" hook="$2" hook_branch="$3" foreign_branch="$4" src="$5" rel="$6" expect="$7"
+    local foreign json
+    foreign=$(mktemp -d) || { echo "FATAL  no foreign fixture directory" >&2; exit 1; }
+    git -C "${foreign:?}" init -q
+    git -C "$foreign" checkout -q -b "$foreign_branch"
+    if [ "$src" != "-" ]; then
+        mkdir -p "$foreign/.github"
+        printf 'SRC_DIR=%s\n' "$src" > "$foreign/.github/af-env.conf"
+    fi
+    json='{"tool_name":"replace_string_in_file","tool_input":{"filePath":"'"$foreign/$rel"'","oldString":"a","newString":"b"}}'
+    run_case "$name" "$hook" "$hook_branch" "$json" "$expect"
+    rm -rf "$foreign"
+}
+
+echo "## producer gates judge the edited file's repository (#456)"
+foreign_case "test-writer denied when the edited repo is on dev" \
+    test-writer-pretooluse.sh agent/fixture dev - tests/test_x.py deny
+foreign_case "refactorer denied when the edited repo is on dev" \
+    refactorer-pretooluse.sh agent/fixture dev - src/main.py deny
+foreign_case "test-writer allowed when the edited repo is on agent/*" \
+    test-writer-pretooluse.sh dev agent/foreign-1 - tests/test_x.py silent
+foreign_case "refactorer allowed when the edited repo is on agent/*" \
+    refactorer-pretooluse.sh dev agent/foreign-1 - src/main.py silent
+foreign_case "test-writer denied in the inherited SRC_DIR" \
+    test-writer-pretooluse.sh agent/fixture agent/foreign-1 - src/main.py deny
+foreign_case "test-writer denied in the edited repo's own SRC_DIR" \
+    test-writer-pretooluse.sh agent/fixture agent/foreign-2 lib lib/core.py deny
+foreign_case "test-writer allowed outside the edited repo's own SRC_DIR" \
+    test-writer-pretooluse.sh agent/fixture agent/foreign-2 lib src/helper.py silent
+
+# cost-snapshot refreshes the session cost store on every Stop and SubagentStop
+# (issue #457). It never decides anything; the store it wrote is the subject.
+echo "## cost-snapshot.sh"
+if [ -f "$HOOK_DIR/cost-snapshot.sh" ]; then
+    cs_dir=$(mktemp -d) || { echo "FATAL  no fixture directory" >&2; exit 1; }
+    cs_sid=1c0ffee0-0000-4000-8000-000000000457
+    cs_chat="$cs_dir/ws/GitHub.copilot-chat"
+    mkdir -p "$cs_chat/debug-logs/$cs_sid" "$cs_chat/transcripts" "$cs_dir/repo/.github/hooks/scripts" "$cs_dir/repo/.github/scripts"
+    printf '%s\n%s\n' \
+        '{"ts":1785760263230,"type":"session_start","spanId":"s0","attrs":{"copilotVersion":"0.71.0","vscodeVersion":"1.143.1"}}' \
+        '{"ts":1785760264230,"type":"llm_request","spanId":"r1","parentSpanId":"s0","status":"ok","attrs":{"model":"claude-opus-5","debugName":"panel/editAgent","inputTokens":1000,"cachedTokens":400,"outputTokens":50,"copilotUsageNanoAiu":1500000000}}' \
+        > "$cs_chat/debug-logs/$cs_sid/main.jsonl"
+    cp "$HOOK_DIR/cost-snapshot.sh" "$HOOK_DIR/cost-snapshot.py" "$HOOK_DIR/_common.sh" "$cs_dir/repo/.github/hooks/scripts/"
+    cp "$GITHUB_DIR/scripts/collect-session-cost.py" "$cs_dir/repo/.github/scripts/"
+    # The core is Python: under Git Bash it needs the Windows spelling of the path.
+    cs_chat_native=$(if command -v cygpath >/dev/null 2>&1; then cygpath -m "$cs_chat"; else printf '%s' "$cs_chat"; fi)
+    cs_run() {
+        ( cd "$cs_dir/repo" && printf '%s' "$1" | AF_COST_SNAPSHOT_SYNC=1 bash .github/hooks/scripts/cost-snapshot.sh )
+    }
+    cs_state="$cs_dir/repo/.github/logs/cost/sessions/$cs_sid.state.json"
+
+    cs_out=$(cs_run '{"hook_event_name":"Stop","session_id":"'"$cs_sid"'","transcript_path":"'"$cs_chat_native/transcripts/$cs_sid.jsonl"'"}')
+    assert_true "cost-snapshot never decides anything" "$([ "$cs_out" = '{}' ] && echo 1 || echo 0)" "got: $cs_out"
+    assert_contains "cost-snapshot refreshes the session store" "$(cat "$cs_state" 2>/dev/null)" '"store_version"' "no state file"
+
+    rm -rf "$cs_dir/repo/.github/logs"
+    cs_out=$(cs_run '{"hook_event_name":"Stop","session_id":"../'"$cs_sid"'","transcript_path":"'"$cs_chat_native/transcripts/$cs_sid.jsonl"'"}')
+    assert_true "a session id carrying a path writes nothing" \
+        "$([ "$cs_out" = '{}' ] && [ ! -e "$cs_state" ] && echo 1 || echo 0)" "got: $cs_out"
+
+    cs_out=$(cs_run '{"hook_event_name":"Stop"}')
+    assert_true "cost-snapshot without session information stays silent" "$([ "$cs_out" = '{}' ] && echo 1 || echo 0)" "got: $cs_out"
+    rm -rf "$cs_dir"
+else
+    assert_true "cost-snapshot.sh ships" 0 "hooks/scripts/cost-snapshot.sh is missing"
+fi
+
 # The planner gained `editFiles` so it can answer the plan review by revising
 # its own document (issue #235). That widens the write surface of the agent
 # with the narrowest charter, and this allowlist is the only thing holding it

@@ -230,7 +230,7 @@ try {
     $results['A_session_reported'] = ($r.Output -match [regex]::Escape($SID))
     $results['A_environment']      = ($r.Output -match 'vscode:\s*"?1\.131\.0' -and
                                       $r.Output -match 'copilot_chat:\s*"?0\.59\.0')
-    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*7\s*$')
+    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*8\s*$')
     $results['A_collector_named']  = ($r.Output -match 'collector:\s*"?collect-session-cost\.py@')
 
     # --- B: subagent child file is summed, per model ------------------------
@@ -983,6 +983,178 @@ print(",".join(sorted(set(mod.PROMPT_ENTITY) | literal)))
         $tel = @([IO.File]::ReadAllLines($tef) | Where-Object { $_.Trim() })
         $results['S_truncated_header_coverage'] = ($tel.Count -eq 9 -and $tel[0] -match '"coverage":\s*"truncated"')
     }
+
+    # --- X: the session store keeps up with the log (#457) -------------------
+    #
+    # The debug log loses its head at a moment nobody controls. Extracted once,
+    # at the end of a workflow, a long session is gone before it is read. The
+    # store is refreshed on every Stop, reads only what was appended since, and
+    # judges completeness over the union of its snapshots, not over the log as
+    # it looks now.
+    $L1 = New-SessionStart
+    $L2 = New-LlmRequest -NanoAiu 1000000000 -Ts ($T0 + 1000)
+    $L3 = New-LlmRequest -NanoAiu 2000000000 -Ts ($T0 + 2000)
+    $L4 = New-LlmRequest -NanoAiu 4000000000 -Ts ($T0 + 3000)
+
+    function Set-MainLog([string]$Dir, [string[]]$Lines) {
+        [IO.File]::WriteAllText((Join-Path $Dir 'main.jsonl'), (($Lines -join "`n") + "`n"))
+    }
+    function Get-StoreRows([string]$Store, [string]$Sid = $SID) {
+        $p = Join-Path $Store "$Sid.facts.ndjson"
+        if (-not (Test-Path $p)) { return @() }
+        return @([IO.File]::ReadAllLines($p) | Where-Object { $_.Trim() -and $_ -notmatch '"record":\s*"header"' })
+    }
+    function Get-StoreState([string]$Store, [string]$Sid = $SID) {
+        $p = Join-Path $Store "$Sid.state.json"
+        if (-not (Test-Path $p)) { return $null }
+        return ([IO.File]::ReadAllText($p) | ConvertFrom-Json)
+    }
+    function Invoke-Snapshot([string]$Dir, [string]$Store) {
+        Invoke-Collector @('--session-dir', $Dir, '--store', $Store, '--snapshot')
+    }
+
+    # (a) Appended lines are read once, and only they are read.
+    $dir = New-SessionFixture -Main @($L1, $L2)
+    $fixtures += $dir
+    $store = Join-Path (Split-Path $dir) 'store'
+    $r = Invoke-Snapshot $dir $store
+    $results['X_snapshot_exit_zero'] = ($r.Code -eq 0)
+    $results['X_first_snapshot_rows'] = ((Get-StoreRows $store).Count -eq 1)
+    [IO.File]::AppendAllText((Join-Path $dir 'main.jsonl'), "$L3`n")
+    $null = Invoke-Snapshot $dir $store
+    $results['X_append_adds_only_new'] = ((Get-StoreRows $store).Count -eq 2)
+    # The performance claim, measured deterministically: bytes read, not time.
+    $st = Get-StoreState $store
+    $results['X_reads_only_the_tail'] = ($null -ne $st -and
+        [long]$st.logs.'main.jsonl'.last_read_bytes -eq ([Text.Encoding]::UTF8.GetByteCount($L3) + 1))
+    $null = Invoke-Snapshot $dir $store
+    $st = Get-StoreState $store
+    $results['X_repeat_snapshot_idempotent'] = ((Get-StoreRows $store).Count -eq 2 -and
+        $null -ne $st -and [long]$st.logs.'main.jsonl'.last_read_bytes -eq 0)
+
+    # (b) The head is cut after a snapshot, but the last line read survives:
+    # nothing was lost, so the union is complete and the total is emitted.
+    Set-MainLog $dir @($L3, $L4)
+    $uf = Join-Path (Split-Path $dir) 'union.ndjson'
+    $r = Invoke-Collector @('--session-dir', $dir, '--store', $store, '--facts-out', $uf)
+    $results['X_trim_after_snapshot_stays_full'] = ($r.Output -match '(?m)^\s*coverage:\s*full\s*$')
+    $results['X_union_total'] = ($r.Output -match '(?m)^\s*credits:\s*7(\.0+)?\s*$' -and
+                                 $r.Output -match '(?m)^\s*requests:\s*3\s*$')
+    # The workflow artifact is written from the union, not from what is left.
+    $results['X_facts_out_from_union'] = ((Test-Path $uf) -and
+        @([IO.File]::ReadAllLines($uf) | Where-Object { $_ -match '"record":\s*"fact"|"nano_aiu"' }).Count -eq 3)
+
+    # (c) The cut went past the last line read: what lay between is lost and
+    # the store says where, instead of certifying a total.
+    $dir = New-SessionFixture -Main @($L1, $L2)
+    $fixtures += $dir
+    $store = Join-Path (Split-Path $dir) 'store'
+    $null = Invoke-Snapshot $dir $store
+    Set-MainLog $dir @($L4)
+    $r = Invoke-Collector @('--session-dir', $dir, '--store', $store)
+    $results['X_gap_flagged'] = ($r.Output -match '(?m)^\s*coverage:\s*gapped\s*$')
+    $results['X_gap_withholds_total'] = ($r.Output -match '(?m)^\s*credits:\s*null\s*$')
+    $results['X_gap_dated'] = ($r.Output -match "after_ts:\s*$($T0 + 1000)\b" -and
+                               $r.Output -match "resumed_ts:\s*$($T0 + 3000)\b")
+    # The rows that survived are a lower bound, and labelled as one.
+    $results['X_gap_surviving_lower_bound'] = ($r.Output -match
+        '(?m)^\s*surviving:\s*\{\s*requests:\s*2,\s*unbilled_requests:\s*0,\s*credits:\s*5(\.0+)?\s*\}')
+
+    # (d) The cut landed inside the last line read: its tail is the first
+    # line now. Nothing after it was lost, so this is not a gap.
+    $canary = 'SUPERSECRET-STORE-' + ('q' * 400)
+    $Lf = New-LlmRequest -NanoAiu 1000000000 -Ts ($T0 + 1000) -SecretText $canary
+    $dir = New-SessionFixture -Main @($L1, $Lf)
+    $fixtures += $dir
+    $store = Join-Path (Split-Path $dir) 'store'
+    $null = Invoke-Snapshot $dir $store
+    Set-MainLog $dir @($Lf.Substring($Lf.Length - 300), $L3)
+    $r = Invoke-Collector @('--session-dir', $dir, '--store', $store)
+    $results['X_cut_inside_anchor_is_no_gap'] = ($r.Output -match '(?m)^\s*coverage:\s*full\s*$' -and
+                                                 $r.Output -match '(?m)^\s*credits:\s*3(\.0+)?\s*$')
+    # The continuity proof keeps hashes, never the line: the line is a prompt.
+    $leak = @(Get-ChildItem $store -File | Where-Object { [IO.File]::ReadAllText($_.FullName) -match 'SUPERSECRET' })
+    $results['X_store_no_prompt_leak'] = ((Get-ChildItem $store -File).Count -ge 2 -and $leak.Count -eq 0)
+
+    # (e) The head was gone before the first snapshot: a lower bound from the
+    # start, dated by the first surviving event.
+    $dir = New-SessionFixture -Main @($L2, $L3)
+    $fixtures += $dir
+    $store = Join-Path (Split-Path $dir) 'store'
+    $r = Invoke-Collector @('--session-dir', $dir, '--store', $store)
+    $results['X_head_lost_truncated'] = ($r.Output -match '(?m)^\s*coverage:\s*truncated\s*$' -and
+                                         $r.Output -match "(?m)^\s*earliest_ts:\s*$($T0 + 1000)\s*$")
+    $results['X_head_lost_surviving'] = ($r.Output -match 'surviving:\s*\{\s*requests:\s*2,[^}]*credits:\s*3(\.0+)?\s*\}')
+
+    # (f) A line still being written is not consumed: reading it half would
+    # either drop it or count it twice once it is complete.
+    $dir = New-SessionFixture -Main @($L1)
+    $fixtures += $dir
+    $store = Join-Path (Split-Path $dir) 'store'
+    [IO.File]::AppendAllText((Join-Path $dir 'main.jsonl'), $L2)
+    $null = Invoke-Snapshot $dir $store
+    $results['X_partial_line_deferred'] = ((Get-StoreRows $store).Count -eq 0)
+    [IO.File]::AppendAllText((Join-Path $dir 'main.jsonl'), "`n")
+    $null = Invoke-Snapshot $dir $store
+    $results['X_partial_line_counted_once'] = ((Get-StoreRows $store).Count -eq 1)
+
+    # (g) Two hooks firing at once must not both append: a fresh lock skips,
+    # a stale one (a crashed run) is taken over.
+    $dir = New-SessionFixture -Main @($L1, $L2)
+    $fixtures += $dir
+    $store = Join-Path (Split-Path $dir) 'store'
+    New-Item -ItemType Directory -Path $store -Force | Out-Null
+    $lock = Join-Path $store "$SID.lock"
+    [IO.File]::WriteAllText($lock, 'held')
+    $r = Invoke-Snapshot $dir $store
+    $results['X_fresh_lock_skips'] = ($r.Code -eq 0 -and (Get-StoreRows $store).Count -eq 0)
+    (Get-Item $lock).LastWriteTime = (Get-Date).AddHours(-2)
+    $null = Invoke-Snapshot $dir $store
+    $results['X_stale_lock_taken_over'] = ((Get-StoreRows $store).Count -eq 1 -and -not (Test-Path $lock))
+
+    # (h) Subagent logs are followed the same way.
+    $dir = New-SessionFixture -Main @($L1, $L2) -Child @(
+        (New-LlmRequest -Model 'claude-haiku-4.5' -NanoAiu 500000000 -Ts ($T0 + 1500) -DebugName 'tool/runSubagent-implementer')
+    )
+    $fixtures += $dir
+    $store = Join-Path (Split-Path $dir) 'store'
+    $null = Invoke-Snapshot $dir $store
+    [IO.File]::AppendAllText((Join-Path $dir 'runSubagent-implementer-toolu_test.jsonl'),
+        ((New-LlmRequest -Model 'claude-haiku-4.5' -NanoAiu 500000000 -Ts ($T0 + 2500) -DebugName 'tool/runSubagent-implementer') + "`n"))
+    $r = Invoke-Collector @('--session-dir', $dir, '--store', $store)
+    $results['X_subagent_followed'] = ($r.Output -match '(?m)^\s*credits:\s*2(\.0+)?\s*$' -and
+        $r.Output -match 'implementer:\s+totals:\s*\{\s*invocations:\s*1,\s*requests:\s*2\b')
+
+    # (i) The total across sessions: complete sessions sum to a number, the
+    # rest only to a lower bound, and the report keeps the two apart.
+    $dir = New-SessionFixture -Main @($L1, $L2, $L3)
+    $fixtures += $dir
+    $store = Join-Path (Split-Path $dir) 'store'
+    $null = Invoke-Snapshot $dir $store
+    $other = New-SessionFixture -SessionId 'a1b2c3d4-0000-4000-8000-000000000457' -Main @($L4)
+    $fixtures += $other
+    $null = Invoke-Snapshot $other $store
+    $r = Invoke-Collector @('--report', $store)
+    $results['X_report_exit_zero'] = ($r.Code -eq 0)
+    $results['X_report_sessions'] = ($r.Output -match '(?m)^\s*sessions:\s*2\s*$' -and
+                                     $r.Output -match '(?m)^\s*complete:\s*1\s*$')
+    $results['X_report_complete_total'] = ($r.Output -match '(?m)^\s*credits_complete:\s*3(\.0+)?\s*$')
+    $results['X_report_lower_bound'] = ($r.Output -match '(?m)^\s*credits_lower_bound:\s*7(\.0+)?\s*$')
+
+    # (j) Withheld is not zero (#457): with the totals withheld, the splits say
+    # so instead of printing an empty map that reads as "cost nothing".
+    $dir = New-SessionFixture -Main @($L2, $L3)
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['X_by_model_withheld_null'] = ($r.Output -match '(?m)^\s*by_model:\s*null\s*$')
+    $results['X_by_purpose_withheld_null'] = ($r.Output -match '(?m)^\s*by_purpose:\s*null\s*$')
+    $results['X_surviving_without_store'] = ($r.Output -match 'surviving:\s*\{\s*requests:\s*2,[^}]*credits:\s*3(\.0+)?\s*\}')
+    # Control: a complete log carries no lower bound -- it has the total.
+    $dir = New-SessionFixture -Main @($L1, $L2)
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['X_full_has_no_surviving'] = ($r.Output -match '(?m)^\s*coverage:\s*full\s*$' -and
+                                           $r.Output -notmatch 'surviving:')
 }
 finally {
     foreach ($f in $fixtures) {

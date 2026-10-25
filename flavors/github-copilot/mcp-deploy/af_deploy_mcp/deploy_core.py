@@ -233,15 +233,43 @@ def _is_ignored_artifact(p: Path) -> bool:
     return "__pycache__" in p.parts or p.suffix in (".pyc", ".pyo")
 
 
+def git_ignored_files(source_root: Path) -> set[str]:
+    """Payload-relative paths git ignores under ``source_root`` (#454), or an empty set.
+
+    Runtime files such as the foreign-work guard's ``.github/logs/.worktree-baseline-*``
+    sit next to the payload and are ignored there; they are not payload. Same rule
+    as ``source_commit``: only a payload whose ``VERSION`` is tracked is judged, because
+    the wheel's copy under ``mcp-deploy/.venv`` is ignored as a whole.
+    """
+
+    def git(*args: str) -> subprocess.CompletedProcess[bytes] | None:
+        try:
+            return subprocess.run(["git", "-C", str(source_root), *args], capture_output=True, timeout=30, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    tracked = git("ls-files", "--error-unmatch", "--", "VERSION")
+    if tracked is None or tracked.returncode != 0:
+        return set()
+    ignored = git("ls-files", "--others", "--ignored", "--exclude-standard", "-z", "--", ".github", ".vscode")
+    if ignored is None or ignored.returncode != 0:
+        return set()
+    return {p for p in ignored.stdout.decode("utf-8", "surrogateescape").split("\0") if p}
+
+
 def collect_source_files(source_github: Path, manifest: Manifest) -> list[str]:
     """All deployable .github-relative files (forward-slash keys)."""
+    ignored = {p[len(".github/") :] for p in git_ignored_files(source_github.parent) if p.startswith(".github/")}
     rels: list[str] = []
     for d in manifest.dirs:
         src_dir = source_github / d
         if src_dir.is_dir():
             for p in sorted(src_dir.rglob("*")):
-                if p.is_file() and not _is_ignored_artifact(p):
-                    rels.append(_norm(str(p.relative_to(source_github))))
+                if not p.is_file() or _is_ignored_artifact(p):
+                    continue
+                rel = _norm(str(p.relative_to(source_github)))
+                if rel not in ignored:
+                    rels.append(rel)
     for f in manifest.root_files:
         if (source_github / f).is_file():
             rels.append(f)
