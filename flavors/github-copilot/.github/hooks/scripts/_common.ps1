@@ -562,7 +562,15 @@ function Get-AfPeerEdits {
     }
     if (-not $python) { return @() }
 
-    $out = & $python $reader '--session-dir' $sessionDir '--agent' $Agent '--repo-root' $CodeRoot 2>$null
+    $readerArgs = @('--session-dir', $sessionDir, '--agent', $Agent, '--repo-root', $CodeRoot)
+    # The stop payload's agent_id names this invocation's own log exactly and
+    # its SubagentStart baseline: files dirty at start and still unchanged are
+    # subtracted too -- the sequential half of #101 that peer logs cannot see.
+    $agentId = [string]$payload.agent_id
+    if ($agentId) {
+        $readerArgs += @('--agent-id', $agentId, '--baseline-dir', (Join-Path $MainRoot '.github/logs/subagent-baseline'))
+    }
+    $out = & $python $reader @readerArgs 2>$null
     if ($LASTEXITCODE -ne 0) { return @() }
 
     return @($out | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })

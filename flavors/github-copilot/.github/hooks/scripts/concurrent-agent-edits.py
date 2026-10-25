@@ -37,21 +37,30 @@ subtract nothing, which is the safe direction. A file the peer edited and the
 caller edited too is NOT subtracted -- shared authorship is real authorship,
 and the caller must still answer for it.
 
-Identifying the caller's own log is a heuristic: the most recently modified
-`runSubagent-{agent}-*.jsonl`. A Stop hook runs as its own invocation finishes,
-so that log is the one still being written. Two invocations of the SAME agent
-in parallel would defeat it; the reported incident is implementer against
-refactorer, and the misidentification degrades to subtracting less.
+The caller's own log is `runSubagent-{agent}-{agent_id}.jsonl` when the stop
+payload's `agent_id` is passed (`--agent-id`); the id in the file name is the
+payload's (probe of 2026-10-22). Without it, or when no such file exists, the
+fallback is the heuristic it replaced: the most recently modified
+`runSubagent-{agent}-*.jsonl`, which two parallel invocations of the SAME agent
+defeat -- degrading to subtracting less.
+
+THE SEQUENTIAL CASE. Peer logs cannot see an earlier producer's output that is
+still uncommitted: it did not overlap. `--baseline-dir` adds the files that were
+dirty when this invocation started and are still byte-identical (`_baseline`,
+written by the SubagentStart hook). Same failure direction: no record, no
+subtraction.
 
 Stdlib only, on purpose -- a gate that needs `pip install` stops being run.
 
 Usage:
     concurrent-agent-edits.py --session-dir <dir> --agent <name>
-                              [--repo-root <path>]
+                              [--repo-root <path>] [--agent-id <id>]
+                              [--baseline-dir <dir>]
 
 Output:
     Repo-relative POSIX paths, one per line -- files a concurrent peer agent
-    edited and the caller did not.
+    edited and the caller did not, plus files untouched since the caller
+    started.
 
 Exit codes:
     0  a list was emitted (possibly empty -- nothing to subtract)
@@ -65,8 +74,10 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 
 from _agentlog import TOOL_CALL_HINT, agent_from, harvest_paths
+from _baseline import untouched
 
 # Cheap prefilter so a 20 MB log is not JSON-parsed line by line. The optional
 # whitespace is not decoration: the editor writes compact JSON, but a log
@@ -192,16 +203,25 @@ def main() -> int:
     parser.add_argument("--session-dir", required=True)
     parser.add_argument("--agent", required=True)
     parser.add_argument("--repo-root", default=".")
+    parser.add_argument("--agent-id", default="")
+    parser.add_argument("--baseline-dir", default="")
     args = parser.parse_args()
+
+    unchanged: list[str] = []
+    if args.agent_id and args.baseline_dir:
+        unchanged = untouched(Path(args.baseline_dir), args.agent_id, Path(args.repo_root))
 
     try:
         names = [n for n in os.listdir(args.session_dir) if n.startswith("runSubagent-") and n.endswith(".jsonl")]
     except OSError:
-        return 1
+        names = []
 
     mine: str | None = None
+    exact = f"runSubagent-{args.agent}-{args.agent_id}.jsonl"
+    if args.agent_id and exact in names:
+        mine = exact
     mine_mtime = -1.0
-    for name in names:
+    for name in names if mine is None else []:
         if agent_from(name) != args.agent:
             continue
         full = os.path.join(args.session_dir, name)
@@ -213,7 +233,9 @@ def main() -> int:
             mine_mtime = mtime
             mine = name
     if mine is None:
-        return 1
+        for path in unchanged:
+            print(path)
+        return 0 if unchanged else 1
 
     my_start, my_end, my_edits = scan(os.path.join(args.session_dir, mine))
 
@@ -236,7 +258,7 @@ def main() -> int:
         if os.path.normcase(os.path.abspath(p)) not in {os.path.normcase(os.path.abspath(m)) for m in my_edits}
     }
 
-    for path in relativise(exclusive, args.repo_root):
+    for path in sorted(set(relativise(exclusive, args.repo_root)) | set(unchanged)):
         print(path)
     return 0
 

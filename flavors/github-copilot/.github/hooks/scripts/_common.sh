@@ -595,6 +595,16 @@ af_peer_edits() {
     [ -n "$_pe_python" ] || _pe_python="${AF_PYTHON:-}"
     [ -n "$_pe_python" ] || return 0
 
+    # agent_id names this invocation's own log exactly and its SubagentStart
+    # baseline (see Get-AfPeerEdits in _common.ps1).
+    _pe_aid=$(printf '%s' "$_pe_stdin" | grep -o '"agent_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    if [ -n "$_pe_aid" ]; then
+        "$_pe_python" "$_pe_reader" --session-dir "$_pe_session_dir" \
+            --agent "$_pe_agent" --repo-root "${AF_CODE_ROOT:-.}" \
+            --agent-id "$_pe_aid" --baseline-dir "${AF_MAIN_ROOT:-.}/.github/logs/subagent-baseline" \
+            2>/dev/null || return 0
+        return 0
+    fi
     "$_pe_python" "$_pe_reader" --session-dir "$_pe_session_dir" \
         --agent "$_pe_agent" --repo-root "${AF_CODE_ROOT:-.}" 2>/dev/null || return 0
 }
