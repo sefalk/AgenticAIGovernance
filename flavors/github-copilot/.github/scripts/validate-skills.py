@@ -490,7 +490,10 @@ def main(argv: list[str] | None = None) -> int:
     warnings: list[str] = []
 
     # Activation is a move, so an activated skill lives only in skills/ (#110).
+    # A folder without SKILL.md holds no copy (#464).
     for name in sorted(active_dirs & available_dirs):
+        if not (available_root / name / "SKILL.md").is_file():
+            continue
         warnings.append(f"skill '{name}' is active and also in _available/ -- remove the _available/ copy (#110)")
 
     # --- Validate active skills (deep) ---
