@@ -27,6 +27,7 @@ $stdinRaw = [Console]::In.ReadToEnd()
 # Before Gate 0, because Gate 0 blocks too (issue #298).
 Invoke-AfStopLoopGuard -StdinRaw $stdinRaw -Agent 'test-writer' `
     -Gates 'undeclared root files, red phase, provenance, no production code'
+Invoke-AfRepoGates -StdinRaw $stdinRaw -HookPath $PSCommandPath
 
 # ---------- Gate 0: no undeclared files at the repository root (#123) ----------
 #
