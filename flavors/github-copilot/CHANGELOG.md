@@ -14,6 +14,47 @@ still fails the build for a repeated `###` kind inside one section (#322).
 
 ## [Unreleased]
 
+## [1.28.0] -- 2026-10-27
+
+### Fixed
+
+- **Producer stop gates no longer claim an earlier producer's uncommitted work
+  (#101).** A new global `SubagentStart` hook (`subagent-baseline`) records, per
+  `agent_id`, every path that is dirty when a test-writer, implementer or
+  refactorer starts, with the blob hash of its content — for the deploying repo,
+  the active worktree and every folder of the multi-root workspace. The stop
+  gates' peer-edit reader (`concurrent-agent-edits.py`) now also drops files
+  that are still byte-identical to that record, so a provenance or quality gate
+  no longer demands work on a file the subagent never touched. It also names the
+  subagent's own debug log exactly by `agent_id` instead of by newest mtime.
+  The lint scope is unchanged. No record, a moved `HEAD` or any failure
+  subtracts nothing — the previous behaviour.
+
+- **Producer stop gates now judge every repository the subagent edited
+  (#456, phase 2).** In a multi-root workspace the deploying repository's
+  `implementer-stop`, `refactorer-stop` and `test-writer-stop` fired for edits
+  in every folder but scoped themselves from the deploying checkout, so an edit
+  in a second repository was never tested, linted or checked for provenance.
+  The new `repo-gates.py` core reads the subagent's own debug log (exactly, by
+  `agent_id`), and when another repository was edited it runs the calling hook
+  and that repository's own deployed copy of it — under its own `af-env.conf`,
+  venv and test log — and merges the verdicts: every block is reported in one
+  message, prefixed with the repository. A repository without a deployed hook is
+  named as not gated. Edits confined to the deploying repository gate inline
+  exactly as before.
+
+- **An empty `skills/_available/{name}/` folder is no longer reported as a duplicate activation (#464).** `deploy.ps1` and `validate-skills.py` tested for the folder, not for the skill. In MP the four stale copies were removed with `git rm`, OneDrive kept the empty folders, and every following dry run still listed all four under `Duplicate activations`, asking the user to remove copies that no longer existed. Both checks now count a duplicate only when `_available/{name}/SKILL.md` exists; a folder holding one is still reported.
+
+- **The session cost store no longer reports every intact session as
+  `coverage: truncated` (#467).** The editor writes one `hook`/`SessionStart`
+  span per SessionStart hook ahead of `session_start` in `main.jsonl`, so the
+  #450 rule "the first line must be `session_start`" withheld the total of every
+  session in a deployment with SessionStart hooks — #457 showed only a lower
+  bound. Leading SessionStart hook spans are now passed over, in the direct and
+  the `--store` path; a fragment or any other event first is still `truncated`.
+  The store's verdict waits across snapshots until the deciding line is read,
+  and `STORE_VERSION` 2 re-reads stores written under the old rule.
+
 ## [1.27.0] -- 2026-10-25
 
 ### Fixed
