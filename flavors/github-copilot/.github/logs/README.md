@@ -120,7 +120,10 @@ Reading it:
   replaced with another guess. `partial` means the session began after the
   workflow did, so earlier phases were never logged.
   Truncation is judged on `main.jsonl` alone: its first line must parse and be
-  a `session_start` (#450). Every subagent log carries its own `session_start`
+  a `session_start` (#450), after any leading `hook`/`SessionStart` spans — the
+  editor writes one per SessionStart hook before `session_start`, so every
+  intact log of a hooked deployment begins with them (#467). Every subagent log
+  carries its own `session_start`
   and a window reload writes another one mid-log, so a later one certifies
   nothing; measured, a 163 MB log began with a 469,188-character fragment and
   was reported `full`. A truncated block adds `earliest_ts`, the epoch-ms
