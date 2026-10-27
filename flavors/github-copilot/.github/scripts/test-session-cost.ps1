@@ -39,6 +39,17 @@ function New-SessionStart([long]$Ts = $T0) {
     } | ConvertTo-Json -Compress -Depth 6
 }
 
+# A SessionStart hook's span. The editor writes one per hook BEFORE session_start
+# (measured 2026-10-27, #467): an intact log of a deployment with two SessionStart
+# hooks begins hook, hook, session_start.
+function New-HookSpan([long]$Ts = ($T0 - 500), [string]$Name = 'SessionStart') {
+    [ordered]@{
+        ts = $Ts; dur = 3000; sid = $SID
+        type = 'hook'; name = $Name; spanId = 'h0'; status = 'ok'
+        attrs = [ordered]@{ command = 'powershell -File .github\hooks\scripts\session-context.ps1' }
+    } | ConvertTo-Json -Compress -Depth 6
+}
+
 function New-LlmRequest {
     param(
         [string]$Model = 'claude-opus-5',
@@ -556,6 +567,39 @@ try {
     $results['F2_reload_start_keeps_full'] = ($r.Output -match '(?m)^\s*coverage:\s*full\s*$' -and
                                               $r.Output -match '(?m)^\s*credits:\s*4(\.0+)?\s*$' -and
                                               $r.Output -notmatch 'earliest_ts')
+
+    # --- F3: SessionStart hook spans precede session_start (#467) ------------
+    # Every intact log of a deployment with SessionStart hooks begins with their
+    # spans. Reading that as a lost head withheld the total of every session.
+    $dir = New-SessionFixture -Main @(
+        (New-HookSpan -Ts ($T0 - 600)),
+        (New-HookSpan -Ts ($T0 - 300)),
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1500000000)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['F3_hook_spans_then_start_is_full'] = ($r.Output -match '(?m)^\s*coverage:\s*full\s*$' -and
+                                                    $r.Output -match '(?m)^\s*credits:\s*1\.5\s*$')
+
+    # A hook span vouches for nothing on its own: what follows must be the start.
+    $dir = New-SessionFixture -Main @(
+        (New-HookSpan),
+        (New-LlmRequest -NanoAiu 1500000000)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['F3_hook_span_without_start_is_truncated'] = ($r.Output -match '(?m)^\s*coverage:\s*truncated\s*$')
+
+    # Only SessionStart hooks run before the session starts; any other hook first is a cut.
+    $dir = New-SessionFixture -Main @(
+        (New-HookSpan -Name 'PreToolUse'),
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1500000000)
+    )
+    $fixtures += $dir
+    $r = Invoke-Collector @('--session-dir', $dir)
+    $results['F3_other_hook_first_is_truncated'] = ($r.Output -match '(?m)^\s*coverage:\s*truncated\s*$')
 
     # --- W: the long_context price tier (#451) --------------------------------
     # A prompt above default.max_prompt_tokens is billed at long_context. 200k
@@ -1085,6 +1129,42 @@ print(",".join(sorted(set(mod.PROMPT_ENTITY) | literal)))
     $results['X_head_lost_truncated'] = ($r.Output -match '(?m)^\s*coverage:\s*truncated\s*$' -and
                                          $r.Output -match "(?m)^\s*earliest_ts:\s*$($T0 + 1000)\s*$")
     $results['X_head_lost_surviving'] = ($r.Output -match 'surviving:\s*\{\s*requests:\s*2,[^}]*credits:\s*3(\.0+)?\s*\}')
+
+    # (e2) #467: SessionStart hook spans ahead of session_start are the intact head.
+    $H1 = New-HookSpan -Ts ($T0 - 600)
+    $H2 = New-HookSpan -Ts ($T0 - 300)
+    $dir = New-SessionFixture -Main @($H1, $H2, $L1, $L2)
+    $fixtures += $dir
+    $store = Join-Path (Split-Path $dir) 'store'
+    $r = Invoke-Collector @('--session-dir', $dir, '--store', $store)
+    $results['X_hook_head_is_full'] = ($r.Output -match '(?m)^\s*coverage:\s*full\s*$' -and
+                                       $r.Output -match '(?m)^\s*credits:\s*1(\.0+)?\s*$')
+
+    # A snapshot can land between the hook spans and session_start: the verdict
+    # waits for the line that decides it instead of judging the first one.
+    $dir = New-SessionFixture -Main @($H1)
+    $fixtures += $dir
+    $store = Join-Path (Split-Path $dir) 'store'
+    $null = Invoke-Snapshot $dir $store
+    [IO.File]::AppendAllText((Join-Path $dir 'main.jsonl'), "$H2`n$L1`n$L2`n")
+    $r = Invoke-Collector @('--session-dir', $dir, '--store', $store)
+    $results['X_hook_head_verdict_waits_across_snapshots'] = ($r.Output -match '(?m)^\s*coverage:\s*full\s*$')
+
+    # Stores written under the old rule carry head_seen false for intact logs.
+    # They are re-read, not left withholding forever.
+    $dir = New-SessionFixture -Main @($H1, $H2, $L1, $L2)
+    $fixtures += $dir
+    $store = Join-Path (Split-Path $dir) 'store'
+    $null = Invoke-Snapshot $dir $store
+    $statePath = Join-Path $store "$SID.state.json"
+    $old = [IO.File]::ReadAllText($statePath) | ConvertFrom-Json
+    $old.store_version = 1
+    $old.head_seen = $false
+    $old.earliest_ts = $T0 - 600
+    [IO.File]::WriteAllText($statePath, ($old | ConvertTo-Json -Compress -Depth 10))
+    $r = Invoke-Collector @('--session-dir', $dir, '--store', $store)
+    $results['X_old_store_rejudged'] = ($r.Output -match '(?m)^\s*coverage:\s*full\s*$' -and
+                                        $r.Output -match '(?m)^\s*credits:\s*1(\.0+)?\s*$')
 
     # (f) A line still being written is not consumed: reading it half would
     # either drop it or count it twice once it is complete.
