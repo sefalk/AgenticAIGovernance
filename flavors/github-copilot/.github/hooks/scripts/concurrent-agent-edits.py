@@ -70,102 +70,12 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import re
 import sys
 from pathlib import Path
 
-from _agentlog import TOOL_CALL_HINT, agent_from, harvest_paths
+from _agentlog import find_own_log, scan_edits
 from _baseline import untouched
-
-# Cheap prefilter so a 20 MB log is not JSON-parsed line by line. The optional
-# whitespace is not decoration: the editor writes compact JSON, but a log
-# rewritten by any pretty-printer would carry `"ts": 123`, and an anchored
-# pattern silently found no timestamps at all.
-TS = re.compile(rb'"ts":\s*(\d+)')
-
-# Allowlist, not a denylist. `read_file` and `grep_search` also carry a
-# `filePath`, and harvesting those would subtract files nobody wrote.
-#
-# Deliberately the same rule as `Test-AfWriteTool` in `_common` rather than a
-# second, narrower one: those names were read out of captured PreToolUse
-# payloads instead of tool documentation (issue #69), and two lists of write
-# tools in one hook directory would drift apart the first time a client added
-# a tool. The trailing heuristic covers a tool that does not exist yet -- a
-# writing verb plus a file noun. `read_file` carries no verb and
-# `create_and_run_task` no file noun, so neither is caught.
-EDIT_TOOLS = frozenset(
-    {
-        "create_file",
-        "replace_string_in_file",
-        "multi_replace_string_in_file",
-        "create_directory",
-        "edit_notebook_file",
-        "create_new_jupyter_notebook",
-        "insert_edit_into_file",
-        "apply_patch",
-        "editFiles",
-        "editFile",
-        "createFile",
-        "createDirectory",
-        "createDir",
-        "editNotebook",
-        "writeFile",
-        "applyPatch",
-        "insertEdit",
-    }
-)
-EDIT_VERB = re.compile(r"create|write|edit|insert|apply|replace")
-EDIT_NOUN = re.compile(r"file|notebook|dir")
-
-
-def is_edit_tool(name: object) -> bool:
-    if not isinstance(name, str) or not name:
-        return False
-    if name in EDIT_TOOLS:
-        return True
-    return bool(EDIT_VERB.search(name) and EDIT_NOUN.search(name))
-
-
-def scan(path: str) -> tuple[int | None, int | None, set[str]]:
-    """One pass over a subagent log: time span and files it edited."""
-    first_ts: int | None = None
-    last_ts: int | None = None
-    edited: set[str] = set()
-    try:
-        with open(path, "rb") as handle:
-            for raw in handle:
-                stamp = TS.search(raw)
-                if stamp:
-                    value = int(stamp.group(1))
-                    if first_ts is None or value < first_ts:
-                        first_ts = value
-                    if last_ts is None or value > last_ts:
-                        last_ts = value
-                if TOOL_CALL_HINT not in raw:
-                    continue
-                try:
-                    span = json.loads(raw.decode("utf-8", "replace"))
-                except (ValueError, UnicodeDecodeError):
-                    continue
-                if not isinstance(span, dict) or span.get("type") != "tool_call":
-                    continue
-                if not is_edit_tool(span.get("name")):
-                    continue
-                attrs = span.get("attrs")
-                if not isinstance(attrs, dict):
-                    continue
-                args = attrs.get("args")
-                if isinstance(args, str):
-                    try:
-                        args = json.loads(args)
-                    except ValueError:
-                        continue
-                harvest_paths(args, edited)
-    except OSError:
-        return None, None, set()
-    return first_ts, last_ts, edited
 
 
 def overlaps(a: tuple[int | None, int | None], b: tuple[int | None, int | None]) -> bool:
@@ -216,34 +126,20 @@ def main() -> int:
     except OSError:
         names = []
 
-    mine: str | None = None
-    exact = f"runSubagent-{args.agent}-{args.agent_id}.jsonl"
-    if args.agent_id and exact in names:
-        mine = exact
-    mine_mtime = -1.0
-    for name in names if mine is None else []:
-        if agent_from(name) != args.agent:
-            continue
-        full = os.path.join(args.session_dir, name)
-        try:
-            mtime = os.path.getmtime(full)
-        except OSError:
-            continue
-        if mtime > mine_mtime:
-            mine_mtime = mtime
-            mine = name
+    own = find_own_log(args.session_dir, args.agent, args.agent_id) if names else None
+    mine = os.path.basename(own) if own else None
     if mine is None:
         for path in unchanged:
             print(path)
         return 0 if unchanged else 1
 
-    my_start, my_end, my_edits = scan(os.path.join(args.session_dir, mine))
+    my_start, my_end, my_edits = scan_edits(os.path.join(args.session_dir, mine))
 
     peer_edits: set[str] = set()
     for name in names:
         if name == mine:
             continue
-        start, end, edited = scan(os.path.join(args.session_dir, name))
+        start, end, edited = scan_edits(os.path.join(args.session_dir, name))
         if not edited:
             continue
         if not overlaps((my_start, my_end), (start, end)):

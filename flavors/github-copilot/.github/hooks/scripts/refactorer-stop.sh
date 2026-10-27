@@ -31,6 +31,7 @@ stdin_raw=$(cat)
 # Thirteen blocking sites below, none of which a forced retry can clear on its
 # own. The guard runs before the first of them (issue #298).
 af_stop_loop_guard "$stdin_raw" refactorer 'tests, behaviour preservation, provenance, python quality, ignore hygiene, linting'
+af_repo_gates "$stdin_raw" "$AF_SCRIPT_DIR/refactorer-stop.sh"
 
 # ---------- Gate 1: All tests must pass ----------
 # A missing test runner disables THIS gate only. Gates 2-5 need neither pytest
