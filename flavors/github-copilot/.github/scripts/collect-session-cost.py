@@ -492,12 +492,19 @@ def price(fact: dict[str, Any], cards: dict[str, list[dict[str, Any]]] | None) -
     fact["nano_unexplained"] = nano - (fact["nano_input_uncached"] + fact["nano_cache_read"] + fact["nano_output"])
 
 
+def _start_hook(event: Any) -> bool:
+    """A SessionStart hook's span: written ahead of session_start in an intact log (#467)."""
+    return isinstance(event, dict) and event.get("type") == "hook" and event.get("name") == "SessionStart"
+
+
 def iter_events(path: str, head: dict[str, Any] | None = None) -> Iterator[dict[str, Any]]:
     """Yield parsed JSONL entries, skipping unparseable lines.
 
     Streams the file: a single session log reached 163 MB. When ``head`` is
     given it records whether the first non-empty line parsed and what it was:
     the size cap cuts mid-line, so a fragment there means the start is gone (#450).
+    Leading SessionStart hook spans are passed over: the editor writes them
+    before session_start (#467).
     """
     with open(path, encoding="utf-8", errors="replace") as handle:
         for line in handle:
@@ -508,7 +515,7 @@ def iter_events(path: str, head: dict[str, Any] | None = None) -> Iterator[dict[
                 event = json.loads(line)
             except (ValueError, TypeError):
                 event = None
-            if head is not None and "type" not in head:
+            if head is not None and "type" not in head and not _start_hook(event):
                 head["type"] = event.get("type") if isinstance(event, dict) else None
             if isinstance(event, dict):
                 if head is not None and "earliest_ts" not in head and isinstance(event.get("ts"), int):
@@ -797,7 +804,9 @@ def _withhold(result: dict[str, Any], coverage: str) -> dict[str, Any]:
 #     went past it, and the store records a gap with both timestamps instead of
 #     certifying a total. Only hashes are kept: a line is a prompt.
 
-STORE_VERSION = 1
+# v2: head_seen judged past leading SessionStart hook spans (#467); v1 states
+# marked every intact log of a hooked deployment as truncated, so they are re-read.
+STORE_VERSION = 2
 # A run that crashed leaves its lock behind; one older than this is taken over.
 LOCK_STALE_SECONDS = 300
 # How much of a log's head is hashed to prove the file was only appended to.
@@ -985,8 +994,9 @@ def _update_locked(session_dir: str, session: str, paths: dict[str, str]) -> dic
                 entry["tail_sig"] = _sig(line)
                 entry["tail_end_sig"] = _sig(line[-TAIL_PROBE:]) if len(line) >= TAIL_PROBE else None
                 event = _parse(raw)
-                if is_main and state["head_seen"] is None and plan["start"] == 0 and index == 0:
-                    # First line ever read from main.jsonl: did it still begin at the start?
+                if is_main and state["head_seen"] is None and not _start_hook(event):
+                    # First line past the SessionStart hook spans: did main.jsonl still begin at the start?
+                    # Undecided until that line is read, which may be a later snapshot.
                     state["head_seen"] = bool(event and event.get("type") == "session_start")
                 if event is None:
                     continue
