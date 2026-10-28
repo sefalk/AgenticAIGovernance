@@ -50,8 +50,8 @@ Invoke-AfRepoGates -StdinRaw $stdinRaw -HookPath $PSCommandPath
 # linting and ignore hygiene need neither pytest nor a tests/ directory, and
 # exiting here used to take them down with it (issue #12).
 $testGateSkipped = $null
-if (-not (Get-Command pytest -ErrorAction SilentlyContinue)) {
-    $testGateSkipped = 'pytest not found'
+if ((Get-AfPytest -Root $codeRoot).Count -eq 0) {
+    $testGateSkipped = 'no pytest in the code root .venv or on PATH'
 } elseif (-not (Test-Path (Join-Path $codeRoot 'tests'))) {
     $testGateSkipped = 'no tests/ directory'
 }
@@ -408,7 +408,11 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
     }
 
     $output = @{
-        systemMessage = "implementer:Stop -- Green gate PASS: tests $testsStatus, provenance + python quality verified, linting: $lintStatus$returnNote"
+        systemMessage = if ($testGateSkipped) {
+            "implementer:Stop -- Green gate NOT RUN ($testGateSkipped); provenance + python quality verified, linting: $lintStatus$returnNote"
+        } else {
+            "implementer:Stop -- Green gate PASS: tests $testsStatus, provenance + python quality verified, linting: $lintStatus$returnNote"
+        }
     } | ConvertTo-Json -Compress
     Write-Output $output
     exit 0

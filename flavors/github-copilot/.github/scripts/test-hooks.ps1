@@ -3637,10 +3637,10 @@ Assert-True "test-writer-stop.sh blocks on an undeclared root creation" `
 # when pytest is missing or collects nothing, and a scratch file in the root is
 # a mess whether or not the suite ran.
 Assert-True "the PowerShell scratch gate runs before the pytest early-return" `
-    ($usTwPs1.IndexOf('Get-AfUndeclaredScratch') -lt $usTwPs1.IndexOf('Get-Command pytest')) `
+    ($usTwPs1.IndexOf('Get-AfUndeclaredScratch') -lt $usTwPs1.IndexOf('Get-AfPytest')) `
     "a missing pytest lets an undeclared root file through"
 Assert-True "the bash scratch gate runs before the pytest early-return" `
-    ($usTwSh.IndexOf('af_undeclared_scratch') -lt $usTwSh.IndexOf('command -v pytest')) `
+    ($usTwSh.IndexOf('af_undeclared_scratch') -lt $usTwSh.IndexOf('af_resolve_pytest')) `
     "a missing pytest lets an undeclared root file through"
 
 Write-Output ""
@@ -4799,7 +4799,7 @@ function Get-RedPhaseDecision {
     $r = Invoke-Hook -Script 'test-writer-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/123-x' `
         -StubBin $PYTEST_STUB_DIR `
         -StubFiles @{ "$PYTEST_STUB_DIR/pytest.cmd" = $stub } `
-        -Files @{ 'tests/test_seeded.py' = "def test_seeded():`n    assert True`n" }
+        -Files @{ 'tests/test_seeded.py' = "# copilot:generated | test-writer | 2026-08-24`ndef test_seeded():`n    assert True`n" }
     return (Resolve-StopDecision $r.Output $r.ExitCode)
 }
 
@@ -4844,12 +4844,15 @@ $tvBase = Join-Path ([IO.Path]::GetTempPath()) "af473-$(Get-Random)"
 function Test-ImportsPytest([string]$Py) {
     try { $null = & $Py -c 'import pytest' 2>&1; return ($LASTEXITCODE -eq 0) } catch { return $false }
 }
+$tvCommon = try { Split-Path (git -C $githubDir rev-parse --path-format=absolute --git-common-dir 2>$null) } catch { $null }
 $tvHost = @(
     (Join-Path $githubDir '../.venv/Scripts/python.exe'),
     (Join-Path $githubDir '../../../.venv/Scripts/python.exe'),
     (Join-Path $githubDir '../mcp-deploy/.venv/Scripts/python.exe'),
+    # A linked worktree has no venv of its own; the main checkout's serves.
+    $(if ($tvCommon) { Join-Path $tvCommon '.venv/Scripts/python.exe' }),
     'python'
-) | Where-Object { ($_ -eq 'python' -or (Test-Path $_)) -and (Test-ImportsPytest $_) } | Select-Object -First 1
+) | Where-Object { $_ -and ($_ -eq 'python' -or (Test-Path $_)) -and (Test-ImportsPytest $_) } | Select-Object -First 1
 if ($tvHost) {
     try {
         $tvSite = (& $tvHost -c 'import os, pytest; print(os.path.dirname(os.path.dirname(pytest.__file__)))' 2>&1 | Out-String).Trim()

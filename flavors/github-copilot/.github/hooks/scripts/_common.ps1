@@ -147,6 +147,25 @@ function Find-AfPython {
 
 $script:AfPython = Find-AfPython
 
+# The project's test runner: the venv interpreter run-tests.ps1 itself uses,
+# PATH last. The extension host starts hooks without the venv on PATH, so a
+# PATH lookup alone found nothing and every producer test gate skipped (#473).
+# Returns the command as an array (exe, args...), or an empty array.
+function Get-AfPytest {
+    param([string]$Root = $script:AfCodeRoot)
+    foreach ($base in @($Root, $script:AfMainRoot) | Where-Object { $_ } | Select-Object -Unique) {
+        foreach ($rel in '.venv/Scripts/python.exe', '.venv/bin/python') {
+            $py = Join-Path $base $rel
+            if (-not (Test-Path -LiteralPath $py -PathType Leaf)) { continue }
+            & $py -c 'import pytest' *> $null
+            if ($LASTEXITCODE -eq 0) { return , @($py, '-m', 'pytest') }
+        }
+    }
+    $cmd = Get-Command pytest -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source) { return , @($cmd.Source) }
+    return , @()
+}
+
 # ── Workflow lifecycle ───────────────────────────────────────────────────
 #
 # Get-AfPlanLifecycle -WorkflowId <id> [-Root <path>]

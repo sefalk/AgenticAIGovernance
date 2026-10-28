@@ -28,8 +28,8 @@ af_repo_gates "$stdin_raw" "$AF_SCRIPT_DIR/test-writer-stop.sh"
 
 # ---------- Gate 0: no undeclared files at the repository root (#123) ----------
 #
-# Runs before the Red gate on purpose. Every gate below returns early when
-# pytest is missing or collects nothing, and a scratch file left in the root is
+# Runs before the Red gate on purpose. The Red gate is skipped when no runner
+# or no tests are found, and a scratch file left in the root is
 # a mess whether or not the suite ran.
 scratch=$(af_undeclared_scratch "$stdin_raw" test-writer | sed '/^[[:space:]]*$/d')
 if [ -n "$scratch" ]; then
@@ -38,14 +38,15 @@ if [ -n "$scratch" ]; then
     exit 0
 fi
 
-if ! command -v pytest &>/dev/null; then
-    echo '{"systemMessage": "test-writer:Stop — pytest not found, Red gate skipped"}'
-    exit 0
-fi
-
-if [ ! -d "tests/" ]; then
-    echo '{"systemMessage": "test-writer:Stop — no tests/ directory, Red gate skipped"}'
-    exit 0
+# A missing runner, tests/ directory or collected test disables the Red gate
+# only; provenance still runs (#473, the #12 rule).
+red_not_run=""
+output=""
+exit_code=1
+if ! af_resolve_pytest "$AF_CODE_ROOT"; then
+    red_not_run="no pytest in the code root .venv or on PATH"
+elif [ ! -d "tests/" ]; then
+    red_not_run="no tests/ directory"
 fi
 
 # ---------- Gate 1: Red phase — new tests must FAIL ----------
@@ -54,19 +55,20 @@ fi
 # followed by `exit_code=$?` reads the status of `true`, which is 0 on every
 # path — so this gate always took the "all tests PASS" branch and blocked every
 # legitimate Red phase. Same bug, same fix as scan-secrets.sh (issue #123).
-output=$(pytest tests/ -q --tb=line --no-header 2>&1)
-exit_code=$?
+if [ -z "$red_not_run" ]; then
+    output=$("${AF_PYTEST[@]}" tests/ -q --tb=line --no-header 2>&1)
+    exit_code=$?
 
-# Exit code 0 = all tests pass → Red phase violation
-if [ "$exit_code" -eq 0 ]; then
-    echo '{"hookSpecificOutput": {"hookEventName": "Stop", "decision": "block", "reason": "Red phase violation: all tests PASS. New tests must FAIL against the existing production code to express a genuine requirement gap. Ensure your tests assert behaviour that is not yet implemented."}}'
-    exit 0
-fi
+    # Exit code 0 = all tests pass → Red phase violation
+    if [ "$exit_code" -eq 0 ]; then
+        echo '{"hookSpecificOutput": {"hookEventName": "Stop", "decision": "block", "reason": "Red phase violation: all tests PASS. New tests must FAIL against the existing production code to express a genuine requirement gap. Ensure your tests assert behaviour that is not yet implemented."}}'
+        exit 0
+    fi
 
-# Exit code 5 = no tests collected → skip
-if [ "$exit_code" -eq 5 ]; then
-    echo '{"systemMessage": "test-writer:Stop — no tests collected, Red gate skipped"}'
-    exit 0
+    # Exit code 5 = no tests collected → skip
+    if [ "$exit_code" -eq 5 ]; then
+        red_not_run="no tests collected"
+    fi
 fi
 
 # Not every red is a red. A file that cannot be imported (exit 2) or a test that
@@ -79,7 +81,7 @@ fi
 # `1 error` and still exits 1, which is indistinguishable from a genuine failure
 # by exit code alone. Measured 2026-08-24.
 summary_line=$(printf '%s' "$output" | grep -v '^[[:space:]]*$' | tail -1)
-if [ "$exit_code" -eq 2 ] || printf '%s' "$summary_line" | grep -qE '[0-9]+ error'; then
+if [ -z "$red_not_run" ] && { [ "$exit_code" -eq 2 ] || printf '%s' "$summary_line" | grep -qE '[0-9]+ error'; }; then
     detail=$(af_json_escape "$summary_line")
     echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Red phase invalid: the suite reported collection or setup ERRORS, not test failures. A test that cannot be collected or set up never reaches the behaviour it claims to guard, and it stays red after a correct implementation. Fix the test construction — imports, syntax, fixtures, schema-less DataFrames — so the red comes from an assertion. Summary: ${detail}\"}}"
     exit 0
@@ -108,7 +110,7 @@ while IFS= read -r line; do
             missing="${missing}${file}, "
         fi
     fi
-done < <(git status --porcelain "tests/" 2>/dev/null | grep -E '^\?\? |^A ')
+done < <(git status --porcelain --untracked-files=all "tests/" 2>/dev/null | grep -E '^\?\? |^A ')
 
 if [ -n "$missing" ]; then
     missing="${missing%, }"  # trim trailing comma
@@ -117,6 +119,10 @@ if [ -n "$missing" ]; then
 fi
 
 # All gates passed
+if [ -n "$red_not_run" ]; then
+    echo "{\"systemMessage\": \"test-writer:Stop — Red gate NOT RUN (${red_not_run}); provenance OK\"}"
+    exit 0
+fi
 summary=$(echo "$output" | tail -1)
 echo "{\"systemMessage\": \"test-writer:Stop — Red gate PASS: tests are failing as expected. Provenance OK. Summary: ${summary}\"}"
 exit 0
