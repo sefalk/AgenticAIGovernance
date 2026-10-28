@@ -44,6 +44,7 @@ $stdinRaw = [Console]::In.ReadToEnd()
 # same verdict on the same unchanged tree (issue #298).
 Invoke-AfStopLoopGuard -StdinRaw $stdinRaw -Agent 'implementer' `
     -Gates 'tests, provenance, python quality, ignore hygiene, linting'
+Invoke-AfRepoGates -StdinRaw $stdinRaw -HookPath $PSCommandPath
 
 # A missing test runner disables the TEST gate only. Provenance, quality,
 # linting and ignore hygiene need neither pytest nor a tests/ directory, and

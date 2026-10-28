@@ -1351,7 +1351,8 @@ $targetSkills    = Join-Path $TargetGitHub 'skills'
 if ((Test-Path $targetAvailable) -and (Test-Path $targetSkills)) {
     foreach ($activeDir in (Get-ChildItem $targetSkills -Directory)) {
         if ($activeDir.Name -eq '_available' -or $activeDir.Name.StartsWith('.')) { continue }
-        if (Test-Path (Join-Path $targetAvailable $activeDir.Name) -PathType Container) {
+        # A folder without SKILL.md holds no copy, e.g. one git rm left behind (#464).
+        if (Test-Path (Join-Path (Join-Path $targetAvailable $activeDir.Name) 'SKILL.md') -PathType Leaf) {
             $staleSkills += $activeDir.Name
         }
     }

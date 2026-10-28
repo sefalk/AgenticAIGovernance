@@ -21,10 +21,13 @@ duplication for one indirection — but the split is real and worth stating:
   log identification  SUBAGENT, agent_from, find_own_log   all four readers
   payload harvesting  TOOL_CALL_HINT, PATH_KEYS,           two of the four
                       harvest_paths
+  edit scan           is_edit_tool, scan_edits             concurrent-agent-edits,
+                                                           repo-gates
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 
@@ -47,6 +50,90 @@ TOOL_CALL_HINT = b'"tool_call"'
 # paths sit in `replacements[].filePath`, which the recursive walk reaches.
 PATH_KEYS = frozenset({"filePath", "path", "dirPath", "notebookUri", "uri"})
 
+TS = re.compile(rb'"ts":\s*(\d+)')
+
+# Allowlist, not a denylist. `read_file` and `grep_search` also carry a
+# `filePath`, and harvesting those would attribute files nobody wrote.
+#
+# Deliberately the same rule as `Test-AfWriteTool` in `_common` rather than a
+# second, narrower one: those names were read out of captured PreToolUse
+# payloads instead of tool documentation (issue #69), and two lists of write
+# tools in one hook directory would drift apart the first time a client added
+# a tool. The trailing heuristic covers a tool that does not exist yet -- a
+# writing verb plus a file noun. `read_file` carries no verb and
+# `create_and_run_task` no file noun, so neither is caught.
+EDIT_TOOLS = frozenset(
+    {
+        "create_file",
+        "replace_string_in_file",
+        "multi_replace_string_in_file",
+        "create_directory",
+        "edit_notebook_file",
+        "create_new_jupyter_notebook",
+        "insert_edit_into_file",
+        "apply_patch",
+        "editFiles",
+        "editFile",
+        "createFile",
+        "createDirectory",
+        "createDir",
+        "editNotebook",
+        "writeFile",
+        "applyPatch",
+        "insertEdit",
+    }
+)
+EDIT_VERB = re.compile(r"create|write|edit|insert|apply|replace")
+EDIT_NOUN = re.compile(r"file|notebook|dir")
+
+
+def is_edit_tool(name: object) -> bool:
+    if not isinstance(name, str) or not name:
+        return False
+    if name in EDIT_TOOLS:
+        return True
+    return bool(EDIT_VERB.search(name) and EDIT_NOUN.search(name))
+
+
+def scan_edits(path: str) -> tuple[int | None, int | None, set[str]]:
+    """One pass over a subagent log: time span and files it edited."""
+    first_ts: int | None = None
+    last_ts: int | None = None
+    edited: set[str] = set()
+    try:
+        with open(path, "rb") as handle:
+            for raw in handle:
+                stamp = TS.search(raw)
+                if stamp:
+                    value = int(stamp.group(1))
+                    if first_ts is None or value < first_ts:
+                        first_ts = value
+                    if last_ts is None or value > last_ts:
+                        last_ts = value
+                if TOOL_CALL_HINT not in raw:
+                    continue
+                try:
+                    span = json.loads(raw.decode("utf-8", "replace"))
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                if not isinstance(span, dict) or span.get("type") != "tool_call":
+                    continue
+                if not is_edit_tool(span.get("name")):
+                    continue
+                attrs = span.get("attrs")
+                if not isinstance(attrs, dict):
+                    continue
+                args = attrs.get("args")
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except ValueError:
+                        continue
+                harvest_paths(args, edited)
+    except OSError:
+        return None, None, set()
+    return first_ts, last_ts, edited
+
 
 def agent_from(filename: str) -> str:
     """The agent name encoded in a `runSubagent-*.jsonl` filename."""
@@ -56,14 +143,20 @@ def agent_from(filename: str) -> str:
     return filename[len("runSubagent-") : -len(".jsonl")]
 
 
-def find_own_log(session_dir: str, agent: str) -> str | None:
-    """The caller's own log: the most recently modified one for this agent.
+def find_own_log(session_dir: str, agent: str, agent_id: str = "") -> str | None:
+    """The caller's own log: `runSubagent-{agent}-{agent_id}.jsonl`, else the newest for this agent.
 
-    A Stop hook runs as its own invocation finishes, so that log is the one
-    still being written. Two invocations of the same agent in parallel would
-    defeat the heuristic; the consequence is reading a sibling's prompt and
-    file list together, which stays self-consistent.
+    The stop payload's `agent_id` is the id in the file name (probe of
+    2026-10-22, #101), so with it the match is exact. Without it, a Stop hook
+    runs as its own invocation finishes, so that log is the one still being
+    written. Two invocations of the same agent in parallel would defeat the
+    heuristic; the consequence is reading a sibling's prompt and file list
+    together, which stays self-consistent.
     """
+    if agent_id:
+        exact = os.path.join(session_dir, f"runSubagent-{agent}-{agent_id}.jsonl")
+        if os.path.isfile(exact):
+            return exact
     try:
         names = os.listdir(session_dir)
     except OSError:

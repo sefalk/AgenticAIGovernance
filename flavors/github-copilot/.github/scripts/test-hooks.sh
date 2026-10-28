@@ -612,6 +612,29 @@ else
     assert_true "cost-snapshot.sh ships" 0 "hooks/scripts/cost-snapshot.sh is missing"
 fi
 
+# subagent-baseline records what was dirty when a producer started (issue #101).
+# The core's cases live in test-hooks.ps1; this one proves the bash wrapper
+# hands the payload and both roots through.
+echo "## subagent-baseline.sh"
+if [ -f "$HOOK_DIR/subagent-baseline.sh" ]; then
+    sb_dir=$(mktemp -d) || { echo "FATAL  no fixture directory" >&2; exit 1; }
+    mkdir -p "$sb_dir/.github/hooks/scripts"
+    cp "$HOOK_DIR/subagent-baseline.sh" "$HOOK_DIR/subagent-baseline.py" "$HOOK_DIR/_baseline.py" "$HOOK_DIR/_common.sh" "$sb_dir/.github/hooks/scripts/"
+    (
+        cd "$sb_dir" && git init -q && printf 'x = 1' > a.py &&
+        git -c user.email=af@test -c user.name=af add -- a.py &&
+        git -c user.email=af@test -c user.name=af commit -q -m base && printf 'x = 2' > a.py
+    ) >/dev/null 2>&1
+    sb_out=$(cd "$sb_dir" && printf '%s' '{"hook_event_name":"SubagentStart","agent_id":"toolu_101S","agent_type":"refactorer"}' |
+        bash .github/hooks/scripts/subagent-baseline.sh 2>/dev/null)
+    assert_true "subagent-baseline.sh stays silent" "$([ "$sb_out" = '{}' ] && echo 1 || echo 0)" "got: $sb_out"
+    assert_contains "subagent-baseline.sh records the dirty file" \
+        "$(cat "$sb_dir/.github/logs/subagent-baseline/toolu_101S.json" 2>/dev/null)" '"a.py"' "no record"
+    rm -rf "$sb_dir"
+else
+    assert_true "subagent-baseline.sh ships" 0 "hooks/scripts/subagent-baseline.sh is missing"
+fi
+
 # The planner gained `editFiles` so it can answer the plan review by revising
 # its own document (issue #235). That widens the write surface of the agent
 # with the narrowest charter, and this allowlist is the only thing holding it

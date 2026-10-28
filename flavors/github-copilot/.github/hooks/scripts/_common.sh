@@ -595,8 +595,37 @@ af_peer_edits() {
     [ -n "$_pe_python" ] || _pe_python="${AF_PYTHON:-}"
     [ -n "$_pe_python" ] || return 0
 
+    # agent_id names this invocation's own log exactly and its SubagentStart
+    # baseline (see Get-AfPeerEdits in _common.ps1).
+    _pe_aid=$(printf '%s' "$_pe_stdin" | grep -o '"agent_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    if [ -n "$_pe_aid" ]; then
+        "$_pe_python" "$_pe_reader" --session-dir "$_pe_session_dir" \
+            --agent "$_pe_agent" --repo-root "${AF_CODE_ROOT:-.}" \
+            --agent-id "$_pe_aid" --baseline-dir "${AF_BASELINE_DIR:-${AF_MAIN_ROOT:-.}/.github/logs/subagent-baseline}" \
+            2>/dev/null || return 0
+        return 0
+    fi
     "$_pe_python" "$_pe_reader" --session-dir "$_pe_session_dir" \
         --agent "$_pe_agent" --repo-root "${AF_CODE_ROOT:-.}" 2>/dev/null || return 0
+}
+
+# ── Producer gates per edited repository (issue #456, phase 2) ─────────
+#
+# Twin of Invoke-AfRepoGates in _common.ps1. Call right after the loop guard:
+#     af_repo_gates "$stdin_raw" "$AF_SCRIPT_DIR/implementer-stop.sh"
+# Prints the merged verdict and exits when another repository was edited;
+# returns otherwise, and the hook gates inline as before.
+af_repo_gates() {
+    [ -z "${AF_GATE_CHILD:-}" ] && [ -n "${1:-}" ] && [ -n "${AF_PYTHON:-}" ] || return 0
+    [ -f "$AF_SCRIPT_DIR/repo-gates.py" ] || return 0
+    # The core is Python: under Git Bash every path needs its Windows spelling.
+    _rg_native() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+    _rg_out=$(printf '%s' "$1" | "$AF_PYTHON" "$(_rg_native "$AF_SCRIPT_DIR/repo-gates.py")" \
+        --hook-path "$(_rg_native "$2")" --shell "$(_rg_native "${BASH:-/bin/bash}")" \
+        --main-root "$(_rg_native "$AF_MAIN_ROOT")" --code-root "$(_rg_native "$AF_CODE_ROOT")" 2>/dev/null) || return 0
+    [ -n "$_rg_out" ] || return 0
+    printf '%s\n' "$_rg_out"
+    exit 0
 }
 
 # ── This agent's own final return text (issue #285) ────────────────────

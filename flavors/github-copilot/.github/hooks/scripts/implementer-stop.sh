@@ -32,6 +32,7 @@ stdin_raw=$(cat)
 # this hook has twelve blocking sites and a second invocation would reach the
 # same verdict on the same unchanged tree (issue #298).
 af_stop_loop_guard "$stdin_raw" implementer 'tests, provenance, python quality, ignore hygiene, linting'
+af_repo_gates "$stdin_raw" "$AF_SCRIPT_DIR/implementer-stop.sh"
 
 # A missing test runner disables the TEST gate only. Provenance, quality,
 # linting and ignore hygiene need neither pytest nor a tests/ directory, and

@@ -34,6 +34,7 @@ $stdinRaw = [Console]::In.ReadToEnd()
 # own. The guard runs before the first of them (issue #298).
 Invoke-AfStopLoopGuard -StdinRaw $stdinRaw -Agent 'refactorer' `
     -Gates 'tests, behaviour preservation, provenance, python quality, ignore hygiene, linting'
+Invoke-AfRepoGates -StdinRaw $stdinRaw -HookPath $PSCommandPath
 
 # ---------- Gate 1: All tests must pass ----------
 # A missing test runner disables THIS gate only. Gates 2-5 need neither pytest

@@ -44,6 +44,14 @@
         "timeout": 15
       }
     ],
+    "SubagentStart": [
+      {
+        "type": "command",
+        "command": "bash .github/hooks/scripts/subagent-baseline.sh",
+        "windows": "powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\subagent-baseline.ps1",
+        "timeout": 20
+      }
+    ],
     "SubagentStop": [
       {
         "type": "command",

@@ -24,6 +24,7 @@ stdin_raw=$(cat)
 
 # Before Gate 0, because Gate 0 blocks too (issue #298).
 af_stop_loop_guard "$stdin_raw" test-writer 'undeclared root files, red phase, provenance, no production code'
+af_repo_gates "$stdin_raw" "$AF_SCRIPT_DIR/test-writer-stop.sh"
 
 # ---------- Gate 0: no undeclared files at the repository root (#123) ----------
 #

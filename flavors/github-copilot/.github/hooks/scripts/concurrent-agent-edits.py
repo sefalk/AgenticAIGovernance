@@ -37,21 +37,30 @@ subtract nothing, which is the safe direction. A file the peer edited and the
 caller edited too is NOT subtracted -- shared authorship is real authorship,
 and the caller must still answer for it.
 
-Identifying the caller's own log is a heuristic: the most recently modified
-`runSubagent-{agent}-*.jsonl`. A Stop hook runs as its own invocation finishes,
-so that log is the one still being written. Two invocations of the SAME agent
-in parallel would defeat it; the reported incident is implementer against
-refactorer, and the misidentification degrades to subtracting less.
+The caller's own log is `runSubagent-{agent}-{agent_id}.jsonl` when the stop
+payload's `agent_id` is passed (`--agent-id`); the id in the file name is the
+payload's (probe of 2026-10-22). Without it, or when no such file exists, the
+fallback is the heuristic it replaced: the most recently modified
+`runSubagent-{agent}-*.jsonl`, which two parallel invocations of the SAME agent
+defeat -- degrading to subtracting less.
+
+THE SEQUENTIAL CASE. Peer logs cannot see an earlier producer's output that is
+still uncommitted: it did not overlap. `--baseline-dir` adds the files that were
+dirty when this invocation started and are still byte-identical (`_baseline`,
+written by the SubagentStart hook). Same failure direction: no record, no
+subtraction.
 
 Stdlib only, on purpose -- a gate that needs `pip install` stops being run.
 
 Usage:
     concurrent-agent-edits.py --session-dir <dir> --agent <name>
-                              [--repo-root <path>]
+                              [--repo-root <path>] [--agent-id <id>]
+                              [--baseline-dir <dir>]
 
 Output:
     Repo-relative POSIX paths, one per line -- files a concurrent peer agent
-    edited and the caller did not.
+    edited and the caller did not, plus files untouched since the caller
+    started.
 
 Exit codes:
     0  a list was emitted (possibly empty -- nothing to subtract)
@@ -61,100 +70,12 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import re
 import sys
+from pathlib import Path
 
-from _agentlog import TOOL_CALL_HINT, agent_from, harvest_paths
-
-# Cheap prefilter so a 20 MB log is not JSON-parsed line by line. The optional
-# whitespace is not decoration: the editor writes compact JSON, but a log
-# rewritten by any pretty-printer would carry `"ts": 123`, and an anchored
-# pattern silently found no timestamps at all.
-TS = re.compile(rb'"ts":\s*(\d+)')
-
-# Allowlist, not a denylist. `read_file` and `grep_search` also carry a
-# `filePath`, and harvesting those would subtract files nobody wrote.
-#
-# Deliberately the same rule as `Test-AfWriteTool` in `_common` rather than a
-# second, narrower one: those names were read out of captured PreToolUse
-# payloads instead of tool documentation (issue #69), and two lists of write
-# tools in one hook directory would drift apart the first time a client added
-# a tool. The trailing heuristic covers a tool that does not exist yet -- a
-# writing verb plus a file noun. `read_file` carries no verb and
-# `create_and_run_task` no file noun, so neither is caught.
-EDIT_TOOLS = frozenset(
-    {
-        "create_file",
-        "replace_string_in_file",
-        "multi_replace_string_in_file",
-        "create_directory",
-        "edit_notebook_file",
-        "create_new_jupyter_notebook",
-        "insert_edit_into_file",
-        "apply_patch",
-        "editFiles",
-        "editFile",
-        "createFile",
-        "createDirectory",
-        "createDir",
-        "editNotebook",
-        "writeFile",
-        "applyPatch",
-        "insertEdit",
-    }
-)
-EDIT_VERB = re.compile(r"create|write|edit|insert|apply|replace")
-EDIT_NOUN = re.compile(r"file|notebook|dir")
-
-
-def is_edit_tool(name: object) -> bool:
-    if not isinstance(name, str) or not name:
-        return False
-    if name in EDIT_TOOLS:
-        return True
-    return bool(EDIT_VERB.search(name) and EDIT_NOUN.search(name))
-
-
-def scan(path: str) -> tuple[int | None, int | None, set[str]]:
-    """One pass over a subagent log: time span and files it edited."""
-    first_ts: int | None = None
-    last_ts: int | None = None
-    edited: set[str] = set()
-    try:
-        with open(path, "rb") as handle:
-            for raw in handle:
-                stamp = TS.search(raw)
-                if stamp:
-                    value = int(stamp.group(1))
-                    if first_ts is None or value < first_ts:
-                        first_ts = value
-                    if last_ts is None or value > last_ts:
-                        last_ts = value
-                if TOOL_CALL_HINT not in raw:
-                    continue
-                try:
-                    span = json.loads(raw.decode("utf-8", "replace"))
-                except (ValueError, UnicodeDecodeError):
-                    continue
-                if not isinstance(span, dict) or span.get("type") != "tool_call":
-                    continue
-                if not is_edit_tool(span.get("name")):
-                    continue
-                attrs = span.get("attrs")
-                if not isinstance(attrs, dict):
-                    continue
-                args = attrs.get("args")
-                if isinstance(args, str):
-                    try:
-                        args = json.loads(args)
-                    except ValueError:
-                        continue
-                harvest_paths(args, edited)
-    except OSError:
-        return None, None, set()
-    return first_ts, last_ts, edited
+from _agentlog import find_own_log, scan_edits
+from _baseline import untouched
 
 
 def overlaps(a: tuple[int | None, int | None], b: tuple[int | None, int | None]) -> bool:
@@ -192,36 +113,33 @@ def main() -> int:
     parser.add_argument("--session-dir", required=True)
     parser.add_argument("--agent", required=True)
     parser.add_argument("--repo-root", default=".")
+    parser.add_argument("--agent-id", default="")
+    parser.add_argument("--baseline-dir", default="")
     args = parser.parse_args()
+
+    unchanged: list[str] = []
+    if args.agent_id and args.baseline_dir:
+        unchanged = untouched(Path(args.baseline_dir), args.agent_id, Path(args.repo_root))
 
     try:
         names = [n for n in os.listdir(args.session_dir) if n.startswith("runSubagent-") and n.endswith(".jsonl")]
     except OSError:
-        return 1
+        names = []
 
-    mine: str | None = None
-    mine_mtime = -1.0
-    for name in names:
-        if agent_from(name) != args.agent:
-            continue
-        full = os.path.join(args.session_dir, name)
-        try:
-            mtime = os.path.getmtime(full)
-        except OSError:
-            continue
-        if mtime > mine_mtime:
-            mine_mtime = mtime
-            mine = name
+    own = find_own_log(args.session_dir, args.agent, args.agent_id) if names else None
+    mine = os.path.basename(own) if own else None
     if mine is None:
-        return 1
+        for path in unchanged:
+            print(path)
+        return 0 if unchanged else 1
 
-    my_start, my_end, my_edits = scan(os.path.join(args.session_dir, mine))
+    my_start, my_end, my_edits = scan_edits(os.path.join(args.session_dir, mine))
 
     peer_edits: set[str] = set()
     for name in names:
         if name == mine:
             continue
-        start, end, edited = scan(os.path.join(args.session_dir, name))
+        start, end, edited = scan_edits(os.path.join(args.session_dir, name))
         if not edited:
             continue
         if not overlaps((my_start, my_end), (start, end)):
@@ -236,7 +154,7 @@ def main() -> int:
         if os.path.normcase(os.path.abspath(p)) not in {os.path.normcase(os.path.abspath(m)) for m in my_edits}
     }
 
-    for path in relativise(exclusive, args.repo_root):
+    for path in sorted(set(relativise(exclusive, args.repo_root)) | set(unchanged)):
         print(path)
     return 0
 

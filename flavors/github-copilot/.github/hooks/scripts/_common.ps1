@@ -562,10 +562,41 @@ function Get-AfPeerEdits {
     }
     if (-not $python) { return @() }
 
-    $out = & $python $reader '--session-dir' $sessionDir '--agent' $Agent '--repo-root' $CodeRoot 2>$null
+    $readerArgs = @('--session-dir', $sessionDir, '--agent', $Agent, '--repo-root', $CodeRoot)
+    # The stop payload's agent_id names this invocation's own log exactly and
+    # its SubagentStart baseline: files dirty at start and still unchanged are
+    # subtracted too -- the sequential half of #101 that peer logs cannot see.
+    $agentId = [string]$payload.agent_id
+    if ($agentId) {
+        # A gate run for another repository (#456) reads the deploying repository's store.
+        $baselineDir = if ($env:AF_BASELINE_DIR) { $env:AF_BASELINE_DIR } else { Join-Path $MainRoot '.github/logs/subagent-baseline' }
+        $readerArgs += @('--agent-id', $agentId, '--baseline-dir', $baselineDir)
+    }
+    $out = & $python $reader @readerArgs 2>$null
     if ($LASTEXITCODE -ne 0) { return @() }
 
     return @($out | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })
+}
+
+# ── Producer gates per edited repository (issue #456, phase 2) ─────────
+#
+# Call right after the loop guard. When the subagent edited a repository other
+# than the deploying one, repo-gates.py runs this hook and that repository's own
+# copy of it, prints the merged verdict, and the hook exits here. Otherwise --
+# one repository, a child run, no interpreter, any failure -- it returns and the
+# hook gates inline exactly as before.
+function Invoke-AfRepoGates {
+    param([string]$StdinRaw, [string]$HookPath)
+
+    if ($env:AF_GATE_CHILD -or -not $StdinRaw -or -not $script:AfPython) { return }
+    $core = Join-Path $script:AfScriptDir 'repo-gates.py'
+    if (-not (Test-Path $core)) { return }
+    $shell = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+    $out = $StdinRaw | & $script:AfPython $core --hook-path $HookPath --shell $shell `
+        --main-root $script:AfMainRoot --code-root $script:AfCodeRoot 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $out) { return }
+    Write-Output ((@($out) -join "`n").Trim())
+    exit 0
 }
 
 # ── This agent's own final return text (issue #285) ────────────────────

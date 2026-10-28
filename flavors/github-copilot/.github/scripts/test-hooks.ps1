@@ -4007,6 +4007,216 @@ foreach ($csEvent in @('Stop', 'SubagentStop')) {
 
 Write-Output ""
 
+# ── 6m. Per-invocation baseline (issue #101, sequential case) ────────────
+#
+# Peer logs only see a producer that ran AT THE SAME TIME. The common case is
+# sequential: the test-writer's output is still uncommitted when the
+# implementer starts, `git diff` hands it to the implementer, and the
+# provenance gate makes it claim authorship. SubagentStart records what was
+# dirty and its content; the stop side drops what is still byte-identical.
+
+Write-Output "## subagent-baseline (issue #101)"
+
+$sbCore = Join-Path $scriptDir 'subagent-baseline.py'
+$sbReader = Join-Path $scriptDir 'concurrent-agent-edits.py'
+$sbPy = @(
+    (Join-Path $githubDir '../.venv/Scripts/python.exe')
+    (Join-Path $githubDir '../.venv/bin/python')
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $sbPy) { $sbPy = 'python' }
+
+Assert-True "subagent-baseline.py ships" (Test-Path $sbCore) "hooks/scripts/subagent-baseline.py is missing"
+if (Test-Path $sbCore) {
+$sbBase = Join-Path ([IO.Path]::GetTempPath()) "af101b-$(Get-Random)"
+$sbRepo = Join-Path $sbBase 'repo'
+$sbLogs = Join-Path $sbBase 'debug-logs'
+$sbStore = Join-Path $sbRepo '.github/logs/subagent-baseline'
+New-Item -ItemType Directory -Path (Join-Path $sbRepo 'src'), $sbLogs -Force | Out-Null
+try {
+    function Invoke-SbGit { git -C $sbRepo -c user.email=af@test -c user.name=af -c core.autocrlf=false @args 2>&1 | Out-Null }
+    function Invoke-SbStart([string]$Json) { $Json | & $sbPy $sbCore --root $sbRepo 2>$null }
+    function Invoke-SbReader([string]$AgentId) {
+        $out = & $sbPy $sbReader --session-dir $sbLogs --agent implementer --repo-root $sbRepo `
+            --agent-id $AgentId --baseline-dir $sbStore 2>$null
+        @{ Out = (@($out) -join "`n"); Code = $LASTEXITCODE }
+    }
+    Invoke-SbGit init -q
+    Set-Content (Join-Path $sbRepo '.gitignore') '.github/logs/' -NoNewline
+    Set-Content (Join-Path $sbRepo 'src/a.py') 'a = 1' -NoNewline
+    Set-Content (Join-Path $sbRepo 'src/b.py') 'b = 1' -NoNewline
+    Invoke-SbGit add -- .gitignore src/a.py src/b.py
+    Invoke-SbGit commit -q -m base
+
+    # The earlier producer's uncommitted output: one modified, one new file.
+    Set-Content (Join-Path $sbRepo 'src/a.py') 'a = 2' -NoNewline
+    Set-Content (Join-Path $sbRepo 'src/new_test.py') 't = 1' -NoNewline
+
+    $sbOut = Invoke-SbStart '{"hook_event_name":"SubagentStart","agent_id":"toolu_101A","agent_type":"implementer"}'
+    Assert-True "subagent-baseline never decides anything" ((@($sbOut) -join '').Trim() -eq '{}') "got: $sbOut"
+    Assert-True "a producer's start is recorded under its agent_id" `
+        (Test-Path (Join-Path $sbStore 'toolu_101A.json')) "no record in $sbStore"
+
+    [void](Invoke-SbStart '{"hook_event_name":"SubagentStart","agent_id":"toolu_101C","agent_type":"code-critic"}')
+    Assert-True "a non-producer's start is not recorded" `
+        (-not (Test-Path (Join-Path $sbStore 'toolu_101C.json'))) "a reviewer got a baseline"
+
+    # The id becomes a file name; one carrying a path must not.
+    [void](Invoke-SbStart '{"hook_event_name":"SubagentStart","agent_id":"../toolu_101E","agent_type":"implementer"}')
+    Assert-True "an agent_id carrying a path writes nothing" `
+        (-not (Test-Path (Join-Path $sbRepo '.github/logs/toolu_101E.json'))) "the record escaped the store"
+
+    # This invocation's own work: b.py edited, nothing else touched.
+    Set-Content (Join-Path $sbRepo 'src/b.py') 'b = 2' -NoNewline
+    $r = Invoke-SbReader 'toolu_101A'
+    Assert-True "a file dirty at start and untouched leaves the scope" `
+        ($r.Out -match '(?m)^src/a\.py$' -and $r.Out -match '(?m)^src/new_test\.py$') "got: $($r.Out) (exit $($r.Code))"
+    Assert-True "a file this invocation dirtied stays in scope" `
+        ($r.Out -notmatch '(?m)^src/b\.py$') "got: $($r.Out)"
+    Assert-True "the baseline alone is a measurement (exit 0 without any subagent log)" ($r.Code -eq 0) "exit $($r.Code)"
+
+    # Editing an already-dirty file is authorship: its content no longer matches.
+    Set-Content (Join-Path $sbRepo 'src/a.py') 'a = 3' -NoNewline
+    $r = Invoke-SbReader 'toolu_101A'
+    Assert-True "a dirty-at-start file this invocation edited stays in scope" `
+        ($r.Out -notmatch '(?m)^src/a\.py$') "got: $($r.Out)"
+
+    # No record: subtract nothing -- the behaviour before the baseline existed.
+    $r = Invoke-SbReader 'toolu_101Z'
+    Assert-True "no record subtracts nothing" `
+        ([string]::IsNullOrWhiteSpace($r.Out) -and $r.Code -ne 0) "got: $($r.Out) (exit $($r.Code))"
+
+    # A commit in between makes the dirty sets incomparable.
+    Invoke-SbGit add -- src/b.py
+    Invoke-SbGit commit -q -m moved
+    $r = Invoke-SbReader 'toolu_101A'
+    Assert-True "HEAD moved since the start subtracts nothing" `
+        ([string]::IsNullOrWhiteSpace($r.Out)) "got: $($r.Out)"
+
+    # The own log by agent_id, not by mtime. A second implementer whose log is
+    # newer used to be taken for this one, and its edits were never subtracted.
+    $sbPeer = Join-Path $sbRepo 'src/peer.py'
+    $sbMine = Join-Path $sbRepo 'src/mine.py'
+    $old = (Get-Date).AddMinutes(-5)
+    New-PeerLog -Dir $sbLogs -Name 'runSubagent-implementer-toolu_101M.jsonl' -Start 1000 -End 3000 -Files @($sbMine) -Mtime $old
+    New-PeerLog -Dir $sbLogs -Name 'runSubagent-implementer-toolu_101P.jsonl' -Start 2000 -End 4000 -Files @($sbPeer) -Mtime (Get-Date)
+    $r = Invoke-SbReader 'toolu_101M'
+    Assert-True "agent_id names the own log exactly" `
+        ($r.Out -match '(?m)^src/peer\.py$' -and $r.Out -notmatch '(?m)^src/mine\.py$') "got: $($r.Out)"
+} finally {
+    Remove-Item $sbBase -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# End to end through the wrapper, as SubagentStart runs it. Detached gives the
+# fixture a HEAD; an unborn branch has none to record.
+$sb = Invoke-Hook -Script 'subagent-baseline.ps1' -Detached `
+    -JsonInput '{"hook_event_name":"SubagentStart","agent_id":"toolu_101W","agent_type":"test-writer"}' `
+    -StubFiles @{ '.github/hooks/scripts/subagent-baseline.py' = (Get-Content $sbCore -Raw) } `
+    -ReadBack '.github/logs/subagent-baseline/toolu_101W.json'
+Assert-True "subagent-baseline.ps1 stays silent" `
+    ((Resolve-Decision $sb.Output $sb.ExitCode) -eq 'silent') "got: $($sb.Output) (exit $($sb.ExitCode))"
+Assert-Contains "subagent-baseline.ps1 writes the record" $sb.ReadBack '"toolu_101W"' "no record read back"
+}
+
+$sbHooks = Get-Content (Join-Path $githubDir 'hooks/agent-hooks.json') -Raw | ConvertFrom-Json
+$sbDeclared = @($sbHooks.hooks.SubagentStart | Where-Object { [string]$_.windows -match 'subagent-baseline\.ps1' -and [string]$_.command -match 'subagent-baseline\.sh' })
+Assert-True "subagent-baseline is declared globally on SubagentStart" ($sbDeclared.Count -eq 1) "declared $($sbDeclared.Count) time(s)"
+
+Write-Output ""
+
+# ── 6n. Producer gates per edited repository (issue #456, phase 2) ───────
+#
+# The deploying repository's producer hooks fire for edits in every folder of a
+# multi-root workspace, but scope themselves from the deploying checkout: an
+# edit in a second repository was never tested, linted or checked. repo-gates
+# runs each edited repository's own copy of the hook and merges the verdicts.
+
+Write-Output "## repo-gates (issue #456)"
+
+$rgCore = Join-Path $scriptDir 'repo-gates.py'
+Assert-True "repo-gates.py ships" (Test-Path $rgCore) "hooks/scripts/repo-gates.py is missing"
+if (Test-Path $rgCore) {
+$rgBase = Join-Path ([IO.Path]::GetTempPath()) "af456-$(Get-Random)"
+$rgSid = '4560c0de-0000-4000-8000-000000000456'
+$rgLogs = Join-Path $rgBase "ws/GitHub.copilot-chat/debug-logs/$rgSid"
+$rgShell = (Get-Command powershell).Source
+New-Item -ItemType Directory -Path $rgLogs -Force | Out-Null
+try {
+    foreach ($name in 'main', 'other', 'plain') {
+        $dir = Join-Path $rgBase $name
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        git -C $dir init -q 2>&1 | Out-Null
+    }
+    $rgMainHook = Join-Path $rgBase 'main/.github/hooks/scripts/implementer-stop.ps1'
+    $rgOtherHook = Join-Path $rgBase 'other/.github/hooks/scripts/implementer-stop.ps1'
+    New-Item -ItemType Directory -Path (Split-Path $rgMainHook), (Split-Path $rgOtherHook) -Force | Out-Null
+    Set-Content $rgMainHook '$null = [Console]::In.ReadToEnd(); Write-Output ''{"systemMessage":"main ok"}'''
+    $rgBlock = '$null = [Console]::In.ReadToEnd(); Write-Output (''{"hookSpecificOutput":{"hookEventName":"Stop","decision":"block","reason":"other says no child='' + $env:AF_GATE_CHILD + '' conf='' + $env:AF_CONF_PATH + ''"}}'')'
+    Set-Content $rgOtherHook $rgBlock
+
+    function Invoke-RepoGates([string]$AgentId) {
+        $payload = @{
+            hook_event_name = 'SubagentStop'; session_id = $rgSid; agent_id = $AgentId; agent_type = 'implementer'
+            transcript_path = (Join-Path $rgBase "ws/GitHub.copilot-chat/transcripts/$rgSid.jsonl")
+        } | ConvertTo-Json -Compress
+        $out = $payload | & $sbPy $rgCore --hook-path $rgMainHook --shell $rgShell --main-root (Join-Path $rgBase 'main') 2>$null
+        @{ Out = (@($out) -join "`n"); Code = $LASTEXITCODE }
+    }
+    $old = (Get-Date).AddMinutes(-5)
+    New-PeerLog -Dir $rgLogs -Name 'runSubagent-implementer-toolu_456M.jsonl' -Start 1000 -End 2000 `
+        -Files @((Join-Path $rgBase 'main/src/a.py')) -Mtime $old
+    New-PeerLog -Dir $rgLogs -Name 'runSubagent-implementer-toolu_456X.jsonl' -Start 3000 -End 4000 `
+        -Files @((Join-Path $rgBase 'main/src/a.py'), (Join-Path $rgBase 'other/src/new/b.py'), (Join-Path $rgBase 'plain/c.py')) -Mtime (Get-Date)
+
+    # The common case must not change: one repository gates inline, as before.
+    $r = Invoke-RepoGates 'toolu_456M'
+    Assert-True "edits in the deploying repository alone gate inline" `
+        ($r.Code -eq 3 -and [string]::IsNullOrWhiteSpace($r.Out)) "exit $($r.Code), out: $($r.Out)"
+
+    $savedConf = $env:AF_CONF_PATH
+    $env:AF_CONF_PATH = Join-Path $rgBase 'main/.github/af-env.conf'
+    try { $r = Invoke-RepoGates 'toolu_456X' } finally { $env:AF_CONF_PATH = $savedConf }
+    $v = $null
+    try { $v = $r.Out | ConvertFrom-Json } catch {}
+    Assert-True "another repository's own hook blocks for its edits" `
+        ($r.Code -eq 0 -and $v.hookSpecificOutput.decision -eq 'block' -and $v.hookSpecificOutput.reason -match '\[other\] other says no') `
+        "exit $($r.Code), out: $($r.Out)"
+    Assert-True "a child runs marked, under its own config" `
+        ($v.hookSpecificOutput.reason -match 'child=1 conf=(\s|"|$)') "the deploying AF_CONF_PATH leaked: $($r.Out)"
+    Assert-True "a repository without a deployed hook is named as not gated" `
+        ($v.hookSpecificOutput.reason -match '\[plain\][^|]*not gated') "got: $($r.Out)"
+
+    Set-Content $rgOtherHook '$null = [Console]::In.ReadToEnd(); Write-Output ''{"systemMessage":"other ok"}'''
+    $r = Invoke-RepoGates 'toolu_456X'
+    Assert-True "every repository passing merges into one message" `
+        ($r.Code -eq 0 -and $r.Out -match '\[main\] main ok' -and $r.Out -match '\[other\] other ok' -and $r.Out -notmatch '"decision"') `
+        "exit $($r.Code), out: $($r.Out)"
+
+    # A child must never dispatch again.
+    $env:AF_GATE_CHILD = '1'
+    try { $r = Invoke-RepoGates 'toolu_456X' } finally { Remove-Item Env:AF_GATE_CHILD -ErrorAction SilentlyContinue }
+    Assert-True "a child run gates inline" ($r.Code -eq 3) "exit $($r.Code), out: $($r.Out)"
+} finally {
+    Remove-Item $rgBase -Recurse -Force -ErrorAction SilentlyContinue
+}
+}
+
+# The wiring: every producer stop hook dispatches right after its loop guard,
+# before the first gate reads the deploying checkout.
+foreach ($rgHook in @('implementer-stop', 'refactorer-stop', 'test-writer-stop')) {
+    foreach ($ext in 'ps1', 'sh') {
+        $code = @((Get-Content (Join-Path $scriptDir "$rgHook.$ext")) | Where-Object { $_ -notmatch '^\s*#' -and $_.Trim() })
+        $guardAt = -1; $gatesAt = -1
+        for ($i = 0; $i -lt $code.Count; $i++) {
+            if ($guardAt -lt 0 -and $code[$i] -match 'Invoke-AfStopLoopGuard|af_stop_loop_guard') { $guardAt = $i }
+            if ($gatesAt -lt 0 -and $code[$i] -match 'Invoke-AfRepoGates|af_repo_gates') { $gatesAt = $i }
+        }
+        Assert-True "$rgHook.$ext dispatches per repository right after the loop guard" `
+            ($guardAt -ge 0 -and $gatesAt -gt $guardAt -and $gatesAt -le $guardAt + 2) "guard at $guardAt, dispatch at $gatesAt"
+    }
+}
+
+Write-Output ""
+
 # ── 7. Edge cases ────────────────────────────────────────────────────────
 
 Write-Output "## Edge cases"
