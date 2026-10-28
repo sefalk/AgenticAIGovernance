@@ -558,14 +558,14 @@ try {
     }
 
     # 13. Negative control + visibility: a clean tree without tests/ must NOT
-    #     block, and the output must still say the test gate was skipped.
+    #     block, and the output must still say the test gate did not run (#473).
     $repo = New-GateRepo -NoTests; $repos += $repo
     $CLEAN_SRC_EXTENDED | Set-Content (Join-Path $repo 'src/app.py')
     git -C $repo add -- ':(literal)src/app.py' | Out-Null
     $r = Invoke-StopHook -Repo $repo -Hook 'implementer-stop.ps1'
     $results['clean_repo_without_tests_dir_passes'] =
         ($r.Json.hookSpecificOutput.decision -ne 'block') -and
-        ($r.Text -match 'skipped')
+        ($r.Text -match 'NOT RUN')
     $details['clean_repo_without_tests_dir_passes'] = $r.Text
 
     # --- Issue #13: branch delta as the gate's input set ---

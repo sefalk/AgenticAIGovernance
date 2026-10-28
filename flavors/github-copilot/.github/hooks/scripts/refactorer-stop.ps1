@@ -40,8 +40,8 @@ Invoke-AfRepoGates -StdinRaw $stdinRaw -HookPath $PSCommandPath
 # A missing test runner disables THIS gate only. Gates 2-5 need neither pytest
 # nor a tests/ directory, and exiting here used to take them down too (#12).
 $testGateSkipped = $null
-if (-not (Get-Command pytest -ErrorAction SilentlyContinue)) {
-    $testGateSkipped = 'pytest not found'
+if ((Get-AfPytest -Root $codeRoot).Count -eq 0) {
+    $testGateSkipped = 'no pytest in the code root .venv or on PATH'
 } elseif (-not (Test-Path (Join-Path $codeRoot 'tests'))) {
     $testGateSkipped = 'no tests/ directory'
 }
@@ -426,7 +426,11 @@ if ($changedLintPy.Count -gt 0 -or $inheritedLintPy.Count -gt 0) {
 
 # All gates passed
 $output = @{
-    systemMessage = "refactorer:Stop -- all gates PASS: tests $(if ($testGateSkipped) {"gate skipped ($testGateSkipped)"} elseif ($fromLog) {'accepted from log'} else {'green'}), no new files created, python quality verified, linting: $lintStatus"
+    systemMessage = if ($testGateSkipped) {
+        "refactorer:Stop -- test gate NOT RUN ($testGateSkipped); other gates PASS: no new files created, python quality verified, linting: $lintStatus"
+    } else {
+        "refactorer:Stop -- all gates PASS: tests $(if ($fromLog) {'accepted from log'} else {'green'}), no new files created, python quality verified, linting: $lintStatus"
+    }
 } | ConvertTo-Json -Compress
 Write-Output $output
 exit 0

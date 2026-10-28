@@ -635,6 +635,28 @@ else
     assert_true "subagent-baseline.sh ships" 0 "hooks/scripts/subagent-baseline.sh is missing"
 fi
 
+# The extension host starts hooks without the venv on PATH; the runner is the
+# code root's venv interpreter (#473). A stub interpreter that imports "pytest".
+echo "## af_resolve_pytest (issue #473)"
+rp_dir=$(mktemp -d) || { echo "FATAL  no fixture directory" >&2; exit 1; }
+mkdir -p "$rp_dir/.venv/bin"
+printf '#!/bin/sh\nexit 0\n' > "$rp_dir/.venv/bin/python"
+chmod +x "$rp_dir/.venv/bin/python"
+rp_out=$(AF_CODE_ROOT="$rp_dir" AF_MAIN_ROOT="$rp_dir" PATH=/usr/bin:/bin bash -c '
+    . "$1/_common.sh" >/dev/null 2>&1
+    AF_CODE_ROOT="$2"; AF_MAIN_ROOT="$2"
+    if af_resolve_pytest "$2"; then printf "%s|" "${AF_PYTEST[@]}"; else printf "none"; fi' _ "$HOOK_DIR" "$rp_dir")
+assert_true "the venv interpreter is the test runner, not PATH" \
+    "$([ "$rp_out" = "$rp_dir/.venv/bin/python|-m|pytest|" ] && echo 1 || echo 0)" "got: $rp_out"
+rm -f "$rp_dir/.venv/bin/python"
+rp_out=$(PATH=/usr/bin:/bin bash -c '
+    . "$1/_common.sh" >/dev/null 2>&1
+    AF_CODE_ROOT="$2"; AF_MAIN_ROOT="$2"
+    if command -v pytest >/dev/null 2>&1; then printf "skip"; elif af_resolve_pytest "$2"; then printf "found"; else printf "none"; fi' _ "$HOOK_DIR" "$rp_dir")
+assert_true "no venv and no PATH pytest is no runner" \
+    "$([ "$rp_out" = "none" ] || [ "$rp_out" = "skip" ] && echo 1 || echo 0)" "got: $rp_out"
+rm -rf "$rp_dir"
+
 # The planner gained `editFiles` so it can answer the plan review by revising
 # its own document (issue #235). That widens the write surface of the agent
 # with the narrowest charter, and this allowlist is the only thing holding it
@@ -2340,7 +2362,7 @@ fi
 # when pytest is missing or collects nothing, and a scratch file in the root is
 # a mess whether or not the suite ran.
 us_gate=$(grep -n 'Get-AfUndeclaredScratch' "$HOOK_DIR/test-writer-stop.ps1" | head -1 | cut -d: -f1)
-us_pytest=$(grep -n 'Get-Command pytest' "$HOOK_DIR/test-writer-stop.ps1" | head -1 | cut -d: -f1)
+us_pytest=$(grep -n 'Get-AfPytest' "$HOOK_DIR/test-writer-stop.ps1" | head -1 | cut -d: -f1)
 if [ -n "$us_gate" ] && [ -n "$us_pytest" ] && [ "$us_gate" -lt "$us_pytest" ]; then
     assert_true "the PowerShell scratch gate runs before the pytest early-return" 1
 else
@@ -2348,7 +2370,7 @@ else
         "a missing pytest lets an undeclared root file through"
 fi
 us_gate=$(grep -n 'af_undeclared_scratch' "$HOOK_DIR/test-writer-stop.sh" | head -1 | cut -d: -f1)
-us_pytest=$(grep -n 'command -v pytest' "$HOOK_DIR/test-writer-stop.sh" | head -1 | cut -d: -f1)
+us_pytest=$(grep -n 'af_resolve_pytest' "$HOOK_DIR/test-writer-stop.sh" | head -1 | cut -d: -f1)
 if [ -n "$us_gate" ] && [ -n "$us_pytest" ] && [ "$us_gate" -lt "$us_pytest" ]; then
     assert_true "the bash scratch gate runs before the pytest early-return" 1
 else
@@ -3207,7 +3229,7 @@ gate_case() {
     } > "$stub_path"
     chmod +x "$stub_path"
 
-    printf 'def test_seeded():\n    assert True\n' > "$fixture/tests/test_seeded.py"
+    printf '# copilot:generated | test-writer | 2026-08-24\ndef test_seeded():\n    assert True\n' > "$fixture/tests/test_seeded.py"
 
     (
         cd "${fixture:?empty fixture path (#248)}" || exit 1

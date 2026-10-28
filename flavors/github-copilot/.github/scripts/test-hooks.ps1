@@ -123,7 +123,9 @@ function Invoke-Hook {
         [string]$ReadBack,
         [string]$StubBin,
         [hashtable]$StubFiles,
-        [string[]]$Track
+        [string[]]$Track,
+        [hashtable]$CopyIn,
+        [string]$PathWithout
     )
     $hookPath = Join-Path $scriptDir $Script
     if (-not (Test-Path $hookPath)) {
@@ -132,7 +134,7 @@ function Invoke-Hook {
     if (-not $Branch -and -not $Detached -and -not $Files) {
         return (Invoke-HookScript -HookPath $hookPath -JsonInput $JsonInput)
     }
-    return (Invoke-HookInFixture -HookPath $hookPath -Script $Script -JsonInput $JsonInput -Branch $Branch -Detached:$Detached -Files $Files -ReadBack $ReadBack -StubBin $StubBin -StubFiles $StubFiles -Track $Track)
+    return (Invoke-HookInFixture -HookPath $hookPath -Script $Script -JsonInput $JsonInput -Branch $Branch -Detached:$Detached -Files $Files -ReadBack $ReadBack -StubBin $StubBin -StubFiles $StubFiles -Track $Track -CopyIn $CopyIn -PathWithout $PathWithout)
 }
 
 # Branch-context gates read the branch of the repo the hook sits in, resolved
@@ -166,7 +168,12 @@ function Invoke-HookInFixture {
         # Seeded paths to put in the index. Whether a file is under version
         # control is an input for gates that must not instruct untracking one
         # (issue #109).
-        [string[]]$Track
+        [string[]]$Track,
+        # Fixture-relative path -> directory copied in whole (a venv: #473).
+        [hashtable]$CopyIn,
+        # A command name no PATH entry may resolve while the hook runs: the
+        # extension host starts hooks without the project's venv on PATH (#473).
+        [string]$PathWithout
     )
     $fixture = Join-Path ([System.IO.Path]::GetTempPath()) "af-hook-branch-$(Get-Random)"
     $fixtureHooks = Join-Path $fixture '.github/hooks/scripts'
@@ -248,7 +255,21 @@ function Invoke-HookInFixture {
         $fixtureConf = Join-Path $fixture '.github/af-env.conf'
         $env:AF_CONF_PATH = if (Test-Path $fixtureConf) { $fixtureConf } else { $null }
         $savedPath = $env:PATH
-        if ($StubBin) { $env:PATH = "$(Join-Path $fixture $StubBin);$savedPath" }
+        if ($CopyIn) {
+            foreach ($rel in $CopyIn.Keys) { Copy-Item -LiteralPath $CopyIn[$rel] -Destination (Join-Path $fixture $rel) -Recurse }
+        }
+        if ($PathWithout) {
+            $kept = foreach ($dir in @($env:PATH -split ';')) {
+                if (-not $dir) { continue }
+                $hit = $false
+                foreach ($ext in '.exe', '.cmd', '.bat', '') {
+                    if (Test-Path -LiteralPath (Join-Path $dir "$PathWithout$ext") -PathType Leaf) { $hit = $true }
+                }
+                if (-not $hit) { $dir }
+            }
+            $env:PATH = @($kept) -join ';'
+        }
+        if ($StubBin) { $env:PATH = "$(Join-Path $fixture $StubBin);$env:PATH" }
         try {
             $output = $JsonInput | powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fixtureHooks $Script) 2>&1
             $exitCode = $LASTEXITCODE
@@ -3616,10 +3637,10 @@ Assert-True "test-writer-stop.sh blocks on an undeclared root creation" `
 # when pytest is missing or collects nothing, and a scratch file in the root is
 # a mess whether or not the suite ran.
 Assert-True "the PowerShell scratch gate runs before the pytest early-return" `
-    ($usTwPs1.IndexOf('Get-AfUndeclaredScratch') -lt $usTwPs1.IndexOf('Get-Command pytest')) `
+    ($usTwPs1.IndexOf('Get-AfUndeclaredScratch') -lt $usTwPs1.IndexOf('Get-AfPytest')) `
     "a missing pytest lets an undeclared root file through"
 Assert-True "the bash scratch gate runs before the pytest early-return" `
-    ($usTwSh.IndexOf('af_undeclared_scratch') -lt $usTwSh.IndexOf('command -v pytest')) `
+    ($usTwSh.IndexOf('af_undeclared_scratch') -lt $usTwSh.IndexOf('af_resolve_pytest')) `
     "a missing pytest lets an undeclared root file through"
 
 Write-Output ""
@@ -4778,7 +4799,7 @@ function Get-RedPhaseDecision {
     $r = Invoke-Hook -Script 'test-writer-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/123-x' `
         -StubBin $PYTEST_STUB_DIR `
         -StubFiles @{ "$PYTEST_STUB_DIR/pytest.cmd" = $stub } `
-        -Files @{ 'tests/test_seeded.py' = "def test_seeded():`n    assert True`n" }
+        -Files @{ 'tests/test_seeded.py' = "# copilot:generated | test-writer | 2026-08-24`ndef test_seeded():`n    assert True`n" }
     return (Resolve-StopDecision $r.Output $r.ExitCode)
 }
 
@@ -4803,6 +4824,76 @@ Assert-True "red phase: a setup error exiting 1 is not a satisfied red" `
 Assert-True "red phase: no tests collected is not a verdict" `
     ((Get-RedPhaseDecision -StubExit 5 -StubSummary 'no tests ran in 0.1s') -eq 'pass') `
     "an empty run is a skip, not a satisfied red and not a violation"
+
+Write-Output ""
+
+# --- The test runner lives in the venv, not on PATH (issue #473) -------------
+#
+# The extension host starts hooks without the project's venv on PATH. The gates
+# asked `Get-Command pytest`, found nothing, and skipped: 15 of 15 producer
+# verdicts in the live hook logs (2026-10-22..28), each reading PASS. The
+# test-writer's early exit also took its provenance gate down with it.
+
+Write-Output "## producer stop hooks find pytest in the venv (issue #473)"
+
+# A venv whose interpreter imports pytest, built without pip: a .pth points its
+# site-packages at an interpreter that already has pytest. Copyable into a fixture.
+$tvVenv = $null
+$tvBase = Join-Path ([IO.Path]::GetTempPath()) "af473-$(Get-Random)"
+# Native stderr is a terminating error under this suite's policy; a probe must not abort the run.
+function Test-ImportsPytest([string]$Py) {
+    try { $null = & $Py -c 'import pytest' 2>&1; return ($LASTEXITCODE -eq 0) } catch { return $false }
+}
+$tvCommon = try { Split-Path (git -C $githubDir rev-parse --path-format=absolute --git-common-dir 2>$null) } catch { $null }
+$tvHost = @(
+    (Join-Path $githubDir '../.venv/Scripts/python.exe'),
+    (Join-Path $githubDir '../../../.venv/Scripts/python.exe'),
+    (Join-Path $githubDir '../mcp-deploy/.venv/Scripts/python.exe'),
+    # A linked worktree has no venv of its own; the main checkout's serves.
+    $(if ($tvCommon) { Join-Path $tvCommon '.venv/Scripts/python.exe' }),
+    'python'
+) | Where-Object { $_ -and ($_ -eq 'python' -or (Test-Path $_)) -and (Test-ImportsPytest $_) } | Select-Object -First 1
+if ($tvHost) {
+    try {
+        $tvSite = (& $tvHost -c 'import os, pytest; print(os.path.dirname(os.path.dirname(pytest.__file__)))' 2>&1 | Out-String).Trim()
+        $null = & $tvHost -m venv --without-pip (Join-Path $tvBase 'venv') 2>&1
+    } catch {}
+    $tvPth = Join-Path $tvBase 'venv/Lib/site-packages/af473.pth'
+    if (Test-Path (Split-Path $tvPth)) {
+        [IO.File]::WriteAllText($tvPth, "$tvSite`n")
+        if (Test-ImportsPytest (Join-Path $tvBase 'venv/Scripts/python.exe')) { $tvVenv = Join-Path $tvBase 'venv' }
+    }
+}
+Assert-True "a venv with pytest can be built for the #473 cases" ($null -ne $tvVenv) `
+    "no interpreter with pytest found to build one from (host: $tvHost)"
+
+if ($tvVenv) {
+    $tvRed = "# copilot:generated | test-writer | 2026-10-28`ndef test_red():`n    assert False`n"
+    $r = Invoke-Hook -Script 'test-writer-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/473-x' `
+        -PathWithout 'pytest' -CopyIn @{ '.venv' = $tvVenv } -Files @{ 'tests/test_red.py' = $tvRed }
+    Assert-True "test-writer runs the Red gate with the venv's pytest when PATH has none" `
+        ($r.Output -match 'Red gate PASS') "got: $($r.Output)"
+
+    $r = Invoke-Hook -Script 'implementer-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/473-x' `
+        -PathWithout 'pytest' -CopyIn @{ '.venv' = $tvVenv } `
+        -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n" } `
+        -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
+    Assert-True "implementer runs the Green gate with the venv's pytest when PATH has none" `
+        ($r.Output -match 'tests all pass' -and $r.Output -notmatch 'NOT RUN') "got: $($r.Output)"
+}
+Remove-Item -LiteralPath $tvBase -Recurse -Force -ErrorAction SilentlyContinue
+
+# Without any runner the Red gate cannot run -- provenance still can, and a
+# skipped gate must not read as a pass.
+$r = Invoke-Hook -Script 'test-writer-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/473-x' `
+    -PathWithout 'pytest' -Files @{ 'tests/test_unmarked.py' = "def test_x():`n    assert False`n" }
+Assert-True "test-writer without a runner still enforces provenance" `
+    ((Resolve-StopDecision $r.Output $r.ExitCode) -eq 'block' -and $r.Output -match 'Provenance') "got: $($r.Output)"
+
+$r = Invoke-Hook -Script 'implementer-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/473-x' `
+    -PathWithout 'pytest' -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n" }
+Assert-True "a Green gate that could not run says NOT RUN, not PASS" `
+    ($r.Output -match 'Green gate NOT RUN' -and $r.Output -notmatch 'Green gate PASS') "got: $($r.Output)"
 
 Write-Output ""
 
