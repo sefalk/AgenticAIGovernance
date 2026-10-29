@@ -14,6 +14,35 @@ still fails the build for a repeated `###` kind inside one section (#322).
 
 ## [Unreleased]
 
+## [1.28.1] -- 2026-10-29
+
+### Fixed
+
+- **The context budget no longer charges a consumer's activated optional skills
+  to the framework's catalogue share (#471).** An optional skill the project
+  moved from `skills/_available/` to `skills/` is deployed and therefore listed
+  in `.af-hashes`, so `check-context-budget.py` counted it as AF's own: MP failed
+  the AF catalogue ceiling at 3,584 > 3,400 tokens although no AF catalogue entry
+  had changed. The payload now ships `skills/default-skills.txt`, the skills AF
+  itself activates; any other active skill counts against the project share.
+  Measured on a copy of MP's tree: AF catalogue 3,320 / 3,400. Without the list
+  (an older payload) attribution is unchanged, and `test-context-budget.ps1`
+  pins the list to the source tree's active skills.
+
+- **Producer stop gates run the tests again in a live session (#473).** The
+  extension host starts hooks without the project's venv on `PATH`, and
+  `implementer-stop`, `refactorer-stop` and `test-writer-stop` looked the runner
+  up with `Get-Command pytest` / `command -v pytest` only — so every live Red and
+  Green gate was skipped (15 of 15 verdicts in the hook logs, 2026-10-22..28),
+  each reading as a pass. The runner is now resolved like `run-tests.ps1` does:
+  the code root's (then the deploying root's) `.venv` interpreter with
+  `-m pytest`, `PATH` last (`Get-AfPytest` / `af_resolve_pytest` in `_common`).
+- **test-writer keeps its provenance gate without a runner.** A missing runner,
+  `tests/` directory or collected test now disables the Red gate only; it used
+  to exit before the provenance gate. New test files are listed with
+  `--untracked-files=all`, so files in a new test directory are checked too.
+- A test gate that could not run is reported as `NOT RUN`, not as `PASS`.
+
 ## [1.28.0] -- 2026-10-27
 
 ### Fixed
