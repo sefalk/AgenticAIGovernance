@@ -16,7 +16,9 @@ Every count is measured from the log. The findings are inferences and say so:
                 but absent from every log read. SessionStart hooks are exempt: a
                 log opened mid-session never holds them
 
-Read-only. Prints a table, or JSON with --json.
+Read-only. Prints a table, or JSON with --json. No hook calls it (af-caller-ok:
+a report run by hand to audit the gates; the flight report, #476, is its first
+planned programmatic caller).
 
 Usage:
     gate-health.py [--log FILE ...] [--logs-root DIR] [--since YYYY-MM-DD]
