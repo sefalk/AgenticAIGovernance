@@ -41,6 +41,7 @@ function New-Fixture {
         [byte[]]$ConfBytes = $null,
         [string[]]$Customizable = @(),    # manifest paths marked [customizable]
         [string[]]$Hashes = $null,        # write .af-hashes listing these paths
+        [string[]]$DefaultSkills = $null, # write skills/default-skills.txt listing these names (#471)
         [switch]$NoManifest,
         [switch]$NoInstructionsDir,
         [switch]$NoRootInstructions,
@@ -108,6 +109,10 @@ function New-Fixture {
         $lines = @('# AF deployment baseline hashes')
         foreach ($path in $Hashes) { $lines += "$path=0000" }
         [IO.File]::WriteAllText((Join-Path $gh '.af-hashes'), ($lines -join "`n") + "`n")
+    }
+    if ($null -ne $DefaultSkills) {
+        New-Item -ItemType Directory -Path (Join-Path $gh 'skills') -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $gh 'skills/default-skills.txt'), "# fixture`n" + ($DefaultSkills -join "`n") + "`n")
     }
     return $gh
 }
@@ -578,6 +583,43 @@ try {
         (([regex]::Matches($written, 'AF_PROJECT_CONTEXT_BUDGET_TOKENS=')).Count -eq 1 -and
          $written -match 'AF_PROJECT_CONTEXT_BUDGET_TOKENS=150')
 
+    # #471: a skill the project activated from skills/_available/ is deployed
+    # (so it is in .af-hashes) but is the project's choice. Charging it to AF
+    # failed MP's AF share at 3,584 > 3,400 with no AF change at all.
+    $gh = New-Fixture -RootTokens 100 -Conf $splitConf -DefaultSkills @('alpha') `
+        -Hashes @('copilot-instructions.md', 'agents/stub.agent.md', 'skills/alpha/SKILL.md', 'skills/optional/SKILL.md') `
+        -Skills @{ 'alpha' = @{ Description = 'does alpha things' }; 'optional' = @{ Description = $long } }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh @('--verbose')
+    $results['OS_activated_optional_skill_is_project_owned'] =
+        ($r.Output -match '(?m)^\s+[\d,]+ tok\s+skills\s+2 entries\s+\(AF [\d,]+, project [1-9][\d,]*\)' -and
+         $r.Output -match '(?m)project\s+skill\s+optional')
+    $results['OS_default_skill_stays_af_owned'] = ($r.Output -match '(?m)AF\s+skill\s+alpha')
+
+    # Without the list (an older payload) nothing changes: deployed means AF's.
+    $gh = New-Fixture -RootTokens 100 -Conf $splitConf `
+        -Hashes @('copilot-instructions.md', 'agents/stub.agent.md', 'skills/alpha/SKILL.md', 'skills/optional/SKILL.md') `
+        -Skills @{ 'alpha' = @{ Description = 'does alpha things' }; 'optional' = @{ Description = $long } }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh @('--verbose')
+    $results['OS_no_list_keeps_deployed_as_af'] = ($r.Output -match '(?m)AF\s+skill\s+optional')
+
+    # The shipped list is only right while it names exactly the source tree's
+    # active skills; a skill moved in or out of _available/ must update it.
+    # Source tree only: a consumer's active set is its own curation.
+    $repoGh = (Resolve-Path (Join-Path $scriptDir '..')).Path
+    if (-not (Test-Path (Join-Path $repoGh '.af-hashes'))) {
+    $listed = @(Get-Content (Join-Path $repoGh 'skills/default-skills.txt') -ErrorAction SilentlyContinue |
+        Where-Object { $_ -and -not $_.StartsWith('#') } | ForEach-Object { $_.Trim() } | Sort-Object)
+    $active = @(Get-ChildItem (Join-Path $repoGh 'skills') -Directory |
+        Where-Object { $_.Name -ne '_available' -and -not $_.Name.StartsWith('_') -and (Test-Path (Join-Path $_.FullName 'SKILL.md')) } |
+        ForEach-Object { $_.Name } | Sort-Object)
+    $results['OS_default_list_matches_source_tree'] =
+        ($listed.Count -gt 0 -and (Compare-Object $listed $active).Count -eq 0)
+    } else {
+        Skip-Check 'OS_default_list_matches_source_tree' 'consumer tree: its active skills are its own curation'
+    }
+
     # SS: deploy is where a consumer gets its baseline. A fresh install that
     #     silently kept the framework's own numbers would ship the arrival
     #     failure again, so both dialects must carry the seeding step. Only
@@ -892,7 +934,7 @@ Write-Host "  Checks skipped: $($skipped.Count)"
 # silently stops matching, as one nearly did in #209 -- shows up as a shortfall
 # instead of as a smaller green number nobody compares. Raise it deliberately
 # when adding a check.
-$EXPECTED_CHECK_TOTAL = 99
+$EXPECTED_CHECK_TOTAL = 103
 $actualTotal = $results.Count + $skipped.Count
 if ($actualTotal -ne $EXPECTED_CHECK_TOTAL) {
     Write-Host "  FAIL: check inventory is $actualTotal, expected $EXPECTED_CHECK_TOTAL -- a check was added without raising the total, or one stopped running without announcing a skip"
