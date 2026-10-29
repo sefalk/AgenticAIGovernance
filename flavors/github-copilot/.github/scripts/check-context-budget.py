@@ -302,21 +302,43 @@ def _deployed(github_dir: Path) -> set[str] | None:
     }
 
 
+def _default_skills(github_dir: Path) -> set[str] | None:
+    """Names of the skills AF ships active, or None when the payload predates the list."""
+    listing = github_dir / "skills" / "default-skills.txt"
+    if not listing.is_file():
+        return None
+    return {
+        line.strip() for line in _read_text(listing).splitlines() if line.strip() and not line.lstrip().startswith("#")
+    }
+
+
 class Ownership:
     """Decides whether a measured file counts against AF or against the project.
 
-    Two signals, because one is not enough. ``[customizable]`` catches files AF
+    Three signals, because one is not enough. ``[customizable]`` catches files AF
     ships as templates and invites the project to rewrite. ``.af-hashes``
     catches files AF never shipped at all -- a project's own instruction file
     sits in the same directory as AF's and is otherwise indistinguishable.
+    ``skills/default-skills.txt`` catches optional skills the project activated:
+    deployed, so hashed, but the project's choice (#471).
     """
 
     def __init__(self, github_dir: Path) -> None:
         self.customizable = _customizable(github_dir)
         self.deployed = _deployed(github_dir)
+        self.default_skills = _default_skills(github_dir)
 
     def is_project(self, relative: str) -> bool:
         if relative in self.customizable:
+            return True
+        parts = relative.split("/")
+        if (
+            self.default_skills is not None
+            and len(parts) >= 3
+            and parts[0] == "skills"
+            and parts[1] != "_available"
+            and parts[1] not in self.default_skills
+        ):
             return True
         # No deployment record means the AF source tree, where an unlisted file
         # is AF's own. In a consumer that lost the record this errs towards
