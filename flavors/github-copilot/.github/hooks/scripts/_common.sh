@@ -150,6 +150,31 @@ af_find_python() {
 
 AF_PYTHON=$(af_find_python "${AF_PYTHON_OVERRIDE:-}" python3 python py)
 
+# af_resolve_pytest [ROOT] -- sets AF_PYTEST to the project's test runner
+# (venv interpreter + "-m pytest", PATH pytest last); returns 1 when none
+# imports pytest. Twin of Get-AfPytest: the extension host starts hooks
+# without the venv on PATH, so `command -v pytest` alone skipped every
+# producer test gate live (#473).
+AF_PYTEST=()
+af_resolve_pytest() {
+    local _rp_base _rp_rel
+    AF_PYTEST=()
+    for _rp_base in "${1:-$AF_CODE_ROOT}" "$AF_MAIN_ROOT"; do
+        [ -n "$_rp_base" ] || continue
+        for _rp_rel in .venv/bin/python .venv/Scripts/python.exe; do
+            if [ -f "$_rp_base/$_rp_rel" ] && "$_rp_base/$_rp_rel" -c 'import pytest' >/dev/null 2>&1; then
+                AF_PYTEST=("$_rp_base/$_rp_rel" -m pytest)
+                return 0
+            fi
+        done
+    done
+    if command -v pytest >/dev/null 2>&1; then
+        AF_PYTEST=(pytest)
+        return 0
+    fi
+    return 1
+}
+
 # af_tool_name_from_json RAW
 #
 # Prints the payload's tool_name. Returns 1 when it cannot be read with

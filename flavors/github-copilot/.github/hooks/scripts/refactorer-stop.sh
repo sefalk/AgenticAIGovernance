@@ -37,8 +37,8 @@ af_repo_gates "$stdin_raw" "$AF_SCRIPT_DIR/refactorer-stop.sh"
 # A missing test runner disables THIS gate only. Gates 2-5 need neither pytest
 # nor a tests/ directory, and exiting here used to take them down too (#12).
 test_gate_skipped=""
-if ! command -v pytest &>/dev/null; then
-    test_gate_skipped="pytest not found"
+if ! af_resolve_pytest "$AF_CODE_ROOT"; then
+    test_gate_skipped="no pytest in the code root .venv or on PATH"
 elif [ ! -d "tests/" ]; then
     test_gate_skipped="no tests/ directory"
 fi
@@ -319,7 +319,8 @@ fi
 
 # All gates passed
 if [[ -n "$test_gate_skipped" ]]; then
-    pass_detail="test gate skipped (${test_gate_skipped})"
+    echo "{\"systemMessage\": \"refactorer:Stop \u2014 test gate NOT RUN (${test_gate_skipped}); other gates PASS: no new files created, python quality verified, linting: ${lint_status}\"}"
+    exit 0
 elif [[ "$from_log" == true ]]; then
     pass_detail="tests accepted from log"
 else

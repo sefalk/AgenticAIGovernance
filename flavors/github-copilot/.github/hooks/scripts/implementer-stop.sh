@@ -38,8 +38,8 @@ af_repo_gates "$stdin_raw" "$AF_SCRIPT_DIR/implementer-stop.sh"
 # linting and ignore hygiene need neither pytest nor a tests/ directory, and
 # exiting here used to take them down with it (issue #12).
 test_gate_skipped=""
-if ! command -v pytest &>/dev/null; then
-    test_gate_skipped="pytest not found"
+if ! af_resolve_pytest "$AF_CODE_ROOT"; then
+    test_gate_skipped="no pytest in the code root .venv or on PATH"
 elif [ ! -d "tests/" ]; then
     test_gate_skipped="no tests/ directory"
 fi
@@ -343,6 +343,10 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
             ;;
     esac
 
+    if [[ -n "$test_gate_skipped" ]]; then
+        echo "{\"systemMessage\": \"implementer:Stop \u2014 Green gate NOT RUN (${test_gate_skipped}); provenance + python quality verified, linting: ${lint_status}${return_note}\"}"
+        exit 0
+    fi
     echo "{\"systemMessage\": \"implementer:Stop \u2014 Green gate PASS: ${pass_detail}, provenance + python quality verified, linting: ${lint_status}${return_note}\"}"
     exit 0
 else

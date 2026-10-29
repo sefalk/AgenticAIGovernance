@@ -1,0 +1,35 @@
+# AF default skills: the skills the framework ships active in skills/{name}/.
+# One name per line. Any other active skill in a consumer was activated by the
+# project from skills/_available/, and its catalogue cost counts against the
+# project share, not the framework's (#471). Kept equal to the source tree's
+# active skill directories by test-context-budget.ps1.
+ado-pr
+ado-shared
+ado-wiki
+ado-workitem
+code-review
+copilot-authoring
+databricks-execution-patterns
+dependency-management
+deployment
+design-patterns
+documentation
+error-handling
+gh-issue
+git-workflow
+git-worktrees
+hexagonal-architecture
+human-escalation
+metrics
+notebook-execution
+property-testing
+pydantic
+refactoring
+risk-management
+secure-coding
+static-analysis
+task-decomposition
+tdd-orchestration
+test-execution
+unit-testing
+work-item-state

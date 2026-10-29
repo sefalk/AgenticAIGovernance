@@ -31,8 +31,8 @@ Invoke-AfRepoGates -StdinRaw $stdinRaw -HookPath $PSCommandPath
 
 # ---------- Gate 0: no undeclared files at the repository root (#123) ----------
 #
-# Runs before the Red gate on purpose. Every gate below returns early when
-# pytest is missing or collects nothing, and a scratch file left in the root is
+# Runs before the Red gate on purpose. The Red gate is skipped when no runner
+# or no tests are found, and a scratch file left in the root is
 # a mess whether or not the suite ran.
 $scratch = @(Get-AfUndeclaredScratch -StdinRaw $stdinRaw -Agent 'test-writer' -CodeRoot $codeRoot -MainRoot $mainRoot)
 if ($scratch.Count -gt 0) {
@@ -48,51 +48,46 @@ if ($scratch.Count -gt 0) {
     exit 0
 }
 
-$pytest = Get-Command pytest -ErrorAction SilentlyContinue
-if (-not $pytest) {
-    $output = @{
-        systemMessage = "test-writer:Stop -- pytest not found, Red gate skipped"
-    } | ConvertTo-Json -Compress
-    Write-Output $output
-    exit 0
-}
-
-if (-not (Test-Path (Join-Path $codeRoot 'tests'))) {
-    $output = @{
-        systemMessage = "test-writer:Stop -- no tests/ directory, Red gate skipped"
-    } | ConvertTo-Json -Compress
-    Write-Output $output
-    exit 0
+# A missing runner, tests/ directory or collected test disables the Red gate
+# only. Exiting here used to skip the provenance gate with it, and the runner
+# was looked up on a PATH the extension host never puts the venv on (#473).
+$redNotRun = $null
+$pytest = Get-AfPytest -Root $codeRoot
+if ($pytest.Count -eq 0) {
+    $redNotRun = 'no pytest in the code root .venv or on PATH'
+} elseif (-not (Test-Path (Join-Path $codeRoot 'tests'))) {
+    $redNotRun = 'no tests/ directory'
 }
 
 # ---------- Gate 1: Red phase -- new tests must FAIL ----------
 
-Push-Location $codeRoot
-$result = & pytest tests/ -q --tb=line --no-header 2>&1
-$exitCode = $LASTEXITCODE
-Pop-Location
+$result = @()
+if (-not $redNotRun) {
+    $pytestExe = $pytest[0]
+    $pytestArgs = @($pytest | Select-Object -Skip 1)
+    Push-Location $codeRoot
+    $result = & $pytestExe @pytestArgs tests/ -q --tb=line --no-header 2>&1
+    $exitCode = $LASTEXITCODE
+    Pop-Location
 
-# Exit code 0 = all tests pass → Red phase violation (tests should fail)
-# Exit code 1 = some tests fail → Red phase satisfied
-# Exit code 5 = no tests collected → skip (nothing to verify)
-if ($exitCode -eq 0) {
-    $output = @{
-        hookSpecificOutput = @{
-            hookEventName = "Stop"
-            decision = "block"
-            reason = "Red phase violation: all tests PASS. New tests must FAIL against the existing production code to express a genuine requirement gap. Ensure your tests assert behaviour that is not yet implemented."
-        }
-    } | ConvertTo-Json -Compress -Depth 3
-    Write-Output $output
-    exit 0
-}
+    # Exit code 0 = all tests pass -> Red phase violation (tests should fail)
+    # Exit code 1 = some tests fail -> Red phase satisfied
+    # Exit code 5 = no tests collected -> skip (nothing to verify)
+    if ($exitCode -eq 0) {
+        $output = @{
+            hookSpecificOutput = @{
+                hookEventName = "Stop"
+                decision = "block"
+                reason = "Red phase violation: all tests PASS. New tests must FAIL against the existing production code to express a genuine requirement gap. Ensure your tests assert behaviour that is not yet implemented."
+            }
+        } | ConvertTo-Json -Compress -Depth 3
+        Write-Output $output
+        exit 0
+    }
 
-if ($exitCode -eq 5) {
-    $output = @{
-        systemMessage = "test-writer:Stop -- no tests collected, Red gate skipped"
-    } | ConvertTo-Json -Compress
-    Write-Output $output
-    exit 0
+    if ($exitCode -eq 5) {
+        $redNotRun = 'no tests collected'
+    }
 }
 
 # Not every red is a red. A file that cannot be imported (exit 2) or a test that
@@ -105,7 +100,7 @@ if ($exitCode -eq 5) {
 # `1 error` and still exits 1, indistinguishable from a genuine failure by exit
 # code alone. Measured 2026-08-24.
 $summaryLine = ($result | Where-Object { "$_".Trim() } | Select-Object -Last 1 | Out-String).Trim()
-if ($exitCode -eq 2 -or $summaryLine -match '\d+ error') {
+if (-not $redNotRun -and ($exitCode -eq 2 -or $summaryLine -match '\d+ error')) {
     $output = @{
         hookSpecificOutput = @{
             hookEventName = "Stop"
@@ -121,7 +116,9 @@ if ($exitCode -eq 2 -or $summaryLine -match '\d+ error') {
 
 # ---------- Gate 2: Provenance markers on new test files (H5) ----------
 
-$newTestFiles = & git -C $codeRoot status --porcelain "tests/" 2>$null |
+# --untracked-files=all: a new test directory is otherwise one `?? tests/x/` line
+# with no .py in it, and every file inside escaped this gate (#473).
+$newTestFiles = & git -C $codeRoot status --porcelain --untracked-files=all "tests/" 2>$null |
     Where-Object { $_ -match '^\?\? ' -or $_ -match '^A ' } |
     ForEach-Object { ($_ -replace '^.. ', '').Trim('"') } |
     Where-Object { $_ -match '\.py$' }
@@ -159,7 +156,11 @@ if ($missingMarkers.Count -gt 0) {
 # All gates passed
 $summary = ($result | Select-Object -Last 1 | Out-String).Trim()
 $output = @{
-    systemMessage = "test-writer:Stop -- Red gate PASS: tests are failing as expected. Provenance OK. Summary: $summary"
+    systemMessage = if ($redNotRun) {
+        "test-writer:Stop -- Red gate NOT RUN ($redNotRun); provenance OK"
+    } else {
+        "test-writer:Stop -- Red gate PASS: tests are failing as expected. Provenance OK. Summary: $summary"
+    }
 } | ConvertTo-Json -Compress
 Write-Output $output
 exit 0
