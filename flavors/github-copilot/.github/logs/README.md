@@ -29,6 +29,45 @@ See the [documenter agent](../agents/documenter.agent.md) for the full YAML sche
   no holes. A missing log then means a workflow that was never recorded, which
   is a defect, not a cheap run.
 
+## Measured, inferred, lower bound (#477)
+
+Every field an AF report emits is one of four kinds, so an estimate never
+reads as a fact:
+
+| Kind | Meaning |
+|---|---|
+| `measured` | read from a machine-written record (billing attribute, hook log line, token count) |
+| `inferred` | derived by a stated rule; the report names the rule id below |
+| `lower_bound` | measured, but known to be incomplete: "at least", never "total" |
+| `meta` | not a figure: versions, identifiers, paths, the declaration itself |
+
+A field built on an inferred verdict is inferred, even when the numbers it sums
+are measured: `credits_complete` is exact only if each session's `coverage` is.
+
+Each report script declares the kind of every top-level field in `FIELD_KINDS`,
+and its suite fails on an emitted field without one. The `cost:` block names its
+inferred and lower-bound fields in its `kinds:` line (the rest are measured or
+meta); the gate health report (`scripts/gate-health.py --json`) carries the full
+map in `kinds` and a `rule` on every finding.
+
+Rule ids:
+
+- `log-head`: `coverage`. `full` only when `main.jsonl` opens with its
+  `session_start` (after SessionStart hook spans) and, with `--store`, no line
+  was lost past the last one read; see `coverage` below.
+- `price-tier-fit`: `credits_by_kind`. Each request is priced at the cheapest
+  tier whose `max_prompt_tokens` holds its prompt, a rule fitted on billed
+  requests (#451), not specified by the vendor.
+- `chars-per-token`: `by_entity`. Token footprints are characters / 4,
+  request-weighted; the vendor tokenizer is not ours to run.
+- `not-run-half`: gate health `not-run`. At least half of at least `--min-runs`
+  runs reported NOT RUN, skipped or not measurable.
+- `quiet-gate`: gate health `never-decided`. A gate able to block, deny or ask
+  did none of them in at least `--quiet-runs` runs. Often fine.
+- `declared-unseen`: gate health `never-ran`. Declared in `agent-hooks.json` or
+  agent frontmatter, absent from every log read. A log opened mid-session can
+  miss a hook that did run.
+
 ## The `cost:` block (ADVISORY)
 
 Appended automatically by the documenter Stop hook
@@ -38,8 +77,9 @@ the chat debug log of the current session:
 
 ```yaml
 cost:
-  schema_version: 8
-  collector: "collect-session-cost.py@8"
+  schema_version: 9
+  collector: "collect-session-cost.py@9"
+  kinds: { inferred: { coverage: log-head, credits_by_kind: price-tier-fit, by_entity: chars-per-token } }
   available: true
   coverage: full            # full | partial | truncated | gapped
   sessions: ["<session-id>"]
@@ -327,7 +367,9 @@ the session gives a chance to:
 
   `credits_complete` sums only sessions whose every request is in the store;
   `credits_lower_bound` sums every row held, including sessions with a gap or a
-  lost head. The two are never merged into one number.
+  lost head. The two are never merged into one number. Its `kinds:` line marks
+  `requests`, `unbilled_requests` and `by_model` as lower bounds too: they sum
+  the same rows.
 
 Regression tests: `scripts/test-session-cost.ps1`.
 

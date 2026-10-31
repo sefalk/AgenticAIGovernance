@@ -38,6 +38,9 @@ from collections import defaultdict
 from pathlib import Path
 
 LOG_NAME = "GitHub Copilot Chat Hooks.log"
+# What each top-level field of the JSON report is (#477; logs/README.md). Rule ids
+# of the inferred findings are defined there too.
+FIELD_KINDS = {"logs": "meta", "since": "meta", "gates": "measured", "findings": "inferred", "kinds": "meta"}
 LINE = re.compile(r"^(\d{4}-\d{2}-\d{2}) \d{2}:\d{2}:\d{2}\.\d+ \[info\] \[#(\d+)\] \[(\w+)\] (.*)$")
 TIMEOUT = re.compile(r"^(\d{4}-\d{2}-\d{2}) .*\[HookExecutor\] Hook command timed out after (\d+)s: (.+)$")
 SCRIPT = re.compile(r"hooks/scripts/([^/\s\"]+\.(?:ps1|sh))")
@@ -202,6 +205,7 @@ def findings(stats: dict, decl: dict[str, str], min_runs: int, quiet_runs: int) 
                     "script": name,
                     "detail": f"reported NOT RUN/skipped in {not_run} of {runs} runs",
                     "basis": "inferred",
+                    "rule": "not-run-half",
                 }
             )
         able = any(token in name for token in ("-stop.", "pretooluse", "block-dangerous"))
@@ -212,6 +216,7 @@ def findings(stats: dict, decl: dict[str, str], min_runs: int, quiet_runs: int) 
                     "script": name,
                     "detail": f"{runs} runs, 0 block/deny/ask",
                     "basis": "inferred",
+                    "rule": "quiet-gate",
                 }
             )
     ran = {name.rsplit(".", 1)[0] for name, counts in stats.items() if counts.get("runs", 0)}
@@ -222,7 +227,15 @@ def findings(stats: dict, decl: dict[str, str], min_runs: int, quiet_runs: int) 
         if "SessionStart" in where or stem in ran or stem in seen:
             continue
         seen.add(stem)
-        out.append({"kind": "never-ran", "script": stem, "detail": f"declared in {where}", "basis": "inferred"})
+        out.append(
+            {
+                "kind": "never-ran",
+                "script": stem,
+                "detail": f"declared in {where}",
+                "basis": "inferred",
+                "rule": "declared-unseen",
+            }
+        )
     return out
 
 
@@ -253,7 +266,7 @@ def main() -> int:
             "since": args.since,
             "gates": {name: {k: v for k, v in counts.items() if v} for name, counts in sorted(stats.items())},
             "findings": found,
-            "basis": {"gates": "measured", "findings": "inferred"},
+            "kinds": FIELD_KINDS,
         }
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
@@ -268,7 +281,7 @@ def main() -> int:
     if not found:
         print("  no findings")
     for item in found:
-        print(f"  {item['kind'].upper():14} {item['script']}: {item['detail']} ({item['basis']})")
+        print(f"  {item['kind'].upper():14} {item['script']}: {item['detail']} ({item['basis']}: {item['rule']})")
     return 0
 
 

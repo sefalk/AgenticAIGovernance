@@ -54,8 +54,9 @@ from typing import Any
 
 # v8: `surviving` and `gaps` when the total is withheld, coverage `gapped`, and
 # `by_model`/`by_purpose` render `null` rather than `{}` when withheld (#457).
-SCHEMA_VERSION = 8
-COLLECTOR_VERSION = 8
+# v9: `kinds` names the inferred and lower-bound fields the block emitted (#477).
+SCHEMA_VERSION = 9
+COLLECTOR_VERSION = 9
 # v2: the file accumulates instead of being replaced, so it carries one header
 # per session and every row names the session it came from.
 # v3: every row names the price tier it was priced at (#451).
@@ -63,6 +64,62 @@ FACTS_SCHEMA_VERSION = 3
 ENTITY_SCHEMA_VERSION = 2
 
 NANO_AIU_PER_CREDIT = 1_000_000_000
+
+# What each top-level field of the `cost:` block is (#477; logs/README.md). A
+# field missing here fails test-session-cost, so no estimate can ship as a fact.
+FIELD_KINDS: dict[str, str] = {
+    "schema_version": "meta",
+    "collector": "meta",
+    "kinds": "meta",
+    "available": "meta",
+    "reason": "meta",
+    "coverage": "inferred",
+    "earliest_ts": "measured",
+    "gaps": "measured",
+    "surviving": "lower_bound",
+    "sessions": "meta",
+    "requests": "measured",
+    "unbilled_requests": "measured",
+    "no_usage_requests": "measured",
+    "drift": "measured",
+    "tokens": "measured",
+    "credits": "measured",
+    "rate_card": "meta",
+    "credits_by_kind": "inferred",
+    "by_model": "measured",
+    "by_purpose": "measured",
+    "by_agent": "measured",
+    "by_entity": "inferred",
+    "facts": "meta",
+    "environment": "meta",
+}
+# Rule ids, each defined in logs/README.md under "Measured, inferred, lower bound".
+INFERRED_RULES: dict[str, str] = {
+    "coverage": "log-head",
+    "credits_by_kind": "price-tier-fit",
+    "by_entity": "chars-per-token",
+}
+# The `cost_report:` of `--report`. What is complete rests on each session's
+# coverage verdict, so it is inferred; sums over every row are lower bounds.
+REPORT_FIELD_KINDS: dict[str, str] = {
+    "schema_version": "meta",
+    "collector": "meta",
+    "kinds": "meta",
+    "sessions": "measured",
+    "complete": "inferred",
+    "credits_complete": "inferred",
+    "credits_lower_bound": "lower_bound",
+    "requests": "lower_bound",
+    "unbilled_requests": "lower_bound",
+    "by_model": "lower_bound",
+    "by_session": "inferred",
+}
+REPORT_INFERRED_RULES: dict[str, str] = {
+    "complete": "log-head",
+    "credits_complete": "log-head",
+    "by_session": "log-head",
+}
+TOP_FIELD = re.compile(r"^  ([a-z_]+):")
 
 # The usual English rule of thumb. The vendor's tokenizer is not ours to run, so
 # every count derived from it is named `_est` and never crossed with a price.
@@ -1187,7 +1244,7 @@ def report(store: str) -> str:
         )
     if not sessions:
         lines[-1] = "  by_session: []"
-    return "\n".join(lines) + "\n"
+    return "\n".join(_with_kinds(lines, REPORT_FIELD_KINDS, REPORT_INFERRED_RULES)) + "\n"
 
 
 def _record_customizations(event: dict[str, Any], sink: dict[str, dict[str, Any]]) -> None:
@@ -1310,7 +1367,24 @@ def render(result: dict[str, Any], facts_path: str | None = None, entities_path:
     # Names the artifact a third party can re-aggregate, not just this summary.
     lines.append(f"  facts: {_scalar(facts_path)}")
     lines.append(f"  environment: {{ vscode: {_scalar(env['vscode'])}, copilot_chat: {_scalar(env['copilot_chat'])} }}")
-    return "\n".join(lines) + "\n"
+    return "\n".join(_with_kinds(lines)) + "\n"
+
+
+def _with_kinds(
+    lines: list[str], kinds: dict[str, str] = FIELD_KINDS, rules: dict[str, str] = INFERRED_RULES
+) -> list[str]:
+    """Name the inferred and lower-bound fields among those emitted; the rest are measured or meta (#477)."""
+    emitted = [m.group(1) for line in lines if (m := TOP_FIELD.match(line))]
+    inferred = [f"{name}: {rules[name]}" for name in emitted if kinds.get(name) == "inferred"]
+    lower = [name for name in emitted if kinds.get(name) == "lower_bound"]
+    parts = []
+    if inferred:
+        parts.append("inferred: { " + ", ".join(inferred) + " }")
+    if lower:
+        parts.append("lower_bound: [" + ", ".join(lower) + "]")
+    if not parts:
+        return lines
+    return [*lines[:3], f"  kinds: {{ {', '.join(parts)} }}", *lines[3:]]
 
 
 def _by_agent(per_agent: dict[str, Totals] | None) -> list[str]:
