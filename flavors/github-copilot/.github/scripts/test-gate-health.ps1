@@ -101,8 +101,19 @@ try {
             (@($kinds | Where-Object { $_ -eq 'never-ran:researcher-pretooluse' }).Count -eq 1) ($kinds -join ', ')
         Add-Result 'F4_a_twin_that_ran_in_one_dialect_and_sessionstart_are_not_flagged' `
             (-not ($kinds | Where-Object { $_ -like 'never-ran:block-dangerous*' -or $_ -like 'never-ran:session-context*' -or $_ -like '*not-a-declaration*' })) ($kinds -join ', ')
-        Add-Result 'F5_findings_are_labelled_inferred_counts_measured' `
-            (@($j.findings | Where-Object { $_.basis -ne 'inferred' }).Count -eq 0 -and $j.basis.gates -eq 'measured') "basis=$($j.basis | ConvertTo-Json -Compress)"
+        # #477: every top-level field declares its kind, and an inferred finding names its rule.
+        $top = @($j.PSObject.Properties.Name)
+        $declaredKinds = if ($j.PSObject.Properties['kinds']) { $j.kinds } else { [pscustomobject]@{} }
+        $kindOf = @{}
+        $declaredKinds.PSObject.Properties | ForEach-Object { $kindOf[$_.Name] = $_.Value }
+        $missing = @($top | Where-Object { -not $kindOf.ContainsKey($_) })
+        $bad = @($kindOf.Values | Where-Object { @('measured', 'inferred', 'lower_bound', 'meta') -notcontains $_ })
+        Add-Result 'F5_every_top_level_field_declares_a_kind' `
+            ($missing.Count -eq 0 -and $bad.Count -eq 0 -and $kindOf['gates'] -eq 'measured' -and $kindOf['findings'] -eq 'inferred') `
+            "missing=$($missing -join ',') kinds=$($declaredKinds | ConvertTo-Json -Compress)"
+        Add-Result 'F6_every_finding_is_inferred_and_names_its_rule' `
+            (@($j.findings).Count -ge 3 -and @($j.findings | Where-Object { $_.basis -ne 'inferred' -or -not $_.PSObject.Properties['rule'] -or -not $_.rule }).Count -eq 0) `
+            "$($j.findings | ConvertTo-Json -Compress)"
     }
 
     $r = Invoke-Subject @()
