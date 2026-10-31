@@ -93,7 +93,14 @@ def gate_cells(health: ModuleType, logs: list[Path], session: str) -> list[dict]
     return sorted(cells, key=lambda c: (c["ts"] is None, c["ts"] or 0))
 
 
-def render(session: str, lane_rows: list[dict], cells: list[dict], cost: dict[str, Any], rows: list[dict]) -> str:
+def render(
+    session: str,
+    lane_rows: list[dict],
+    cells: list[dict],
+    cost: dict[str, Any],
+    rows: list[dict],
+    series: dict[str, dict[str, Any]] | None = None,
+) -> str:
     e = html.escape
     stamps = [x for lane in lane_rows for x in (lane["start"], lane["end"]) if x is not None]
     stamps += [c["ts"] for c in cells if c["ts"] is not None]
@@ -141,6 +148,8 @@ def render(session: str, lane_rows: list[dict], cells: list[dict], cost: dict[st
         )
     out.append("</section>")
 
+    out.extend(_context_panel(lane_rows, series or {}, lo, span))
+
     out.append('<section class="panel" data-panel="gates" data-kind="measured">')
     out.append(f'<h2>Gate strip <span class="kind">measured, {len(cells)} verdicts</span></h2><div>')
     for c in cells:
@@ -181,6 +190,44 @@ def render(session: str, lane_rows: list[dict], cells: list[dict], cost: dict[st
     return "\n".join(out) + "\n"
 
 
+def _context_panel(lane_rows: list[dict], series: dict[str, dict[str, Any]], lo: int, span: int) -> list[str]:
+    """Input tokens per request, one line per lane; drops are inferred compactions (#479)."""
+    e = html.escape
+    top = max((s["max"] for s in series.values()), default=1) or 1
+    out = [
+        '<section class="panel" data-panel="context" data-kind="measured">',
+        '<h2>Context per request <span class="kind">measured input tokens;'
+        f" drops inferred: a fall of more than half (#479); scale 0..{top}</span></h2>",
+    ]
+    for lane in lane_rows:
+        s = series.get(lane["log"])
+        if not s:
+            continue
+        coords = " ".join(
+            f"{round(600 * ((ts or lo) - lo) / span, 1)},{round(40 - 38 * size / top, 1)}"
+            for ts, size, _ in s["points"]
+        )
+        floor = s["floor"] if s["floor"] is not None else "missing"
+        note = "" if s["floor"] is not None else " &middot; floor missing: the log lost its head"
+        out.append(
+            f'<div><span class="label">{e(lane["agent"])} &middot; floor {floor} &middot; median {s["median"]}'
+            f" &middot; max {s['max']}{note}</span>"
+            '<svg width="600" height="42" style="background:#f4f4f4">'
+            f'<polyline class="ctx" data-lane="{e(lane["agent"])}" data-floor="{floor}" data-median="{s["median"]}"'
+            f' data-max="{s["max"]}" data-drops="{len(s["drops"])}" points="{coords}"'
+            ' fill="none" stroke="#5b8def" stroke-width="1.5"/>'
+        )
+        for drop in s["drops"]:
+            x = round(600 * ((drop["ts"] or lo) - lo) / span, 1)
+            out.append(
+                f'<circle class="drop" data-kind="inferred" cx="{x}" cy="21" r="4" fill="#d9534f">'
+                f"<title>{drop['from']} -> {drop['to']} tokens</title></circle>"
+            )
+        out.append("</svg></div>")
+    out.append("</section>")
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--session-dir", required=True, help="the chat session's debug-log directory")
@@ -208,6 +255,7 @@ def main() -> int:
         gate_cells(health, [p for p in logs if p.is_file()], session),
         cost,
         cost_rows(facts),
+        cost_mod.context_series(facts, head_lost=cost.get("coverage") == "truncated"),
     )
     out = Path(args.out) if args.out else Path(".github") / "logs" / f"flight-{session}.html"
     out.parent.mkdir(parents=True, exist_ok=True)

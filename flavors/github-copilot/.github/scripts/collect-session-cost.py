@@ -47,6 +47,7 @@ import hashlib
 import json
 import os
 import re
+import statistics
 import sys
 import time
 from collections.abc import Callable, Iterator
@@ -112,13 +113,19 @@ REPORT_FIELD_KINDS: dict[str, str] = {
     "requests": "lower_bound",
     "unbilled_requests": "lower_bound",
     "by_model": "lower_bound",
+    "context_floor": "inferred",
     "by_session": "inferred",
 }
 REPORT_INFERRED_RULES: dict[str, str] = {
     "complete": "log-head",
     "credits_complete": "log-head",
+    "context_floor": "first-request",
     "by_session": "log-head",
 }
+# A fall of more than this share between two requests of one log reads as a
+# compaction (#479). Inferred: the log records sizes, not a compaction event.
+CONTEXT_DROP = 0.5
+MAIN_LOG = "main.jsonl"
 TOP_FIELD = re.compile(r"^  ([a-z_]+):")
 
 # The usual English rule of thumb. The vendor's tokenizer is not ours to run, so
@@ -1180,9 +1187,37 @@ def collect_store(session_dir: str, store: str, workflow_start: int | None) -> d
     return _certify(result, _coverage(state.get("started_ts"), workflow_start))
 
 
+def context_series(facts: list[dict[str, Any]], head_lost: bool = False) -> dict[str, dict[str, Any]]:
+    """Per log: input tokens per request over time, floor, median, max and inferred drops (#479).
+
+    Input is uncached + cached: what the model read, not what it cost. Only
+    agent_work requests count; a compaction call is a different conversation.
+    The floor is the first request, so a log that lost its head has none.
+    """
+    series: dict[str, dict[str, Any]] = {}
+    for fact in sorted(facts, key=lambda f: f.get("ts") or 0):
+        if fact.get("purpose") != "agent_work":
+            continue
+        entry = series.setdefault(fact["log"], {"agent": fact["agent"], "points": []})
+        entry["points"].append((fact["ts"], fact["input_uncached"] + fact["cached"], fact["model"]))
+    for log, entry in series.items():
+        points = entry["points"]
+        sizes = [size for _, size, _ in points]
+        entry["floor"] = None if head_lost and log == MAIN_LOG else sizes[0]
+        entry["median"] = int(statistics.median(sizes))
+        entry["max"] = max(sizes)
+        entry["drops"] = [
+            {"ts": cur[0], "from": prev[1], "to": cur[1]}
+            for prev, cur in zip(points, points[1:], strict=False)
+            if cur[1] < prev[1] * (1 - CONTEXT_DROP)
+        ]
+    return series
+
+
 def report(store: str) -> str:
     """The total across every session in the store, complete and lower bound kept apart."""
     sessions: list[dict[str, Any]] = []
+    floors: list[int] = []
     for path in sorted(glob.glob(os.path.join(store, "*.state.json"))):
         session = os.path.basename(path)[: -len(".state.json")]
         state = _load_state(path, session)
@@ -1191,10 +1226,15 @@ def report(store: str) -> str:
         rows = _store_rows(_store_paths(store, session)["facts"])
         totals, _ = _tally(rows, [])
         stamps = [row["ts"] for row in rows if isinstance(row.get("ts"), int)]
+        coverage = _store_coverage(state)
+        if coverage == "full":
+            main_series = context_series(rows).get(MAIN_LOG)
+            if main_series:
+                floors.append(main_series["floor"])
         sessions.append(
             {
                 "session": session,
-                "coverage": _store_coverage(state),
+                "coverage": coverage,
                 "totals": totals,
                 "first_ts": min(stamps) if stamps else None,
                 "last_ts": max(stamps) if stamps else None,
@@ -1226,6 +1266,15 @@ def report(store: str) -> str:
         f"  credits_lower_bound: {every.credits}",
         f"  requests: {every.requests}",
         f"  unbilled_requests: {every.unbilled}",
+        # What the first request of a complete session read: the system prompt
+        # and catalogue every empty turn carries (#479, #221).
+        "  context_floor: "
+        + (
+            f"{{ sessions: {len(floors)}, min: {min(floors)}, median: {int(statistics.median(floors))},"
+            f" max: {max(floors)} }}"
+            if floors
+            else "null"
+        ),
         "  by_model:",
     ]
     for model, bucket in sorted(every.by_model.items()):
