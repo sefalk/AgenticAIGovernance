@@ -35,7 +35,10 @@ import os
 import re
 import sys
 from collections import defaultdict
+from collections.abc import Iterator
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 LOG_NAME = "GitHub Copilot Chat Hooks.log"
 # What each top-level field of the JSON report is (#477; logs/README.md). Rule ids
@@ -45,6 +48,8 @@ LINE = re.compile(r"^(\d{4}-\d{2}-\d{2}) \d{2}:\d{2}:\d{2}\.\d+ \[info\] \[#(\d+
 TIMEOUT = re.compile(r"^(\d{4}-\d{2}-\d{2}) .*\[HookExecutor\] Hook command timed out after (\d+)s: (.+)$")
 SCRIPT = re.compile(r"hooks/scripts/([^/\s\"]+\.(?:ps1|sh))")
 COMMAND = re.compile(r'"command":"((?:[^"\\]|\\.)*)"')
+SESSION = re.compile(r'"session_id":\s*"([^"]+)"')
+STAMP = re.compile(r'"timestamp":\s*"([^"]+)"')
 
 NOT_RUN = re.compile(r"NOT RUN|gate skipped|gates? skipped|not measurable|pytest not found", re.IGNORECASE)
 # The loop guard skips on purpose after a block; that is not an inert gate.
@@ -119,8 +124,32 @@ def default_root() -> Path:
 def read_logs(paths: list[Path], since: str) -> dict[str, dict[str, int]]:
     """script -> outcome -> count, plus an 'events' tally per script."""
     stats: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for record in iter_runs(paths, since):
+        name = record["script"]
+        if record["type"] == "run":
+            stats[name]["runs"] += 1
+            stats[name]["event:" + record["event"]] += 1
+        else:
+            stats[name][record["outcome"]] += 1
+    return stats
+
+
+def _epoch_ms(stamp: str) -> int | None:
+    try:
+        return int(datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp() * 1000)
+    except ValueError:
+        return None
+
+
+def iter_runs(paths: list[Path], since: str = "") -> Iterator[dict[str, Any]]:
+    """Every hook run ("run") and every outcome it settled ("outcome"), in log order.
+
+    The single reader of the hook log: the report above counts these, the
+    flight report (#476) places them on a session's time axis. A run's
+    `session` and `ts` come from its Input line; a timeout line carries neither.
+    """
     for path in paths:
-        current: dict[tuple[str, str], str] = {}
+        current: dict[tuple[str, str], dict[str, Any]] = {}
         settled: set[tuple[str, str, str]] = set()
         try:
             handle = path.open(encoding="utf-8", errors="replace")
@@ -133,7 +162,14 @@ def read_logs(paths: list[Path], since: str) -> dict[str, dict[str, int]]:
                 if timed:
                     if timed.group(1) >= since:
                         name = script_of(timed.group(3)) or timed.group(3).strip()
-                        stats[name]["timeout"] += 1
+                        yield {
+                            "type": "outcome",
+                            "script": name,
+                            "event": None,
+                            "session": None,
+                            "ts": None,
+                            "outcome": "timeout",
+                        }
                     continue
                 match = LINE.match(line)
                 if not match:
@@ -146,24 +182,30 @@ def read_logs(paths: list[Path], since: str) -> dict[str, dict[str, int]]:
                 if message.startswith("Running:"):
                     name = script_of(message)
                     if name:
-                        current[key] = name
-                        stats[name]["runs"] += 1
-                        stats[name]["event:" + event] += 1
+                        current[key] = {"script": name, "event": event, "session": None, "ts": None}
+                        yield {"type": "run", **current[key]}
                     continue
-                name = current.get(key)
-                if not name:
+                run = current.get(key)
+                if not run:
                     continue
-                unit = (seq, event, name)
+                if message.startswith("Input:"):
+                    session = SESSION.search(message)
+                    stamp = STAMP.search(message)
+                    run["session"] = session.group(1) if session else None
+                    run["ts"] = _epoch_ms(stamp.group(1)) if stamp else None
+                    continue
+                unit = (seq, event, run["script"])
+                outcome = None
                 if message.startswith("Completed (Failure)"):
-                    stats[name]["error"] += 1
-                    settled.add(unit)
+                    outcome = "error"
                 elif message.startswith("Completed") and "no output" in message:
-                    stats[name]["silent"] += 1
-                    settled.add(unit)
+                    outcome = "silent"
                 elif message.startswith("Output:") and unit not in settled:
-                    stats[name][classify(message[len("Output:") :].strip())] += 1
-                    settled.add(unit)
-    return stats
+                    outcome = classify(message[len("Output:") :].strip())
+                if outcome is None:
+                    continue
+                settled.add(unit)
+                yield {"type": "outcome", **run, "outcome": outcome}
 
 
 def declared(github_dir: Path) -> dict[str, str]:
