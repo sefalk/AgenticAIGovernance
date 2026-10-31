@@ -1275,6 +1275,24 @@ print(",".join(sorted(set(mod.PROMPT_ENTITY) | literal)))
                                      $r.Output -match '(?m)^\s*complete:\s*1\s*$')
     $results['X_report_complete_total'] = ($r.Output -match '(?m)^\s*credits_complete:\s*3(\.0+)?\s*$')
     $results['X_report_lower_bound'] = ($r.Output -match '(?m)^\s*credits_lower_bound:\s*7(\.0+)?\s*$')
+    # #477: the store report declares its kinds like the block does.
+    $reportProbe = @'
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("c", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+print(json.dumps(getattr(mod, "REPORT_FIELD_KINDS", {})))
+'@
+    $reportFile = Join-Path ([IO.Path]::GetTempPath()) ("cost-rkinds-" + [Guid]::NewGuid().ToString('N') + '.py')
+    Set-Content -LiteralPath $reportFile -Value $reportProbe -Encoding UTF8
+    $reportKinds = @()
+    try { $reportKinds = @((((& $python $reportFile $collector 2>&1) -join '') | ConvertFrom-Json).PSObject.Properties.Name | Where-Object { $_ }) } catch {}
+    Remove-Item $reportFile -Force -ErrorAction SilentlyContinue
+    $reportFields = @([regex]::Matches($r.Output, '(?m)^  ([a-z_]+):') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+    $results['X_report_every_field_declares_a_kind'] = ($reportFields.Count -ge 8 -and
+        @($reportFields | Where-Object { $reportKinds -notcontains $_ }).Count -eq 0)
+    $results['X_report_names_lower_bounds'] = ($r.Output -match
+        '(?m)^  kinds: .*lower_bound: \[credits_lower_bound, requests, unbilled_requests, by_model\]')
 
     # (j) Withheld is not zero (#457): with the totals withheld, the splits say
     # so instead of printing an empty map that reads as "cost nothing".
