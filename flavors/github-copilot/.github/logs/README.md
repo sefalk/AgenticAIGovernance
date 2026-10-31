@@ -68,6 +68,20 @@ Rule ids:
   agent frontmatter, absent from every log read. A log opened mid-session can
   miss a hook that did run.
 
+## Flight report (#476)
+
+`scripts/flight-report.py --session-dir <debug-log dir>` writes one
+self-contained HTML page, `flight-<session>.html` in this directory, with four
+panels:
+- subagent lanes on one time axis;
+- a strip of this session's hook verdicts, from `gate-health.py`'s reader;
+- cost by agent × model;
+- a log of starts, ends and non-silent verdicts.
+
+It reads the session's debug logs and the hook logs, loads nothing from the
+network, and copies no prompt or argument text. The cost panel is `measured`
+only at coverage `full`; otherwise it is a `lower_bound`.
+
 ## The `cost:` block (ADVISORY)
 
 Appended automatically by the documenter Stop hook
