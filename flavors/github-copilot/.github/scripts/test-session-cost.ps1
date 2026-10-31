@@ -730,6 +730,39 @@ print(json.dumps({"kinds": getattr(mod, "FIELD_KINDS", {}), "rules": getattr(mod
     $results['Z_rule_ids_documented'] = ($ruleNames.Count -ge 1 -and $undocumented.Count -eq 0 -and
                                          $readmeKinds -match '(?m)^## Measured, inferred, lower bound')
 
+    # --- Y: context per log, floor and inferred compactions (#479) ----------
+    # Input = uncached + cached: what the model read, not what it cost. Only
+    # agent_work requests form the series; a compaction call is another
+    # conversation. A fall of more than half between two requests is a drop.
+    $ctxProbe = @'
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("c", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+def f(log, agent, ts, size, purpose="agent_work"):
+    return {"log": log, "agent": agent, "ts": ts, "input_uncached": size - 100, "cached": 100,
+            "model": "m", "purpose": purpose}
+facts = [f("main.jsonl", "main", t, s) for t, s in [(1, 10000), (2, 12000), (3, 30000), (4, 9000), (5, 12000), (6, 7300)]]
+facts.append(f("main.jsonl", "main", 3.5, 50000, "compaction"))
+facts += [f("runSubagent-implementer-t1.jsonl", "implementer", t, s) for t, s in [(2, 5000), (3, 6000)]]
+out = {"full": mod.context_series(facts), "cut": mod.context_series(facts, head_lost=True), "ratio": mod.CONTEXT_DROP}
+print(json.dumps(out))
+'@
+    $ctxFile = Join-Path ([IO.Path]::GetTempPath()) ("cost-ctx-" + [Guid]::NewGuid().ToString('N') + '.py')
+    Set-Content -LiteralPath $ctxFile -Value $ctxProbe -Encoding UTF8
+    $ctx = $null
+    try { $ctx = ((& $python $ctxFile $collector 2>&1) -join '') | ConvertFrom-Json } catch {}
+    Remove-Item $ctxFile -Force -ErrorAction SilentlyContinue
+    $m = if ($ctx) { $ctx.full.'main.jsonl' } else { $null }
+    $i = if ($ctx) { $ctx.full.'runSubagent-implementer-t1.jsonl' } else { $null }
+    $results['Y_series_per_log_without_compaction'] = ($m -and @($m.points).Count -eq 6 -and $m.agent -eq 'main' -and $i -and @($i.points).Count -eq 2)
+    $results['Y_floor_median_max'] = ($m -and $m.floor -eq 10000 -and $m.median -eq 11000 -and $m.max -eq 30000 -and $i.floor -eq 5000)
+    # 30000 -> 9000 is a 70 % fall; 12000 -> 7300 (39 %) is not.
+    $results['Y_drop_over_half_is_inferred_compaction'] = ($m -and $ctx.ratio -eq 0.5 -and @($m.drops).Count -eq 1 -and
+        $m.drops[0].ts -eq 4 -and $m.drops[0].from -eq 30000 -and $m.drops[0].to -eq 9000)
+    # A log that lost its head has no first request to call a floor.
+    $results['Y_lost_head_has_no_floor'] = ($ctx -and $null -eq $ctx.cut.'main.jsonl'.floor -and $ctx.cut.'runSubagent-implementer-t1.jsonl'.floor -eq 5000)
+
     # --- K: usage error is the only non-zero exit ---------------------------
     $r = Invoke-Collector @()
     $results['K_missing_arg_exit_two'] = ($r.Code -eq 2 -and $r.Output -match 'usage')
@@ -1293,6 +1326,11 @@ print(json.dumps(getattr(mod, "REPORT_FIELD_KINDS", {})))
         @($reportFields | Where-Object { $reportKinds -notcontains $_ }).Count -eq 0)
     $results['X_report_names_lower_bounds'] = ($r.Output -match
         '(?m)^  kinds: .*lower_bound: \[credits_lower_bound, requests, unbilled_requests, by_model\]')
+    # #479: the floor (first request of a complete session) is a direct measure
+    # of what an empty turn reads; only `full` sessions vouch for their first request.
+    $results['X_report_context_floor'] = ($r.Output -match
+        '(?m)^  context_floor: \{ sessions: 1, min: 1000, median: 1000, max: 1000 \}\s*$' -and
+        $r.Output -match '(?m)^  kinds: .*context_floor: first-request')
 
     # (j) Withheld is not zero (#457): with the totals withheld, the splits say
     # so instead of printing an empty map that reads as "cost nothing".
