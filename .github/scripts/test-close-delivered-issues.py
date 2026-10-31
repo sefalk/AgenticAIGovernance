@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / ".github" / "scripts" / "close-delivered-issues.ps1"
+WORKFLOW = REPO / ".github" / "workflows" / "close-delivered-issues.yml"
 SINCE = "2026-10-07T00:00:00Z"
 AFTER = "2026-10-07T09:00:00Z"
 BEFORE = "2026-10-06T09:00:00Z"
@@ -134,12 +136,33 @@ def stub(pulls: list[dict], issues: dict[int, dict], log: Path, fail_writes: boo
     )
 
 
+def runs_are_serialised(text: str) -> bool:
+    """Two runs started together both saw #471 open and both noted it; one failed (#484).
+
+    A top-level concurrency group queues them, so the second reads the issue closed.
+    Cancelling instead could stop a run between its note and its close.
+    """
+    block = re.search(r"(?m)^concurrency:[ \t]*\n((?:[ \t]+.*\n?)+)", text)
+    if not block:
+        return False
+    body = block.group(1)
+    return bool(re.search(r"(?m)^[ \t]+group:[ \t]*\S", body)) and bool(
+        re.search(r"(?m)^[ \t]+cancel-in-progress:[ \t]*false[ \t]*$", body)
+    )
+
+
 def main() -> int:
     if not SCRIPT.is_file():
         print(f"FAIL: {SCRIPT.relative_to(REPO)} does not exist.")
         return 1
 
     failures = 0
+    total = len(CASES) + 1
+    serialised = runs_are_serialised(WORKFLOW.read_text(encoding="utf-8"))
+    failures += 0 if serialised else 1
+    print(f"[{'PASS' if serialised else 'FAIL'}] the_workflow_queues_concurrent_runs_instead_of_racing")
+    if not serialised:
+        print("        want a top-level concurrency: block with a group and cancel-in-progress: false")
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         for name, pulls, issues, extra, fail_writes, want_exit, want_closed, want_text in CASES:
@@ -183,7 +206,7 @@ def main() -> int:
                         print(f"        | {line.rstrip()}")
 
     print()
-    print(f"=== {len(CASES) - failures}/{len(CASES)} passed ===")
+    print(f"=== {total - failures}/{total} passed ===")
     return 1 if failures else 0
 
 
