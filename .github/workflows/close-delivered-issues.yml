@@ -28,6 +28,13 @@ permissions:
   issues: write
   pull-requests: read
 
+# Two pull requests opened together started two sweeps that both noted #471 and
+# one failed (#484). Queued, the second run reads the issue closed and skips it;
+# cancelling could stop a run between its note and its close.
+concurrency:
+  group: close-delivered-issues
+  cancel-in-progress: false
+
 jobs:
   close:
     # A fork's pull request gets a read-only token; skip it rather than fail.
