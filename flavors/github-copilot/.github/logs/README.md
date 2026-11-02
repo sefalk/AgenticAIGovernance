@@ -60,6 +60,10 @@ Rule ids:
   requests (#451), not specified by the vendor.
 - `chars-per-token`: `by_entity`. Token footprints are characters / 4,
   request-weighted; the vendor tokenizer is not ours to run.
+- `first-request`: `context_floor` (`--report`) and the context floor in the
+  flight report. The input tokens of a log's first agent request, read as what
+  every turn carries before any work: system prompt, catalogue, first message.
+  A log that lost its head has no floor.
 - `not-run-half`: gate health `not-run`. At least half of at least `--min-runs`
   runs reported NOT RUN, skipped or not measurable.
 - `quiet-gate`: gate health `never-decided`. A gate able to block, deny or ask
@@ -71,9 +75,12 @@ Rule ids:
 ## Flight report (#476)
 
 `scripts/flight-report.py --session-dir <debug-log dir>` writes one
-self-contained HTML page, `flight-<session>.html` in this directory, with four
+self-contained HTML page, `flight-<session>.html` in this directory, with five
 panels:
 - subagent lanes on one time axis;
+- the context per request of each lane (input tokens, uncached + cached; not
+  cost), with floor, median and max, and drops of more than half marked as
+  inferred compactions (#479);
 - a strip of this session's hook verdicts, from `gate-health.py`'s reader;
 - cost by agent × model;
 - a log of starts, ends and non-silent verdicts.
@@ -383,7 +390,9 @@ the session gives a chance to:
   `credits_lower_bound` sums every row held, including sessions with a gap or a
   lost head. The two are never merged into one number. Its `kinds:` line marks
   `requests`, `unbilled_requests` and `by_model` as lower bounds too: they sum
-  the same rows.
+  the same rows. `context_floor` gives min, median and max of the first request's
+  input tokens over the complete sessions (#479): what an empty turn reads, the
+  direct measure #221 estimated.
 
 Regression tests: `scripts/test-session-cost.ps1`.
 

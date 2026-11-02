@@ -124,7 +124,12 @@ try {
     Add-Result 'O1_the_page_loads_nothing_from_the_network' `
         ($html.Length -gt 0 -and $html -notmatch '(?i)<script[^>]+src=|<link[^>]+href=|@import|url\(\s*["'']?https?:|src=["'']https?:') 'external reference found'
     $panels = @([regex]::Matches($html, '<section class="panel" data-panel="([a-z]+)" data-kind="(measured|inferred|lower_bound)"') | ForEach-Object { $_.Groups[1].Value })
-    Add-Result 'K1_every_panel_declares_its_kind' ((($panels | Sort-Object) -join ',') -eq 'cost,gates,lanes,log') "panels=$($panels -join ',')"
+    Add-Result 'K1_every_panel_declares_its_kind' ((($panels | Sort-Object) -join ',') -eq 'context,cost,gates,lanes,log') "panels=$($panels -join ',')"
+
+    # #479: one context series per lane; the fixture's requests all read 1000 tokens.
+    $ctx = @([regex]::Matches($html, '<polyline class="ctx" data-lane="([^"]+)" data-floor="([0-9a-z]+)" data-median="(\d+)" data-max="(\d+)" data-drops="(\d+)"') |
+        ForEach-Object { "$($_.Groups[1].Value)|$($_.Groups[2].Value)|$($_.Groups[4].Value)|$($_.Groups[5].Value)" })
+    Add-Result 'X1_context_series_per_lane' (($ctx -contains 'main|1000|1000|0') -and ($ctx -contains 'implementer|1000|1000|0') -and $ctx.Count -eq 3) "ctx=$($ctx -join '; ')"
 
     # A truncated session: the cost panel is a lower bound, never a total.
     $truncDir = Join-Path $fixtureDir 'aaaaaaaa-0000-4000-8000-000000000476'
@@ -136,6 +141,7 @@ try {
     $ErrorActionPreference = 'Stop'
     $thtml = if (Test-Path $tout) { [IO.File]::ReadAllText($tout) } else { '' }
     Add-Result 'C3_a_truncated_session_is_a_lower_bound' ($thtml -match 'data-panel="cost" data-kind="lower_bound"' -and $thtml -match 'data-coverage="truncated"') 'truncated cost panel'
+    Add-Result 'X2_a_truncated_main_log_has_no_floor' ($thtml -match '<polyline class="ctx" data-lane="main" data-floor="missing"') 'truncated context floor'
 
     $ErrorActionPreference = 'Continue'
     & $python $subject --session-dir (Join-Path $fixtureDir 'absent') --log $hookLog --out (Join-Path $fixtureDir 'x.html') 2>&1 | Out-Null
