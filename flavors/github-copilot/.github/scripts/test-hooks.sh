@@ -612,6 +612,32 @@ else
     assert_true "cost-snapshot.sh ships" 0 "hooks/scripts/cost-snapshot.sh is missing"
 fi
 
+# turn-receipt lifts this turn's NOT RUN gates to the top level (#478); the
+# decision table lives in test-turn-receipt.ps1, this proves the bash wrapper.
+echo "## turn-receipt.sh"
+if [ -f "$HOOK_DIR/turn-receipt.sh" ]; then
+    tr_dir=$(mktemp -d) || { echo "FATAL  no fixture directory" >&2; exit 1; }
+    tr_sid=1c0ffee0-0000-4000-8000-000000000478
+    tr_chat="$tr_dir/ws/GitHub.copilot-chat"
+    mkdir -p "$tr_chat/debug-logs/$tr_sid" "$tr_dir/repo/.github/hooks/scripts" "$tr_dir/repo/.github/scripts"
+    printf '%s\n' \
+        '{"ts":1785760264230,"type":"hook","name":"SubagentStop","status":"ok","attrs":{"command":"bash .github/hooks/scripts/implementer-stop.sh","output":"{\"systemMessage\":\"implementer:Stop -- Green gate NOT RUN (no pytest)\"}"}}' \
+        > "$tr_chat/debug-logs/$tr_sid/runSubagent-implementer-toolu_X.jsonl"
+    cp "$HOOK_DIR/turn-receipt.sh" "$HOOK_DIR/turn-receipt.py" "$HOOK_DIR/_common.sh" "$tr_dir/repo/.github/hooks/scripts/"
+    cp "$GITHUB_DIR/scripts/gate-health.py" "$tr_dir/repo/.github/scripts/"
+    tr_chat_native=$(if command -v cygpath >/dev/null 2>&1; then cygpath -m "$tr_chat"; else printf '%s' "$tr_chat"; fi)
+    tr_run() {
+        ( cd "$tr_dir/repo" && printf '%s' "$1" | bash .github/hooks/scripts/turn-receipt.sh )
+    }
+    tr_out=$(tr_run '{"hook_event_name":"Stop","session_id":"'"$tr_sid"'","timestamp":"2026-08-03T12:00:00.000Z","transcript_path":"'"$tr_chat_native/transcripts/$tr_sid.jsonl"'"}')
+    assert_contains "turn-receipt lifts a subagent's NOT RUN gate to the top level" "$tr_out" 'implementer-stop NOT RUN' "got: $tr_out"
+    tr_out=$(tr_run '{"hook_event_name":"Stop"}')
+    assert_true "turn-receipt without session information stays silent" "$([ "$tr_out" = '{}' ] && echo 1 || echo 0)" "got: $tr_out"
+    rm -rf "$tr_dir"
+else
+    assert_true "turn-receipt.sh ships" 0 "hooks/scripts/turn-receipt.sh is missing"
+fi
+
 # subagent-baseline records what was dirty when a producer started (issue #101).
 # The core's cases live in test-hooks.ps1; this one proves the bash wrapper
 # hands the payload and both roots through.

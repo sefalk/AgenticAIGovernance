@@ -191,6 +191,22 @@
       ".github/scripts/collect-session-cost.py",
       ".github/instructions/**"
     ],
+    "test-gate-health.ps1": [
+      ".github/scripts/gate-health.py"
+    ],
+    "test-flight-report.ps1": [
+      ".github/scripts/flight-report.py",
+      ".github/scripts/gate-health.py",
+      ".github/scripts/collect-session-cost.py",
+      ".github/hooks/scripts/_agentlog.py"
+    ],
+    "test-turn-receipt.ps1": [
+      ".github/hooks/scripts/turn-receipt.py",
+      ".github/hooks/scripts/turn-receipt.ps1",
+      ".github/hooks/scripts/turn-receipt.sh",
+      ".github/hooks/agent-hooks.json",
+      ".github/scripts/gate-health.py"
+    ],
     "test-suite-budgets.ps1": [
       ".github/scripts/suite-budgets.json"
     ],
