@@ -42,6 +42,12 @@
         "command": "bash .github/hooks/scripts/cost-snapshot.sh",
         "windows": "powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\cost-snapshot.ps1",
         "timeout": 15
+      },
+      {
+        "type": "command",
+        "command": "bash .github/hooks/scripts/turn-receipt.sh",
+        "windows": "powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\turn-receipt.ps1",
+        "timeout": 15
       }
     ],
     "SubagentStart": [
