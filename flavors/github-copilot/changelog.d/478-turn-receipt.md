@@ -12,6 +12,18 @@
     under the answer, for example
     `turn findings (#478): implementer-stop NOT RUN; block-dangerous deny x2`.
   - A clean turn prints nothing, so the warning badge keeps its meaning.
-  - Verdicts come from the hook log through `gate-health.iter_runs`, filtered
-    to this session and to the time since its previous `Stop`.
-  - Measured on a real 3.9 MB hook log: 1.5 s, inside the 15 s timeout.
+  - Verdicts come from the `hook` spans in the session's own debug logs
+    (`main.jsonl` and each subagent log), from the time since the session's
+    previous `Stop`. VS Code's `Hooks.log` is not used: on 2026-11-03 it had
+    gone 23 hours without a write while hooks kept firing (#492).
+  - Measured on a live session (123 MB `main.jsonl`): 2.4 s, inside the 15 s
+    timeout. Live probe in an AF window: a turn with a denied command showed
+    `turn findings (#478): block-dangerous deny`; the next, clean turn showed
+    nothing.
+
+### Fixed
+
+- `suite-scope.json` now maps `test-gate-health.ps1`, `test-flight-report.ps1`
+  and `test-turn-receipt.ps1`. Before, `test-suite-scope` (S2) and
+  `test-suite-portability` failed on `dev`, which PR-scoped sweeps did not
+  select.
