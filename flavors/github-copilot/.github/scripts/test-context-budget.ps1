@@ -820,6 +820,20 @@ try {
     [IO.File]::WriteAllText((Join-Path $gh 'skills/alpha/REFERENCE.md'), ('z' * 60000))
     $results['YY_skill_reference_file_not_charged'] = ((Invoke-Guard (New-StagedRepo $gh)).Code -eq 0)
 
+    # #495: the guard must measure with the default-skill list (#471). It
+    #       exported only SKILL.md files, so an activated optional skill was
+    #       charged to AF again and MP's 1.28.2 payload commit was blocked at
+    #       3,584 > 3,400 while the checker said 3,320.
+    $osGuardConf = $catGuardConf + "AF_PROJECT_CATALOGUE_BUDGET_TOKENS=5000`n"
+    $gh = New-Fixture -RootTokens 100 -Conf $osGuardConf -DefaultSkills @('alpha') `
+        -Hashes @('copilot-instructions.md', 'agents/stub.agent.md', 'instructions/ok.instructions.md', 'skills/alpha/SKILL.md', 'skills/optional/SKILL.md') `
+        -Skills @{ 'alpha' = @{ Description = 'does alpha things' }; 'optional' = @{ Description = ('y' * 4000) } } `
+        -Instructions @{ 'ok.instructions.md' = @{ Tokens = 100; ApplyTo = '**' } }
+    $fixtures += $gh
+    $r = Invoke-Guard (New-StagedRepo $gh)
+    $results['OS_staged_guard_reads_the_default_skill_list'] = ($r.Code -eq 0)
+    if ($r.Code -ne 0) { Write-Host "  (guard: $($r.Output.Trim()))" }
+
     # --- The guard's own blind spot (issue #125) --------------------------
     # The guard measures the index, so a project that gitignores .github/ can
     # never stage a budget input and the guard can never fire. It emitted
@@ -934,7 +948,7 @@ Write-Host "  Checks skipped: $($skipped.Count)"
 # silently stops matching, as one nearly did in #209 -- shows up as a shortfall
 # instead of as a smaller green number nobody compares. Raise it deliberately
 # when adding a check.
-$EXPECTED_CHECK_TOTAL = 103
+$EXPECTED_CHECK_TOTAL = 104
 $actualTotal = $results.Count + $skipped.Count
 if ($actualTotal -ne $EXPECTED_CHECK_TOTAL) {
     Write-Host "  FAIL: check inventory is $actualTotal, expected $EXPECTED_CHECK_TOTAL -- a check was added without raising the total, or one stopped running without announcing a skip"
