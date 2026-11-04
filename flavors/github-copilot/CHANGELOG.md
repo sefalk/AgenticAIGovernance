@@ -14,6 +14,102 @@ still fails the build for a repeated `###` kind inside one section (#322).
 
 ## [Unreleased]
 
+## [1.28.2] -- 2026-11-04
+
+### Added
+
+- **`gate-health.py`: what every hook actually decided, per gate (#475).** It
+  reads VS Code's `GitHub Copilot Chat Hooks.log` (all windows, or `--log`, from
+  `--since`) and counts each hook script's outcomes. Outcomes are allow / ask /
+  deny / block, pass, warn, advisory, silent, NOT RUN (including the `skipped`
+  and `not measurable` wordings), loop-guard skip, error and timeout. It then
+  lists inferred findings:
+  - `not-run`: a gate that did not run in at least half its runs;
+  - `never-decided`: a gate able to block that never did;
+  - `never-ran`: declared in `agent-hooks.json` or agent frontmatter but never
+    seen; dialect twins count as one, and SessionStart is exempt.
+
+  Against the 2026-10-22..28 logs it flags `implementer-stop` (9 of 11 runs) and
+  `test-writer-stop` (8 of 8): the inert gates of #473, which a week of verdicts
+  had shown as PASS. Read-only; `--json` for other tools (the flight report,
+  #476).
+
+- **`flight-report.py`: one offline HTML page per chat session (#476).** It
+  joins the session's debug logs, the hook log and the cost collector on one
+  time axis. The page has four panels:
+  - subagent lanes: span, requests and edited files per log;
+  - a gate strip: one cell per hook verdict that names this session;
+  - cost by agent × model, with its coverage;
+  - a log of starts, ends, denies, blocks and NOT RUN verdicts.
+
+  Every panel declares its kind (#477). At any coverage other than `full` the
+  cost panel is a `lower_bound`. The page loads nothing from the network and
+  copies no prompt, argument or tool text. It is run by hand:
+  `flight-report.py --session-dir <dir>` writes
+  `.github/logs/flight-<session>.html`. On a real session (96 MB `main.jsonl`,
+  832 verdicts) the page took 2.1 s.
+- `gate-health.py` now reads the hook log through `iter_runs()`, which yields
+  every run and outcome with its `session` and timestamp from the Input line.
+  The counts report and the flight report share this one reader.
+
+- **Every field of an AF report says whether it is measured or inferred
+  (#477).** The convention is written once in `logs/README.md` ("Measured,
+  inferred, lower bound"), and the metrics skill points to it. There are four
+  kinds: `measured`, `inferred` (with a named rule id), `lower_bound`, and
+  `meta`. A field built on an inferred verdict is inferred.
+  - `collect-session-cost.py` declares `FIELD_KINDS` for the `cost:` block and
+    `REPORT_FIELD_KINDS` for `--report`. Both outputs carry a `kinds:` line that
+    names their inferred fields with rule ids and their lower bounds. The block
+    is now schema 9.
+  - `gate-health.py --json` replaces `basis` with a `kinds` map over every
+    top-level field. Each finding names its rule: `not-run-half`, `quiet-gate`
+    or `declared-unseen`.
+  - `test-session-cost.ps1` and `test-gate-health.ps1` fail on an emitted field
+    without a kind, and on a rule id the README does not define.
+
+- **Turn receipt: a global `Stop` hook lifts this turn's actionable gate
+  verdicts to the top level (#478).** A probe on 2026-11-02 showed that every
+  hook `systemMessage` renders, but only as a collapsed "Warning from Stop
+  hook". A subagent's verdict also sits inside the coordinator's collapsed
+  thinking and then inside the subagent block, two levels deep. That is how
+  "Green gate NOT RUN" stayed unseen for a week (#473).
+  - `turn-receipt.ps1`/`.sh` with the core `turn-receipt.py` run after
+    `stop-tests` and `cost-snapshot`.
+  - They name this turn's NOT RUN, block, deny and error verdicts in one line
+    under the answer, for example
+    `turn findings (#478): implementer-stop NOT RUN; block-dangerous deny x2`.
+  - A clean turn prints nothing, so the warning badge keeps its meaning.
+  - Verdicts come from the `hook` spans in the session's own debug logs
+    (`main.jsonl` and each subagent log), from the time since the session's
+    previous `Stop`. VS Code's `Hooks.log` is not used: on 2026-11-03 it had
+    gone 23 hours without a write while hooks kept firing (#492).
+  - Measured on a live session (123 MB `main.jsonl`): 2.4 s, inside the 15 s
+    timeout. Live probe in an AF window: a turn with a denied command showed
+    `turn findings (#478): block-dangerous deny`; the next, clean turn showed
+    nothing.
+
+- **Context trace per agent (#479).** `collect-session-cost.py` gains
+  `context_series()`. Per log (main and each subagent) it collects the input
+  tokens of each agent request (uncached + cached: what the model read, not
+  what it cost), with floor, median and max. A fall of more than half between
+  two requests is marked as an inferred compaction (`CONTEXT_DROP` 0.5). A log
+  that lost its head has no floor.
+  - `--report` adds `context_floor`: min, median and max of the first request
+    over the complete sessions, kind `inferred` with rule `first-request`. On
+    MP's store (2 complete sessions) it reads 45,556 to 47,306 tokens: what an
+    empty turn reads, measured where #221 had an estimate.
+  - The flight report (#476) gets a fifth panel, "Context per request", with one
+    line per lane and the drops marked. On this AF session the main log peaked
+    at 691,139 input tokens with one inferred drop; the test-writer log ran from
+    39,395 to 84,727.
+
+### Fixed
+
+- `suite-scope.json` now maps `test-gate-health.ps1`, `test-flight-report.ps1`
+  and `test-turn-receipt.ps1`. Before, `test-suite-scope` (S2) and
+  `test-suite-portability` failed on `dev`, which PR-scoped sweeps did not
+  select.
+
 ## [1.28.1] -- 2026-10-29
 
 ### Fixed
