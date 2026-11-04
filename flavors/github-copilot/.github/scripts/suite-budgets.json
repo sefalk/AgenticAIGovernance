@@ -14,6 +14,8 @@
     "test-body-shrink-guard.ps1": 240,
     "test-foreign-guard.ps1": 360,
     "test-field-shrink-guard.ps1": 240,
+    "test-flight-report.ps1": 30,
+    "test-gate-health.ps1": 30,
     "test-hook-decision-contract.ps1": 30,
     "test-hook-declarations.ps1": 30,
     "test-hook-log-attribution.ps1": 30,
@@ -36,6 +38,7 @@
     "test-suite-budgets.ps1": 30,
     "test-suite-portability.ps1": 100,
     "test-suite-scope.ps1": 30,
+    "test-turn-receipt.ps1": 30,
     "test-work-item-owner.ps1": 90,
     "test-workflow-log-schema.ps1": 60,
     "test-worktree-scripts.ps1": 60
