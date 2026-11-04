@@ -257,6 +257,8 @@ def _export_index(root: str, dest: Path) -> bool:
         # commit that touches one, to measure a few hundred characters of
         # frontmatter.
         f":(glob){root}/skills/*/SKILL.md",
+        # Which active skills are AF's defaults; without it an activated optional skill is charged to AF (#495).
+        f":(literal){root}/skills/default-skills.txt",
     ]
     names = _git_bytes(["-c", "core.quotePath=false", "ls-files", "-z", "--", *pathspecs])
     if not names.strip(b"\0"):
