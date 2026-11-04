@@ -10,8 +10,8 @@ A clean turn prints nothing, so the warning badge keeps its meaning.
 
 Source: the `hook` spans of the session's own debug logs -- main.jsonl and each
 subagent log -- which carry the command and its output. Not VS Code's
-Hooks.log: measured 2026-11-03, it had not been written for 23 hours while
-hooks kept firing, and it mixes every session of a window. The turn is
+Hooks.log: it is per window, mixes every session, and has to be located by
+launch folder (the newest one can be empty; #492). The turn is
 everything after the session's previous Stop. ``AF_SESSION_DIR`` points the
 hook at a fixture session. Advisory: any failure prints ``{}``.
 """
