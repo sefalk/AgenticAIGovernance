@@ -9,8 +9,8 @@
 #
 # Source: the hook spans of the session's own debug logs (main.jsonl and each
 # subagent log), which carry command, input and output. VS Code's Hooks.log is
-# not used: measured 2026-11-03, it had not been written for 23 hours while
-# hooks kept firing, and it mixes every session of a window.
+# not used: it is per window, mixes every session, and has to be located by
+# launch folder -- the newest one can be empty (#492).
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
