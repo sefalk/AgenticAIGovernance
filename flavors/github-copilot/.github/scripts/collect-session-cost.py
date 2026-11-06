@@ -47,6 +47,7 @@ import hashlib
 import json
 import os
 import re
+import statistics
 import sys
 import time
 from collections.abc import Callable, Iterator
@@ -54,8 +55,9 @@ from typing import Any
 
 # v8: `surviving` and `gaps` when the total is withheld, coverage `gapped`, and
 # `by_model`/`by_purpose` render `null` rather than `{}` when withheld (#457).
-SCHEMA_VERSION = 8
-COLLECTOR_VERSION = 8
+# v9: `kinds` names the inferred and lower-bound fields the block emitted (#477).
+SCHEMA_VERSION = 9
+COLLECTOR_VERSION = 9
 # v2: the file accumulates instead of being replaced, so it carries one header
 # per session and every row names the session it came from.
 # v3: every row names the price tier it was priced at (#451).
@@ -63,6 +65,68 @@ FACTS_SCHEMA_VERSION = 3
 ENTITY_SCHEMA_VERSION = 2
 
 NANO_AIU_PER_CREDIT = 1_000_000_000
+
+# What each top-level field of the `cost:` block is (#477; logs/README.md). A
+# field missing here fails test-session-cost, so no estimate can ship as a fact.
+FIELD_KINDS: dict[str, str] = {
+    "schema_version": "meta",
+    "collector": "meta",
+    "kinds": "meta",
+    "available": "meta",
+    "reason": "meta",
+    "coverage": "inferred",
+    "earliest_ts": "measured",
+    "gaps": "measured",
+    "surviving": "lower_bound",
+    "sessions": "meta",
+    "requests": "measured",
+    "unbilled_requests": "measured",
+    "no_usage_requests": "measured",
+    "drift": "measured",
+    "tokens": "measured",
+    "credits": "measured",
+    "rate_card": "meta",
+    "credits_by_kind": "inferred",
+    "by_model": "measured",
+    "by_purpose": "measured",
+    "by_agent": "measured",
+    "by_entity": "inferred",
+    "facts": "meta",
+    "environment": "meta",
+}
+# Rule ids, each defined in logs/README.md under "Measured, inferred, lower bound".
+INFERRED_RULES: dict[str, str] = {
+    "coverage": "log-head",
+    "credits_by_kind": "price-tier-fit",
+    "by_entity": "chars-per-token",
+}
+# The `cost_report:` of `--report`. What is complete rests on each session's
+# coverage verdict, so it is inferred; sums over every row are lower bounds.
+REPORT_FIELD_KINDS: dict[str, str] = {
+    "schema_version": "meta",
+    "collector": "meta",
+    "kinds": "meta",
+    "sessions": "measured",
+    "complete": "inferred",
+    "credits_complete": "inferred",
+    "credits_lower_bound": "lower_bound",
+    "requests": "lower_bound",
+    "unbilled_requests": "lower_bound",
+    "by_model": "lower_bound",
+    "context_floor": "inferred",
+    "by_session": "inferred",
+}
+REPORT_INFERRED_RULES: dict[str, str] = {
+    "complete": "log-head",
+    "credits_complete": "log-head",
+    "context_floor": "first-request",
+    "by_session": "log-head",
+}
+# A fall of more than this share between two requests of one log reads as a
+# compaction (#479). Inferred: the log records sizes, not a compaction event.
+CONTEXT_DROP = 0.5
+MAIN_LOG = "main.jsonl"
+TOP_FIELD = re.compile(r"^  ([a-z_]+):")
 
 # The usual English rule of thumb. The vendor's tokenizer is not ours to run, so
 # every count derived from it is named `_est` and never crossed with a price.
@@ -1123,9 +1187,37 @@ def collect_store(session_dir: str, store: str, workflow_start: int | None) -> d
     return _certify(result, _coverage(state.get("started_ts"), workflow_start))
 
 
+def context_series(facts: list[dict[str, Any]], head_lost: bool = False) -> dict[str, dict[str, Any]]:
+    """Per log: input tokens per request over time, floor, median, max and inferred drops (#479).
+
+    Input is uncached + cached: what the model read, not what it cost. Only
+    agent_work requests count; a compaction call is a different conversation.
+    The floor is the first request, so a log that lost its head has none.
+    """
+    series: dict[str, dict[str, Any]] = {}
+    for fact in sorted(facts, key=lambda f: f.get("ts") or 0):
+        if fact.get("purpose") != "agent_work":
+            continue
+        entry = series.setdefault(fact["log"], {"agent": fact["agent"], "points": []})
+        entry["points"].append((fact["ts"], fact["input_uncached"] + fact["cached"], fact["model"]))
+    for log, entry in series.items():
+        points = entry["points"]
+        sizes = [size for _, size, _ in points]
+        entry["floor"] = None if head_lost and log == MAIN_LOG else sizes[0]
+        entry["median"] = int(statistics.median(sizes))
+        entry["max"] = max(sizes)
+        entry["drops"] = [
+            {"ts": cur[0], "from": prev[1], "to": cur[1]}
+            for prev, cur in zip(points, points[1:], strict=False)
+            if cur[1] < prev[1] * (1 - CONTEXT_DROP)
+        ]
+    return series
+
+
 def report(store: str) -> str:
     """The total across every session in the store, complete and lower bound kept apart."""
     sessions: list[dict[str, Any]] = []
+    floors: list[int] = []
     for path in sorted(glob.glob(os.path.join(store, "*.state.json"))):
         session = os.path.basename(path)[: -len(".state.json")]
         state = _load_state(path, session)
@@ -1134,10 +1226,15 @@ def report(store: str) -> str:
         rows = _store_rows(_store_paths(store, session)["facts"])
         totals, _ = _tally(rows, [])
         stamps = [row["ts"] for row in rows if isinstance(row.get("ts"), int)]
+        coverage = _store_coverage(state)
+        if coverage == "full":
+            main_series = context_series(rows).get(MAIN_LOG)
+            if main_series:
+                floors.append(main_series["floor"])
         sessions.append(
             {
                 "session": session,
-                "coverage": _store_coverage(state),
+                "coverage": coverage,
                 "totals": totals,
                 "first_ts": min(stamps) if stamps else None,
                 "last_ts": max(stamps) if stamps else None,
@@ -1169,6 +1266,15 @@ def report(store: str) -> str:
         f"  credits_lower_bound: {every.credits}",
         f"  requests: {every.requests}",
         f"  unbilled_requests: {every.unbilled}",
+        # What the first request of a complete session read: the system prompt
+        # and catalogue every empty turn carries (#479, #221).
+        "  context_floor: "
+        + (
+            f"{{ sessions: {len(floors)}, min: {min(floors)}, median: {int(statistics.median(floors))},"
+            f" max: {max(floors)} }}"
+            if floors
+            else "null"
+        ),
         "  by_model:",
     ]
     for model, bucket in sorted(every.by_model.items()):
@@ -1187,7 +1293,7 @@ def report(store: str) -> str:
         )
     if not sessions:
         lines[-1] = "  by_session: []"
-    return "\n".join(lines) + "\n"
+    return "\n".join(_with_kinds(lines, REPORT_FIELD_KINDS, REPORT_INFERRED_RULES)) + "\n"
 
 
 def _record_customizations(event: dict[str, Any], sink: dict[str, dict[str, Any]]) -> None:
@@ -1310,7 +1416,24 @@ def render(result: dict[str, Any], facts_path: str | None = None, entities_path:
     # Names the artifact a third party can re-aggregate, not just this summary.
     lines.append(f"  facts: {_scalar(facts_path)}")
     lines.append(f"  environment: {{ vscode: {_scalar(env['vscode'])}, copilot_chat: {_scalar(env['copilot_chat'])} }}")
-    return "\n".join(lines) + "\n"
+    return "\n".join(_with_kinds(lines)) + "\n"
+
+
+def _with_kinds(
+    lines: list[str], kinds: dict[str, str] = FIELD_KINDS, rules: dict[str, str] = INFERRED_RULES
+) -> list[str]:
+    """Name the inferred and lower-bound fields among those emitted; the rest are measured or meta (#477)."""
+    emitted = [m.group(1) for line in lines if (m := TOP_FIELD.match(line))]
+    inferred = [f"{name}: {rules[name]}" for name in emitted if kinds.get(name) == "inferred"]
+    lower = [name for name in emitted if kinds.get(name) == "lower_bound"]
+    parts = []
+    if inferred:
+        parts.append("inferred: { " + ", ".join(inferred) + " }")
+    if lower:
+        parts.append("lower_bound: [" + ", ".join(lower) + "]")
+    if not parts:
+        return lines
+    return [*lines[:3], f"  kinds: {{ {', '.join(parts)} }}", *lines[3:]]
 
 
 def _by_agent(per_agent: dict[str, Totals] | None) -> list[str]:

@@ -241,7 +241,7 @@ try {
     $results['A_session_reported'] = ($r.Output -match [regex]::Escape($SID))
     $results['A_environment']      = ($r.Output -match 'vscode:\s*"?1\.131\.0' -and
                                       $r.Output -match 'copilot_chat:\s*"?0\.59\.0')
-    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*8\s*$')
+    $results['A_schema_version']   = ($r.Output -match '(?m)^\s*schema_version:\s*9\s*$')
     $results['A_collector_named']  = ($r.Output -match 'collector:\s*"?collect-session-cost\.py@')
 
     # --- B: subagent child file is summed, per model ------------------------
@@ -667,13 +667,101 @@ try {
         'main', 'environment', 'vscode', 'copilot_chat', 'claude-opus-5',
         'claude-haiku-4.5', 'rate_card', 'credits_by_kind', 'cache_read',
         'unexplained', 'facts', 'by_purpose', 'agent_work', 'compaction',
-        'background', 'other', 'unbilled', 'by_entity', 'no_usage_requests'
+        'background', 'other', 'unbilled', 'by_entity', 'no_usage_requests',
+        'kinds', 'inferred', 'lower_bound'
     )
     $keys = [regex]::Matches($r.Output, '(?m)(?:^\s*|[{,]\s*)([A-Za-z][\w.\-]*)\s*:') |
             ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
     $unexpected = $keys | Where-Object { $allowed -notcontains $_ }
     $results['J_key_allowlist'] = ($unexpected.Count -eq 0)
     if ($unexpected.Count -gt 0) { Write-Host "  (unexpected keys: $($unexpected -join ', '))" }
+
+    # --- Z: every field says whether it is measured or inferred (#477) -------
+    # A new field must not present an estimate as a fact: each top-level field
+    # is declared in FIELD_KINDS, and the block itself names its inferred and
+    # lower-bound fields so a reader of one workflow log needs no source.
+    $kindProbe = @'
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("c", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+print(json.dumps({"kinds": getattr(mod, "FIELD_KINDS", {}), "rules": getattr(mod, "INFERRED_RULES", {})}))
+'@
+    $kindFile = Join-Path ([IO.Path]::GetTempPath()) ("cost-kinds-" + [Guid]::NewGuid().ToString('N') + '.py')
+    Set-Content -LiteralPath $kindFile -Value $kindProbe -Encoding UTF8
+    $declared = $null
+    try { $declared = ((& $python $kindFile $collector 2>&1) -join '') | ConvertFrom-Json } catch {}
+    Remove-Item $kindFile -Force -ErrorAction SilentlyContinue
+    $kindNames = @($(if ($declared -and $declared.kinds) { $declared.kinds.PSObject.Properties.Name }) | Where-Object { $_ })
+    $ruleNames = @($(if ($declared -and $declared.rules) { $declared.rules.PSObject.Properties.Name }) | Where-Object { $_ })
+    $validKinds = @('measured', 'inferred', 'lower_bound', 'meta')
+
+    $zFull = New-SessionFixture -Main @(
+        (New-SessionStart),
+        (New-LlmRequest -NanoAiu 1500000000)
+    )
+    $zTrunc = New-SessionFixture -Main @(
+        (New-LlmRequest -NanoAiu 1500000000)
+    )
+    $fixtures += $zFull, $zTrunc
+    $zOutFull  = (Invoke-Collector @('--session-dir', $zFull)).Output
+    $zOutTrunc = (Invoke-Collector @('--session-dir', $zTrunc)).Output
+    $zFields = @(foreach ($o in $zOutFull, $zOutTrunc) {
+        [regex]::Matches($o, '(?m)^  ([a-z_]+):') | ForEach-Object { $_.Groups[1].Value }
+    }) | Sort-Object -Unique
+    $undeclared = @($zFields | Where-Object { $kindNames -notcontains $_ })
+    $badKind = @($kindNames | Where-Object { $validKinds -notcontains $declared.kinds.$_ })
+    $results['Z_every_field_declares_a_kind'] = ($zFields.Count -ge 15 -and $undeclared.Count -eq 0 -and $badKind.Count -eq 0)
+    if ($undeclared.Count -gt 0) { Write-Host "  (fields without a kind: $($undeclared -join ', '))" }
+    if ($badKind.Count -gt 0) { Write-Host "  (not a kind: $($badKind -join ', '))" }
+
+    $inferred = @($kindNames | Where-Object { $declared.kinds.$_ -eq 'inferred' })
+    $ruleless = @($inferred | Where-Object { $ruleNames -notcontains $_ })
+    $results['Z_every_inferred_field_names_its_rule'] = ($inferred.Count -ge 1 -and $ruleless.Count -eq 0)
+
+    # The block carries the declaration for the fields it actually emitted.
+    $results['Z_block_names_inferred_fields'] = ($zOutFull -match '(?m)^  kinds: \{ inferred: \{ coverage: [a-z0-9-]+,')
+    $results['Z_block_names_the_lower_bound'] = ($zOutTrunc -match '(?m)^  kinds: .*lower_bound: \[surviving\]' -and
+                                                 $zOutFull -notmatch 'lower_bound')
+
+    # Each rule id is defined once, in the README section the block points to.
+    $readmeKinds = [IO.File]::ReadAllText((Join-Path $repoRootAF '.github/logs/README.md'))
+    $undocumented = @($ruleNames | Where-Object { $readmeKinds -notmatch ('`' + [regex]::Escape([string]$declared.rules.$_) + '`') })
+    $results['Z_rule_ids_documented'] = ($ruleNames.Count -ge 1 -and $undocumented.Count -eq 0 -and
+                                         $readmeKinds -match '(?m)^## Measured, inferred, lower bound')
+
+    # --- Y: context per log, floor and inferred compactions (#479) ----------
+    # Input = uncached + cached: what the model read, not what it cost. Only
+    # agent_work requests form the series; a compaction call is another
+    # conversation. A fall of more than half between two requests is a drop.
+    $ctxProbe = @'
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("c", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+def f(log, agent, ts, size, purpose="agent_work"):
+    return {"log": log, "agent": agent, "ts": ts, "input_uncached": size - 100, "cached": 100,
+            "model": "m", "purpose": purpose}
+facts = [f("main.jsonl", "main", t, s) for t, s in [(1, 10000), (2, 12000), (3, 30000), (4, 9000), (5, 12000), (6, 7300)]]
+facts.append(f("main.jsonl", "main", 3.5, 50000, "compaction"))
+facts += [f("runSubagent-implementer-t1.jsonl", "implementer", t, s) for t, s in [(2, 5000), (3, 6000)]]
+out = {"full": mod.context_series(facts), "cut": mod.context_series(facts, head_lost=True), "ratio": mod.CONTEXT_DROP}
+print(json.dumps(out))
+'@
+    $ctxFile = Join-Path ([IO.Path]::GetTempPath()) ("cost-ctx-" + [Guid]::NewGuid().ToString('N') + '.py')
+    Set-Content -LiteralPath $ctxFile -Value $ctxProbe -Encoding UTF8
+    $ctx = $null
+    try { $ctx = ((& $python $ctxFile $collector 2>&1) -join '') | ConvertFrom-Json } catch {}
+    Remove-Item $ctxFile -Force -ErrorAction SilentlyContinue
+    $m = if ($ctx) { $ctx.full.'main.jsonl' } else { $null }
+    $i = if ($ctx) { $ctx.full.'runSubagent-implementer-t1.jsonl' } else { $null }
+    $results['Y_series_per_log_without_compaction'] = ($m -and @($m.points).Count -eq 6 -and $m.agent -eq 'main' -and $i -and @($i.points).Count -eq 2)
+    $results['Y_floor_median_max'] = ($m -and $m.floor -eq 10000 -and $m.median -eq 11000 -and $m.max -eq 30000 -and $i.floor -eq 5000)
+    # 30000 -> 9000 is a 70 % fall; 12000 -> 7300 (39 %) is not.
+    $results['Y_drop_over_half_is_inferred_compaction'] = ($m -and $ctx.ratio -eq 0.5 -and @($m.drops).Count -eq 1 -and
+        $m.drops[0].ts -eq 4 -and $m.drops[0].from -eq 30000 -and $m.drops[0].to -eq 9000)
+    # A log that lost its head has no first request to call a floor.
+    $results['Y_lost_head_has_no_floor'] = ($ctx -and $null -eq $ctx.cut.'main.jsonl'.floor -and $ctx.cut.'runSubagent-implementer-t1.jsonl'.floor -eq 5000)
 
     # --- K: usage error is the only non-zero exit ---------------------------
     $r = Invoke-Collector @()
@@ -1220,6 +1308,29 @@ print(",".join(sorted(set(mod.PROMPT_ENTITY) | literal)))
                                      $r.Output -match '(?m)^\s*complete:\s*1\s*$')
     $results['X_report_complete_total'] = ($r.Output -match '(?m)^\s*credits_complete:\s*3(\.0+)?\s*$')
     $results['X_report_lower_bound'] = ($r.Output -match '(?m)^\s*credits_lower_bound:\s*7(\.0+)?\s*$')
+    # #477: the store report declares its kinds like the block does.
+    $reportProbe = @'
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("c", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+print(json.dumps(getattr(mod, "REPORT_FIELD_KINDS", {})))
+'@
+    $reportFile = Join-Path ([IO.Path]::GetTempPath()) ("cost-rkinds-" + [Guid]::NewGuid().ToString('N') + '.py')
+    Set-Content -LiteralPath $reportFile -Value $reportProbe -Encoding UTF8
+    $reportKinds = @()
+    try { $reportKinds = @((((& $python $reportFile $collector 2>&1) -join '') | ConvertFrom-Json).PSObject.Properties.Name | Where-Object { $_ }) } catch {}
+    Remove-Item $reportFile -Force -ErrorAction SilentlyContinue
+    $reportFields = @([regex]::Matches($r.Output, '(?m)^  ([a-z_]+):') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+    $results['X_report_every_field_declares_a_kind'] = ($reportFields.Count -ge 8 -and
+        @($reportFields | Where-Object { $reportKinds -notcontains $_ }).Count -eq 0)
+    $results['X_report_names_lower_bounds'] = ($r.Output -match
+        '(?m)^  kinds: .*lower_bound: \[credits_lower_bound, requests, unbilled_requests, by_model\]')
+    # #479: the floor (first request of a complete session) is a direct measure
+    # of what an empty turn reads; only `full` sessions vouch for their first request.
+    $results['X_report_context_floor'] = ($r.Output -match
+        '(?m)^  context_floor: \{ sessions: 1, min: 1000, median: 1000, max: 1000 \}\s*$' -and
+        $r.Output -match '(?m)^  kinds: .*context_floor: first-request')
 
     # (j) Withheld is not zero (#457): with the totals withheld, the splits say
     # so instead of printing an empty map that reads as "cost nothing".

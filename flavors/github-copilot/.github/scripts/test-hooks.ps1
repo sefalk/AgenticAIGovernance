@@ -4028,6 +4028,47 @@ foreach ($csEvent in @('Stop', 'SubagentStop')) {
 
 Write-Output ""
 
+# ── 6h2. The turn receipt names this turn's NOT RUN gates at the top level (#478)
+#
+# A subagent's Stop verdict renders two collapsed levels deep. The receipt
+# reads the session's debug-log hook spans and repeats the actionable ones under
+# the answer; a clean turn stays silent. Full decision table: test-turn-receipt.ps1.
+
+Write-Output "## turn-receipt.ps1"
+
+$trSid = '1c0ffee0-0000-4000-8000-000000000478'
+$trBase = Join-Path ([System.IO.Path]::GetTempPath()) "af478-$(Get-Random)"
+$trChat = Join-Path $trBase 'ws/GitHub.copilot-chat'
+$trLogDir = Join-Path $trChat "debug-logs/$trSid"
+New-Item -ItemType Directory -Path $trLogDir -Force | Out-Null
+$trSpan = '{"ts":1785760264230,"type":"hook","name":"SubagentStop","status":"ok","attrs":{"command":"powershell -File .github\\hooks\\scripts\\implementer-stop.ps1","output":"{\"systemMessage\":\"implementer:Stop -- Green gate NOT RUN (no pytest)\"}"}}'
+[IO.File]::WriteAllText((Join-Path $trLogDir 'runSubagent-implementer-toolu_X.jsonl'), "$trSpan`n")
+$trJson = @{
+    hook_event_name = 'Stop'
+    session_id      = $trSid
+    timestamp       = '2026-08-03T12:00:00.000Z'
+    transcript_path = (Join-Path $trChat "transcripts/$trSid.jsonl")
+} | ConvertTo-Json -Compress
+$trStubs = @{
+    '.github/scripts/gate-health.py'         = (Get-Content (Join-Path $githubDir 'scripts/gate-health.py') -Raw)
+    '.github/hooks/scripts/turn-receipt.py'  = (Get-Content (Join-Path $scriptDir 'turn-receipt.py') -Raw -ErrorAction SilentlyContinue)
+}
+$trShips = Test-Path (Join-Path $scriptDir 'turn-receipt.ps1')
+Assert-True "turn-receipt.ps1 ships" $trShips "hooks/scripts/turn-receipt.ps1 is missing"
+if ($trShips) {
+    try {
+        $tr = Invoke-Hook -Script 'turn-receipt.ps1' -JsonInput $trJson -Branch 'agent/fixture' -StubFiles $trStubs
+        Assert-Contains "turn-receipt lifts a subagent's NOT RUN gate to the top level" `
+            $tr.Output 'implementer-stop NOT RUN' "got: $($tr.Output) (exit $($tr.ExitCode))"
+    } finally {
+        Remove-Item $trBase -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Assert-Silent "turn-receipt without session information stays silent" `
+        "turn-receipt.ps1" '{"hook_event_name":"Stop"}'
+}
+
+Write-Output ""
+
 # ── 6m. Per-invocation baseline (issue #101, sequential case) ────────────
 #
 # Peer logs only see a producer that ran AT THE SAME TIME. The common case is

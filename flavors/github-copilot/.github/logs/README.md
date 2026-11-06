@@ -29,6 +29,66 @@ See the [documenter agent](../agents/documenter.agent.md) for the full YAML sche
   no holes. A missing log then means a workflow that was never recorded, which
   is a defect, not a cheap run.
 
+## Measured, inferred, lower bound (#477)
+
+Every field an AF report emits is one of four kinds, so an estimate never
+reads as a fact:
+
+| Kind | Meaning |
+|---|---|
+| `measured` | read from a machine-written record (billing attribute, hook log line, token count) |
+| `inferred` | derived by a stated rule; the report names the rule id below |
+| `lower_bound` | measured, but known to be incomplete: "at least", never "total" |
+| `meta` | not a figure: versions, identifiers, paths, the declaration itself |
+
+A field built on an inferred verdict is inferred, even when the numbers it sums
+are measured: `credits_complete` is exact only if each session's `coverage` is.
+
+Each report script declares the kind of every top-level field in `FIELD_KINDS`,
+and its suite fails on an emitted field without one. The `cost:` block names its
+inferred and lower-bound fields in its `kinds:` line (the rest are measured or
+meta); the gate health report (`scripts/gate-health.py --json`) carries the full
+map in `kinds` and a `rule` on every finding.
+
+Rule ids:
+
+- `log-head`: `coverage`. `full` only when `main.jsonl` opens with its
+  `session_start` (after SessionStart hook spans) and, with `--store`, no line
+  was lost past the last one read; see `coverage` below.
+- `price-tier-fit`: `credits_by_kind`. Each request is priced at the cheapest
+  tier whose `max_prompt_tokens` holds its prompt, a rule fitted on billed
+  requests (#451), not specified by the vendor.
+- `chars-per-token`: `by_entity`. Token footprints are characters / 4,
+  request-weighted; the vendor tokenizer is not ours to run.
+- `first-request`: `context_floor` (`--report`) and the context floor in the
+  flight report. The input tokens of a log's first agent request, read as what
+  every turn carries before any work: system prompt, catalogue, first message.
+  A log that lost its head has no floor.
+- `not-run-half`: gate health `not-run`. At least half of at least `--min-runs`
+  runs reported NOT RUN, skipped or not measurable.
+- `quiet-gate`: gate health `never-decided`. A gate able to block, deny or ask
+  did none of them in at least `--quiet-runs` runs. Often fine.
+- `declared-unseen`: gate health `never-ran`. Declared in `agent-hooks.json` or
+  agent frontmatter, absent from every log read. A log opened mid-session can
+  miss a hook that did run.
+
+## Flight report (#476)
+
+`scripts/flight-report.py --session-dir <debug-log dir>` writes one
+self-contained HTML page, `flight-<session>.html` in this directory, with five
+panels:
+- subagent lanes on one time axis;
+- the context per request of each lane (input tokens, uncached + cached; not
+  cost), with floor, median and max, and drops of more than half marked as
+  inferred compactions (#479);
+- a strip of this session's hook verdicts, from `gate-health.py`'s reader;
+- cost by agent × model;
+- a log of starts, ends and non-silent verdicts.
+
+It reads the session's debug logs and the hook logs, loads nothing from the
+network, and copies no prompt or argument text. The cost panel is `measured`
+only at coverage `full`; otherwise it is a `lower_bound`.
+
 ## The `cost:` block (ADVISORY)
 
 Appended automatically by the documenter Stop hook
@@ -38,8 +98,9 @@ the chat debug log of the current session:
 
 ```yaml
 cost:
-  schema_version: 8
-  collector: "collect-session-cost.py@8"
+  schema_version: 9
+  collector: "collect-session-cost.py@9"
+  kinds: { inferred: { coverage: log-head, credits_by_kind: price-tier-fit, by_entity: chars-per-token } }
   available: true
   coverage: full            # full | partial | truncated | gapped
   sessions: ["<session-id>"]
@@ -327,7 +388,11 @@ the session gives a chance to:
 
   `credits_complete` sums only sessions whose every request is in the store;
   `credits_lower_bound` sums every row held, including sessions with a gap or a
-  lost head. The two are never merged into one number.
+  lost head. The two are never merged into one number. Its `kinds:` line marks
+  `requests`, `unbilled_requests` and `by_model` as lower bounds too: they sum
+  the same rows. `context_floor` gives min, median and max of the first request's
+  input tokens over the complete sessions (#479): what an empty turn reads, the
+  direct measure #221 estimated.
 
 Regression tests: `scripts/test-session-cost.ps1`.
 

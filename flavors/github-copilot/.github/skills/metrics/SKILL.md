@@ -32,6 +32,10 @@ When you report a lint figure as gate evidence, take it from
 delta the hard gate evaluates, so a number from `lint: ruff check` answers a
 different question than the one the gate asks.
 
+Label every reported figure `measured`, `inferred` (name the rule),
+`lower_bound` or `meta`, as defined once in
+[logs/README.md](../../logs/README.md#measured-inferred-lower-bound-477).
+
 ## When to Use
 
 - Validating quality gate thresholds after implementation
