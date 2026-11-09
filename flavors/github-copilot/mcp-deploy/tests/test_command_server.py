@@ -117,6 +117,25 @@ def test_long_runs_report_progress(ws: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert any(msg and "working" in msg for _, msg in ctx.progress)
 
 
+def test_progress_names_start_time_and_walltime_bound(ws: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # #508: "hh:mm:ss - <elapsed>s/<walltime>s max: <last line>", start = script start (local time).
+    import re
+    from datetime import datetime, timedelta
+
+    monkeypatch.setattr(cs, "PROGRESS_TICK_S", 0.3)
+    _conf(ws, "AF_SCRIPT_APPROVAL=autonomous\n")
+    _script(ws, f"{AGENT_DIR}/slow.py", "import time\nprint('working', flush=True)\ntime.sleep(1.5)\n")
+    ctx = FakeCtx()
+    before = datetime.now().replace(microsecond=0)
+    assert _call(cs.run_script, str(ws), f"{AGENT_DIR}/slow.py", [], 60, ctx)["verdict"] == "PASS"
+    messages = [msg for _, msg in ctx.progress if msg]
+    assert messages
+    match = re.match(r"^(\d\d):(\d\d):(\d\d) - (\d+)s/60s max: working$", messages[-1])
+    assert match, messages[-1]
+    start = before.replace(hour=int(match[1]), minute=int(match[2]), second=int(match[3]))
+    assert timedelta(0) <= start - before <= timedelta(seconds=3)
+
+
 def test_an_explicit_walltime_is_honoured(ws: Path) -> None:
     _conf(ws, "AF_SCRIPT_APPROVAL=autonomous\n")
     _script(ws, f"{AGENT_DIR}/hang.py", "import time\ntime.sleep(30)\n")
