@@ -137,7 +137,7 @@ hook's timeout (#497). All other test execution must be scoped.
 
 | Agent | Budget | Scope | When to Skip |
 |---|---|---|---|
-| test-writer | 1–3 targeted runs | `-Filter` or `-File` on new tests, domain scope, fail-fast | Never runs all. Never adapters unless writing adapter tests. |
+| test-writer | 1–3 targeted runs | `-Filter` or `-File` on new tests, domain scope, fail-fast | Never runs all. Never adapters unless writing adapter tests. Stop hook runs only the changed test files (#507). |
 | implementer | unlimited domain, 1 adapters (if changed), 1× all | domain during dev, adapters only if adapter code changed; `tests: all` once, after the last code change | Stop hook only reads the log: it blocks without a current, passing `all` entry and never runs the suite itself (#497). |
 | refactorer | unlimited domain, 0 adapters, 1× all | domain after each step; `tests: all` once, after the last step | Stop hook only reads the log, as for the implementer. |
 | code-critic | 0–1 scoped runs | domain+coverage or adapters+coverage | Accept implementer results if test log shows < 5 min old. Never re-run what test log shows as current. |
