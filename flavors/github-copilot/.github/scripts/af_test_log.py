@@ -126,6 +126,9 @@ def pytest_configure(config: pytest.Config) -> None:
         return
     if not (Path(config.rootpath) / ".github").is_dir():
         return
+    # Collect-only exits 0 with nothing executed; filed under `all` it read as a green suite (#504).
+    if config.getoption("collectonly", default=False):
+        return
     log = _TestLog(config)
     log._write(log.entry("running", None))
     config.pluginmanager.register(log, "af_test_log_writer")

@@ -74,7 +74,7 @@ if (-not $testGateSkipped -and (Test-Path $testLogPath)) {
         $log = Get-Content $testLogPath -Raw | ConvertFrom-Json
         $allEntry = $null
         if ($log.PSObject.Properties.Name -contains 'all') { $allEntry = $log.all }
-        if ($allEntry -and $allEntry.exit_code -eq 0 -and $allEntry.last_run -and $allEntry.partial -eq $false) {
+        if ($allEntry -and $allEntry.exit_code -eq 0 -and $allEntry.total -gt 0 -and $allEntry.last_run -and $allEntry.partial -eq $false) {
             $since = if ($allEntry.started) { $allEntry.started } else { $allEntry.last_run }
             $fromLog = Test-AfRunCurrent -Since $since -CodeRoot $codeRoot -Paths @("$SRC_DIR/", 'tests/')
         }
