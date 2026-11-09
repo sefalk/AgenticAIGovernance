@@ -3248,7 +3248,7 @@ gate_case() {
             # exit code of the suite is reachable at all.
             printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/bin/pytest"
             chmod +x "$fixture/bin/pytest" ;;
-        log|stale|nolog)
+        log|stale|empty|nolog)
             mkdir -p "$fixture/.github/scripts"
             stub_path="$fixture/.github/scripts/run-tests.sh"
             printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/bin/pytest"
@@ -3283,7 +3283,7 @@ gate_case() {
         # uncommitted when the gate reads the log, so "uncommitted" alone cannot
         # mean stale. What decides is whether the edit came after the run started.
         case "$stub" in
-            log|stale)
+            log|stale|empty)
                 git add tests
                 GIT_AUTHOR_DATE='2000-01-01T00:00:00Z' GIT_COMMITTER_DATE='2000-01-01T00:00:00Z' \
                     git -c user.email=f@x -c user.name=f commit -qm seed
@@ -3298,6 +3298,11 @@ gate_case() {
             stale)
                 printf '{"all": {"exit_code": %s, "started": "2001-01-01T00:00:00Z", "last_run": "2001-01-01T00:05:00Z", "partial": false, "passed": 10, "total": 10}}\n' \
                     "$log_exit" > .github/test-log.json ;;
+            empty)
+                touch -t 200001010100 tests/test_seeded.py
+                _now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                printf '{"all": {"exit_code": %s, "started": "%s", "last_run": "%s", "partial": false, "passed": 0, "total": 0}}\n' \
+                    "$log_exit" "$_now" "$_now" > .github/test-log.json ;;
         esac
         printf '%s' '{"session_id":"s1","transcript_path":"/none"}' \
             | bash ".github/hooks/scripts/$hook"
@@ -3380,6 +3385,13 @@ gate_case "green phase: a pass logged before the last edit blocks" \
 
 gate_case "refactor phase: a pass logged before the last edit blocks" \
     refactorer-stop.sh block stale 0 ""
+
+# Exit 0 with nothing executed (collect-only) is not a green suite (#504).
+gate_case "green phase: a 0/0 full-suite result blocks" \
+    implementer-stop.sh block empty 0 ""
+
+gate_case "refactor phase: a 0/0 full-suite result blocks" \
+    refactorer-stop.sh block empty 0 ""
 
 # --- The verdict still has to reach the client (issue #202) ----------------
 #
