@@ -391,6 +391,13 @@ function Get-PathWithoutPytest {
 function Invoke-StopHook {
     param([string]$Repo, [string]$Hook, [string]$PathOverride, [string]$StdinJson = '{}')
     $hookPath = Join-Path $Repo ".github/hooks/scripts/$Hook"
+    # The test gate is not under test here. The producer runs `tests: all` last
+    # and the gate reads that result (#497), so every scenario stops after a
+    # passing run that started after its edits. Two seconds ahead keeps a
+    # commit made in the same second out of `git log --after`.
+    $started = (Get-Date).ToUniversalTime().AddSeconds(2).ToString('o')
+    '{"all": {"exit_code": 0, "started": "' + $started + '", "last_run": "' + $started + '", "partial": false, "passed": 1, "total": 1}}' |
+        Set-Content (Join-Path $Repo '.github/test-log.json')
     $savedPath = $env:PATH
     if ($PathOverride) { $env:PATH = $PathOverride }
     Push-Location $Repo

@@ -83,8 +83,8 @@ are in `skills/test-execution/SKILL.md`. These rules bind regardless:
 5. **Check `.github/test-log.json` before running.** If the scope passed
    recently and no relevant code changed, skip the run and cite the log — it
    is the source of truth for cross-agent test visibility.
-6. **Do not pre-run what a stop hook already runs.** The implementer and
-   refactorer stop hooks run the full suite and write the log.
+6. **The full suite runs once, by the producer.** Implementer and refactorer
+   run `tests: all` last; their stop hooks only read the log (#497).
 7. **`run_in_terminal` is reserved** for coordinator and code-critic. Other
    agents use `run_task`, `runTests` (file- or test-scoped), or
    `af-command/run_script` when no label expresses the invocation.

@@ -131,13 +131,15 @@ is the durable part, not the absolute numbers.
 ## Test Budget per Workflow
 
 **Cardinal Rule:** a full-suite run (`tests: all`) happens **at most ONCE** per
-workflow. All other test execution must be scoped.
+producer phase that changed code (Green, Refactor), run by that producer as its
+last step. Stop hooks never run it: a 20-minute suite cannot finish inside a
+hook's timeout (#497). All other test execution must be scoped.
 
 | Agent | Budget | Scope | When to Skip |
 |---|---|---|---|
 | test-writer | 1–3 targeted runs | `-Filter` or `-File` on new tests, domain scope, fail-fast | Never runs all. Never adapters unless writing adapter tests. |
-| implementer | unlimited domain, 1 adapters (if changed), 0× all | domain during dev, adapters only if adapter code changed | Stop hook runs all via canonical script and writes test log — do not pre-run all. |
-| refactorer | unlimited domain, 0 adapters, 0 all | domain after each step | Stop hook runs full suite — do NOT pre-run all yourself. |
+| implementer | unlimited domain, 1 adapters (if changed), 1× all | domain during dev, adapters only if adapter code changed; `tests: all` once, after the last code change | Stop hook only reads the log: it blocks without a current, passing `all` entry and never runs the suite itself (#497). |
+| refactorer | unlimited domain, 0 adapters, 1× all | domain after each step; `tests: all` once, after the last step | Stop hook only reads the log, as for the implementer. |
 | code-critic | 0–1 scoped runs | domain+coverage or adapters+coverage | Accept implementer results if test log shows < 5 min old. Never re-run what test log shows as current. |
 | test-critic | 0–2 targeted runs | `runTests` with `files`/`testNames`, only to verify a claim the test log cannot back | Read the test log first; never all, never adapters. |
 

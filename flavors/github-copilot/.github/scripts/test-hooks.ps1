@@ -4918,13 +4918,37 @@ if ($tvVenv) {
 
     # #497: the gate reads the full-suite result from the test log and never runs
     # the suite itself. The stub runner would pass; a hook that still ran it reads green.
-    $tvLog = '{"all": {"exit_code": 0, "last_run": "2026-11-09T10:00:00Z", "partial": false, "passed": 3, "total": 3}}'
+    # The edit is still uncommitted when the producer stops, so what decides is
+    # whether the run STARTED after it: a run stamped in the future is current,
+    # one stamped an hour ago predates the file the fixture writes now.
+    $tvFresh = (Get-Date).ToUniversalTime().AddMinutes(5).ToString('o')
+    $tvStale = (Get-Date).ToUniversalTime().AddHours(-1).ToString('o')
+    $tvLog = '{"all": {"exit_code": 0, "started": "' + $tvFresh + '", "last_run": "' + $tvFresh + '", "partial": false, "passed": 3, "total": 3}}'
     $r = Invoke-Hook -Script 'implementer-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/473-x' `
         -PathWithout 'pytest' -CopyIn @{ '.venv' = $tvVenv } `
         -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n"; '.github/test-log.json' = $tvLog } `
         -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
-    Assert-True "implementer accepts a current full-suite pass from the test log" `
+    Assert-True "implementer accepts a full-suite pass that started after the last uncommitted edit" `
         ($r.Output -match 'accepted from' -and $r.Output -notmatch 'NOT RUN') "got: $($r.Output)"
+
+    $tvLogStale = '{"all": {"exit_code": 0, "started": "' + $tvStale + '", "last_run": "' + $tvStale + '", "partial": false, "passed": 3, "total": 3}}'
+    foreach ($tvHook in @('implementer-stop.ps1', 'refactorer-stop.ps1')) {
+        $r = Invoke-Hook -Script $tvHook -JsonInput $STOP_JSON -Branch 'agent/497-x' `
+            -PathWithout 'pytest' -CopyIn @{ '.venv' = $tvVenv } `
+            -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n"; '.github/test-log.json' = $tvLogStale } `
+            -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
+        Assert-True "$tvHook blocks a full-suite pass that started before the last edit" `
+            ((Resolve-StopDecision $r.Output $r.ExitCode) -eq 'block' -and $r.Output -match 'tests: all') "got: $($r.Output)"
+
+        # A run still in progress has no exit code yet; it is not a failed run.
+        $tvRunning = '{"all": {"exit_code": null, "status": "running", "started": "' + $tvFresh + '", "last_run": "' + $tvFresh + '", "partial": false}}'
+        $r = Invoke-Hook -Script $tvHook -JsonInput $STOP_JSON -Branch 'agent/497-x' `
+            -PathWithout 'pytest' -CopyIn @{ '.venv' = $tvVenv } `
+            -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n"; '.github/test-log.json' = $tvRunning } `
+            -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
+        Assert-True "$tvHook reads a running entry as no result, not as a failed run" `
+            ((Resolve-StopDecision $r.Output $r.ExitCode) -eq 'block' -and $r.Output -match 'no current full-suite pass' -and $r.Output -notmatch 'violation') "got: $($r.Output)"
+    }
 
     foreach ($tvHook in @('implementer-stop.ps1', 'refactorer-stop.ps1')) {
         $r = Invoke-Hook -Script $tvHook -JsonInput $STOP_JSON -Branch 'agent/497-x' `

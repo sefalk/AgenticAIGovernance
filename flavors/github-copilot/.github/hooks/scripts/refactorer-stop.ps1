@@ -54,21 +54,19 @@ if ((Get-AfPytest -Root $codeRoot).Count -eq 0) {
 # be filed under the scope key it was narrowed from, so a handful of green
 # tests could close this gate on behalf of the whole suite (#303). Logs written
 # before that fix carry no `partial` field at all, and those are precisely the
-# entries that cannot be trusted -- so a missing field falls through to running
-# the suite, which costs one full run once and never reports a false green.
+# entries that cannot be trusted -- so a missing field falls through to the
+# block below, which asks for one fresh run and never reports a false green.
 $testLogPath = Join-Path $mainRoot '.github/test-log.json'
 $fromLog = $false
+$allEntry = $null
 if (-not $testGateSkipped -and (Test-Path $testLogPath)) {
     try {
         $log = Get-Content $testLogPath -Raw | ConvertFrom-Json
         $allEntry = $null
         if ($log.PSObject.Properties.Name -contains 'all') { $allEntry = $log.all }
         if ($allEntry -and $allEntry.exit_code -eq 0 -and $allEntry.last_run -and $allEntry.partial -eq $false) {
-            $commitsSince = git -C $codeRoot log --oneline --after="$($allEntry.last_run)" -- "$SRC_DIR/" 'tests/' 2>$null
-            $uncommitted = git -C $codeRoot diff --name-only HEAD -- "$SRC_DIR/" 'tests/' 2>$null
-            if (-not $commitsSince -and -not $uncommitted) {
-                $fromLog = $true
-            }
+            $since = if ($allEntry.started) { $allEntry.started } else { $allEntry.last_run }
+            $fromLog = Test-AfRunCurrent -Since $since -CodeRoot $codeRoot -Paths @("$SRC_DIR/", 'tests/')
         }
     } catch {}
 }
@@ -76,11 +74,14 @@ if (-not $testGateSkipped -and (Test-Path $testLogPath)) {
 if ($testGateSkipped -or $fromLog) {
     $exitCode = 0
 } else {
-    $scriptPath = Join-Path $mainRoot '.github/scripts/run-tests.ps1'
-    Push-Location $codeRoot
-    $result = & $scriptPath -Scope all 2>&1
-    $exitCode = $LASTEXITCODE
-    Pop-Location
+    # The hook never runs the suite (#497); the refactorer runs it, once, last.
+    $reason = if ($allEntry -and $null -ne $allEntry.exit_code -and $allEntry.exit_code -ne 0 -and $allEntry.partial -eq $false) {
+        "Refactor phase violation: the last full-suite run in .github/test-log.json failed (exit $($allEntry.exit_code)). All tests must remain green. Fix it, run the task 'tests: all' once more, then stop again."
+    } else {
+        "Refactor gate: no current full-suite pass in .github/test-log.json (missing, partial, or older than your last change). Run the task 'tests: all' once as your last step, then stop again. This hook never runs the suite itself (#497)."
+    }
+    @{ hookSpecificOutput = @{ hookEventName = 'Stop'; decision = 'block'; reason = $reason } } | ConvertTo-Json -Compress -Depth 3
+    exit 0
 }
 
 if ($exitCode -ne 0 -and $exitCode -ne 5) {

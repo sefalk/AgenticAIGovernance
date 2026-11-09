@@ -51,8 +51,8 @@ fi
 # be filed under the scope key it was narrowed from, so a handful of green
 # tests could close this gate on behalf of the whole suite (#303). Logs written
 # before that fix carry no `partial` field at all, and those are precisely the
-# entries that cannot be trusted -- so a missing field falls through to running
-# the suite, which costs one full run once and never reports a false green.
+# entries that cannot be trusted -- so a missing field falls through to the
+# block below, which asks for one fresh run and never reports a false green.
 TEST_LOG=".github/test-log.json"
 from_log=false
 if [[ -z "$test_gate_skipped" ]] && [[ -f "$TEST_LOG" ]]; then
@@ -63,10 +63,9 @@ if [[ -z "$test_gate_skipped" ]] && [[ -f "$TEST_LOG" ]]; then
         _partial=$(echo "$_all_block" | sed -n 's/.*"partial" *: *\(true\|false\).*/\1/p')
         if [[ "$_ec" == "0" ]] && [[ "$_partial" == "false" ]]; then
             _lr=$(echo "$_all_block" | sed -n 's/.*"last_run" *: *"\([^"]*\)".*/\1/p')
+            _st=$(echo "$_all_block" | sed -n 's/.*"started" *: *"\([^"]*\)".*/\1/p')
             if [[ -n "$_lr" ]]; then
-                commits_since=$(git log --oneline --after="$_lr" -- "${SRC_DIR}/" 'tests/' 2>/dev/null)
-                uncommitted=$(git diff --name-only HEAD -- "${SRC_DIR}/" 'tests/' 2>/dev/null)
-                if [[ -z "$commits_since" ]] && [[ -z "$uncommitted" ]]; then
+                if af_run_current "${_st:-$_lr}" "${SRC_DIR}/" 'tests/'; then
                     _passed=$(echo "$_all_block" | sed -n 's/.*"passed" *: *\([0-9][0-9]*\).*/\1/p')
                     _total=$(echo "$_all_block" | sed -n 's/.*"total" *: *\([0-9][0-9]*\).*/\1/p')
                     from_log=true
@@ -84,12 +83,13 @@ elif [[ "$from_log" == true ]]; then
     exit_code=0
     output="Tests: accepted from test log (${log_info} passed, no code changes since)"
 else
-    # `output=$(...) || true` followed by `exit_code=$?` reads the status of
-    # `true`, which is 0 on every path -- so the Refactor gate never fired and a
-    # refactor could break the suite unchallenged (issue #123). Same bug, same
-    # fix as scan-secrets.sh.
-    output=$(.github/scripts/run-tests.sh --scope all 2>&1)
-    exit_code=$?
+    # The hook never runs the suite (#497); the refactorer runs it, once, last.
+    if [[ -n "${_ec:-}" ]] && [[ "${_ec:-}" != "0" ]] && [[ "${_partial:-}" == "false" ]]; then
+        echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Refactor phase violation: the last full-suite run in .github/test-log.json failed (exit ${_ec}). All tests must remain green. Fix it, run the task 'tests: all' once more, then stop again.\"}}"
+    else
+        echo "{\"hookSpecificOutput\": {\"hookEventName\": \"Stop\", \"decision\": \"block\", \"reason\": \"Refactor gate: no current full-suite pass in .github/test-log.json (missing, partial, or older than your last change). Run the task 'tests: all' once as your last step, then stop again. This hook never runs the suite itself (#497).\"}}"
+    fi
+    exit 0
 fi
 
 if [ "$exit_code" -ne 0 ] && [ "$exit_code" -ne 5 ]; then

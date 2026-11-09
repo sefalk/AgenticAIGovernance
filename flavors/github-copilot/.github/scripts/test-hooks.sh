@@ -3221,14 +3221,16 @@ echo "## producer stop gates (executed against a stubbed suite)"
 
 # gate_case NAME HOOK EXPECT STUB STUB_EXIT STUB_STDOUT
 #   EXPECT = block | pass
-#   STUB   = pytest | run-tests | log | nolog
-#            log   -- .github/test-log.json carries an `all` entry with STUB_EXIT;
+#   STUB   = pytest | run-tests | log | stale | nolog
+#            log   -- .github/test-log.json carries an `all` entry with STUB_EXIT,
+#                     started after the last edit of the uncommitted test file;
 #                     run-tests.sh is a stub that would pass, so a hook that
 #                     still ran the suite itself would read green (#497)
+#            stale -- the same entry, started BEFORE that edit
 #            nolog -- the same, with no test log at all
 gate_case() {
     local name="$1" hook="$2" expect="$3" stub="$4" stub_exit="$5" stub_out="$6"
-    local fixture rc=0 out ok=0 stmts stub_path fault
+    local fixture rc=0 out ok=0 stmts stub_path fault log_exit=""
 
     new_fixture; fixture=$FIXTURE_DIR
     mkdir -p "$fixture/.github/hooks/scripts" "$fixture/tests" "$fixture/bin"
@@ -3246,15 +3248,15 @@ gate_case() {
             # exit code of the suite is reachable at all.
             printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/bin/pytest"
             chmod +x "$fixture/bin/pytest" ;;
-        log|nolog)
+        log|stale|nolog)
             mkdir -p "$fixture/.github/scripts"
             stub_path="$fixture/.github/scripts/run-tests.sh"
             printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/bin/pytest"
             chmod +x "$fixture/bin/pytest"
-            if [ "$stub" = log ]; then
-                printf '{"all": {"exit_code": %s, "last_run": "2026-11-09T10:00:00Z", "partial": false, "passed": 10, "total": 10}}\n' \
-                    "$stub_exit" > "$fixture/.github/test-log.json"
-            fi
+            # A committed seed puts the edit in the ignore-hygiene gate's scope,
+            # which fails closed without its checker.
+            cp "$GITHUB_DIR/scripts/check-python-quality.py" "$fixture/.github/scripts/"
+            log_exit=$stub_exit
             stub_exit=0 ;;
     esac
 
@@ -3277,6 +3279,26 @@ gate_case() {
         PATH="$fixture/bin:$PATH"; export PATH
         git init -q .
         git checkout -q -b agent/123-x
+        # The producer edits, then runs the suite, then stops: the edit is still
+        # uncommitted when the gate reads the log, so "uncommitted" alone cannot
+        # mean stale. What decides is whether the edit came after the run started.
+        case "$stub" in
+            log|stale)
+                git add tests
+                GIT_AUTHOR_DATE='2000-01-01T00:00:00Z' GIT_COMMITTER_DATE='2000-01-01T00:00:00Z' \
+                    git -c user.email=f@x -c user.name=f commit -qm seed
+                printf 'def test_edited():\n    assert True\n' >> tests/test_seeded.py ;;
+        esac
+        case "$stub" in
+            log)
+                touch -t 200001010100 tests/test_seeded.py
+                _now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                printf '{"all": {"exit_code": %s, "started": "%s", "last_run": "%s", "partial": false, "passed": 10, "total": 10}}\n' \
+                    "$log_exit" "$_now" "$_now" > .github/test-log.json ;;
+            stale)
+                printf '{"all": {"exit_code": %s, "started": "2001-01-01T00:00:00Z", "last_run": "2001-01-01T00:05:00Z", "partial": false, "passed": 10, "total": 10}}\n' \
+                    "$log_exit" > .github/test-log.json ;;
+        esac
         printf '%s' '{"session_id":"s1","transcript_path":"/none"}' \
             | bash ".github/hooks/scripts/$hook"
     ) > "$fixture/out.txt" 2> "$fixture/err.txt" || rc=$?
@@ -3352,6 +3374,12 @@ gate_case "refactor phase: a passing, current full-suite result does not block" 
 
 gate_case "refactor phase: no full-suite result blocks instead of running the suite" \
     refactorer-stop.sh block nolog 0 ""
+
+gate_case "green phase: a pass logged before the last edit blocks" \
+    implementer-stop.sh block stale 0 ""
+
+gate_case "refactor phase: a pass logged before the last edit blocks" \
+    refactorer-stop.sh block stale 0 ""
 
 # --- The verdict still has to reach the client (issue #202) ----------------
 #
