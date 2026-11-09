@@ -4916,12 +4916,24 @@ if ($tvVenv) {
     Assert-True "test-writer runs the Red gate with the venv's pytest when PATH has none" `
         ($r.Output -match 'Red gate PASS') "got: $($r.Output)"
 
+    # #497: the gate reads the full-suite result from the test log and never runs
+    # the suite itself. The stub runner would pass; a hook that still ran it reads green.
+    $tvLog = '{"all": {"exit_code": 0, "last_run": "2026-11-09T10:00:00Z", "partial": false, "passed": 3, "total": 3}}'
     $r = Invoke-Hook -Script 'implementer-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/473-x' `
         -PathWithout 'pytest' -CopyIn @{ '.venv' = $tvVenv } `
-        -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n" } `
+        -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n"; '.github/test-log.json' = $tvLog } `
         -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
-    Assert-True "implementer runs the Green gate with the venv's pytest when PATH has none" `
-        ($r.Output -match 'tests all pass' -and $r.Output -notmatch 'NOT RUN') "got: $($r.Output)"
+    Assert-True "implementer accepts a current full-suite pass from the test log" `
+        ($r.Output -match 'accepted from' -and $r.Output -notmatch 'NOT RUN') "got: $($r.Output)"
+
+    foreach ($tvHook in @('implementer-stop.ps1', 'refactorer-stop.ps1')) {
+        $r = Invoke-Hook -Script $tvHook -JsonInput $STOP_JSON -Branch 'agent/497-x' `
+            -PathWithout 'pytest' -CopyIn @{ '.venv' = $tvVenv } `
+            -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n" } `
+            -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
+        Assert-True "$tvHook without a full-suite result blocks and names tests: all instead of running the suite" `
+            ((Resolve-StopDecision $r.Output $r.ExitCode) -eq 'block' -and $r.Output -match 'tests: all') "got: $($r.Output)"
+    }
 }
 Remove-Item -LiteralPath $tvBase -Recurse -Force -ErrorAction SilentlyContinue
 

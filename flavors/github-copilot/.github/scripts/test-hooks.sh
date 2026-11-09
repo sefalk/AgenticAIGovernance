@@ -3221,7 +3221,11 @@ echo "## producer stop gates (executed against a stubbed suite)"
 
 # gate_case NAME HOOK EXPECT STUB STUB_EXIT STUB_STDOUT
 #   EXPECT = block | pass
-#   STUB   = pytest | run-tests   -- the command the hook shells out to
+#   STUB   = pytest | run-tests | log | nolog
+#            log   -- .github/test-log.json carries an `all` entry with STUB_EXIT;
+#                     run-tests.sh is a stub that would pass, so a hook that
+#                     still ran the suite itself would read green (#497)
+#            nolog -- the same, with no test log at all
 gate_case() {
     local name="$1" hook="$2" expect="$3" stub="$4" stub_exit="$5" stub_out="$6"
     local fixture rc=0 out ok=0 stmts stub_path fault
@@ -3242,6 +3246,16 @@ gate_case() {
             # exit code of the suite is reachable at all.
             printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/bin/pytest"
             chmod +x "$fixture/bin/pytest" ;;
+        log|nolog)
+            mkdir -p "$fixture/.github/scripts"
+            stub_path="$fixture/.github/scripts/run-tests.sh"
+            printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/bin/pytest"
+            chmod +x "$fixture/bin/pytest"
+            if [ "$stub" = log ]; then
+                printf '{"all": {"exit_code": %s, "last_run": "2026-11-09T10:00:00Z", "partial": false, "passed": 10, "total": 10}}\n' \
+                    "$stub_exit" > "$fixture/.github/test-log.json"
+            fi
+            stub_exit=0 ;;
     esac
 
     # A quoted heredoc, not printf: a summary line is arbitrary text and may
@@ -3318,19 +3332,26 @@ gate_case "red phase: a setup error exiting 1 is not a satisfied red" \
 gate_case "red phase: no tests collected is not a verdict" \
     test-writer-stop.sh pass pytest 5 "no tests ran in 0.1s"
 
-# Green and refactor phase. Both hooks already ran the suite; the defect was
-# that the result never reached the decision.
-gate_case "green phase: a failing suite blocks the implementer" \
-    implementer-stop.sh block run-tests 1 "2 failed, 8 passed in 1.0s"
+# Green and refactor phase. The gates read the full-suite result from the test
+# log; running the suite inside a Stop hook took 114 min in MP and was then
+# discarded as a timed-out non-blocking error (#497).
+gate_case "green phase: a failing full-suite result blocks the implementer" \
+    implementer-stop.sh block log 1 ""
 
-gate_case "green phase: a passing suite does not block the implementer" \
-    implementer-stop.sh pass run-tests 0 "10 passed in 1.0s"
+gate_case "green phase: a passing, current full-suite result does not block" \
+    implementer-stop.sh pass log 0 ""
 
-gate_case "refactor phase: a failing suite blocks the refactorer" \
-    refactorer-stop.sh block run-tests 1 "2 failed, 8 passed in 1.0s"
+gate_case "green phase: no full-suite result blocks instead of running the suite" \
+    implementer-stop.sh block nolog 0 ""
 
-gate_case "refactor phase: a passing suite does not block the refactorer" \
-    refactorer-stop.sh pass run-tests 0 "10 passed in 1.0s"
+gate_case "refactor phase: a failing full-suite result blocks the refactorer" \
+    refactorer-stop.sh block log 1 ""
+
+gate_case "refactor phase: a passing, current full-suite result does not block" \
+    refactorer-stop.sh pass log 0 ""
+
+gate_case "refactor phase: no full-suite result blocks instead of running the suite" \
+    refactorer-stop.sh block nolog 0 ""
 
 # --- The verdict still has to reach the client (issue #202) ----------------
 #
@@ -3353,12 +3374,6 @@ WIN_SUMMARY='2 failed in 1.0s -- C:\Users\me\repo\src\a.py:12	expected \"x\"'
 
 gate_case "a red verdict survives a Windows path in the summary line" \
     test-writer-stop.sh block pytest 2 "$WIN_SUMMARY"
-
-gate_case "a green-phase block survives a Windows path in the suite output" \
-    implementer-stop.sh block run-tests 1 "$WIN_SUMMARY"
-
-gate_case "a refactor-phase block survives a Windows path in the suite output" \
-    refactorer-stop.sh block run-tests 1 "$WIN_SUMMARY"
 
 # The escaping lives in one place or it does not live at all. `sed 's/"/\"/g'`
 # handles the character an author thinks of first and leaves the one that
