@@ -28,9 +28,10 @@ from datetime import datetime
 from pathlib import Path
 from types import ModuleType
 
+import _agentlog
+
 ACTIONABLE = ("not_run", "block", "deny", "error")
 LABEL = {"not_run": "NOT RUN"}
-HOOK_SPAN = b'"type":"hook"'
 # Hooks of one Stop event share its timestamp; an earlier Stop is a previous turn.
 SAME_EVENT_MS = 1000
 
@@ -57,22 +58,6 @@ def session_dir(payload: dict) -> Path | None:
     return Path(transcript).parent.parent / "debug-logs" / sid
 
 
-def hook_spans(directory: Path) -> list[dict]:
-    spans = []
-    for log in sorted(directory.glob("*.jsonl")):
-        with log.open("rb") as handle:
-            for raw in handle:
-                if HOOK_SPAN not in raw:
-                    continue
-                try:
-                    span = json.loads(raw)
-                except ValueError:
-                    continue
-                if isinstance(span, dict) and span.get("type") == "hook" and isinstance(span.get("ts"), int):
-                    spans.append(span)
-    return spans
-
-
 def _ms(stamp: object) -> int:
     try:
         return int(datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp() * 1000)
@@ -88,12 +73,10 @@ def findings(spans: list[dict], now: int, health: ModuleType) -> Counter:
         ts, event = span["ts"], span.get("name")
         if (since is not None and ts <= since) or (event == "Stop" and ts >= now - SAME_EVENT_MS):
             continue
-        attrs = span.get("attrs") or {}
-        outcome = "error" if span.get("status") not in (None, "ok") else health.classify(str(attrs.get("output") or ""))
-        if outcome not in ACTIONABLE:
+        verdict = health.span_verdict(span)
+        if verdict["outcome"] not in ACTIONABLE:
             continue
-        script = health.script_of(json.dumps({"command": str(attrs.get("command") or "")})) or str(event)
-        hits[(script.rsplit(".", 1)[0], LABEL.get(outcome, outcome))] += 1
+        hits[(verdict["script"].rsplit(".", 1)[0], LABEL.get(verdict["outcome"], verdict["outcome"]))] += 1
     return hits
 
 
@@ -102,7 +85,7 @@ def main() -> int:
         payload = json.loads(sys.stdin.read() or "{}")
         directory = session_dir(payload) if isinstance(payload, dict) else None
         if directory is not None and directory.is_dir():
-            hits = findings(hook_spans(directory), _ms(payload.get("timestamp")), _gate_health())
+            hits = findings(_agentlog.hook_spans(str(directory)), _ms(payload.get("timestamp")), _gate_health())
             if hits:
                 parts = [f"{script} {what}" + (f" x{n}" if n > 1 else "") for (script, what), n in sorted(hits.items())]
                 print(json.dumps({"systemMessage": "turn findings (#478): " + "; ".join(parts)}))

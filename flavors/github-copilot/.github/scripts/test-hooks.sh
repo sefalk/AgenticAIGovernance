@@ -623,7 +623,7 @@ if [ -f "$HOOK_DIR/turn-receipt.sh" ]; then
     printf '%s\n' \
         '{"ts":1785760264230,"type":"hook","name":"SubagentStop","status":"ok","attrs":{"command":"bash .github/hooks/scripts/implementer-stop.sh","output":"{\"systemMessage\":\"implementer:Stop -- Green gate NOT RUN (no pytest)\"}"}}' \
         > "$tr_chat/debug-logs/$tr_sid/runSubagent-implementer-toolu_X.jsonl"
-    cp "$HOOK_DIR/turn-receipt.sh" "$HOOK_DIR/turn-receipt.py" "$HOOK_DIR/_common.sh" "$tr_dir/repo/.github/hooks/scripts/"
+    cp "$HOOK_DIR/turn-receipt.sh" "$HOOK_DIR/turn-receipt.py" "$HOOK_DIR/_agentlog.py" "$HOOK_DIR/_common.sh" "$tr_dir/repo/.github/hooks/scripts/"
     cp "$GITHUB_DIR/scripts/gate-health.py" "$tr_dir/repo/.github/scripts/"
     tr_chat_native=$(if command -v cygpath >/dev/null 2>&1; then cygpath -m "$tr_chat"; else printf '%s' "$tr_chat"; fi)
     tr_run() {
