@@ -4052,6 +4052,7 @@ $trJson = @{
 $trStubs = @{
     '.github/scripts/gate-health.py'         = (Get-Content (Join-Path $githubDir 'scripts/gate-health.py') -Raw)
     '.github/hooks/scripts/turn-receipt.py'  = (Get-Content (Join-Path $scriptDir 'turn-receipt.py') -Raw -ErrorAction SilentlyContinue)
+    '.github/hooks/scripts/_agentlog.py'     = (Get-Content (Join-Path $scriptDir '_agentlog.py') -Raw)
 }
 $trShips = Test-Path (Join-Path $scriptDir 'turn-receipt.ps1')
 Assert-True "turn-receipt.ps1 ships" $trShips "hooks/scripts/turn-receipt.ps1 is missing"
