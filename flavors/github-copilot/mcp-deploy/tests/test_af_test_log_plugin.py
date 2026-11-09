@@ -119,6 +119,15 @@ def test_a_wrapper_run_is_left_to_the_wrapper(project):
     assert not (project / ".github" / "test-log.json").exists()
 
 
+def test_collect_only_is_not_a_run(project):
+    # Collect-only exits 0 with nothing executed; filed under `all` it closed the green gate as 0/0 (#504).
+    before = {"all": {"status": "ok", "passed": 7, "total": 7, "exit_code": 0, "partial": False}}
+    (project / ".github" / "test-log.json").write_text(json.dumps(before), encoding="utf-8")
+    for flag in ("--collect-only", "--co"):
+        _pytest(project, "tests", flag)
+        assert _log(project) == before
+
+
 @pytest.mark.parametrize("wrapper", ["run-tests.ps1", "run-tests.sh"])
 def test_wrappers_switch_the_plugin_off(wrapper):
     assert "AF_TEST_LOG_BY_WRAPPER" in (AF_ROOT / ".github" / "scripts" / wrapper).read_text(encoding="utf-8")

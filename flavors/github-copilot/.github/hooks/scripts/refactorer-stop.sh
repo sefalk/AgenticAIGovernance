@@ -61,7 +61,8 @@ if [[ -z "$test_gate_skipped" ]] && [[ -f "$TEST_LOG" ]]; then
     if [[ -n "$_all_block" ]]; then
         _ec=$(echo "$_all_block" | sed -n 's/.*"exit_code" *: *\([0-9][0-9]*\).*/\1/p')
         _partial=$(echo "$_all_block" | sed -n 's/.*"partial" *: *\(true\|false\).*/\1/p')
-        if [[ "$_ec" == "0" ]] && [[ "$_partial" == "false" ]]; then
+        _tot=$(echo "$_all_block" | sed -n 's/.*"total" *: *\([0-9][0-9]*\).*/\1/p')
+        if [[ "$_ec" == "0" ]] && [[ "$_partial" == "false" ]] && [[ "${_tot:-0}" -gt 0 ]]; then
             _lr=$(echo "$_all_block" | sed -n 's/.*"last_run" *: *"\([^"]*\)".*/\1/p')
             _st=$(echo "$_all_block" | sed -n 's/.*"started" *: *"\([^"]*\)".*/\1/p')
             if [[ -n "$_lr" ]]; then
