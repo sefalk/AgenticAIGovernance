@@ -153,8 +153,8 @@ changed). One `all` run at the very end only.
 **Workflow:**
 1. After each subtask → run `tests: domain` (or `tests: domain + fail-fast`)
 2. If you modified adapter code → run `tests: adapters` once
-3. **Do NOT run `tests: all`** — the stop hook runs the full suite automatically
-   when you finish.
+3. **Run `tests: all` once, last**, after your final code change. The stop hook
+   reads that result from the test log and blocks without it (#497).
 4. Before running any scope, check `.github/test-log.json` — skip if scope
    passed recently and no relevant code changed since
 

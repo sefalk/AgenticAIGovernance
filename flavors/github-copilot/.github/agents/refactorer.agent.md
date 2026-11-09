@@ -130,8 +130,8 @@ Consult the **human-escalation** skill for the full halt protocol.
 1. Before refactoring → check `.github/test-log.json` for baseline (do NOT
    run `tests: all` to establish baseline — the log has it)
 2. After each refactoring step → run `tests: domain` only
-3. **Do NOT run `tests: all`** — the stop hook runs the full suite automatically
-   when you finish. Running it yourself wastes ~20 minutes.
+3. **Run `tests: all` once, last**, after your final step. The stop hook reads
+   that result from the test log and blocks without it (#497).
 
 **Rule:** Use `run_task` for `tests: domain`. Use `runTests` for file-scoped
 runs. An invocation no fixed label expresses goes through `af-command`'s

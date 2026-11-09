@@ -175,6 +175,33 @@ af_resolve_pytest() {
     return 1
 }
 
+# af_run_current SINCE PATHSPEC... -- true when nothing under PATHSPEC changed
+# after the run that started at SINCE. Twin of Test-AfRunCurrent: the producer's
+# edits are still uncommitted when it stops, so "uncommitted" cannot mean stale
+# (#497). A commit after the start, or a dirty or untracked file written after
+# it, can. Whole seconds; a deleted file does not count; a stamp that cannot be
+# read (no GNU date, no interpreter) is not current.
+af_run_current() {
+    local _rc_since="$1" _rc_limit="" _rc_line _rc_rel _rc_mt
+    shift
+    _rc_limit=$(date -u -d "$_rc_since" +%s 2>/dev/null) || _rc_limit=""
+    if [ -z "$_rc_limit" ] && [ -n "${AF_PYTHON:-}" ]; then
+        _rc_limit=$("$AF_PYTHON" -c 'import sys,datetime as d; print(int(d.datetime.fromisoformat(sys.argv[1].replace("Z","+00:00")).timestamp()))' "$_rc_since" 2>/dev/null) || _rc_limit=""
+    fi
+    case "$_rc_limit" in ''|*[!0-9-]*) return 1 ;; esac
+    [ -z "$(git log --oneline --after="$_rc_since" -- "$@" 2>/dev/null)" ] || return 1
+    while IFS= read -r _rc_line; do
+        [ "${#_rc_line}" -ge 4 ] || continue
+        _rc_rel=${_rc_line:3}
+        _rc_rel=${_rc_rel##* -> }
+        _rc_rel=${_rc_rel#\"}; _rc_rel=${_rc_rel%\"}
+        [ -e "$_rc_rel" ] || continue
+        _rc_mt=$(stat -c %Y "$_rc_rel" 2>/dev/null || stat -f %m "$_rc_rel" 2>/dev/null) || return 1
+        [ "$_rc_mt" -le "$_rc_limit" ] || return 1
+    done <<<"$(git status --porcelain --untracked-files=all -- "$@" 2>/dev/null)"
+    return 0
+}
+
 # af_tool_name_from_json RAW
 #
 # Prints the payload's tool_name. Returns 1 when it cannot be read with
