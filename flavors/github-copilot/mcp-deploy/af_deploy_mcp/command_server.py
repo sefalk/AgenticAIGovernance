@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import anyio
@@ -82,8 +83,9 @@ def _ticker(ctx: Context | None):
     if ctx is None:
         return None
 
-    def tick(elapsed: float, last_line: str) -> None:
-        message = f"{int(elapsed)}s: {last_line}"[:200]
+    def tick(elapsed: float, last_line: str, walltime_s: int) -> None:
+        started = (datetime.now() - timedelta(seconds=elapsed)).strftime("%H:%M:%S")
+        message = f"{started} - {int(elapsed)}s/{walltime_s}s max: {last_line}"[:200]
         with contextlib.suppress(Exception):
             anyio.from_thread.run(ctx.report_progress, elapsed, None, message)
 
