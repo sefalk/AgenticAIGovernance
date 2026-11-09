@@ -3354,6 +3354,38 @@ gate_case "red phase: a setup error exiting 1 is not a satisfied red" \
 gate_case "red phase: no tests collected is not a verdict" \
     test-writer-stop.sh pass pytest 5 "no tests ran in 0.1s"
 
+# #507: the Red gate runs the CHANGED test files, never `tests/`. The stub fails
+# when handed the whole directory, as a suite with one old red test would.
+# red_scope_case NAME FILE EXPECT_REGEX
+red_scope_case() {
+    local name="$1" file="$2" want="$3" fixture out
+    new_fixture; fixture=$FIXTURE_DIR
+    mkdir -p "$fixture/.github/hooks/scripts" "$fixture/tests" "$fixture/bin"
+    cp "$HOOK_DIR/test-writer-stop.sh" "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
+    printf '#!/usr/bin/env bash\nif [ "$1" = "tests/" ]; then echo "1 failed, 40 passed in 900s"; exit 1; fi\necho "1 passed in 0.5s"\nexit 0\n' > "$fixture/bin/pytest"
+    chmod +x "$fixture/bin/pytest"
+    printf '# copilot:generated | test-writer | 2026-11-09\ndef test_new():\n    assert True\n' > "$fixture/$file"
+    out=$(
+        cd "${fixture:?empty fixture path (#248)}" || exit 1
+        use_fixture_conf
+        PATH="$fixture/bin:$PATH"; export PATH
+        git init -q . && git checkout -q -b agent/507-x
+        printf '%s' '{"session_id":"s1","transcript_path":"/none"}' | bash .github/hooks/scripts/test-writer-stop.sh 2>/dev/null
+    )
+    if printf '%s' "$out" | grep -qE -e "$want"; then
+        echo "PASS  $name"; pass=$((pass + 1))
+    else
+        echo "FAIL  $name -- got: ${out:-<no output>}"; fail=$((fail + 1))
+    fi
+    rm -rf "$fixture"
+}
+
+red_scope_case "red phase: an old red test elsewhere does not satisfy the Red gate for new passing tests" \
+    tests/test_new.py '"block".*Red phase violation|Red phase violation.*"block"'
+
+red_scope_case "red phase: no changed test file means the Red gate did not run, and it never runs tests/" \
+    tests/conftest.py 'NOT RUN \(no changed test files\)'
+
 # Green and refactor phase. The gates read the full-suite result from the test
 # log; running the suite inside a Stop hook took 114 min in MP and was then
 # discarded as a timed-out non-blocking error (#497).
