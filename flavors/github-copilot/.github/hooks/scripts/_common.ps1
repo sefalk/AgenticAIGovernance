@@ -666,6 +666,10 @@ function Get-AfSubagentReturn {
 
     $blocked = @{ Status = 'unavailable'; Text = '' }
     if (-not $StdinRaw -or -not $Agent) { return $blocked }
+    # An omitted -CodeRoot made every return UNREADABLE in MP (#505).
+    if (-not $CodeRoot) { $CodeRoot = $script:AfCodeRoot }
+    if (-not $MainRoot) { $MainRoot = $script:AfMainRoot }
+    if (-not $CodeRoot -or -not $MainRoot) { return $blocked }
 
     try { $payload = $StdinRaw | ConvertFrom-Json } catch { return $blocked }
     $sid = $payload.session_id
