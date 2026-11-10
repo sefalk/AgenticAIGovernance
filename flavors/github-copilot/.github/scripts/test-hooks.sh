@@ -524,6 +524,18 @@ ro_probe scan-secrets.sh '{"tool_name":"mcp_github_mcp_se_issue_read","tool_inpu
 assert_true "scan-secrets still records an issue read for the body guard" "$ro_started" "out=$ro_out"
 ro_probe scan-secrets.sh "{\"tool_name\":\"mcp_azure_devops__wit_work_item\",\"tool_input\":{\"action\":\"list_comments\"},\"tool_response\":\"$(printf 'x%.0s' $(seq 1 9000))\"}"
 assert_true "scan-secrets still inspects a read large enough to spill (#341)" "$ro_started" "started=$ro_started"
+# The shared predicate itself (_fastpath.sh), including the ambiguity rule.
+(
+    . "$HOOK_DIR/_fastpath.sh"
+    ok=1
+    af_unguarded_tool mcp_azure_devops__wit_work_item || ok=0
+    af_unguarded_tool runInTerminal && ok=0
+    af_unguarded_tool editFiles && ok=0
+    [ -z "$(af_fast_tool_name '{"tool_name":"read_file","tool_input":{"tool_name":"runInTerminal"}}')" ] || ok=0
+    [ "$(af_fast_tool_name '{"tool_name":"read_file"}')" = read_file ] || ok=0
+    echo "$ok"
+) > "$ro_dir/predicate"
+assert_true "_fastpath.sh: reads skip, guarded and ambiguous calls do not" "$(cat "$ro_dir/predicate")" "predicate check failed"
 rm -rf "$ro_dir"
 
 # The coordinator hook's whole purpose is delegation enforcement, and nothing

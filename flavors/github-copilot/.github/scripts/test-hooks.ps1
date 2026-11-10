@@ -1405,6 +1405,14 @@ $roReads = @('read_file', 'grep_search', 'mcp_azure_devops__wit_work_item', 'mcp
     'mcp_github_mcp_se_list_pull_requests', 'mcp_af-command_list_scripts', 'mcp_azure_devops__search_workitem')
 $roSlow = @($roReads | Where-Object { -not $roPsPat -or $_ -match $roPsPat })
 Assert-True "read tools take the fast path" ($roSlow.Count -eq 0) "slow: $($roSlow -join ', ')"
+# Every read the body guard records must keep scan-secrets on the full path.
+$roBg = Get-Content (Join-Path $scriptDir '_body_guard.py') -Raw -ErrorAction SilentlyContinue
+$roBgReads = @(if ($roBg -match '(?s)READ_SUFFIXES = \((.*?)\)') { [regex]::Matches($Matches[1], '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value } }) + @('add_issue_comment')
+$roGrPat = if ($roPs -match '(?m)^\$afGuardReads = ''([^'']+)''') { $Matches[1] } else { '' }
+$roGrSh = if ($roSh -match '(?m)^AF_GUARD_READS=''([^'']+)''') { $Matches[1] } else { '' }
+$roGrMiss = @($roBgReads | Where-Object { -not $roGrPat -or "mcp_github_mcp_se_$_" -notmatch $roGrPat })
+Assert-True "every body-guard read stays on the scan-secrets full path, same pattern in both dialects" `
+    ($roBgReads.Count -ge 4 -and $roGrMiss.Count -eq 0 -and $roGrPat -eq $roGrSh) "reads=$($roBgReads.Count) missing: $($roGrMiss -join ', ') ps1=[$roGrPat] sh=[$roGrSh]"
 Remove-Item -LiteralPath $roDir -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Output ""

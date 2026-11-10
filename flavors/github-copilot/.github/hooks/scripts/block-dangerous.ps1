@@ -31,12 +31,24 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# A call no guard acts on exits before _common.ps1 probes for Python (#515).
+# Without the helper the full path runs: a missing file must not silence the guard.
+$raw = $null
+if (Test-Path "$PSScriptRoot/_fastpath.ps1") {
+    . "$PSScriptRoot/_fastpath.ps1"
+    $raw = Read-AfStdinRaw
+    if (Test-AfUnguardedTool (Get-AfFastToolName $raw)) {
+        Write-Output '{}'
+        exit 0
+    }
+}
+
 # Root, config and interpreter come from this script's location, never from
 # the cwd the agent happens to run in (issue #54).
 . "$PSScriptRoot/_common.ps1"
+if ($null -eq $raw) { $raw = Read-AfStdin }
 
-# Read and parse stdin
-$raw = Read-AfStdin
+# Parse stdin
 try {
     $inputData = $raw | ConvertFrom-Json
 } catch {

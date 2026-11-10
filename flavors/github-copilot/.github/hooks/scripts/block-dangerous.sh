@@ -28,10 +28,20 @@
 # merely resolved: on Windows `command -v python3` finds the App Execution
 # Alias, which is non-empty but runs nothing -- every python call would then
 # fail silently and the hook would emit no opinion for any command.
-. "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
-PYTHON="$AF_PYTHON"
-
+_bd_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 raw=$(cat)
+# A call no guard acts on exits before _common.sh probes for Python (#515).
+# Without the helper the full path runs: a missing file must not silence the guard.
+if [ -f "$_bd_dir/_fastpath.sh" ]; then
+    . "$_bd_dir/_fastpath.sh"
+    if af_unguarded_tool "$(af_fast_tool_name "$raw")"; then
+        echo '{}'
+        exit 0
+    fi
+fi
+
+. "$_bd_dir/_common.sh"
+PYTHON="$AF_PYTHON"
 
 # create_and_run_task and run_task are the names VS Code actually sends; the
 # camelCase spellings never occur in a captured payload and are kept only so a

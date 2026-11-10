@@ -10,6 +10,15 @@ set -uo pipefail
 # Root, config and interpreter come from this script's location, never from
 # the cwd the agent happens to run in (issue #54).
 _af_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# A call with nothing to scan, record or announce skips Python (#515).
+# Without the helper the full path runs: a missing file must not silence the scan.
+_af_raw=$(cat)
+if [ -f "$_af_dir/_fastpath.sh" ]; then
+    . "$_af_dir/_fastpath.sh"
+    if af_scan_skippable "$_af_raw"; then echo '{}'; exit 0; fi
+fi
+
 . "$_af_dir/_common.sh"
 
 _af_core="$_af_dir/scan-secrets.py"
@@ -21,4 +30,4 @@ if [ -z "${AF_PYTHON:-}" ] || [ ! -f "$_af_core" ]; then
     exit 0
 fi
 
-exec "$AF_PYTHON" "$_af_core"
+printf '%s' "$_af_raw" | exec "$AF_PYTHON" "$_af_core"
