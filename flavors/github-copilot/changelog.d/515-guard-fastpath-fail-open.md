@@ -17,6 +17,10 @@
     - any result of 4,096 chars or more, which may need the long-line notice
       (#341);
     - `runSubagent`.
+  - **`block-dangerous` timeout raised from 15 s to 60 s.** Under the MP load it
+    took up to 36 s. A timeout lets the call through unchecked, so a slow
+    verdict is still better than none. Idle six-parallel p95 is 3.5 s; in
+    normal use the fast path keeps reads well below that.
 
 ### Added
 

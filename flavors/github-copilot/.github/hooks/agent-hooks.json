@@ -19,7 +19,7 @@
         "type": "command",
         "command": "bash .github/hooks/scripts/block-dangerous.sh",
         "windows": "powershell -ExecutionPolicy Bypass -File .github\\hooks\\scripts\\block-dangerous.ps1",
-        "timeout": 15
+        "timeout": 60
       }
     ],
     "PostToolUse": [
