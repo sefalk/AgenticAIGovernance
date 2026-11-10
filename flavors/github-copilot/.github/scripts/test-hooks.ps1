@@ -4964,6 +4964,15 @@ if ($tvVenv) {
             -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
         Assert-True "$tvHook reads a running entry as no result, not as a failed run" `
             ((Resolve-StopDecision $r.Output $r.ExitCode) -eq 'block' -and $r.Output -match 'no current full-suite pass' -and $r.Output -notmatch 'violation') "got: $($r.Output)"
+
+        # Exit 0 with nothing executed (collect-only) is not a green suite (#504).
+        $tvEmpty = '{"all": {"exit_code": 0, "status": "ok", "started": "' + $tvFresh + '", "last_run": "' + $tvFresh + '", "partial": false, "passed": 0, "total": 0}}'
+        $r = Invoke-Hook -Script $tvHook -JsonInput $STOP_JSON -Branch 'agent/504-x' `
+            -PathWithout 'pytest' -CopyIn @{ '.venv' = $tvVenv } `
+            -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n"; '.github/test-log.json' = $tvEmpty } `
+            -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
+        Assert-True "$tvHook does not accept a 0/0 full-suite result" `
+            ((Resolve-StopDecision $r.Output $r.ExitCode) -eq 'block' -and $r.Output -match 'no current full-suite pass') "got: $($r.Output)"
     }
 
     foreach ($tvHook in @('implementer-stop.ps1', 'refactorer-stop.ps1')) {
