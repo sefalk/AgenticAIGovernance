@@ -1381,28 +1381,30 @@ $r = Invoke-RoProbe 'scan-secrets.ps1' $roBig
 Assert-True "scan-secrets still inspects a read large enough to spill (#341)" `
     $r.Started "out=$($r.Output.Substring(0, [Math]::Min(80, $r.Output.Length)))"
 
-# The allowlist decides what skips the guard, so it must never name a tool a
-# guard acts on, and both dialects must hold the same list.
-$roPs = Get-Content (Join-Path $scriptDir '_readonly.ps1') -Raw -ErrorAction SilentlyContinue
-$roSh = Get-Content (Join-Path $scriptDir '_readonly.sh') -Raw -ErrorAction SilentlyContinue
-$roPsPat = if ($roPs -match '(?m)^\$afReadOnlyTools = ''([^'']+)''') { $Matches[1] } else { '' }
-$roShPat = if ($roSh -match '(?m)^AF_READONLY_TOOLS=''([^'']+)''') { $Matches[1] } else { '' }
-Assert-True "the read-only allowlist is identical in both dialects" `
+# The pattern decides what skips the guards, so it must cover every tool a
+# guard acts on, and both dialects must hold the same pattern.
+$roPs = Get-Content (Join-Path $scriptDir '_fastpath.ps1') -Raw -ErrorAction SilentlyContinue
+$roSh = Get-Content (Join-Path $scriptDir '_fastpath.sh') -Raw -ErrorAction SilentlyContinue
+$roPsPat = if ($roPs -match '(?m)^\$afGuardedTools = ''([^'']+)''') { $Matches[1] } else { '' }
+$roShPat = if ($roSh -match '(?m)^AF_GUARDED_TOOLS=''([^'']+)''') { $Matches[1] } else { '' }
+Assert-True "the guarded-tool pattern is identical in both dialects" `
     ($roPsPat -and $roPsPat -eq $roShPat) "ps1=[$roPsPat] sh=[$roShPat]"
-$roGated = @('runInTerminal', 'run_in_terminal', 'create_and_run_task', 'run_task', 'run_notebook_cell',
-    'mcp_pylance_mcp_s_pylanceRunCodeSnippet', 'run_vscode_command', 'create_file', 'replace_string_in_file',
-    'multi_replace_string_in_file', 'edit_notebook_file', 'mcp_azure_devops__wit_work_item_write',
-    'mcp_azure_devops__repo_pull_request_write', 'mcp_azure_devops__wiki_upsert_page',
-    'mcp_github_mcp_se_issue_write', 'mcp_github_mcp_se_sub_issue_write', 'mcp_github_mcp_se_update_pull_request',
-    'mcp_github_mcp_se_update_issue_comment', 'mcp_github_mcp_se_create_pull_request',
-    'mcp_github_mcp_se_merge_pull_request', 'mcp_af-command_run_script', 'mcp_af_apply')
-$roLeak = @($roGated | Where-Object { $roPsPat -and $_ -cmatch $roPsPat })
-Assert-True "no guarded tool is on the read-only allowlist" `
-    ($roPsPat -and $roLeak.Count -eq 0) "leaked: $($roLeak -join ', ')"
-$roReads = @('read_file', 'mcp_azure_devops__wit_work_item', 'mcp_github_mcp_se_issue_read',
+# Every exact write-tool name the secret scanner knows, plus each class
+# block-dangerous acts on (#60, #74, #138, #36, #376).
+$roPy = Get-Content (Join-Path $scriptDir 'scan-secrets.py') -Raw -ErrorAction SilentlyContinue
+$roWrites = @(if ($roPy -match '(?s)WRITE_TOOLS = \{(.*?)\}') { [regex]::Matches($Matches[1], '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value } })
+$roGated = @($roWrites) + @('runInTerminal', 'run_in_terminal', 'create_and_run_task', 'createAndRunTask', 'run_task',
+    'runTask', 'run_notebook_cell', 'runNotebookCell', 'mcp_pylance_mcp_s_pylanceRunCodeSnippet', 'run_playwright_code',
+    'browser_run_code', 'browser_evaluate', 'run_vscode_command', 'runVsCodeCommand',
+    'mcp_azure_devops__wit_work_item_write', 'mcp_github_mcp_se_issue_write', 'mcp_github_mcp_se_update_pull_request',
+    'mcp_github_mcp_se_update_issue_comment')
+$roLeak = @($roGated | Where-Object { -not ($roPsPat -and $_ -match $roPsPat) })
+Assert-True "every tool a guard acts on takes the full path" `
+    ($roPsPat -and $roWrites.Count -ge 10 -and $roLeak.Count -eq 0) "writes=$($roWrites.Count) unmatched: $($roLeak -join ', ')"
+$roReads = @('read_file', 'grep_search', 'mcp_azure_devops__wit_work_item', 'mcp_github_mcp_se_issue_read',
     'mcp_github_mcp_se_list_pull_requests', 'mcp_af-command_list_scripts', 'mcp_azure_devops__search_workitem')
-$roMiss = @($roReads | Where-Object { -not ($roPsPat -and $_ -cmatch $roPsPat) })
-Assert-True "known read tools are on the allowlist" ($roMiss.Count -eq 0) "missing: $($roMiss -join ', ')"
+$roSlow = @($roReads | Where-Object { -not $roPsPat -or $_ -match $roPsPat })
+Assert-True "read tools take the fast path" ($roSlow.Count -eq 0) "slow: $($roSlow -join ', ')"
 Remove-Item -LiteralPath $roDir -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Output ""
