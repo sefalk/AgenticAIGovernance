@@ -4052,6 +4052,7 @@ $trJson = @{
 $trStubs = @{
     '.github/scripts/gate-health.py'         = (Get-Content (Join-Path $githubDir 'scripts/gate-health.py') -Raw)
     '.github/hooks/scripts/turn-receipt.py'  = (Get-Content (Join-Path $scriptDir 'turn-receipt.py') -Raw -ErrorAction SilentlyContinue)
+    '.github/hooks/scripts/_agentlog.py'     = (Get-Content (Join-Path $scriptDir '_agentlog.py') -Raw)
 }
 $trShips = Test-Path (Join-Path $scriptDir 'turn-receipt.ps1')
 Assert-True "turn-receipt.ps1 ships" $trShips "hooks/scripts/turn-receipt.ps1 is missing"
@@ -4866,6 +4867,22 @@ Assert-True "red phase: no tests collected is not a verdict" `
     ((Get-RedPhaseDecision -StubExit 5 -StubSummary 'no tests ran in 0.1s') -eq 'pass') `
     "an empty run is a skip, not a satisfied red and not a violation"
 
+# #507: the Red gate runs the CHANGED test files, never `tests/`. The stub fails
+# when handed the whole directory, as a suite with one old red test would.
+$rgStub = "@echo off`r`nif `"%~1`"==`"tests/`" (echo 1 failed, 40 passed in 900s& exit /b 1)`r`necho 1 passed in 0.5s`r`nexit /b 0`r`n"
+$rgNew = "# copilot:generated | test-writer | 2026-11-09`ndef test_new():`n    assert True`n"
+$r = Invoke-Hook -Script 'test-writer-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/507-x' `
+    -StubBin $PYTEST_STUB_DIR -StubFiles @{ "$PYTEST_STUB_DIR/pytest.cmd" = $rgStub } `
+    -Files @{ 'tests/test_new.py' = $rgNew }
+Assert-True "red phase: an old red test elsewhere does not satisfy the Red gate for new passing tests" `
+    ((Resolve-StopDecision $r.Output $r.ExitCode) -eq 'block' -and $r.Output -match 'Red phase violation') "got: $($r.Output)"
+
+$r = Invoke-Hook -Script 'test-writer-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/507-x' `
+    -StubBin $PYTEST_STUB_DIR -StubFiles @{ "$PYTEST_STUB_DIR/pytest.cmd" = $rgStub } `
+    -Files @{ 'tests/conftest.py' = "# copilot:generated | test-writer | 2026-11-09`n" }
+Assert-True "red phase: no changed test file means the Red gate did not run, and it never runs tests/" `
+    ($r.Output -match 'NOT RUN \(no changed test files\)') "got: $($r.Output)"
+
 Write-Output ""
 
 # --- The test runner lives in the venv, not on PATH (issue #473) -------------
@@ -4915,12 +4932,57 @@ if ($tvVenv) {
     Assert-True "test-writer runs the Red gate with the venv's pytest when PATH has none" `
         ($r.Output -match 'Red gate PASS') "got: $($r.Output)"
 
+    # #497: the gate reads the full-suite result from the test log and never runs
+    # the suite itself. The stub runner would pass; a hook that still ran it reads green.
+    # The edit is still uncommitted when the producer stops, so what decides is
+    # whether the run STARTED after it: a run stamped in the future is current,
+    # one stamped an hour ago predates the file the fixture writes now.
+    $tvFresh = (Get-Date).ToUniversalTime().AddMinutes(5).ToString('o')
+    $tvStale = (Get-Date).ToUniversalTime().AddHours(-1).ToString('o')
+    $tvLog = '{"all": {"exit_code": 0, "started": "' + $tvFresh + '", "last_run": "' + $tvFresh + '", "partial": false, "passed": 3, "total": 3}}'
     $r = Invoke-Hook -Script 'implementer-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/473-x' `
         -PathWithout 'pytest' -CopyIn @{ '.venv' = $tvVenv } `
-        -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n" } `
+        -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n"; '.github/test-log.json' = $tvLog } `
         -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
-    Assert-True "implementer runs the Green gate with the venv's pytest when PATH has none" `
-        ($r.Output -match 'tests all pass' -and $r.Output -notmatch 'NOT RUN') "got: $($r.Output)"
+    Assert-True "implementer accepts a full-suite pass that started after the last uncommitted edit" `
+        ($r.Output -match 'accepted from' -and $r.Output -notmatch 'NOT RUN') "got: $($r.Output)"
+
+    $tvLogStale = '{"all": {"exit_code": 0, "started": "' + $tvStale + '", "last_run": "' + $tvStale + '", "partial": false, "passed": 3, "total": 3}}'
+    foreach ($tvHook in @('implementer-stop.ps1', 'refactorer-stop.ps1')) {
+        $r = Invoke-Hook -Script $tvHook -JsonInput $STOP_JSON -Branch 'agent/497-x' `
+            -PathWithout 'pytest' -CopyIn @{ '.venv' = $tvVenv } `
+            -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n"; '.github/test-log.json' = $tvLogStale } `
+            -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
+        Assert-True "$tvHook blocks a full-suite pass that started before the last edit" `
+            ((Resolve-StopDecision $r.Output $r.ExitCode) -eq 'block' -and $r.Output -match 'tests: all') "got: $($r.Output)"
+
+        # A run still in progress has no exit code yet; it is not a failed run.
+        $tvRunning = '{"all": {"exit_code": null, "status": "running", "started": "' + $tvFresh + '", "last_run": "' + $tvFresh + '", "partial": false}}'
+        $r = Invoke-Hook -Script $tvHook -JsonInput $STOP_JSON -Branch 'agent/497-x' `
+            -PathWithout 'pytest' -CopyIn @{ '.venv' = $tvVenv } `
+            -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n"; '.github/test-log.json' = $tvRunning } `
+            -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
+        Assert-True "$tvHook reads a running entry as no result, not as a failed run" `
+            ((Resolve-StopDecision $r.Output $r.ExitCode) -eq 'block' -and $r.Output -match 'no current full-suite pass' -and $r.Output -notmatch 'violation') "got: $($r.Output)"
+
+        # Exit 0 with nothing executed (collect-only) is not a green suite (#504).
+        $tvEmpty = '{"all": {"exit_code": 0, "status": "ok", "started": "' + $tvFresh + '", "last_run": "' + $tvFresh + '", "partial": false, "passed": 0, "total": 0}}'
+        $r = Invoke-Hook -Script $tvHook -JsonInput $STOP_JSON -Branch 'agent/504-x' `
+            -PathWithout 'pytest' -CopyIn @{ '.venv' = $tvVenv } `
+            -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n"; '.github/test-log.json' = $tvEmpty } `
+            -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
+        Assert-True "$tvHook does not accept a 0/0 full-suite result" `
+            ((Resolve-StopDecision $r.Output $r.ExitCode) -eq 'block' -and $r.Output -match 'no current full-suite pass') "got: $($r.Output)"
+    }
+
+    foreach ($tvHook in @('implementer-stop.ps1', 'refactorer-stop.ps1')) {
+        $r = Invoke-Hook -Script $tvHook -JsonInput $STOP_JSON -Branch 'agent/497-x' `
+            -PathWithout 'pytest' -CopyIn @{ '.venv' = $tvVenv } `
+            -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n" } `
+            -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
+        Assert-True "$tvHook without a full-suite result blocks and names tests: all instead of running the suite" `
+            ((Resolve-StopDecision $r.Output $r.ExitCode) -eq 'block' -and $r.Output -match 'tests: all') "got: $($r.Output)"
+    }
 }
 Remove-Item -LiteralPath $tvBase -Recurse -Force -ErrorAction SilentlyContinue
 

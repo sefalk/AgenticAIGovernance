@@ -81,11 +81,12 @@ panels:
 - the context per request of each lane (input tokens, uncached + cached; not
   cost), with floor, median and max, and drops of more than half marked as
   inferred compactions (#479);
-- a strip of this session's hook verdicts, from `gate-health.py`'s reader;
+- a strip of this session's hook verdicts, from the `hook` spans in its own
+  debug logs (#492);
 - cost by agent × model;
 - a log of starts, ends and non-silent verdicts.
 
-It reads the session's debug logs and the hook logs, loads nothing from the
+It reads only the session's debug logs, loads nothing from the
 network, and copies no prompt or argument text. The cost panel is `measured`
 only at coverage `full`; otherwise it is a `lower_bound`.
 

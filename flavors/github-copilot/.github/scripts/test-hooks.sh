@@ -623,7 +623,7 @@ if [ -f "$HOOK_DIR/turn-receipt.sh" ]; then
     printf '%s\n' \
         '{"ts":1785760264230,"type":"hook","name":"SubagentStop","status":"ok","attrs":{"command":"bash .github/hooks/scripts/implementer-stop.sh","output":"{\"systemMessage\":\"implementer:Stop -- Green gate NOT RUN (no pytest)\"}"}}' \
         > "$tr_chat/debug-logs/$tr_sid/runSubagent-implementer-toolu_X.jsonl"
-    cp "$HOOK_DIR/turn-receipt.sh" "$HOOK_DIR/turn-receipt.py" "$HOOK_DIR/_common.sh" "$tr_dir/repo/.github/hooks/scripts/"
+    cp "$HOOK_DIR/turn-receipt.sh" "$HOOK_DIR/turn-receipt.py" "$HOOK_DIR/_agentlog.py" "$HOOK_DIR/_common.sh" "$tr_dir/repo/.github/hooks/scripts/"
     cp "$GITHUB_DIR/scripts/gate-health.py" "$tr_dir/repo/.github/scripts/"
     tr_chat_native=$(if command -v cygpath >/dev/null 2>&1; then cygpath -m "$tr_chat"; else printf '%s' "$tr_chat"; fi)
     tr_run() {
@@ -3221,10 +3221,16 @@ echo "## producer stop gates (executed against a stubbed suite)"
 
 # gate_case NAME HOOK EXPECT STUB STUB_EXIT STUB_STDOUT
 #   EXPECT = block | pass
-#   STUB   = pytest | run-tests   -- the command the hook shells out to
+#   STUB   = pytest | run-tests | log | stale | nolog
+#            log   -- .github/test-log.json carries an `all` entry with STUB_EXIT,
+#                     started after the last edit of the uncommitted test file;
+#                     run-tests.sh is a stub that would pass, so a hook that
+#                     still ran the suite itself would read green (#497)
+#            stale -- the same entry, started BEFORE that edit
+#            nolog -- the same, with no test log at all
 gate_case() {
     local name="$1" hook="$2" expect="$3" stub="$4" stub_exit="$5" stub_out="$6"
-    local fixture rc=0 out ok=0 stmts stub_path fault
+    local fixture rc=0 out ok=0 stmts stub_path fault log_exit=""
 
     new_fixture; fixture=$FIXTURE_DIR
     mkdir -p "$fixture/.github/hooks/scripts" "$fixture/tests" "$fixture/bin"
@@ -3242,6 +3248,16 @@ gate_case() {
             # exit code of the suite is reachable at all.
             printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/bin/pytest"
             chmod +x "$fixture/bin/pytest" ;;
+        log|stale|empty|nolog)
+            mkdir -p "$fixture/.github/scripts"
+            stub_path="$fixture/.github/scripts/run-tests.sh"
+            printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/bin/pytest"
+            chmod +x "$fixture/bin/pytest"
+            # A committed seed puts the edit in the ignore-hygiene gate's scope,
+            # which fails closed without its checker.
+            cp "$GITHUB_DIR/scripts/check-python-quality.py" "$fixture/.github/scripts/"
+            log_exit=$stub_exit
+            stub_exit=0 ;;
     esac
 
     # A quoted heredoc, not printf: a summary line is arbitrary text and may
@@ -3263,6 +3279,31 @@ gate_case() {
         PATH="$fixture/bin:$PATH"; export PATH
         git init -q .
         git checkout -q -b agent/123-x
+        # The producer edits, then runs the suite, then stops: the edit is still
+        # uncommitted when the gate reads the log, so "uncommitted" alone cannot
+        # mean stale. What decides is whether the edit came after the run started.
+        case "$stub" in
+            log|stale|empty)
+                git add tests
+                GIT_AUTHOR_DATE='2000-01-01T00:00:00Z' GIT_COMMITTER_DATE='2000-01-01T00:00:00Z' \
+                    git -c user.email=f@x -c user.name=f commit -qm seed
+                printf 'def test_edited():\n    assert True\n' >> tests/test_seeded.py ;;
+        esac
+        case "$stub" in
+            log)
+                touch -t 200001010100 tests/test_seeded.py
+                _now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                printf '{"all": {"exit_code": %s, "started": "%s", "last_run": "%s", "partial": false, "passed": 10, "total": 10}}\n' \
+                    "$log_exit" "$_now" "$_now" > .github/test-log.json ;;
+            stale)
+                printf '{"all": {"exit_code": %s, "started": "2001-01-01T00:00:00Z", "last_run": "2001-01-01T00:05:00Z", "partial": false, "passed": 10, "total": 10}}\n' \
+                    "$log_exit" > .github/test-log.json ;;
+            empty)
+                touch -t 200001010100 tests/test_seeded.py
+                _now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                printf '{"all": {"exit_code": %s, "started": "%s", "last_run": "%s", "partial": false, "passed": 0, "total": 0}}\n' \
+                    "$log_exit" "$_now" "$_now" > .github/test-log.json ;;
+        esac
         printf '%s' '{"session_id":"s1","transcript_path":"/none"}' \
             | bash ".github/hooks/scripts/$hook"
     ) > "$fixture/out.txt" 2> "$fixture/err.txt" || rc=$?
@@ -3318,19 +3359,71 @@ gate_case "red phase: a setup error exiting 1 is not a satisfied red" \
 gate_case "red phase: no tests collected is not a verdict" \
     test-writer-stop.sh pass pytest 5 "no tests ran in 0.1s"
 
-# Green and refactor phase. Both hooks already ran the suite; the defect was
-# that the result never reached the decision.
-gate_case "green phase: a failing suite blocks the implementer" \
-    implementer-stop.sh block run-tests 1 "2 failed, 8 passed in 1.0s"
+# #507: the Red gate runs the CHANGED test files, never `tests/`. The stub fails
+# when handed the whole directory, as a suite with one old red test would.
+# red_scope_case NAME FILE EXPECT_REGEX
+red_scope_case() {
+    local name="$1" file="$2" want="$3" fixture out
+    new_fixture; fixture=$FIXTURE_DIR
+    mkdir -p "$fixture/.github/hooks/scripts" "$fixture/tests" "$fixture/bin"
+    cp "$HOOK_DIR/test-writer-stop.sh" "$HOOK_DIR/_common.sh" "$fixture/.github/hooks/scripts/"
+    printf '#!/usr/bin/env bash\nif [ "$1" = "tests/" ]; then echo "1 failed, 40 passed in 900s"; exit 1; fi\necho "1 passed in 0.5s"\nexit 0\n' > "$fixture/bin/pytest"
+    chmod +x "$fixture/bin/pytest"
+    printf '# copilot:generated | test-writer | 2026-11-09\ndef test_new():\n    assert True\n' > "$fixture/$file"
+    out=$(
+        cd "${fixture:?empty fixture path (#248)}" || exit 1
+        use_fixture_conf
+        PATH="$fixture/bin:$PATH"; export PATH
+        git init -q . && git checkout -q -b agent/507-x
+        printf '%s' '{"session_id":"s1","transcript_path":"/none"}' | bash .github/hooks/scripts/test-writer-stop.sh 2>/dev/null
+    )
+    if printf '%s' "$out" | grep -qE -e "$want"; then
+        echo "PASS  $name"; pass=$((pass + 1))
+    else
+        echo "FAIL  $name -- got: ${out:-<no output>}"; fail=$((fail + 1))
+    fi
+    rm -rf "$fixture"
+}
 
-gate_case "green phase: a passing suite does not block the implementer" \
-    implementer-stop.sh pass run-tests 0 "10 passed in 1.0s"
+red_scope_case "red phase: an old red test elsewhere does not satisfy the Red gate for new passing tests" \
+    tests/test_new.py '"block".*Red phase violation|Red phase violation.*"block"'
 
-gate_case "refactor phase: a failing suite blocks the refactorer" \
-    refactorer-stop.sh block run-tests 1 "2 failed, 8 passed in 1.0s"
+red_scope_case "red phase: no changed test file means the Red gate did not run, and it never runs tests/" \
+    tests/conftest.py 'NOT RUN \(no changed test files\)'
 
-gate_case "refactor phase: a passing suite does not block the refactorer" \
-    refactorer-stop.sh pass run-tests 0 "10 passed in 1.0s"
+# Green and refactor phase. The gates read the full-suite result from the test
+# log; running the suite inside a Stop hook took 114 min in MP and was then
+# discarded as a timed-out non-blocking error (#497).
+gate_case "green phase: a failing full-suite result blocks the implementer" \
+    implementer-stop.sh block log 1 ""
+
+gate_case "green phase: a passing, current full-suite result does not block" \
+    implementer-stop.sh pass log 0 ""
+
+gate_case "green phase: no full-suite result blocks instead of running the suite" \
+    implementer-stop.sh block nolog 0 ""
+
+gate_case "refactor phase: a failing full-suite result blocks the refactorer" \
+    refactorer-stop.sh block log 1 ""
+
+gate_case "refactor phase: a passing, current full-suite result does not block" \
+    refactorer-stop.sh pass log 0 ""
+
+gate_case "refactor phase: no full-suite result blocks instead of running the suite" \
+    refactorer-stop.sh block nolog 0 ""
+
+gate_case "green phase: a pass logged before the last edit blocks" \
+    implementer-stop.sh block stale 0 ""
+
+gate_case "refactor phase: a pass logged before the last edit blocks" \
+    refactorer-stop.sh block stale 0 ""
+
+# Exit 0 with nothing executed (collect-only) is not a green suite (#504).
+gate_case "green phase: a 0/0 full-suite result blocks" \
+    implementer-stop.sh block empty 0 ""
+
+gate_case "refactor phase: a 0/0 full-suite result blocks" \
+    refactorer-stop.sh block empty 0 ""
 
 # --- The verdict still has to reach the client (issue #202) ----------------
 #
@@ -3353,12 +3446,6 @@ WIN_SUMMARY='2 failed in 1.0s -- C:\Users\me\repo\src\a.py:12	expected \"x\"'
 
 gate_case "a red verdict survives a Windows path in the summary line" \
     test-writer-stop.sh block pytest 2 "$WIN_SUMMARY"
-
-gate_case "a green-phase block survives a Windows path in the suite output" \
-    implementer-stop.sh block run-tests 1 "$WIN_SUMMARY"
-
-gate_case "a refactor-phase block survives a Windows path in the suite output" \
-    refactorer-stop.sh block run-tests 1 "$WIN_SUMMARY"
 
 # The escaping lives in one place or it does not live at all. `sed 's/"/\"/g'`
 # handles the character an author thinks of first and leaves the one that

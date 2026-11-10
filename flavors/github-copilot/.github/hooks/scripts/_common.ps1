@@ -166,6 +166,31 @@ function Get-AfPytest {
     return , @()
 }
 
+# Test-AfRunCurrent -Since <iso> -CodeRoot <path> -Paths <pathspec...>
+#
+# True when nothing under -Paths changed after the run that started at -Since.
+# The producer edits, runs `tests: all`, then stops -- its edits are still
+# uncommitted when the gate reads the log, so "uncommitted" cannot mean stale
+# (#497). A commit after the start, or a dirty or untracked file written after
+# it, can. Seconds are compared, not ticks: a run cannot be told from an edit
+# within its own first second, and such an edit was made before it. A deleted
+# file has no time to compare and does not count. An unparseable stamp is not
+# current.
+function Test-AfRunCurrent {
+    param([string]$Since, [string]$CodeRoot, [string[]]$Paths)
+    $at = [datetimeoffset]::MinValue
+    if (-not [datetimeoffset]::TryParse($Since, [ref]$at)) { return $false }
+    if (git -C $CodeRoot log --oneline --after="$Since" -- @Paths 2>$null) { return $false }
+    $limit = $at.ToUnixTimeSeconds()
+    foreach ($line in @(git -C $CodeRoot status --porcelain --untracked-files=all -- @Paths 2>$null)) {
+        if (-not $line -or $line.Length -lt 4) { continue }
+        $rel = ($line.Substring(3) -split ' -> ')[-1].Trim('"')
+        $file = Get-Item -LiteralPath (Join-Path $CodeRoot $rel) -ErrorAction SilentlyContinue
+        if ($file -and ([datetimeoffset]$file.LastWriteTimeUtc).ToUnixTimeSeconds() -gt $limit) { return $false }
+    }
+    return $true
+}
+
 # ── Workflow lifecycle ───────────────────────────────────────────────────
 #
 # Get-AfPlanLifecycle -WorkflowId <id> [-Root <path>]

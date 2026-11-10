@@ -4,7 +4,7 @@
 Joins three records AF already keeps, on one time axis:
 
   lanes   one per session log (main + each subagent): span, requests, edits
-  gates   one cell per hook verdict that names this session (gate-health.py)
+  gates   one cell per hook span in the session's own logs (gate-health.py)
   cost    credits by agent x model (collect-session-cost.py), with its coverage
   log     spawns, ends, edits and the gate verdicts that decided or did not run
 
@@ -16,7 +16,7 @@ Run by hand to inspect a session (af-caller-ok: no hook invokes it; the
 documenter may link the file it writes).
 
 Usage:
-    flight-report.py --session-dir DIR [--log FILE ...] [--out FILE]
+    flight-report.py --session-dir DIR [--out FILE]
 
 Exit codes: 0 report written, 2 no session (directory or main.jsonl missing).
 """
@@ -84,13 +84,9 @@ def cost_rows(facts: list[dict[str, Any]]) -> list[dict]:
     return sorted(rows, key=lambda r: (-r["credits"], r["agent"], r["model"]))
 
 
-def gate_cells(health: ModuleType, logs: list[Path], session: str) -> list[dict]:
-    cells = [
-        r
-        for r in health.iter_runs(logs)
-        if r["type"] == "outcome" and r["session"] == session and r["outcome"] != "timeout"
-    ]
-    return sorted(cells, key=lambda c: (c["ts"] is None, c["ts"] or 0))
+def gate_cells(health: ModuleType, agentlog: ModuleType, session_dir: str) -> list[dict]:
+    cells = [health.span_verdict(span) for span in agentlog.hook_spans(session_dir)]
+    return sorted(cells, key=lambda c: c["ts"])
 
 
 def render(
@@ -231,7 +227,6 @@ def _context_panel(lane_rows: list[dict], series: dict[str, dict[str, Any]], lo:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--session-dir", required=True, help="the chat session's debug-log directory")
-    parser.add_argument("--log", action="append", default=[], help="a hook log file (repeatable)")
     parser.add_argument("--out", default="", help="output file (default .github/logs/flight-<session>.html)")
     args = parser.parse_args()
 
@@ -247,12 +242,11 @@ def main() -> int:
 
     cost = cost_mod.collect(session_dir, None)
     facts = cost.get("facts") or []
-    logs = [Path(p) for p in args.log] or health.find_logs(health.default_root())
 
     page = render(
         session,
         lanes(cost_mod, agentlog, session_dir, facts),
-        gate_cells(health, [p for p in logs if p.is_file()], session),
+        gate_cells(health, agentlog, session_dir),
         cost,
         cost_rows(facts),
         cost_mod.context_series(facts, head_lost=cost.get("coverage") == "truncated"),

@@ -227,6 +227,11 @@ if ($Changed -or $ListSelection) {
         exit 0
     }
     $suites = @($suites | Where-Object { $chosen -contains $_.Name })
+    # Every selected suite was -Exclude'd: CI runs those in their own step (#512).
+    if ($suites.Count -eq 0) {
+        Write-Host "Nothing to run -- the selected suite(s) $($chosen -join ', ') are excluded here."
+        exit 0
+    }
 }
 
 if ($suites.Count -eq 0) {

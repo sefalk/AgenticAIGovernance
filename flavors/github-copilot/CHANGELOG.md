@@ -14,6 +14,81 @@ still fails the build for a repeated `###` kind inside one section (#322).
 
 ## [Unreleased]
 
+## [1.28.4] -- 2026-11-10
+
+### Changed
+
+- **The flight report's gate strip reads the session's own debug-log `hook`
+  spans (#492).** It read VS Code's per-window `Hooks.log` and filtered it to
+  the session. The debug logs carry every hook's command and output, scoped to
+  the session, with subagent verdicts in the subagent's log. `--log` is gone.
+  The span reader is `_agentlog.hook_spans()` and the verdict is
+  `gate-health.span_verdict()`; `turn-receipt` (#478) uses the same pair.
+  `gate-health.py` keeps reading `Hooks.log` for its cross-session counts.
+
+- **The green and refactor gates read the full-suite result; they never run
+  the suite themselves (#497).** Since #473 the stop hooks found pytest and ran
+  `tests: all` inside the `Stop` hook whenever the test log had no current pass.
+  In MP that ran from 22:12 to 00:06 (114 min). The host did not enforce the
+  30 s timeout, and the verdict was then discarded as a `non_blocking_error`:
+  the agent waited two hours and the gate still failed open.
+  - `implementer-stop` and `refactorer-stop` (both dialects) accept a current,
+    complete, passing `all` entry in `.github/test-log.json` as before.
+  - Otherwise they **block**. A failed last run gets "fix it, run `tests: all`
+    once more". A missing, partial or stale entry gets "run `tests: all` once
+    as your last step, then stop again".
+  - The producers now run `tests: all` once as their last step. The number of
+    full runs per phase is unchanged; the run moved from the hook to the agent,
+    where it is visible and has no hook timeout.
+  - **A logged pass is current when nothing changed after the run started.**
+    Before, any uncommitted file under `SRC_DIR` or `tests/` made the log
+    stale. A producer stops before the coordinator commits, so under the new
+    rule that would have blocked every green phase forever. Now a commit after
+    the run started makes the log stale, and so does a dirty or untracked file
+    written after it (`Test-AfRunCurrent` / `af_run_current` in `_common`).
+  - Updated to match: the `test-execution` skill budgets (implementer and
+    refactorer 1× all), `implementer.agent.md`, `refactorer.agent.md` and
+    `testing.instructions.md`.
+
+- **`run_script` progress names the start time and the walltime bound (#508).**
+  The progress line used to read `1351s: <last line>`. It now reads
+  `14:02:11 - 1351s/2400s max: <last line>`:
+  - the local time the script started (not the approval wait);
+  - the elapsed seconds;
+  - the walltime that applies to this run, whether explicit, learned from past
+    runs, or taken from the suite budget.
+
+  The collapsed subagent overview in VS Code still shows only
+  `Running run_script`. That line is drawn by the client, and a server cannot
+  change it.
+
+### Fixed
+
+- **`pytest --collect-only` no longer counts as a green full-suite run (#504).**
+  The `af_test_log` plugin filed a collect-only run of `tests/` under `all`.
+  Such a run exits 0 and executes no tests, so the entry read "0/0 passed" and
+  replaced the last real result. The green and refactor gates then accepted it.
+  - The plugin now writes no entry for a collect-only run.
+  - The gates, in both ps1 and sh, accept a pass only when `total > 0`.
+
+- **The Red gate runs only the changed test files (#507).** `test-writer-stop`
+  (ps1 and sh) used to run `pytest tests/`, the whole suite, inside a Stop
+  hook. In MP that took hours and ended as a host timeout. It also answered the
+  wrong question: one pre-existing red test anywhere in `tests/` satisfied the
+  gate for new tests that all passed.
+  - The gate now runs the files `git status` shows as new or modified under
+    `tests/` (`test_*.py`, `*_test.py`).
+  - If no test file changed, it reports
+    `Red gate NOT RUN (no changed test files)`.
+
+- **A scoped run whose only selected suites are excluded is "nothing to run",
+  not a failure (#512).** CI sweeps with
+  `-Exclude test-hooks-integration.ps1, test-deploy-engine.ps1`, because those
+  two suites have their own steps. A PR that touched only `mcp-deploy/`
+  selected `test-deploy-engine.ps1` alone. Exclusion left zero suites, and
+  `run-all-tests.ps1` exited 1 with `No suites matched filter '*'`, so such a
+  PR could not pass CI. It now prints `Nothing to run` and exits 0.
+
 ## [1.28.3] -- 2026-11-06
 
 ### Fixed

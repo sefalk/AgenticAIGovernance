@@ -23,6 +23,7 @@ duplication for one indirection — but the split is real and worth stating:
                       harvest_paths
   edit scan           is_edit_tool, scan_edits             concurrent-agent-edits,
                                                            repo-gates
+  hook spans          hook_spans                           turn-receipt, flight-report
 """
 
 from __future__ import annotations
@@ -51,6 +52,7 @@ TOOL_CALL_HINT = b'"tool_call"'
 PATH_KEYS = frozenset({"filePath", "path", "dirPath", "notebookUri", "uri"})
 
 TS = re.compile(rb'"ts":\s*(\d+)')
+HOOK_SPAN = b'"type":"hook"'
 
 # Allowlist, not a denylist. `read_file` and `grep_search` also carry a
 # `filePath`, and harvesting those would attribute files nobody wrote.
@@ -133,6 +135,34 @@ def scan_edits(path: str) -> tuple[int | None, int | None, set[str]]:
     except OSError:
         return None, None, set()
     return first_ts, last_ts, edited
+
+
+def hook_spans(session_dir: str) -> list[dict]:
+    """Every `hook` span in a session's logs: main.jsonl and each subagent log (#492).
+
+    A span carries the event (`name`), `attrs.command` and `attrs.output`; a
+    subagent's own Stop verdict sits in its runSubagent log.
+    """
+    spans: list[dict] = []
+    try:
+        names = sorted(n for n in os.listdir(session_dir) if n.endswith(".jsonl"))
+    except OSError:
+        return spans
+    for name in names:
+        try:
+            with open(os.path.join(session_dir, name), "rb") as handle:
+                for raw in handle:
+                    if HOOK_SPAN not in raw:
+                        continue
+                    try:
+                        span = json.loads(raw)
+                    except ValueError:
+                        continue
+                    if isinstance(span, dict) and span.get("type") == "hook" and isinstance(span.get("ts"), int):
+                        spans.append(span)
+        except OSError:
+            continue
+    return spans
 
 
 def agent_from(filename: str) -> str:

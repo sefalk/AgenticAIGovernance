@@ -59,6 +59,14 @@ if ($pytest.Count -eq 0) {
     $redNotRun = 'no tests/ directory'
 }
 
+# The NEW tests must fail, so only they run: `tests/` took hours in a Stop hook
+# and any old red test anywhere satisfied the gate (#507).
+$redFiles = @(& git -C $codeRoot status --porcelain --untracked-files=all -- 'tests/' 2>$null |
+    Where-Object { $_ -and $_.Length -gt 3 -and $_ -notmatch '^ ?D' } |
+    ForEach-Object { (($_.Substring(3)) -split ' -> ')[-1].Trim('"') } |
+    Where-Object { (Split-Path $_ -Leaf) -match '^test_.*\.py$|_test\.py$' -and (Test-Path (Join-Path $codeRoot $_)) })
+if (-not $redNotRun -and $redFiles.Count -eq 0) { $redNotRun = 'no changed test files' }
+
 # ---------- Gate 1: Red phase -- new tests must FAIL ----------
 
 $result = @()
@@ -66,7 +74,7 @@ if (-not $redNotRun) {
     $pytestExe = $pytest[0]
     $pytestArgs = @($pytest | Select-Object -Skip 1)
     Push-Location $codeRoot
-    $result = & $pytestExe @pytestArgs tests/ -q --tb=line --no-header 2>&1
+    $result = & $pytestExe @pytestArgs @redFiles -q --tb=line --no-header 2>&1
     $exitCode = $LASTEXITCODE
     Pop-Location
 

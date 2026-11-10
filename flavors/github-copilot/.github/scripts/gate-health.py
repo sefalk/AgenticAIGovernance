@@ -112,6 +112,18 @@ def classify(payload: str) -> str:
     return "not_run" if NOT_RUN.search(text) else "pass"
 
 
+def span_verdict(span: dict) -> dict[str, Any]:
+    """One debug-log `hook` span -> script, event, ts and outcome (#492).
+
+    The session debug logs record every hook with its output, scoped to the
+    session by construction; the per-window Hooks.log is not needed for that.
+    """
+    attrs = span.get("attrs") or {}
+    outcome = "error" if span.get("status") not in (None, "ok") else classify(str(attrs.get("output") or ""))
+    script = script_of(json.dumps({"command": str(attrs.get("command") or "")})) or str(span.get("name"))
+    return {"script": script, "event": span.get("name"), "ts": span.get("ts"), "outcome": outcome}
+
+
 def find_logs(root: Path) -> list[Path]:
     return sorted(root.rglob(LOG_NAME)) if root.is_dir() else []
 
