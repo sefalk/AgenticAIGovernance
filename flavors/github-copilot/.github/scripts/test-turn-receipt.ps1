@@ -83,6 +83,20 @@ $firstDir = New-Session 'first' @{
     'runSubagent-implementer-toolu_D4.jsonl' = @((Span 'SubagentStop' 'implementer-stop.ps1' -30 $notRun))
 }
 
+# A guard hook that ends in error let its tool call through unchecked (#515).
+function ErrSpan([string]$Event, [string]$Script, [int]$Offset) {
+    [ordered]@{
+        ts = $NOWMS + 1000 * $Offset; dur = 36000; sid = $SID; type = 'hook'; name = $Event; spanId = "e$Offset"; status = 'error'
+        attrs = [ordered]@{ command = "powershell -ExecutionPolicy Bypass -File .github\hooks\scripts\$Script"; input = '{}'; output = ''; resultKind = 'non_blocking_error' }
+    } | ConvertTo-Json -Compress -Depth 5
+}
+$failLog = @((ErrSpan 'PreToolUse' 'block-dangerous.ps1' -40), (ErrSpan 'PreToolUse' 'block-dangerous.ps1' -39),
+    (ErrSpan 'PostToolUse' 'scan-secrets.ps1' -38), (ErrSpan 'SubagentStop' 'cost-snapshot.ps1' -30))
+$failDir = New-Session 'failopen' @{
+    'main.jsonl' = @((Span 'Stop' 'stop-tests.ps1' -60 '{"status":"PASS"}'))
+    'runSubagent-ado-work-item-manager-toolu_E5.jsonl' = $failLog
+}
+
 $payload = "{`"session_id`":`"$SID`",`"timestamp`":`"$($NOW.UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ss.fffZ'))`",`"hook_event_name`":`"Stop`",`"transcript_path`":`"c:\\\\nowhere\\\\transcripts\\\\$SID.jsonl`"}"
 
 function Invoke-Receipt([string]$Dir, [string]$Shell = 'ps') {
@@ -124,6 +138,35 @@ try {
     # First turn of a session: no earlier Stop, so the whole session so far counts.
     $r = Invoke-Receipt $firstDir
     Add-Result 'C3_the_first_turn_counts_from_the_session_start' ((Get-Message $r.Out) -match 'implementer-stop NOT RUN') "out=$($r.Out)"
+
+    $r = Invoke-Receipt $failDir
+    $msg = Get-Message $r.Out
+    Add-Result 'F1_a_guard_error_is_named_fail_open' `
+        ($msg -match 'block-dangerous FAIL-OPEN x2' -and $msg -match 'scan-secrets FAIL-OPEN') "msg=$msg"
+    Add-Result 'F2_a_non_guard_error_keeps_its_plain_label' `
+        ($msg -match 'cost-snapshot error' -and $msg -notmatch 'cost-snapshot FAIL-OPEN') "msg=$msg"
+
+    # When the subagent returns, the coordinator's PostToolUse on runSubagent
+    # tells the coordinator itself, before it acts on the result (#515).
+    $scan = Join-Path $hookDir 'scan-secrets.ps1'
+    $bSid = 'b5150000-0000-4000-8000-000000000515'
+    $bChat = Join-Path $fixtureDir 'ws'
+    $bLogs = Join-Path $bChat "debug-logs/$bSid"
+    New-Item -ItemType Directory -Path $bLogs -Force | Out-Null
+    [IO.File]::WriteAllLines((Join-Path $bLogs 'runSubagent-ado-work-item-manager-toolu_E5.jsonl'), [string[]]$failLog)
+    [IO.File]::WriteAllLines((Join-Path $bLogs 'runSubagent-planner-toolu_F6.jsonl'), [string[]]@((Span 'PreToolUse' 'block-dangerous.ps1' -10 '{}')))
+    function Invoke-SubagentReturn([string]$Agent, [string]$Call) {
+        $p = [ordered]@{ hook_event_name = 'PostToolUse'; session_id = $bSid; tool_name = 'runSubagent'
+            transcript_path = (Join-Path $bChat "transcripts/$bSid.jsonl"); tool_use_id = "${Call}__vscode-1794005468205"
+            tool_input = @{ agentName = $Agent; description = 'x'; prompt = 'x' }; tool_response = 'done' } | ConvertTo-Json -Compress
+        $ErrorActionPreference = 'Continue'
+        return ($p | powershell -NoProfile -ExecutionPolicy Bypass -File $scan 2>&1 | Out-String).Trim()
+    }
+    $out = Invoke-SubagentReturn 'ado-work-item-manager' 'toolu_E5'
+    Add-Result 'B1_the_coordinator_learns_of_fail_open_guards_when_the_subagent_returns' `
+        ($out -match 'additionalContext' -and $out -match 'FAIL-OPEN' -and $out -match 'ado-work-item-manager' -and $out -match 'block-dangerous x2') "out=$out"
+    $out = Invoke-SubagentReturn 'planner' 'toolu_F6'
+    Add-Result 'B2_a_clean_subagent_adds_no_context' ($out -notmatch 'FAIL-OPEN') "out=$out"
 
     $hooksJson = Get-Content -Raw (Join-Path (Split-Path -Parent $scriptDir) 'hooks/agent-hooks.json') | ConvertFrom-Json
     $declared = @($hooksJson.hooks.Stop | Where-Object { [string]$_.windows -match 'turn-receipt\.ps1' -and [string]$_.command -match 'turn-receipt\.sh' })
