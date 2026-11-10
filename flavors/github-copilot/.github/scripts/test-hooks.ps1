@@ -4867,6 +4867,22 @@ Assert-True "red phase: no tests collected is not a verdict" `
     ((Get-RedPhaseDecision -StubExit 5 -StubSummary 'no tests ran in 0.1s') -eq 'pass') `
     "an empty run is a skip, not a satisfied red and not a violation"
 
+# #507: the Red gate runs the CHANGED test files, never `tests/`. The stub fails
+# when handed the whole directory, as a suite with one old red test would.
+$rgStub = "@echo off`r`nif `"%~1`"==`"tests/`" (echo 1 failed, 40 passed in 900s& exit /b 1)`r`necho 1 passed in 0.5s`r`nexit /b 0`r`n"
+$rgNew = "# copilot:generated | test-writer | 2026-11-09`ndef test_new():`n    assert True`n"
+$r = Invoke-Hook -Script 'test-writer-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/507-x' `
+    -StubBin $PYTEST_STUB_DIR -StubFiles @{ "$PYTEST_STUB_DIR/pytest.cmd" = $rgStub } `
+    -Files @{ 'tests/test_new.py' = $rgNew }
+Assert-True "red phase: an old red test elsewhere does not satisfy the Red gate for new passing tests" `
+    ((Resolve-StopDecision $r.Output $r.ExitCode) -eq 'block' -and $r.Output -match 'Red phase violation') "got: $($r.Output)"
+
+$r = Invoke-Hook -Script 'test-writer-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/507-x' `
+    -StubBin $PYTEST_STUB_DIR -StubFiles @{ "$PYTEST_STUB_DIR/pytest.cmd" = $rgStub } `
+    -Files @{ 'tests/conftest.py' = "# copilot:generated | test-writer | 2026-11-09`n" }
+Assert-True "red phase: no changed test file means the Red gate did not run, and it never runs tests/" `
+    ($r.Output -match 'NOT RUN \(no changed test files\)') "got: $($r.Output)"
+
 Write-Output ""
 
 # --- The test runner lives in the venv, not on PATH (issue #473) -------------
@@ -4948,6 +4964,15 @@ if ($tvVenv) {
             -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
         Assert-True "$tvHook reads a running entry as no result, not as a failed run" `
             ((Resolve-StopDecision $r.Output $r.ExitCode) -eq 'block' -and $r.Output -match 'no current full-suite pass' -and $r.Output -notmatch 'violation') "got: $($r.Output)"
+
+        # Exit 0 with nothing executed (collect-only) is not a green suite (#504).
+        $tvEmpty = '{"all": {"exit_code": 0, "status": "ok", "started": "' + $tvFresh + '", "last_run": "' + $tvFresh + '", "partial": false, "passed": 0, "total": 0}}'
+        $r = Invoke-Hook -Script $tvHook -JsonInput $STOP_JSON -Branch 'agent/504-x' `
+            -PathWithout 'pytest' -CopyIn @{ '.venv' = $tvVenv } `
+            -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n"; '.github/test-log.json' = $tvEmpty } `
+            -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
+        Assert-True "$tvHook does not accept a 0/0 full-suite result" `
+            ((Resolve-StopDecision $r.Output $r.ExitCode) -eq 'block' -and $r.Output -match 'no current full-suite pass') "got: $($r.Output)"
     }
 
     foreach ($tvHook in @('implementer-stop.ps1', 'refactorer-stop.ps1')) {

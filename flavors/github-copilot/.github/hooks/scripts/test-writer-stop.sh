@@ -49,6 +49,19 @@ elif [ ! -d "tests/" ]; then
     red_not_run="no tests/ directory"
 fi
 
+# The NEW tests must fail, so only they run: `tests/` took hours in a Stop hook
+# and any old red test anywhere satisfied the gate (#507).
+red_files=()
+while IFS= read -r _rf_line; do
+    [ "${#_rf_line}" -gt 3 ] || continue
+    case "$_rf_line" in 'D '*|' D'*) continue ;; esac
+    _rf=${_rf_line:3}; _rf=${_rf##* -> }; _rf=${_rf#\"}; _rf=${_rf%\"}
+    case "${_rf##*/}" in test_*.py|*_test.py) [ -f "$_rf" ] && red_files+=("$_rf") ;; esac
+done <<<"$(git status --porcelain --untracked-files=all -- tests/ 2>/dev/null)"
+if [ -z "$red_not_run" ] && [ "${#red_files[@]}" -eq 0 ]; then
+    red_not_run="no changed test files"
+fi
+
 # ---------- Gate 1: Red phase — new tests must FAIL ----------
 
 # The exit code has to be read from pytest itself. `output=$(pytest ...) || true`
@@ -56,7 +69,7 @@ fi
 # path — so this gate always took the "all tests PASS" branch and blocked every
 # legitimate Red phase. Same bug, same fix as scan-secrets.sh (issue #123).
 if [ -z "$red_not_run" ]; then
-    output=$("${AF_PYTEST[@]}" tests/ -q --tb=line --no-header 2>&1)
+    output=$("${AF_PYTEST[@]}" "${red_files[@]}" -q --tb=line --no-header 2>&1)
     exit_code=$?
 
     # Exit code 0 = all tests pass → Red phase violation
