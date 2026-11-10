@@ -243,7 +243,7 @@ def execute(
     cwd: Path,
     log_path: Path,
     walltime_s: int,
-    on_tick: Callable[[float, str], None] | None = None,
+    on_tick: Callable[[float, str, int], None] | None = None,
     tick_s: float = 15.0,
 ) -> tuple[str, int | None, float, str]:
     """Run ``argv`` to completion or walltime; return (verdict, exit code, duration, full output)."""
@@ -265,7 +265,7 @@ def execute(
                 if on_tick is not None and elapsed >= next_tick:
                     next_tick += tick_s
                     last = log_path.read_bytes()[-400:].decode("utf-8", errors="replace").splitlines()
-                    on_tick(elapsed, last[-1] if last else "")
+                    on_tick(elapsed, last[-1] if last else "", walltime_s)
     duration = round(time.monotonic() - t0, 2)
     output = log_path.read_bytes().decode("utf-8", errors="replace")
     if code is None:
@@ -290,7 +290,7 @@ def run_script(
     args: list[str],
     walltime_s: int | None = None,
     approve: Callable[[Resolved, str, Config], str | None] | None = None,
-    on_tick: Callable[[float, str], None] | None = None,
+    on_tick: Callable[[float, str, int], None] | None = None,
     tick_s: float = 15.0,
 ) -> dict:
     """Resolve, approve, run and log one script. Never raises for a refusal.

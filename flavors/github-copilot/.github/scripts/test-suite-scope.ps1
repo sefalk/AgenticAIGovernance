@@ -118,6 +118,18 @@ Add-Result 'S8_a_change_only_in_ignored_paths_selects_nothing' `
     ($ignored -match 'nothing selected') `
     'ignored path'
 
+# #512: CI excludes suites that have their own step. A selection made only of
+# those is nothing to run here, not "no suites matched" with exit 1.
+$ErrorActionPreference = 'Continue'
+$exOut = & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -Changed `
+    -ChangedFiles @('flavors/github-copilot/mcp-deploy/af_deploy_mcp/command_core.py') `
+    -PayloadPrefix 'flavors/github-copilot/' -Exclude @('test-deploy-engine.ps1') 2>&1 | Out-String
+$exExit = $LASTEXITCODE
+$ErrorActionPreference = 'Stop'
+Add-Result 'S8b_a_selection_left_empty_by_exclude_is_nothing_to_run' `
+    ($exExit -eq 0 -and $exOut -match 'Nothing to run') `
+    "exit=$exExit out=$($exOut.Trim())"
+
 # VERSION changes at a release cut, and a changelog fragment comes with nearly
 # every pull request (#426). Neither is code a suite covers; without them in the
 # ignore list a scoped run would hit the fallback and degrade to a full sweep.
