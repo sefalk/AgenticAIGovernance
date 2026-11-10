@@ -1329,6 +1329,84 @@ Assert-Decision "trust store: content naming the store is not a write to it" 'si
 
 Write-Output ""
 
+# ── Read-only fast path (issue #515) ─────────────────────────────────────
+#
+# Six parallel MCP reads took the guards to 13-57 s; a quarter timed out and
+# failed open. A read must leave both guards before any Python starts. The
+# probe is an AF_PYTHON_OVERRIDE stub that records each start, then runs the
+# real interpreter so the full path still answers normally.
+Write-Output "## guard hooks: read-only fast path (#515)"
+$roDir = Join-Path ([IO.Path]::GetTempPath()) "af-515-$(Get-Random)"
+New-Item -ItemType Directory -Path $roDir -Force | Out-Null
+$roMarker = Join-Path $roDir 'started.txt'
+$roReal = (Get-Command python -ErrorAction SilentlyContinue).Source
+$roStub = Join-Path $roDir 'python-probe.cmd'
+Set-Content -Path $roStub -Encoding ascii -Value "@echo off`r`necho x>>`"$roMarker`"`r`n`"$roReal`" %*`r`n"
+
+function Invoke-RoProbe {
+    param([string]$Script, [string]$Json)
+    Remove-Item -LiteralPath $roMarker -ErrorAction SilentlyContinue
+    $saved = $env:AF_PYTHON_OVERRIDE
+    $env:AF_PYTHON_OVERRIDE = $roStub
+    try { $r = Invoke-HookScript -HookPath (Join-Path $scriptDir $Script) -JsonInput $Json }
+    finally { $env:AF_PYTHON_OVERRIDE = $saved }
+    @{ Output = $r.Output; Started = (Test-Path -LiteralPath $roMarker) }
+}
+
+$roList = '{"tool_name":"mcp_azure_devops__wit_work_item","tool_input":{"action":"list_comments","workItemId":3403,"top":1},"tool_response":"[]"}'
+$r = Invoke-RoProbe 'block-dangerous.ps1' $roList
+Assert-True "block-dangerous answers an MCP read without starting Python" `
+    ($r.Output -eq '{}' -and -not $r.Started) "out=$($r.Output) started=$($r.Started)"
+$r = Invoke-RoProbe 'block-dangerous.ps1' '{"tool_name":"read_file","tool_input":{"filePath":"C:\\repo\\a.py"}}'
+Assert-True "block-dangerous answers read_file without starting Python" `
+    ($r.Output -eq '{}' -and -not $r.Started) "out=$($r.Output) started=$($r.Started)"
+$r = Invoke-RoProbe 'block-dangerous.ps1' '{"tool_name":"mcp_azure_devops__wit_work_item_write","tool_input":{"action":"update","id":1,"updates":[]}}'
+Assert-True "block-dangerous still runs the full path for a work-item write (control)" `
+    $r.Started "out=$($r.Output)"
+$r = Invoke-RoProbe 'block-dangerous.ps1' '{"tool_name":"read_file","tool_input":{"note":"{\"tool_name\":\"x\"}","tool_name":"runInTerminal"}}'
+Assert-True "block-dangerous takes the full path when tool_name is ambiguous" `
+    $r.Started "out=$($r.Output)"
+
+$r = Invoke-RoProbe 'scan-secrets.ps1' $roList
+Assert-True "scan-secrets answers a small MCP read without starting Python" `
+    ($r.Output -eq '{}' -and -not $r.Started) "out=$($r.Output) started=$($r.Started)"
+$r = Invoke-RoProbe 'scan-secrets.ps1' '{"tool_name":"mcp_azure_devops__wit_work_item","tool_input":{"action":"get","id":3403},"tool_response":"{}"}'
+Assert-True "scan-secrets still records a work-item get for the field guard" `
+    $r.Started "out=$($r.Output)"
+$r = Invoke-RoProbe 'scan-secrets.ps1' '{"tool_name":"mcp_github_mcp_se_issue_read","tool_input":{"method":"get","issue_number":1},"tool_response":"{}"}'
+Assert-True "scan-secrets still records an issue read for the body guard" `
+    $r.Started "out=$($r.Output)"
+$roBig = '{"tool_name":"mcp_azure_devops__wit_work_item","tool_input":{"action":"list_comments"},"tool_response":"' + ('x' * 9000) + '"}'
+$r = Invoke-RoProbe 'scan-secrets.ps1' $roBig
+Assert-True "scan-secrets still inspects a read large enough to spill (#341)" `
+    $r.Started "out=$($r.Output.Substring(0, [Math]::Min(80, $r.Output.Length)))"
+
+# The allowlist decides what skips the guard, so it must never name a tool a
+# guard acts on, and both dialects must hold the same list.
+$roPs = Get-Content (Join-Path $scriptDir '_readonly.ps1') -Raw -ErrorAction SilentlyContinue
+$roSh = Get-Content (Join-Path $scriptDir '_readonly.sh') -Raw -ErrorAction SilentlyContinue
+$roPsPat = if ($roPs -match '(?m)^\$afReadOnlyTools = ''([^'']+)''') { $Matches[1] } else { '' }
+$roShPat = if ($roSh -match '(?m)^AF_READONLY_TOOLS=''([^'']+)''') { $Matches[1] } else { '' }
+Assert-True "the read-only allowlist is identical in both dialects" `
+    ($roPsPat -and $roPsPat -eq $roShPat) "ps1=[$roPsPat] sh=[$roShPat]"
+$roGated = @('runInTerminal', 'run_in_terminal', 'create_and_run_task', 'run_task', 'run_notebook_cell',
+    'mcp_pylance_mcp_s_pylanceRunCodeSnippet', 'run_vscode_command', 'create_file', 'replace_string_in_file',
+    'multi_replace_string_in_file', 'edit_notebook_file', 'mcp_azure_devops__wit_work_item_write',
+    'mcp_azure_devops__repo_pull_request_write', 'mcp_azure_devops__wiki_upsert_page',
+    'mcp_github_mcp_se_issue_write', 'mcp_github_mcp_se_sub_issue_write', 'mcp_github_mcp_se_update_pull_request',
+    'mcp_github_mcp_se_update_issue_comment', 'mcp_github_mcp_se_create_pull_request',
+    'mcp_github_mcp_se_merge_pull_request', 'mcp_af-command_run_script', 'mcp_af_apply')
+$roLeak = @($roGated | Where-Object { $roPsPat -and $_ -cmatch $roPsPat })
+Assert-True "no guarded tool is on the read-only allowlist" `
+    ($roPsPat -and $roLeak.Count -eq 0) "leaked: $($roLeak -join ', ')"
+$roReads = @('read_file', 'mcp_azure_devops__wit_work_item', 'mcp_github_mcp_se_issue_read',
+    'mcp_github_mcp_se_list_pull_requests', 'mcp_af-command_list_scripts', 'mcp_azure_devops__search_workitem')
+$roMiss = @($roReads | Where-Object { -not ($roPsPat -and $_ -cmatch $roPsPat) })
+Assert-True "known read tools are on the allowlist" ($roMiss.Count -eq 0) "missing: $($roMiss -join ', ')"
+Remove-Item -LiteralPath $roDir -Recurse -Force -ErrorAction SilentlyContinue
+
+Write-Output ""
+
 # ── 2. coordinator-pretooluse.ps1 ────────────────────────────────────────
 
 Write-Output "## coordinator-pretooluse.ps1"

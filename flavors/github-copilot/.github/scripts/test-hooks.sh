@@ -490,6 +490,42 @@ WT_POS_BAD='{"tool_name":"runInTerminal","tool_input":{"command":"git worktree a
 WT_COLLIDE_SPACED='{"tool_name":"runInTerminal","tool_input":{"command":"git worktree add \"existing wt\" agent/collide-x"}}'
 WT_COLLIDE_PLAIN='{"tool_name":"runInTerminal","tool_input":{"command":"git worktree add existingwt agent/collide-y"}}'
 
+# Read-only fast path (issue #515). Six parallel MCP reads took the guards to
+# 13-57 s; a quarter timed out and failed open. A read must leave both guards
+# before any Python starts. The probe is an AF_PYTHON_OVERRIDE stub that
+# records each start, then runs the real interpreter.
+echo "## guard hooks: read-only fast path (#515)"
+ro_dir=$(mktemp -d)
+ro_real=""
+for ro_c in python3 python py; do
+    # Probe, not presence: the WindowsApps python3 stub resolves and runs nothing.
+    if command -v "$ro_c" >/dev/null 2>&1 && "$ro_c" -c 'pass' >/dev/null 2>&1; then ro_real=$(command -v "$ro_c"); break; fi
+done
+printf '#!/usr/bin/env bash\necho x >> "%s/started"\nexec "%s" "$@"\n' "$ro_dir" "$ro_real" > "$ro_dir/python-probe"
+chmod +x "$ro_dir/python-probe"
+ro_probe() {
+    rm -f "$ro_dir/started"
+    ro_out=$(printf '%s' "$2" | AF_PYTHON_OVERRIDE="$ro_dir/python-probe" bash "$HOOK_DIR/$1" 2>/dev/null)
+    ro_started=0
+    [ -f "$ro_dir/started" ] && ro_started=1
+}
+ro_list='{"tool_name":"mcp_azure_devops__wit_work_item","tool_input":{"action":"list_comments","workItemId":3403,"top":1},"tool_response":"[]"}'
+ro_probe block-dangerous.sh "$ro_list"
+assert_true "block-dangerous answers an MCP read without starting Python" \
+    "$([ "$ro_out" = '{}' ] && [ $ro_started -eq 0 ] && echo 1 || echo 0)" "out=$ro_out started=$ro_started"
+ro_probe block-dangerous.sh '{"tool_name":"mcp_azure_devops__wit_work_item_write","tool_input":{"action":"update","id":1,"updates":[]}}'
+assert_true "block-dangerous still runs the full path for a work-item write (control)" "$ro_started" "out=$ro_out"
+ro_probe scan-secrets.sh "$ro_list"
+assert_true "scan-secrets answers a small MCP read without starting Python" \
+    "$([ "$ro_out" = '{}' ] && [ $ro_started -eq 0 ] && echo 1 || echo 0)" "out=$ro_out started=$ro_started"
+ro_probe scan-secrets.sh '{"tool_name":"mcp_azure_devops__wit_work_item","tool_input":{"action":"get","id":3403},"tool_response":"{}"}'
+assert_true "scan-secrets still records a work-item get for the field guard" "$ro_started" "out=$ro_out"
+ro_probe scan-secrets.sh '{"tool_name":"mcp_github_mcp_se_issue_read","tool_input":{"method":"get","issue_number":1},"tool_response":"{}"}'
+assert_true "scan-secrets still records an issue read for the body guard" "$ro_started" "out=$ro_out"
+ro_probe scan-secrets.sh "{\"tool_name\":\"mcp_azure_devops__wit_work_item\",\"tool_input\":{\"action\":\"list_comments\"},\"tool_response\":\"$(printf 'x%.0s' $(seq 1 9000))\"}"
+assert_true "scan-secrets still inspects a read large enough to spill (#341)" "$ro_started" "started=$ro_started"
+rm -rf "$ro_dir"
+
 # The coordinator hook's whole purpose is delegation enforcement, and nothing
 # here exercised it -- which is how it stayed unparsable, and therefore silent,
 # without a single red test (issue #65).
