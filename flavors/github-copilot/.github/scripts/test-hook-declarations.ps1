@@ -109,8 +109,10 @@ try {
 # (85 of 1976 runs unchecked); implementer-stop 45-80 s against the implicit
 # 30 s frontmatter default (8 of 11 unchecked). Every declaration therefore
 # carries an explicit timeout, and the measured hooks keep their floor.
+# block-dangerous 60 s (#515): six parallel MCP calls under load took it to 36 s
+# (12 of 40 runs unchecked at 15 s); idle six-parallel p95 is 3.5 s.
 $floors = @{
-    'block-dangerous'  = 15; 'scan-secrets' = 20; 'stop-tests' = 120
+    'block-dangerous'  = 60; 'scan-secrets' = 20; 'stop-tests' = 120
     'implementer-stop' = 300; 'refactorer-stop' = 300; 'test-writer-stop' = 300
 }
 $defaultFloor = 15
