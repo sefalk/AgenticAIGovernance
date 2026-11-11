@@ -33,7 +33,8 @@ function New-Session([string]$Root, [string]$Sid, [datetime]$Date, [string[]]$To
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
     $defs = @($Tools | ForEach-Object { [ordered]@{ name = $_; description = ('D' * 402) } })
     $dump = Join-Path $dir 'tools_0.json'
-    [IO.File]::WriteAllText($dump, (J ([ordered]@{ content = (J $defs) })))
+    # -InputObject: piping a one-element array would unroll it into a bare object.
+    [IO.File]::WriteAllText($dump, (J ([ordered]@{ content = (ConvertTo-Json -InputObject $defs -Compress -Depth 6) })))
     (Get-Item $dump).LastWriteTime = $Date
     $lines = @(J ([ordered]@{ v = 1; ts = 1785760263230; sid = $Sid; type = 'session_start'; name = 'session_start'; spanId = 's0'; status = 'ok'; attrs = @{} }))
     foreach ($c in $Calls) {
@@ -65,6 +66,11 @@ try {
     New-Session $main 'a3' ([datetime]'2026-11-03 10:00') $inWindow @('read_file')
     New-Session $main 'a4' ([datetime]'2026-11-04 10:00') $inWindow
     New-Session $main 'old' ([datetime]'2026-08-01 10:00') @('read_file', 'mcp_gone_tool', 'mcp_idle_probe') @('mcp_idle_probe', 'mcp_idle_probe')
+    # a4 also kept an earlier dump from before a server was switched off: the server's date is that dump's, not the session's.
+    $early = Join-Path $main 'a4\tools_1.json'
+    $earlyDefs = @([ordered]@{ name = 'mcp_switched_off'; description = ('D' * 402) })
+    [IO.File]::WriteAllText($early, (J ([ordered]@{ content = (ConvertTo-Json -InputObject $earlyDefs -Compress -Depth 6) })))
+    (Get-Item $early).LastWriteTime = [datetime]'2026-09-01 10:00'
     $before = @(Get-ChildItem $main -Recurse -File | ForEach-Object { "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)" })
 
     $r = Invoke-Report @($main, '--window-days', '30', '--min-sessions', '3')
@@ -73,14 +79,19 @@ try {
     $github = Get-Row $out 'mcp:github'
     $gone = Get-Row $out 'mcp:gone'
     $builtin = Get-Row $out 'built-in'
+    # Compact schema {"name":"..","description":".."} at 4 chars per token, as collect-session-cost estimates it.
+    $idleTok = [math]::Round((28 + 'mcp_idle_probe'.Length + 402) / 4)
+    $githubTok = [math]::Round((28 + 'mcp_github_issue_read'.Length + 402) / 4)
 
     Add-Result 'R1_a_sufficient_corpus_reports_with_exit_0' ($r.Code -eq 0) "exit=$($r.Code) out=$out"
     Add-Result 'R2_corpus_size_and_date_range_are_stated' ($out -match '4 sessions' -and $out -match '2026-11-01' -and $out -match '2026-11-04' -and $out -match '5 sessions') $out
-    Add-Result 'R3_unused_server_in_window_is_a_candidate' ($idle -match 'candidate' -and $idle -match '\|\s*110\s*\|' -and $idle -match '\|\s*0\s*\|') "row='$idle'"
-    Add-Result 'R4_cost_and_calls_share_one_row' ($github -match '\|\s*110\s*\|' -and $github -match '\|\s*2\s*\|' -and $github -match 'in use' -and $github -notmatch 'candidate') "row='$github'"
+    Add-Result 'R3_unused_server_in_window_is_a_candidate' ($idle -match 'candidate' -and $idle -match "\|\s*$idleTok\s*\|" -and $idle -match '\|\s*0\s*\|') "row='$idle'"
+    Add-Result 'R4_cost_and_calls_share_one_row' ($github -match "\|\s*$githubTok\s*\|" -and $github -match '\|\s*2\s*\|' -and $github -match 'in use' -and $github -notmatch 'candidate') "row='$github'"
     Add-Result 'R5_calls_outside_the_window_do_not_rescue_a_server' ($idle -ne '' -and $idle -notmatch '\|\s*2\s*\|') "row='$idle'"
     Add-Result 'R6_server_absent_from_the_window_is_reported_as_off_not_candidate' ($gone -match '2026-08-01' -and $gone -notmatch 'candidate') "row='$gone'"
     Add-Result 'R7_built_in_tools_are_never_candidates' ($builtin -ne '' -and $builtin -notmatch 'candidate') "row='$builtin'"
+    $switched = Get-Row $out 'mcp:switched'
+    Add-Result 'R11_last_seen_is_the_date_of_the_dump_that_carried_the_server' ($switched -match '2026-09-01' -and $switched -match 'not delivered in window') "row='$switched'"
     Add-Result 'R8_report_says_nothing_is_disabled' ($out -match 'nothing is disabled') $out
     Add-Result 'R9_no_call_arguments_or_results_are_copied' ($github -ne '' -and $out -notmatch [regex]::Escape($CANARY)) 'canary leaked'
     $after = @(Get-ChildItem $main -Recurse -File | ForEach-Object { "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)" })
