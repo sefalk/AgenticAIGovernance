@@ -343,11 +343,23 @@ $rules = @(
     @('YELLOW is not compaction', '(?is)YELLOW.{0,200}(not|never).{0,60}compaction'))
 $missingRules = @($rules | Where-Object { $cba -notmatch $_[1] } | ForEach-Object { $_[0] })
 Add-Result 'R32_runbook_states_the_context_budget_counting_rules' ($cba -and $missingRules.Count -eq 0) "missing: $($missingRules -join ', ')"
+# #519: the measured fill line is the primary signal, the call count the fallback.
+$fillRules = @(
+    @('names the fill keys', 'AF_CONTEXT_YELLOW_FILL_PCT.{0,200}AF_CONTEXT_RED_FILL_PCT'),
+    @('measured line is primary', '(?is)Context budget.{0,40}measured.{0,300}(primary|use it|takes precedence)'),
+    @('call count is the fallback', '(?is)(no|without|absent).{0,80}(measured|line).{0,200}(count|fallback)'),
+    @('narration names the signal', '(?is)narrat.{0,200}(measured|counted)'))
+$missingFillRules = @($fillRules | Where-Object { $cba -notmatch $_[1] } | ForEach-Object { $_[0] })
+Add-Result 'R34_runbook_uses_the_measured_fill_with_the_count_as_fallback' ($cba -and $missingFillRules.Count -eq 0) "missing: $($missingFillRules -join ', ')"
 if (Test-AfSourceTree $scriptDir) {
     $conf = Get-Content (Join-Path $payload 'af-env.conf') -Raw -Encoding UTF8
     $keys = @('AF_CONTEXT_YELLOW_CALLS=7', 'AF_CONTEXT_RED_CALLS=15', 'AF_CONTEXT_RED_MODE=hard')
     $missingKeys = @($keys | Where-Object { $conf -notmatch "(?m)^$([regex]::Escape($_))\s*$" })
     Add-Result 'R33_af_env_template_declares_the_context_budget_keys' ($missingKeys.Count -eq 0) "missing: $($missingKeys -join ', ')"
+    # #519: measured fill thresholds, calibrated defaults.
+    $fillKeys = @('AF_CONTEXT_YELLOW_FILL_PCT=50', 'AF_CONTEXT_RED_FILL_PCT=75')
+    $missingFill = @($fillKeys | Where-Object { $conf -notmatch "(?m)^$([regex]::Escape($_))\s*$" })
+    Add-Result 'R35_af_env_template_declares_the_fill_keys' ($missingFill.Count -eq 0) "missing: $($missingFill -join ', ')"
 } else {
     $notes += 'R33 af-env.conf template keys -- a project carries its own af-env.conf'
 }
