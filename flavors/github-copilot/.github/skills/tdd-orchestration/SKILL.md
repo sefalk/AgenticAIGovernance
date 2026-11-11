@@ -499,8 +499,32 @@ Do NOT skip narration — this is the user's only visibility into multi-step wor
 Self-assess context health:
 
 - 🟢 **GREEN** — plenty of room → continue normally.
-- 🟡 **YELLOW** — context pressure building → compress prior summaries to single lines.
-- 🔴 **RED** — quality degradation risk → **HARD gate**: checkpoint to `WIP.md`, report, stop.
+- 🟡 **YELLOW** — context pressure building → compress prior summaries to single
+  lines. YELLOW does not trigger, replace or announce harness compaction; the
+  harness compacts on its own schedule.
+- 🔴 **RED** — quality degradation risk. What happens depends on
+  `AF_CONTEXT_RED_MODE`:
+  - `hard` (default): finish the current phase up to its next commit checkpoint
+    (§ 2), then checkpoint to `WIP.md`, report, and stop. Never stop mid-phase.
+  - `advisory`: show RED in the narration line and recommend a checkpoint; the
+    workflow continues.
 
-**Heuristics** (tokens not directly measurable): ≥ 7 subagent calls → YELLOW;
-≥ 10 calls (incl. retries) → RED; context-confusion errors → RED.
+**Thresholds** (`af-env.conf`; a missing key falls back to the default):
+`AF_CONTEXT_YELLOW_CALLS` (7) counted calls → YELLOW; `AF_CONTEXT_RED_CALLS`
+(15) → RED. A context-confusion error is RED regardless of the count.
+
+**Counting rules.** Scope: per coordinator session. Counted: workflow-step
+agents (planner, test-writer, test-critic, implementer, refactorer, code-critic,
+arbiter, documenter, researcher), retries included. Not counted: provider
+workers (`ado-*`, `gh-*`) and the compliance-checker bookends, which return
+little and occur a fixed twice per workflow.
+
+**Signal (#519).** When a subagent returns, a hook may add a line
+`Context budget (#519): GREEN|YELLOW|RED · fill NN % ... (measured)`: the
+coordinator's latest prompt tokens over the model's `max_prompt_tokens`, against
+`AF_CONTEXT_YELLOW_FILL_PCT` (50) and `AF_CONTEXT_RED_FILL_PCT` (75). That
+measured line is primary and takes precedence over the count. Without a measured
+line (no session log, unknown model), fall back to the call count above. The
+narration names the signal: `Context: YELLOW (measured 58 %)` or
+`Context: YELLOW (counted 8 calls)`. A reported harness compaction means earlier
+turns are now a summary: re-read what you need instead of recalling it.

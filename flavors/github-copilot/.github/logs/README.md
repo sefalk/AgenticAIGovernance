@@ -90,6 +90,22 @@ It reads only the session's debug logs, loads nothing from the
 network, and copies no prompt or argument text. The cost panel is `measured`
 only at coverage `full`; otherwise it is a `lower_bound`.
 
+## Tool-catalogue report (#221)
+
+`scripts/tool-catalogue-report.py <debug-logs dir> [...]` prints, per MCP
+server, the tokens its tool schemas add to every request next to how often its
+tools were called, over the sessions of the last `--window-days` (default 30).
+It states corpus size and date range, prints `BLOCKED` (exit 2) when there is
+no session data or fewer than `--min-sessions` (default 10) in the window, and
+never disables anything: `candidate` means delivered and never called, and the
+decision stays with a human. A server dated outside the window is reported as
+`not delivered in window` with its last-seen date.
+
+Requests are also split by agent mode (share, mean catalogue tokens). An
+agent's `tools:` frontmatter is the reviewed enablement for that agent, so the
+server verdicts judge only the unrestricted catalogue (no agent); a server seen
+only in an agent's list is `agent tools only`.
+
 ## The `cost:` block (ADVISORY)
 
 Appended automatically by the documenter Stop hook

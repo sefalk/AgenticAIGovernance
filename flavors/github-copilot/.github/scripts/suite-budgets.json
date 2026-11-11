@@ -38,6 +38,7 @@
     "test-suite-budgets.ps1": 30,
     "test-suite-portability.ps1": 100,
     "test-suite-scope.ps1": 30,
+    "test-tool-catalogue.ps1": 30,
     "test-turn-receipt.ps1": 30,
     "test-work-item-owner.ps1": 90,
     "test-workflow-log-schema.ps1": 60,

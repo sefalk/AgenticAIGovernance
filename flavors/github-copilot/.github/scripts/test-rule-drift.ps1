@@ -322,6 +322,48 @@ Add-Result 'R27_parsing_answers_and_reinvokes_without_counting_a_retry' `
     ($tdd -match '(?is)### Verdict Parsing.{0,1500}NEEDS_CLARIFICATION.{0,400}not count as a retry') `
     'verdict parsing does not handle NEEDS_CLARIFICATION as answer-and-re-invoke'
 
+# #518: the coordinator's call-count budget is configurable, its counting rules
+# are written down once, and RED stops only at a phase boundary.
+$coord = Get-Content (Join-Path $payload 'agents/coordinator.agent.md') -Raw -Encoding UTF8
+$cba = [regex]::Match($tdd, '(?s)### Context Budget Awareness.*?(?=\r?\n#{2,3} |\z)').Value
+$hardcoded = @()
+foreach ($pair in @(@('coordinator.agent.md', $coord), @('tdd-orchestration', $cba))) {
+    if ($pair[1] -match '(≥|>=)\s*(7|10)\s+(subagent\s+)?calls') { $hardcoded += "$($pair[0]): $($Matches[0])" }
+    if ($pair[1] -notmatch 'AF_CONTEXT_RED_CALLS') { $hardcoded += "$($pair[0]) names no AF_CONTEXT_RED_CALLS" }
+}
+Add-Result 'R31_no_hardcoded_context_call_thresholds' ($hardcoded.Count -eq 0) ($hardcoded -join '; ')
+$rules = @(
+    @('scope per coordinator session', '(?i)per coordinator session'),
+    @('provider workers not counted', '(?is)not counted.{0,200}ado-\*.{0,40}gh-\*'),
+    @('compliance-checker bookends not counted', '(?is)not counted.{0,300}compliance-checker'),
+    @('retries counted', '(?i)retries'),
+    @('context-confusion stays RED', '(?is)context-confusion.{0,80}RED'),
+    @('advisory mode continues', '(?is)advisory.{0,200}continues'),
+    @('hard mode stops at the phase checkpoint', '(?is)hard.{0,200}(phase|commit) checkpoint'),
+    @('YELLOW is not compaction', '(?is)YELLOW.{0,200}(not|never).{0,60}compaction'))
+$missingRules = @($rules | Where-Object { $cba -notmatch $_[1] } | ForEach-Object { $_[0] })
+Add-Result 'R32_runbook_states_the_context_budget_counting_rules' ($cba -and $missingRules.Count -eq 0) "missing: $($missingRules -join ', ')"
+# #519: the measured fill line is the primary signal, the call count the fallback.
+$fillRules = @(
+    @('names the fill keys', 'AF_CONTEXT_YELLOW_FILL_PCT.{0,200}AF_CONTEXT_RED_FILL_PCT'),
+    @('measured line is primary', '(?is)Context budget.{0,120}measured.{0,300}(primary|use it|takes precedence)'),
+    @('call count is the fallback', '(?is)(no|without|absent).{0,80}(measured|line).{0,200}(count|fallback)'),
+    @('narration names the signal', '(?is)narrat.{0,200}(measured|counted)'))
+$missingFillRules = @($fillRules | Where-Object { $cba -notmatch $_[1] } | ForEach-Object { $_[0] })
+Add-Result 'R34_runbook_uses_the_measured_fill_with_the_count_as_fallback' ($cba -and $missingFillRules.Count -eq 0) "missing: $($missingFillRules -join ', ')"
+if (Test-AfSourceTree $scriptDir) {
+    $conf = Get-Content (Join-Path $payload 'af-env.conf') -Raw -Encoding UTF8
+    $keys = @('AF_CONTEXT_YELLOW_CALLS=7', 'AF_CONTEXT_RED_CALLS=15', 'AF_CONTEXT_RED_MODE=hard')
+    $missingKeys = @($keys | Where-Object { $conf -notmatch "(?m)^$([regex]::Escape($_))\s*$" })
+    Add-Result 'R33_af_env_template_declares_the_context_budget_keys' ($missingKeys.Count -eq 0) "missing: $($missingKeys -join ', ')"
+    # #519: measured fill thresholds, calibrated defaults.
+    $fillKeys = @('AF_CONTEXT_YELLOW_FILL_PCT=50', 'AF_CONTEXT_RED_FILL_PCT=75')
+    $missingFill = @($fillKeys | Where-Object { $conf -notmatch "(?m)^$([regex]::Escape($_))\s*$" })
+    Add-Result 'R35_af_env_template_declares_the_fill_keys' ($missingFill.Count -eq 0) "missing: $($missingFill -join ', ')"
+} else {
+    $notes += 'R33 af-env.conf template keys -- a project carries its own af-env.conf'
+}
+
 Write-Output '===== rule-drift detector tests (issue #304) ====='
 foreach ($n in $notes) { Write-Output "  SKIP  $n" }
 $failed = 0
