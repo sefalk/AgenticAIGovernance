@@ -6,9 +6,18 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-. "$PSScriptRoot/_common.ps1"
+# A call with nothing to scan, record or announce skips Python (#515).
+# Without the helper the full path runs: a missing file must not silence the scan.
+$raw = $null
+if (Test-Path "$PSScriptRoot/_fastpath.ps1") {
+    . "$PSScriptRoot/_fastpath.ps1"
+    $raw = Read-AfStdinRaw
+    if (Test-AfScanSkippable $raw) { Write-Output '{}'; exit 0 }
+}
 
-$raw = Read-AfStdin
+. "$PSScriptRoot/_common.ps1"
+if ($null -eq $raw) { $raw = Read-AfStdin }
+
 $core = Join-Path $PSScriptRoot 'scan-secrets.py'
 
 if (-not $AfPython -or -not (Test-Path $core)) {

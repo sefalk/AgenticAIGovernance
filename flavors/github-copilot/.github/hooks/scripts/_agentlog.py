@@ -53,6 +53,8 @@ PATH_KEYS = frozenset({"filePath", "path", "dirPath", "notebookUri", "uri"})
 
 TS = re.compile(rb'"ts":\s*(\d+)')
 HOOK_SPAN = b'"type":"hook"'
+# Guards whose error or timeout lets the tool call through unchecked (#515).
+GUARD_HOOKS = ("block-dangerous", "scan-secrets")
 
 # Allowlist, not a denylist. `read_file` and `grep_search` also carry a
 # `filePath`, and harvesting those would attribute files nobody wrote.
