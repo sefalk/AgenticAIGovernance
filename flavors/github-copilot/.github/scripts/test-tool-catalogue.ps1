@@ -127,7 +127,9 @@ try {
     [IO.File]::WriteAllText($agentDump, (J ([ordered]@{ content = (ConvertTo-Json -InputObject $agentDefs -Compress -Depth 6) })))
     (Get-Item $agentDump).LastWriteTime = [datetime]'2026-11-04 10:00'
     [IO.File]::WriteAllText((Join-Path $m1 'system_prompt_0.json'), (J ([ordered]@{ content = "You are an assistant. $CANARY" })))
-    [IO.File]::WriteAllText((Join-Path $m1 'system_prompt_1.json'), (J ([ordered]@{ content = "<modeInstructions>`nYou are currently running in `"coordinator`" mode. $CANARY" })))
+    # Real shape (measured 2026-11-11): content is itself JSON, so the quotes around the mode name arrive escaped.
+    $agentPrompt = ConvertTo-Json -InputObject @([ordered]@{ type = 'text'; content = "<modeInstructions>`nYou are currently running in `"coordinator`" mode. $CANARY" }) -Compress -Depth 6
+    [IO.File]::WriteAllText((Join-Path $m1 'system_prompt_1.json'), (J ([ordered]@{ content = $agentPrompt })))
     $requests = @()
     foreach ($i in 1..3) { $requests += J ([ordered]@{ ts = 1785760265000 + $i; sid = 'm1'; type = 'llm_request'; name = 'chat:x'; spanId = "r$i"; status = 'ok'; attrs = [ordered]@{ debugName = 'panel/editAgent'; systemPromptFile = 'system_prompt_0.json'; toolsFile = 'tools_0.json'; userRequest = $CANARY } }) }
     $requests += J ([ordered]@{ ts = 1785760266000; sid = 'm1'; type = 'llm_request'; name = 'chat:x'; spanId = 'r4'; status = 'ok'; attrs = [ordered]@{ debugName = 'panel/editAgent'; systemPromptFile = 'system_prompt_1.json'; toolsFile = 'tools_1.json' } })
