@@ -346,7 +346,7 @@ Add-Result 'R32_runbook_states_the_context_budget_counting_rules' ($cba -and $mi
 # #519: the measured fill line is the primary signal, the call count the fallback.
 $fillRules = @(
     @('names the fill keys', 'AF_CONTEXT_YELLOW_FILL_PCT.{0,200}AF_CONTEXT_RED_FILL_PCT'),
-    @('measured line is primary', '(?is)Context budget.{0,40}measured.{0,300}(primary|use it|takes precedence)'),
+    @('measured line is primary', '(?is)Context budget.{0,120}measured.{0,300}(primary|use it|takes precedence)'),
     @('call count is the fallback', '(?is)(no|without|absent).{0,80}(measured|line).{0,200}(count|fallback)'),
     @('narration names the signal', '(?is)narrat.{0,200}(measured|counted)'))
 $missingFillRules = @($fillRules | Where-Object { $cba -notmatch $_[1] } | ForEach-Object { $_[0] })

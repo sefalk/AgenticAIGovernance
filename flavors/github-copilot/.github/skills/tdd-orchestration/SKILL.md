@@ -518,3 +518,13 @@ agents (planner, test-writer, test-critic, implementer, refactorer, code-critic,
 arbiter, documenter, researcher), retries included. Not counted: provider
 workers (`ado-*`, `gh-*`) and the compliance-checker bookends, which return
 little and occur a fixed twice per workflow.
+
+**Signal (#519).** When a subagent returns, a hook may add a line
+`Context budget (#519): GREEN|YELLOW|RED · fill NN % ... (measured)`: the
+coordinator's latest prompt tokens over the model's `max_prompt_tokens`, against
+`AF_CONTEXT_YELLOW_FILL_PCT` (50) and `AF_CONTEXT_RED_FILL_PCT` (75). That
+measured line is primary and takes precedence over the count. Without a measured
+line (no session log, unknown model), fall back to the call count above. The
+narration names the signal: `Context: YELLOW (measured 58 %)` or
+`Context: YELLOW (counted 8 calls)`. A reported harness compaction means earlier
+turns are now a summary: re-read what you need instead of recalling it.
