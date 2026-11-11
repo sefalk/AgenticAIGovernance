@@ -15,6 +15,7 @@ from collections import Counter
 from pathlib import Path
 
 from _agentlog import GUARD_HOOKS
+from _context_fill import context_line
 
 FAILED = ("error", "non_blocking_error", "timeout")
 
@@ -60,7 +61,7 @@ def fail_open_counts(log: Path) -> Counter:
 
 
 def subagent_receipt(payload: dict) -> dict | None:
-    """PostToolUse output for a returning subagent whose guards failed open, else None."""
+    """PostToolUse context for a returning subagent: fail-open guards (#515) and context fill (#519)."""
     if payload.get("tool_name") != "runSubagent":
         return None
     tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
@@ -69,20 +70,19 @@ def subagent_receipt(payload: dict) -> dict | None:
     directory = _receipt_session_dir(payload)
     if not call or directory is None or not directory.is_dir():
         return None
+    texts = []
     log = _subagent_log(directory, agent, call)
-    if log is None:
+    counts = fail_open_counts(log) if log is not None else {}
+    if counts:
+        parts = ", ".join(f"{guard} x{n}" for guard, n in sorted(counts.items()))
+        texts.append(
+            f"FAIL-OPEN guard (#515): in subagent {agent or call}, {parts} ended in error or timeout, "
+            "so those tool calls ran unchecked. Treat what they did as unverified, and re-check any "
+            "write or terminal command among them before relying on it."
+        )
+    fill = context_line(directory)
+    if fill:
+        texts.append(fill)
+    if not texts:
         return None
-    counts = fail_open_counts(log)
-    if not counts:
-        return None
-    parts = ", ".join(f"{guard} x{n}" for guard, n in sorted(counts.items()))
-    return {
-        "hookSpecificOutput": {
-            "hookEventName": "PostToolUse",
-            "additionalContext": (
-                f"FAIL-OPEN guard (#515): in subagent {agent or call}, {parts} ended in error or timeout, "
-                "so those tool calls ran unchecked. Treat what they did as unverified, and re-check any "
-                "write or terminal command among them before relying on it."
-            ),
-        }
-    }
+    return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "\n\n".join(texts)}}
