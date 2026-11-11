@@ -325,7 +325,7 @@ Add-Result 'R27_parsing_answers_and_reinvokes_without_counting_a_retry' `
 # #518: the coordinator's call-count budget is configurable, its counting rules
 # are written down once, and RED stops only at a phase boundary.
 $coord = Get-Content (Join-Path $payload 'agents/coordinator.agent.md') -Raw -Encoding UTF8
-$cba = [regex]::Match($tdd, '(?s)### Context Budget Awareness.*?(?=\n##)').Value
+$cba = [regex]::Match($tdd, '(?s)### Context Budget Awareness.*?(?=\r?\n#{2,3} |\z)').Value
 $hardcoded = @()
 foreach ($pair in @(@('coordinator.agent.md', $coord), @('tdd-orchestration', $cba))) {
     if ($pair[1] -match '(≥|>=)\s*(7|10)\s+(subagent\s+)?calls') { $hardcoded += "$($pair[0]): $($Matches[0])" }
