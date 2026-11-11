@@ -14,6 +14,68 @@ still fails the build for a repeated `###` kind inside one section (#322).
 
 ## [Unreleased]
 
+## [1.28.6] -- 2026-11-11
+
+### Added
+
+- **Tool-catalogue report: what each MCP server costs per request against how
+  often it is called (#221).**
+  - `scripts/tool-catalogue-report.py <debug-logs dir> [...]` reads the
+    `tools_N.json` dumps and `tool_call` spans of many sessions and prints one
+    row per server with sessions delivered, mean tokens per request, calls,
+    last-seen date and a verdict.
+  - It judges only the last `--window-days` (default 30) and says so, with
+    corpus size and date range. A server is dated by the dumps that carried it,
+    so one switched off earlier shows as `not delivered in window`.
+  - Too few sessions in the window (`--min-sessions`, default 10) or no session
+    data is `BLOCKED`, exit 2.
+  - Read-only: it disables nothing. `candidate` means delivered and never
+    called; the decision is a human's.
+
+- **The context budget measures context fill instead of only counting calls
+  (#519).**
+  - **Where it comes from.** When a subagent returns, the coordinator's
+    PostToolUse on `runSubagent` adds the line
+    `Context budget (#519): GREEN|YELLOW|RED · fill NN % ... (measured)`.
+    The fill is the coordinator's latest prompt tokens (`inputTokens` of its
+    own `panel/*` requests, from the session log) divided by the model's
+    `max_prompt_tokens` (from `models.json`).
+  - **Compactions.** A drop of more than half since the previous request is
+    reported as a harness compaction.
+  - **Thresholds.** New keys `AF_CONTEXT_YELLOW_FILL_PCT=50` and
+    `AF_CONTEXT_RED_FILL_PCT=75`, calibrated on 14 local sessions (recorded on
+    the issue). `AF_CONTEXT_RED_MODE` from #518 applies unchanged.
+  - **Fallback.** Without a session log or a known model there is no line, and
+    the coordinator counts calls as before (#518). The narration names which
+    signal it used.
+  - **Privacy.** No local path reaches the context.
+
+### Changed
+
+- **The coordinator's context budget is configurable, its counting rules are
+  written down, and RED stops only at a phase boundary (#518).** In a consumer
+  session the coordinator hit RED after ten calls and stopped mid-workflow,
+  with no context confusion observed. Two of those ten calls were a work-item
+  lookup and a compliance-checker bookend.
+  - **New `af-env.conf` keys.** A missing key falls back to its default.
+    - `AF_CONTEXT_YELLOW_CALLS=7`
+    - `AF_CONTEXT_RED_CALLS=15` (was 10)
+    - `AF_CONTEXT_RED_MODE=hard|advisory`
+  - **RED behaviour per mode.**
+    - `hard`: finish the current phase to its next commit checkpoint, then
+      checkpoint to `WIP.md` and stop.
+    - `advisory`: narrate RED and continue.
+    - A context-confusion error is RED regardless of the count.
+  - **Counting rules** (in `tdd-orchestration` § Context Budget Awareness):
+    - counted per coordinator session;
+    - workflow-step agents count, retries included;
+    - provider workers (`ado-*`, `gh-*`) and the compliance-checker bookends
+      do not count.
+  - **YELLOW** compresses the coordinator's own summaries only. It does not
+    trigger or replace harness compaction.
+  - `coordinator.agent.md` keeps one line that points to the runbook and names
+    the keys.
+
 ## [1.28.5] -- 2026-11-11
 
 ### Added
