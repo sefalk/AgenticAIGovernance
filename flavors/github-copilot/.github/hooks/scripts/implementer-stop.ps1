@@ -401,7 +401,7 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
     # agent that returned nothing once is the least likely to return words on a
     # forced retry, and that retry now runs with EVERY gate skipped, so blocking
     # buys a wasted round trip and a weaker second pass.
-    $ret = Get-AfSubagentReturn -StdinRaw $stdinRaw -Agent 'implementer' -MainRoot $mainRoot
+    $ret = Get-AfSubagentReturn -StdinRaw $stdinRaw -Agent 'implementer' -CodeRoot $codeRoot -MainRoot $mainRoot
     $returnNote = switch ($ret.Status) {
         'truncated' { ', RETURN TRUNCATED -- the tail was cut by the 5000-char cap, which is where the Gate Summary sits; re-state it in your reply' }
         'empty' { ', RETURN EMPTY -- your log records this turn but no words in it; the coordinator has no verdict to route on, so state your Gate Summary and file list in your reply' }

@@ -5035,6 +5035,21 @@ if ($tvVenv) {
     Assert-True "implementer accepts a full-suite pass that started after the last uncommitted edit" `
         ($r.Output -match 'accepted from' -and $r.Output -notmatch 'NOT RUN') "got: $($r.Output)"
 
+    # #505: the hook reads its own return through the wrapper, end to end. The
+    # reader and the wiring were each tested; the call between them was not,
+    # and it lacked -CodeRoot, so every PASS in MP said RETURN UNREADABLE.
+    $rrChat = Join-Path ([IO.Path]::GetTempPath()) "af-505-$(Get-Random)"
+    New-ReturnLog -Dir (Join-Path $rrChat 'debug-logs\s505') -Name 'runSubagent-implementer-toolu_505.jsonl' `
+        -Response '[{"role":"assistant","parts":[{"type":"text","content":"### Gate Summary 505"}]}]'
+    $rrStop = (@{ session_id = 's505'; transcript_path = (Join-Path $rrChat 'transcripts\s505.jsonl') } | ConvertTo-Json -Compress)
+    $r = Invoke-Hook -Script 'implementer-stop.ps1' -JsonInput $rrStop -Branch 'agent/505-x' `
+        -PathWithout 'pytest' -CopyIn @{ '.venv' = $tvVenv } `
+        -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n"; '.github/test-log.json' = $tvLog } `
+        -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
+    Assert-True "implementer-stop recovers its own complete return (no RETURN UNREADABLE)" `
+        ($r.Output -match 'Green gate PASS' -and $r.Output -notmatch 'RETURN (UNREADABLE|EMPTY|TRUNCATED)') "got: $($r.Output)"
+    Remove-Item -LiteralPath $rrChat -Recurse -Force -ErrorAction SilentlyContinue
+
     $tvLogStale = '{"all": {"exit_code": 0, "started": "' + $tvStale + '", "last_run": "' + $tvStale + '", "partial": false, "passed": 3, "total": 3}}'
     foreach ($tvHook in @('implementer-stop.ps1', 'refactorer-stop.ps1')) {
         $r = Invoke-Hook -Script $tvHook -JsonInput $STOP_JSON -Branch 'agent/497-x' `
