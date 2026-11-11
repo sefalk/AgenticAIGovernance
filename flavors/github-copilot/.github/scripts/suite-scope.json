@@ -201,6 +201,10 @@
       ".github/scripts/collect-session-cost.py",
       ".github/hooks/scripts/_agentlog.py"
     ],
+    "test-tool-catalogue.ps1": [
+      ".github/scripts/tool-catalogue-report.py",
+      ".github/scripts/collect-session-cost.py"
+    ],
     "test-turn-receipt.ps1": [
       ".github/hooks/scripts/turn-receipt.py",
       ".github/hooks/scripts/turn-receipt.ps1",
