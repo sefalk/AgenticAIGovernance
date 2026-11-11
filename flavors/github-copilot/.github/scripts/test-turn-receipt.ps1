@@ -168,6 +168,36 @@ try {
     $out = Invoke-SubagentReturn 'planner' 'toolu_F6'
     Add-Result 'B2_a_clean_subagent_adds_no_context' ($out -notmatch 'FAIL-OPEN') "out=$out"
 
+    # #519: the measured context fill rides on the same subagent-return context.
+    # Fill = the coordinator's latest panel/* request's inputTokens / that model's max_prompt_tokens.
+    $models = '[{"id":"m1","capabilities":{"limits":{"max_prompt_tokens":1000}}}]'
+    function Req([int]$Offset, [int]$Tokens, [string]$Debug = 'panel/editAgent') {
+        [ordered]@{ ts = $NOWMS + 1000 * $Offset; type = 'llm_request'; name = 'chat:m1'; status = 'ok'
+            attrs = [ordered]@{ model = 'm1'; inputTokens = $Tokens; cachedTokens = 0; outputTokens = 10; debugName = $Debug } } | ConvertTo-Json -Compress -Depth 5
+    }
+    function Invoke-Fill([string[]]$Main, [switch]$NoModels) {
+        $dir = Join-Path $bChat "debug-logs/$bSid"
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        [IO.File]::WriteAllLines((Join-Path $dir 'runSubagent-planner-toolu_F6.jsonl'), [string[]]@((Span 'PreToolUse' 'block-dangerous.ps1' -10 '{}')))
+        if ($Main) { [IO.File]::WriteAllLines((Join-Path $dir 'main.jsonl'), $Main) }
+        if (-not $NoModels) { [IO.File]::WriteAllText((Join-Path $dir 'models.json'), $models) }
+        return Invoke-SubagentReturn 'planner' 'toolu_F6'
+    }
+    $out = Invoke-Fill @((Req -30 100), (Req -20 300))
+    Add-Result 'M1_green_fill_is_reported_as_measured' ($out -match 'GREEN' -and $out -match 'fill 30 %' -and $out -match 'measured') "out=$out"
+    $out = Invoke-Fill @((Req -20 300), (Req -10 600), (Req -5 900 'summarizeConversationHistory'))
+    Add-Result 'M2_yellow_at_50_percent_ignores_non_agent_requests' ($out -match 'YELLOW' -and $out -match 'fill 60 %') "out=$out"
+    $out = Invoke-Fill @((Req -20 600), (Req -10 800))
+    Add-Result 'M3_red_at_75_percent' ($out -match 'RED' -and $out -match 'fill 80 %') "out=$out"
+    $out = Invoke-Fill @((Req -20 800), (Req -10 120))
+    Add-Result 'M4_a_compaction_is_named' ($out -match 'GREEN' -and $out -match '(?i)compact' -and $out -match '800' -and $out -match '120') "out=$out"
+    $out = Invoke-Fill @((Req -20 800)) -NoModels
+    Add-Result 'M5_without_models_json_no_measured_line' ($out -notmatch 'fill \d+ %') "out=$out"
+    $out = Invoke-Fill @()
+    Add-Result 'M6_without_a_session_log_no_measured_line' ($out -notmatch 'fill \d+ %') "out=$out"
+    Add-Result 'M7_no_local_path_reaches_the_context' ($out -notmatch [regex]::Escape($bChat)) "out=$out"
+
     $hooksJson = Get-Content -Raw (Join-Path (Split-Path -Parent $scriptDir) 'hooks/agent-hooks.json') | ConvertFrom-Json
     $declared = @($hooksJson.hooks.Stop | Where-Object { [string]$_.windows -match 'turn-receipt\.ps1' -and [string]$_.command -match 'turn-receipt\.sh' })
     Add-Result 'D1_registered_as_a_global_stop_hook_in_both_dialects' ($declared.Count -eq 1) "declared=$($declared.Count)"
