@@ -101,6 +101,11 @@ never disables anything: `candidate` means delivered and never called, and the
 decision stays with a human. A server dated outside the window is reported as
 `not delivered in window` with its last-seen date.
 
+Requests are also split by agent mode (share, mean catalogue tokens). An
+agent's `tools:` frontmatter is the reviewed enablement for that agent, so the
+server verdicts judge only the unrestricted catalogue (no agent); a server seen
+only in an agent's list is `agent tools only`.
+
 ## The `cost:` block (ADVISORY)
 
 Appended automatically by the documenter Stop hook
