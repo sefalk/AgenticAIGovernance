@@ -1329,6 +1329,94 @@ Assert-Decision "trust store: content naming the store is not a write to it" 'si
 
 Write-Output ""
 
+# ── Read-only fast path (issue #515) ─────────────────────────────────────
+#
+# Six parallel MCP reads took the guards to 13-57 s; a quarter timed out and
+# failed open. A read must leave both guards before any Python starts. The
+# probe is an AF_PYTHON_OVERRIDE stub that records each start, then runs the
+# real interpreter so the full path still answers normally.
+Write-Output "## guard hooks: read-only fast path (#515)"
+$roDir = Join-Path ([IO.Path]::GetTempPath()) "af-515-$(Get-Random)"
+New-Item -ItemType Directory -Path $roDir -Force | Out-Null
+$roMarker = Join-Path $roDir 'started.txt'
+$roReal = (Get-Command python -ErrorAction SilentlyContinue).Source
+$roStub = Join-Path $roDir 'python-probe.cmd'
+Set-Content -Path $roStub -Encoding ascii -Value "@echo off`r`necho x>>`"$roMarker`"`r`n`"$roReal`" %*`r`n"
+
+function Invoke-RoProbe {
+    param([string]$Script, [string]$Json)
+    Remove-Item -LiteralPath $roMarker -ErrorAction SilentlyContinue
+    $saved = $env:AF_PYTHON_OVERRIDE
+    $env:AF_PYTHON_OVERRIDE = $roStub
+    try { $r = Invoke-HookScript -HookPath (Join-Path $scriptDir $Script) -JsonInput $Json }
+    finally { $env:AF_PYTHON_OVERRIDE = $saved }
+    @{ Output = $r.Output; Started = (Test-Path -LiteralPath $roMarker) }
+}
+
+$roList = '{"tool_name":"mcp_azure_devops__wit_work_item","tool_input":{"action":"list_comments","workItemId":3403,"top":1},"tool_response":"[]"}'
+$r = Invoke-RoProbe 'block-dangerous.ps1' $roList
+Assert-True "block-dangerous answers an MCP read without starting Python" `
+    ($r.Output -eq '{}' -and -not $r.Started) "out=$($r.Output) started=$($r.Started)"
+$r = Invoke-RoProbe 'block-dangerous.ps1' '{"tool_name":"read_file","tool_input":{"filePath":"C:\\repo\\a.py"}}'
+Assert-True "block-dangerous answers read_file without starting Python" `
+    ($r.Output -eq '{}' -and -not $r.Started) "out=$($r.Output) started=$($r.Started)"
+$r = Invoke-RoProbe 'block-dangerous.ps1' '{"tool_name":"mcp_azure_devops__wit_work_item_write","tool_input":{"action":"update","id":1,"updates":[]}}'
+Assert-True "block-dangerous still runs the full path for a work-item write (control)" `
+    $r.Started "out=$($r.Output)"
+$r = Invoke-RoProbe 'block-dangerous.ps1' '{"tool_name":"read_file","tool_input":{"note":"{\"tool_name\":\"x\"}","tool_name":"runInTerminal"}}'
+Assert-True "block-dangerous takes the full path when tool_name is ambiguous" `
+    $r.Started "out=$($r.Output)"
+
+$r = Invoke-RoProbe 'scan-secrets.ps1' $roList
+Assert-True "scan-secrets answers a small MCP read without starting Python" `
+    ($r.Output -eq '{}' -and -not $r.Started) "out=$($r.Output) started=$($r.Started)"
+$r = Invoke-RoProbe 'scan-secrets.ps1' '{"tool_name":"mcp_azure_devops__wit_work_item","tool_input":{"action":"get","id":3403},"tool_response":"{}"}'
+Assert-True "scan-secrets still records a work-item get for the field guard" `
+    $r.Started "out=$($r.Output)"
+$r = Invoke-RoProbe 'scan-secrets.ps1' '{"tool_name":"mcp_github_mcp_se_issue_read","tool_input":{"method":"get","issue_number":1},"tool_response":"{}"}'
+Assert-True "scan-secrets still records an issue read for the body guard" `
+    $r.Started "out=$($r.Output)"
+$roBig = '{"tool_name":"mcp_azure_devops__wit_work_item","tool_input":{"action":"list_comments"},"tool_response":"' + ('x' * 9000) + '"}'
+$r = Invoke-RoProbe 'scan-secrets.ps1' $roBig
+Assert-True "scan-secrets still inspects a read large enough to spill (#341)" `
+    $r.Started "out=$($r.Output.Substring(0, [Math]::Min(80, $r.Output.Length)))"
+
+# The pattern decides what skips the guards, so it must cover every tool a
+# guard acts on, and both dialects must hold the same pattern.
+$roPs = Get-Content (Join-Path $scriptDir '_fastpath.ps1') -Raw -ErrorAction SilentlyContinue
+$roSh = Get-Content (Join-Path $scriptDir '_fastpath.sh') -Raw -ErrorAction SilentlyContinue
+$roPsPat = if ($roPs -match '(?m)^\$afGuardedTools = ''([^'']+)''') { $Matches[1] } else { '' }
+$roShPat = if ($roSh -match '(?m)^AF_GUARDED_TOOLS=''([^'']+)''') { $Matches[1] } else { '' }
+Assert-True "the guarded-tool pattern is identical in both dialects" `
+    ($roPsPat -and $roPsPat -eq $roShPat) "ps1=[$roPsPat] sh=[$roShPat]"
+# Every exact write-tool name the secret scanner knows, plus each class
+# block-dangerous acts on (#60, #74, #138, #36, #376).
+$roPy = Get-Content (Join-Path $scriptDir 'scan-secrets.py') -Raw -ErrorAction SilentlyContinue
+$roWrites = @(if ($roPy -match '(?s)WRITE_TOOLS = \{(.*?)\}') { [regex]::Matches($Matches[1], '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value } })
+$roGated = @($roWrites) + @('runInTerminal', 'run_in_terminal', 'create_and_run_task', 'createAndRunTask', 'run_task',
+    'runTask', 'run_notebook_cell', 'runNotebookCell', 'mcp_pylance_mcp_s_pylanceRunCodeSnippet', 'run_playwright_code',
+    'browser_run_code', 'browser_evaluate', 'run_vscode_command', 'runVsCodeCommand',
+    'mcp_azure_devops__wit_work_item_write', 'mcp_github_mcp_se_issue_write', 'mcp_github_mcp_se_update_pull_request',
+    'mcp_github_mcp_se_update_issue_comment')
+$roLeak = @($roGated | Where-Object { -not ($roPsPat -and $_ -match $roPsPat) })
+Assert-True "every tool a guard acts on takes the full path" `
+    ($roPsPat -and $roWrites.Count -ge 10 -and $roLeak.Count -eq 0) "writes=$($roWrites.Count) unmatched: $($roLeak -join ', ')"
+$roReads = @('read_file', 'grep_search', 'mcp_azure_devops__wit_work_item', 'mcp_github_mcp_se_issue_read',
+    'mcp_github_mcp_se_list_pull_requests', 'mcp_af-command_list_scripts', 'mcp_azure_devops__search_workitem')
+$roSlow = @($roReads | Where-Object { -not $roPsPat -or $_ -match $roPsPat })
+Assert-True "read tools take the fast path" ($roSlow.Count -eq 0) "slow: $($roSlow -join ', ')"
+# Every read the body guard records must keep scan-secrets on the full path.
+$roBg = Get-Content (Join-Path $scriptDir '_body_guard.py') -Raw -ErrorAction SilentlyContinue
+$roBgReads = @(if ($roBg -match '(?s)READ_SUFFIXES = \((.*?)\)') { [regex]::Matches($Matches[1], '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value } }) + @('add_issue_comment')
+$roGrPat = if ($roPs -match '(?m)^\$afGuardReads = ''([^'']+)''') { $Matches[1] } else { '' }
+$roGrSh = if ($roSh -match '(?m)^AF_GUARD_READS=''([^'']+)''') { $Matches[1] } else { '' }
+$roGrMiss = @($roBgReads | Where-Object { -not $roGrPat -or "mcp_github_mcp_se_$_" -notmatch $roGrPat })
+Assert-True "every body-guard read stays on the scan-secrets full path, same pattern in both dialects" `
+    ($roBgReads.Count -ge 4 -and $roGrMiss.Count -eq 0 -and $roGrPat -eq $roGrSh) "reads=$($roBgReads.Count) missing: $($roGrMiss -join ', ') ps1=[$roGrPat] sh=[$roGrSh]"
+Remove-Item -LiteralPath $roDir -Recurse -Force -ErrorAction SilentlyContinue
+
+Write-Output ""
+
 # ── 2. coordinator-pretooluse.ps1 ────────────────────────────────────────
 
 Write-Output "## coordinator-pretooluse.ps1"
@@ -4946,6 +5034,21 @@ if ($tvVenv) {
         -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
     Assert-True "implementer accepts a full-suite pass that started after the last uncommitted edit" `
         ($r.Output -match 'accepted from' -and $r.Output -notmatch 'NOT RUN') "got: $($r.Output)"
+
+    # #505: the hook reads its own return through the wrapper, end to end. The
+    # reader and the wiring were each tested; the call between them was not,
+    # and it lacked -CodeRoot, so every PASS in MP said RETURN UNREADABLE.
+    $rrChat = Join-Path ([IO.Path]::GetTempPath()) "af-505-$(Get-Random)"
+    New-ReturnLog -Dir (Join-Path $rrChat 'debug-logs\s505') -Name 'runSubagent-implementer-toolu_505.jsonl' `
+        -Response '[{"role":"assistant","parts":[{"type":"text","content":"### Gate Summary 505"}]}]'
+    $rrStop = (@{ session_id = 's505'; transcript_path = (Join-Path $rrChat 'transcripts\s505.jsonl') } | ConvertTo-Json -Compress)
+    $r = Invoke-Hook -Script 'implementer-stop.ps1' -JsonInput $rrStop -Branch 'agent/505-x' `
+        -PathWithout 'pytest' -CopyIn @{ '.venv' = $tvVenv } `
+        -Files @{ 'tests/test_ok.py' = "def test_ok():`n    assert True`n"; '.github/test-log.json' = $tvLog } `
+        -StubFiles @{ '.github/scripts/run-tests.ps1' = "exit 0`n" }
+    Assert-True "implementer-stop recovers its own complete return (no RETURN UNREADABLE)" `
+        ($r.Output -match 'Green gate PASS' -and $r.Output -notmatch 'RETURN (UNREADABLE|EMPTY|TRUNCATED)') "got: $($r.Output)"
+    Remove-Item -LiteralPath $rrChat -Recurse -Force -ErrorAction SilentlyContinue
 
     $tvLogStale = '{"all": {"exit_code": 0, "started": "' + $tvStale + '", "last_run": "' + $tvStale + '", "partial": false, "passed": 3, "total": 3}}'
     foreach ($tvHook in @('implementer-stop.ps1', 'refactorer-stop.ps1')) {

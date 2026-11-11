@@ -33,6 +33,7 @@ import sys
 from _agentlog import PATH_KEYS
 from _body_guard import record_body as record_github_read
 from _field_guard import record as record_work_item_read
+from _guard_receipt import subagent_receipt
 from _long_lines import respond as long_line_notice
 from _provenance import DETAIL as PROVENANCE_DETAIL
 from _provenance import has_provenance_marker
@@ -154,6 +155,17 @@ def emit(verdict: dict[str, object] | None, code: int) -> int:
     return code
 
 
+def _with_context(first: dict | None, second: dict | None) -> dict | None:
+    """One PostToolUse statement carrying both additionalContext texts."""
+    if not first or not second:
+        return first or second
+    a = first.get("hookSpecificOutput", {}).get("additionalContext", "")
+    b = second["hookSpecificOutput"]["additionalContext"]
+    out = first.setdefault("hookSpecificOutput", {"hookEventName": "PostToolUse"})
+    out["additionalContext"] = f"{a}\n\n{b}".strip()
+    return first
+
+
 def block(verdict: dict[str, str], reason: str) -> int:
     """Refuse the call in the shape each harness honours, at exit 0.
 
@@ -199,7 +211,11 @@ def main() -> int:
             record_work_item_read(payload)
         with contextlib.suppress(Exception):
             record_github_read(payload)
-        return emit(long_line_notice(payload), 0)
+        notice = long_line_notice(payload)
+        receipt = None
+        with contextlib.suppress(Exception):
+            receipt = subagent_receipt(payload)
+        return emit(_with_context(notice, receipt), 0)
 
     paths = [p for p in write_paths(payload.get("tool_input")) if os.path.isfile(p)]
     if not paths:

@@ -76,7 +76,10 @@ def findings(spans: list[dict], now: int, health: ModuleType) -> Counter:
         verdict = health.span_verdict(span)
         if verdict["outcome"] not in ACTIONABLE:
             continue
-        hits[(verdict["script"].rsplit(".", 1)[0], LABEL.get(verdict["outcome"], verdict["outcome"]))] += 1
+        script = verdict["script"].rsplit(".", 1)[0]
+        outcome = verdict["outcome"]
+        label = "FAIL-OPEN" if outcome == "error" and script in _agentlog.GUARD_HOOKS else LABEL.get(outcome, outcome)
+        hits[(script, label)] += 1
     return hits
 
 
