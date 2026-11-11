@@ -31,6 +31,12 @@ still fails the build for a repeated `###` kind inside one section (#322).
     data is `BLOCKED`, exit 2.
   - Read-only: it disables nothing. `candidate` means delivered and never
     called; the decision is a human's.
+  - **By agent mode.** Requests are split by the agent they ran in (the mode
+    name the editor writes into the system prompt; nothing else is read from
+    it), with share and mean catalogue tokens. An agent's `tools:` list is its
+    reviewed enablement, so per-server verdicts cover only the unrestricted
+    catalogue; a server seen only in an agent's list is `agent tools only`.
+    Decided on #221: no parallel allowlist beside the agent definitions.
 
 - **The context budget measures context fill instead of only counting calls
   (#519).**

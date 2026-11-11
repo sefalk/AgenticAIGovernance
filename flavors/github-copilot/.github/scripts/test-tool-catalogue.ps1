@@ -116,6 +116,37 @@ try {
     [IO.File]::WriteAllText((Join-Path $bad 'b2\tools_0.json'), 'not json')
     $r = Invoke-Report @($bad, '--min-sessions', '1')
     Add-Result 'U1_an_unreadable_dump_is_skipped_and_counted' ($r.Code -eq 0 -and $r.Out -match '1 session' -and $r.Out -match 'unreadable') "exit=$($r.Code) out=$($r.Out)"
+
+    # --- agent mode: the catalogue an agent's tools: list delivers vs the unrestricted one ---
+    $modes = Join-Path $fixtureDir 'modes'
+    $plain = @('read_file', 'mcp_github_issue_read', 'mcp_idle_probe')
+    New-Session $modes 'm1' ([datetime]'2026-11-04 10:00') $plain
+    $m1 = Join-Path $modes 'm1'
+    $agentDefs = @([ordered]@{ name = 'read_file'; description = ('D' * 402) }, [ordered]@{ name = 'mcp_agentonly_x'; description = ('D' * 402) })
+    $agentDump = Join-Path $m1 'tools_1.json'
+    [IO.File]::WriteAllText($agentDump, (J ([ordered]@{ content = (ConvertTo-Json -InputObject $agentDefs -Compress -Depth 6) })))
+    (Get-Item $agentDump).LastWriteTime = [datetime]'2026-11-04 10:00'
+    [IO.File]::WriteAllText((Join-Path $m1 'system_prompt_0.json'), (J ([ordered]@{ content = "You are an assistant. $CANARY" })))
+    # Real shape (measured 2026-11-11): content is itself JSON, so the quotes around the mode name arrive escaped.
+    $agentPrompt = ConvertTo-Json -InputObject @([ordered]@{ type = 'text'; content = "<modeInstructions>`nYou are currently running in `"coordinator`" mode. $CANARY" }) -Compress -Depth 6
+    [IO.File]::WriteAllText((Join-Path $m1 'system_prompt_1.json'), (J ([ordered]@{ content = $agentPrompt })))
+    $requests = @()
+    foreach ($i in 1..3) { $requests += J ([ordered]@{ ts = 1785760265000 + $i; sid = 'm1'; type = 'llm_request'; name = 'chat:x'; spanId = "r$i"; status = 'ok'; attrs = [ordered]@{ debugName = 'panel/editAgent'; systemPromptFile = 'system_prompt_0.json'; toolsFile = 'tools_0.json'; userRequest = $CANARY } }) }
+    $requests += J ([ordered]@{ ts = 1785760266000; sid = 'm1'; type = 'llm_request'; name = 'chat:x'; spanId = 'r4'; status = 'ok'; attrs = [ordered]@{ debugName = 'panel/editAgent'; systemPromptFile = 'system_prompt_1.json'; toolsFile = 'tools_1.json' } })
+    [IO.File]::AppendAllText((Join-Path $m1 'main.jsonl'), (($requests -join "`n") + "`n"))
+
+    $r = Invoke-Report @($modes, '--min-sessions', '1')
+    $mout = $r.Out
+    $plainTok = [math]::Round((($plain | ForEach-Object { 28 + $_.Length + 402 }) | Measure-Object -Sum).Sum / 4)
+    $agentTok = [math]::Round(((28 + 9 + 402) + (28 + 15 + 402)) / 4)
+    $defaultRow = Get-Row $mout 'default (no agent)'
+    $coordRow = Get-Row $mout 'coordinator'
+    Add-Result 'M1_requests_are_split_by_agent_mode_with_share_and_catalogue_cost' ($r.Code -eq 0 -and $defaultRow -match '\|\s*3\s*\|\s*75 %\s*\|' -and $defaultRow -match "\|\s*$plainTok\s*\|" -and $coordRow -match '\|\s*1\s*\|\s*25 %\s*\|' -and $coordRow -match "\|\s*$agentTok\s*\|") "exit=$($r.Code) out=$mout"
+    $agentOnly = Get-Row $mout 'mcp:agentonly'
+    Add-Result 'M2_a_server_only_in_an_agent_tools_list_is_not_a_candidate' ($agentOnly -match 'agent tools only' -and $agentOnly -notmatch 'candidate') "row='$agentOnly'"
+    $idleM = Get-Row $mout 'mcp:idle'
+    Add-Result 'M3_unrestricted_servers_are_still_judged' ($idleM -match 'candidate') "row='$idleM'"
+    Add-Result 'M4_only_the_mode_name_leaves_the_system_prompt' ($mout -notmatch [regex]::Escape($CANARY) -and $mout -match 'coordinator') 'canary leaked or mode missing'
 } finally {
     Remove-Item $fixtureDir -Recurse -Force -ErrorAction SilentlyContinue
 }
