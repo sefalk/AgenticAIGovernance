@@ -33,6 +33,38 @@ session-log based reports among them ([#447](https://github.com/sefalk/AgenticAI
 
 ## Prerequisites
 
+### Inactive Copilot scoped-hook probe (AF #541)
+
+The Windows-only measurement template
+[`copilot-scoped-probe.json.template`](.github/hooks/copilot-scoped-probe.json.template)
+is **inactive**. Do not rename it in a production project. It uses native
+`exec`/`args`, with Python on PATH, and requires a fresh Copilot chat after
+activation in the disposable probe.
+
+[`copilot-scoped-probe.py`](.github/hooks/scripts/copilot-scoped-probe.py)
+records routing metadata only. The fixed slice selects coordinator pre/post,
+and stop routes for coordinator, implementer, test-writer, refactorer,
+documenter and compliance-checker. It never runs those gates. Other roles,
+missing main-agent roles and unmapped events are recorded without a route.
+`agentStop` never selects a role stop; only `subagentStop` does. Direct-agent
+frontmatter and existing universal registrations remain unchanged.
+
+Each hook prints one `{}`. Invalid/conflicting identity fields produce an
+explicit stderr diagnostic and an `error` audit row, without blocking policy
+decisions. An audit-write failure exits nonzero; this is an infrastructure
+failure, not evidence that a policy gate works.
+
+Run the regression with
+`.github\scripts\run-all-tests.ps1 -Filter copilot-scoped-probe -FailOnSkip`.
+For a **live** native-source check, use
+`.github\scripts\test-copilot-scoped-probe.ps1 -LogPath <routing-log> -SessionIds <root-id>,<child-ids>`.
+Pass root **and** child IDs: child hook `sessionId` may equal `agentId`.
+This separate, owner-approved Copilot check does not change or claim coverage
+from the existing Local-only `test-hooks-integration.ps1`. Preserve the probe
+registration hashes before activation and restore them afterwards.
+
+### Runtime prerequisites
+
 - VS Code with GitHub Copilot extension (agent mode enabled)
 - **Python 3.10+, required by the hooks.** Gate logic lives in Python cores
   behind thin `.ps1`/`.sh` wrappers (#287): secret scan, quality and lint

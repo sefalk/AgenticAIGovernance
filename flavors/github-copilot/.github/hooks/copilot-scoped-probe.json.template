@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "exec": "python",
+        "args": [
+          ".github\\hooks\\scripts\\copilot-scoped-probe.py",
+          "--event",
+          "preToolUse",
+          "--log",
+          ".github\\logs\\copilot-scoped-probe.jsonl"
+        ],
+        "timeoutSec": 10
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "exec": "python",
+        "args": [
+          ".github\\hooks\\scripts\\copilot-scoped-probe.py",
+          "--event",
+          "postToolUse",
+          "--log",
+          ".github\\logs\\copilot-scoped-probe.jsonl"
+        ],
+        "timeoutSec": 10
+      }
+    ],
+    "subagentStop": [
+      {
+        "type": "command",
+        "exec": "python",
+        "args": [
+          ".github\\hooks\\scripts\\copilot-scoped-probe.py",
+          "--event",
+          "subagentStop",
+          "--log",
+          ".github\\logs\\copilot-scoped-probe.jsonl"
+        ],
+        "timeoutSec": 10
+      }
+    ]
+  }
+}
