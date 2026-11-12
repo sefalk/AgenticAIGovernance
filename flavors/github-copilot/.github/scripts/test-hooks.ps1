@@ -1191,8 +1191,8 @@ foreach ($line in (Get-Content -LiteralPath $sharedCasesPath)) {
 # A table that failed to load is not zero failures, it is zero questions asked.
 # Without this the suite would still print 'All tests passed'.
 Assert-True "the shared block-dangerous case table was read" `
-    ($sharedCases.Count -ge 56) `
-    "rows parsed: $($sharedCases.Count) from $sharedCasesPath (floor 56 -- raise it as the table grows, never lower it)"
+    ($sharedCases.Count -ge 64) `
+    "rows parsed: $($sharedCases.Count) from $sharedCasesPath (floor 64 -- raise it as the table grows, never lower it)"
 
 foreach ($case in $sharedCases) {
     Assert-Decision -TestName $case[0] -Expected $case[2] -Script 'block-dangerous.ps1' `
@@ -1393,7 +1393,7 @@ Assert-True "the guarded-tool pattern is identical in both dialects" `
 # block-dangerous acts on (#60, #74, #138, #36, #376).
 $roPy = Get-Content (Join-Path $scriptDir 'scan-secrets.py') -Raw -ErrorAction SilentlyContinue
 $roWrites = @(if ($roPy -match '(?s)WRITE_TOOLS = \{(.*?)\}') { [regex]::Matches($Matches[1], '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value } })
-$roGated = @($roWrites) + @('runInTerminal', 'run_in_terminal', 'create_and_run_task', 'createAndRunTask', 'run_task',
+$roGated = @($roWrites) + @('runInTerminal', 'run_in_terminal', 'Bash', 'powershell', 'create_and_run_task', 'createAndRunTask', 'run_task',
     'runTask', 'run_notebook_cell', 'runNotebookCell', 'mcp_pylance_mcp_s_pylanceRunCodeSnippet', 'run_playwright_code',
     'browser_run_code', 'browser_evaluate', 'run_vscode_command', 'runVsCodeCommand',
     'mcp_azure_devops__wit_work_item_write', 'mcp_github_mcp_se_issue_write', 'mcp_github_mcp_se_update_pull_request',
