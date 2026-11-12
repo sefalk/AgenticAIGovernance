@@ -107,7 +107,9 @@ if (Test-AfWriteTool $toolName) {
     }
 }
 
-if ($toolName -notmatch 'terminal|Terminal' -and -not $isTaskShaped -and -not $isTaskRun -and -not $isExecSurface) {
+# Copilot harness shell tools (#529, captured in #447): `Bash` from agent-hooks.json, `powershell` from a version-1 hook file.
+$isShell = ($toolName -match 'terminal' -or $toolName -match '^(bash|powershell)$')
+if (-not $isShell -and -not $isTaskShaped -and -not $isTaskRun -and -not $isExecSurface) {
     Write-Output '{}'
     exit 0
 }

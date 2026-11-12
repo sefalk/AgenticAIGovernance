@@ -530,6 +530,8 @@ assert_true "scan-secrets still inspects a read large enough to spill (#341)" "$
     ok=1
     af_unguarded_tool mcp_azure_devops__wit_work_item || ok=0
     af_unguarded_tool runInTerminal && ok=0
+    af_unguarded_tool Bash && ok=0
+    af_unguarded_tool powershell && ok=0
     af_unguarded_tool editFiles && ok=0
     [ -z "$(af_fast_tool_name '{"tool_name":"read_file","tool_input":{"tool_name":"runInTerminal"}}')" ] || ok=0
     [ "$(af_fast_tool_name '{"tool_name":"read_file"}')" = read_file ] || ok=0
@@ -2632,8 +2634,8 @@ fi
 # A table that failed to load is not zero failures, it is zero questions asked.
 # Without this the suite would still print 'All tests passed'.
 assert_true "the shared block-dangerous case table was read" \
-    "$([ "$shared_rows" -ge 17 ] && echo 1 || echo 0)" \
-    "rows parsed: $shared_rows from $SHARED_CASES (floor 17 -- raise it as the table grows, never lower it)"
+    "$([ "$shared_rows" -ge 25 ] && echo 1 || echo 0)" \
+    "rows parsed: $shared_rows from $SHARED_CASES (floor 25 -- raise it as the table grows, never lower it)"
 
 # These rules existed in block-dangerous.sh and nothing executed them. The
 # bash suite grew issue by issue -- scan units for #62, tasks for #74 -- so the

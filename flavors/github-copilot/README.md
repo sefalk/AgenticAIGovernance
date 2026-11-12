@@ -18,6 +18,19 @@ suggestions. You stay in control through mandatory escalation points.
 - **Maker-Checker pattern** — every agent's output is reviewed by a critic
 - **Escalation, not surprise** — the coordinator asks you when it needs domain input
 
+## Release lines
+
+VS Code 1.146 deprecated the **Local** agent harness; it is removed in February 2027.
+
+| Line | Branch | Harness | Status |
+|---|---|---|---|
+| **1.28.x** | `release/local-1.28` | Local | Hotfixes only. 1.28.6 is the final feature release. Start sessions with Session Target = **Local**. |
+| **2.x** | `dev` → `main` | Copilot | Migration in progress ([#528](https://github.com/sefalk/AgenticAIGovernance/issues/528)). |
+
+The deployed line is in `.github/.af-version`. Under the Copilot harness a 1.28.x
+payload loads, but parts of it do not work there: subagent receipts and the
+session-log based reports among them ([#447](https://github.com/sefalk/AgenticAIGovernance/issues/447)).
+
 ## Prerequisites
 
 - VS Code with GitHub Copilot extension (agent mode enabled)
