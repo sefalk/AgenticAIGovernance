@@ -10,7 +10,7 @@
 # than needed only costs latency; an unmatched guarded tool would skip a gate,
 # so test-hooks.* assert the superset and the identity with _fastpath.ps1.
 
-AF_GUARDED_TOOLS='terminal|task|update|create|write|edit|insert|apply|replace|runcodesnippet|notebook_?cell|playwright|browser_|vs_?code_?command'
+AF_GUARDED_TOOLS='terminal|bash|powershell|task|update|create|write|edit|insert|apply|replace|runcodesnippet|notebook_?cell|playwright|browser_|vs_?code_?command'
 # Calls the body guard records (#376): its READ_SUFFIXES plus comment declarations.
 AF_GUARD_READS='(issue_read|pull_request_read|list_issues|search_issues|list_pull_requests|search_pull_requests|add_issue_comment)$'
 

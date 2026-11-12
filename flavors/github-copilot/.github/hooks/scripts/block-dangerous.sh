@@ -66,6 +66,8 @@ bd_is_exec_surface() {
 bd_is_gated_tool() {
     case "$1" in
         *terminal*|*Terminal*) return 0 ;;
+        # Copilot harness shell tools (#529, captured in #447).
+        Bash|bash|powershell|PowerShell) return 0 ;;
         create_and_run_task|createAndRunTask) return 0 ;;
         run_task|runTask) return 0 ;;
         *wit_work_item_write) return 0 ;;
