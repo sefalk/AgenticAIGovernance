@@ -31,6 +31,12 @@ The deployed line is in `.github/.af-version`. Under the Copilot harness a 1.28.
 payload loads, but parts of it do not work there: subagent receipts and the
 session-log based reports among them ([#447](https://github.com/sefalk/AgenticAIGovernance/issues/447)).
 
+The two lines do not merge into each other. A change both need gets one issue
+and is implemented on each line in its own pull request; a cherry-pick counts
+as separate. CI refuses a pull request into either line that brings a commit of
+the other, unless its body declares an explicit, urgent owner decision as
+`cross-line: <reason>` ([#537](https://github.com/sefalk/AgenticAIGovernance/issues/537)).
+
 ## Prerequisites
 
 - VS Code with GitHub Copilot extension (agent mode enabled)

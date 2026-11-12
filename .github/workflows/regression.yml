@@ -504,6 +504,33 @@ jobs:
           }
           exit $LASTEXITCODE
 
+      - name: Test the release-line gate
+        shell: powershell
+        run: python .github\scripts\test-release-line-gate.py
+
+      # dev (2.x, Copilot) and release/local-1.28 (1.28.x, Local) are worked by
+      # separate sessions and never merge into each other (#537). A change both
+      # need is implemented on each line; only an explicit, urgent owner
+      # decision crosses, declared as `cross-line: <reason>` in the body. The
+      # body is read from the API so that adding the line and re-running works.
+      - name: Refuse commits from the other release line
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'release/local-1.28') }}
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.number }}
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          $ghApi = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/gh-api.ps1'
+          $bodyLines = & $ghApi -Step 'Release-line gate: read the pull request body' -Mode Read `
+            -Arguments @("repos/$env:REPO/pulls/$env:PR_NUMBER", '--jq', '.body')
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $bodyFile = Join-Path $env:RUNNER_TEMP 'release-line-body.txt'
+          [IO.File]::WriteAllText($bodyFile, ($bodyLines | Out-String), (New-Object Text.UTF8Encoding $false))
+          python .github\scripts\check-release-line.py --base-ref $env:BASE_REF --body-file $bodyFile
+          exit $LASTEXITCODE
+
       # The delivery paths are a skill, not prose, precisely so that they can be
       # checked (#236). This asserts every path still ends in a verification, that
       # the hotfix path still names the checkout trap, that the release cut still
