@@ -189,13 +189,22 @@ def git(work: Path, *args: str) -> str:
 # only in a clone that enabled them, so the pull request is checked as well.
 # The flavor sits one directory down, as in the real repository, so a pathspec
 # resolved against the wrong directory would see nothing and pass.
-def against(edit: Callable[[Path], None], want_exit: int, want_text: str) -> str:
+def against(edit: Callable[[Path], None], want_exit: int, want_text: str, tagged: str | None = None) -> str:
     with tempfile.TemporaryDirectory() as tmp:
         top = Path(tmp)
         git(top, "init", "-q", "-b", "dev")
         work = seed(top / "flavor", {})
         git(top, "add", "--", "flavor")
         git(top, "commit", "-q", "--no-verify", "-m", "base")
+        if tagged is not None:
+            # A release line cut from the same base: its own CHANGELOG, VERSION and tag.
+            git(top, "switch", "-q", "-c", "release")
+            (work / "CHANGELOG.md").write_text(tagged, encoding="utf-8", newline="\n")
+            (work / "VERSION").write_text("1.0.8\n", encoding="utf-8", newline="\n")
+            git(top, "add", "--", "flavor")
+            git(top, "commit", "-q", "--no-verify", "-m", "release: cut 1.0.8")
+            git(top, "tag", "-a", "v1.0.8", "-m", "1.0.8")
+            git(top, "switch", "-q", "dev")
         git(top, "switch", "-q", "-c", "feature")
         edit(work)
         git(top, "add", "--", "flavor")
@@ -220,10 +229,52 @@ def add_fragment(work: Path) -> None:
     (work / "changelog.d/426-x.md").write_text(ADDED_100, encoding="utf-8", newline="\n")
 
 
+# A merge-forward (#535): a hotfix line's released section arrives on dev while
+# dev keeps its own VERSION. Only a section identical to the tagged one passes.
+SECTION_108 = "## [1.0.8] -- 2026-02-01\n\n### Fixed\n\n- Hotfix (#7).\n\n"
+TAGGED_108 = CHANGELOG.replace("## [1.0.0]", SECTION_108 + "## [1.0.0]")
+
+
+def insert(text: str) -> Callable[[Path], None]:
+    def edit(work: Path) -> None:
+        (work / "CHANGELOG.md").write_text(text, encoding="utf-8", newline="\n")
+
+    return edit
+
+
 AGAINST: list[tuple[str, Callable[[], str]]] = [
     ("against_refuses_a_CHANGELOG_edit_without_VERSION", lambda: against(top_insert, 1, "F007")),
     ("against_passes_a_release_cut", lambda: against(release_cut, 0, "fragment(s) ok")),
     ("against_passes_a_fragment", lambda: against(add_fragment, 0, "1 fragment(s) ok")),
+    (
+        "against_passes_a_merge_forward_of_a_tagged_section",
+        lambda: against(insert(TAGGED_108), 0, "fragment(s) ok", tagged=TAGGED_108),
+    ),
+    ("against_refuses_a_released_section_with_no_tag", lambda: against(insert(TAGGED_108), 1, "F007")),
+    (
+        "against_refuses_a_section_that_differs_from_its_tag",
+        lambda: against(insert(TAGGED_108.replace("Hotfix (#7)", "Edited (#7)")), 1, "F007", tagged=TAGGED_108),
+    ),
+    (
+        "against_refuses_a_top_insert_riding_on_a_merge_forward",
+        lambda: against(
+            insert(
+                TAGGED_108.replace("- Already in Unreleased (#1).", "- Already in Unreleased (#1).\n- Sneaked (#9).")
+            ),
+            1,
+            "F007",
+            tagged=TAGGED_108,
+        ),
+    ),
+    (
+        "against_refuses_an_edit_to_an_existing_release_section",
+        lambda: against(
+            insert(TAGGED_108.replace("- First release.", "- First release, edited.")),
+            1,
+            "F007",
+            tagged=TAGGED_108,
+        ),
+    ),
 ]
 
 
