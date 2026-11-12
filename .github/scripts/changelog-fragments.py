@@ -22,7 +22,9 @@ Rules (`check`):
   F005  no `## ` heading -- release sections belong to `assemble`
   F006  no kind is empty
   F007  (`--against REF`) CHANGELOG.md changed since REF without VERSION --
-        a top-insert; the CI half of the refusal in .githooks/pre-commit
+        a top-insert; the CI half of the refusal in .githooks/pre-commit.
+        A merge-forward passes: every section of the merge base unchanged,
+        every new `## [X.Y.Z]` identical to the one tag vX.Y.Z holds (#535)
 
 Usage:
     changelog-fragments.py check [--against REF] [--root DIR]
@@ -51,6 +53,7 @@ _NAME = re.compile(r"^(?P<issue>\d+)-[a-z0-9][a-z0-9-]*\.md$")
 _KIND = re.compile(r"^###\s+(?P<kind>\S.*?)\s*$")
 _SECTION = re.compile(r"^##\s")
 _SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+_RELEASE = re.compile(r"^##\s+\[(?P<version>\d+\.\d+\.\d+)\]")
 
 
 def _strip_blank(lines: list[str]) -> list[str]:
@@ -123,12 +126,60 @@ def _changed_since(root: Path, ref: str, name: str) -> bool:
     return proc.returncode == 1
 
 
+def _git_show(root: Path, rev: str) -> str | None:
+    proc = subprocess.run(
+        ["git", "-C", str(root), "show", f"{rev}:./CHANGELOG.md"],
+        capture_output=True,
+        encoding="utf-8",
+    )
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def _sections(text: str) -> dict[str, str]:
+    """Map each `## ` heading ("" for the preamble) to its block, trailing blank lines dropped."""
+    blocks: dict[str, list[str]] = {"": []}
+    current = ""
+    for line in text.splitlines():
+        if _SECTION.match(line):
+            current = line.strip()
+            blocks[current] = []
+        blocks[current].append(line.rstrip())
+    return {k: "\n".join(_strip_blank(v)) for k, v in blocks.items()}
+
+
+def _is_merge_forward(root: Path, ref: str) -> bool:
+    """Whether HEAD's CHANGELOG.md is the merge base's plus released sections, each as its tag holds it."""
+    base_rev = subprocess.run(
+        ["git", "-C", str(root), "merge-base", ref, "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
+    base_text = _git_show(root, base_rev) if base_rev else None
+    head_text = _git_show(root, "HEAD")
+    if base_text is None or head_text is None:
+        return False
+    base, head = _sections(base_text), _sections(head_text)
+    if any(head.get(heading) != block for heading, block in base.items()):
+        return False
+    added = [heading for heading in head if heading not in base]
+    if not added:
+        return False
+    for heading in added:
+        m = _RELEASE.match(heading)
+        tagged = _git_show(root, f"v{m.group('version')}") if m else None
+        if tagged is None or _sections(tagged).get(heading) != head[heading]:
+            return False
+    return True
+
+
 def check(root: Path, against: str | None = None) -> int:
     paths = fragment_paths(root)
     findings = [f for p in paths for f in parse_fragment(p)[1]]
     if against:
         try:
-            if _changed_since(root, against, "CHANGELOG.md") and not _changed_since(root, against, "VERSION"):
+            if (
+                _changed_since(root, against, "CHANGELOG.md")
+                and not _changed_since(root, against, "VERSION")
+                and not _is_merge_forward(root, against)
+            ):
                 findings.append(
                     f"F007 CHANGELOG.md changed since {against} without VERSION -- write the entry as "
                     "changelog.d/<issue>-<slug>.md; only a release cut edits CHANGELOG.md (#426)"
