@@ -50,6 +50,13 @@ if ($LogPath) {
     $stops = @($records | Where-Object { $_.route -and $_.event -eq 'subagentStop' })
     $repeats = @($stops | Group-Object session_id, agent_id | Where-Object { $_.Count -ne 1 })
     Add-Result 'Live: one stop route per observed child' ($stops.Count -gt 0 -and $repeats.Count -eq 0)
+    $missing = @($SessionIds | Select-Object -Skip 1 | Where-Object {
+        $childId = $_
+        @($stops | Where-Object {
+            $_.agent_id -eq $childId -or $_.session_id -eq $childId
+        }).Count -ne 1
+    })
+    Add-Result 'Live: every requested child has exactly one stop route' ($missing.Count -eq 0)
     Add-Result 'Live: no agentStop role route' (@($records | Where-Object {
         $_.event -eq 'agentStop' -and $_.route
     }).Count -eq 0)
