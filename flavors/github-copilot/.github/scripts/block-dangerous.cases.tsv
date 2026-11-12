@@ -107,3 +107,17 @@ a deferred rule does not silence a retained one in the same command	agent/fixtur
 a command containing quotes still produces parsable JSON	agent/fixture	ask	{"tool_name":"runInTerminal","tool_input":{"command":"Remove-Item \"C:\\tmp\\a b\\file.txt\""}}
 a task command with backslashes and quotes still produces parsable JSON	agent/fixture	deny	{"tool_name":"create_and_run_task","tool_input":{"task":{"label":"x","type":"shell","command":"C:\\evil\\run \"it\".ps1"},"workspaceFolder":"/repo"}}
 pip show via call operator is safe	agent/fixture	allow	{"tool_name":"runInTerminal","tool_input":{"command":"& \".venv/Scripts/python.exe\" -m pip show ruff"}}
+
+# Copilot harness shapes (#529), as captured from agent-hooks.json in #447:
+# the shell tool is `Bash` (also for PowerShell commands on Windows), with
+# `powershell` seen from a version-1 hook file. Before #529 both returned '{}',
+# which is consent. The last three rows guard the fix from overreaching:
+# `task` / `Agent` are the subagent tool, `view` is a read.
+Copilot Bash: push to protected branch is denied	agent/fixture	deny	{"tool_name":"Bash","tool_input":{"command":"git push origin main","description":"push"}}
+Copilot Bash: rm -rf broad path is denied	agent/fixture	deny	{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/data","description":"clean"}}
+Copilot powershell: git add -A is denied	agent/fixture	deny	{"tool_name":"powershell","tool_input":{"command":"git add -A","description":"stage"}}
+Copilot Bash: git status is safe	agent/fixture	allow	{"tool_name":"Bash","tool_input":{"command":"git status","description":"status"}}
+Copilot Bash: tagging is still ours to ask about	agent/fixture	ask	{"tool_name":"Bash","tool_input":{"command":"git tag v1.4.0","description":"tag"}}
+Copilot task subagent call is not a terminal	agent/fixture	silent	{"tool_name":"task","tool_input":{"agent_type":"arbiter","name":"review"}}
+Copilot Agent subagent call is not a terminal	agent/fixture	silent	{"tool_name":"Agent","tool_input":{"agent_type":"arbiter","name":"review"}}
+Copilot view read is not a terminal	agent/fixture	silent	{"tool_name":"view","tool_input":{"path":"README.md"}}
