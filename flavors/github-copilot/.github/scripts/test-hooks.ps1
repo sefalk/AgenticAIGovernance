@@ -13,8 +13,9 @@
 # Usage:
 #   .github/scripts/test-hooks.ps1              # Run all tests
 #   .github/scripts/test-hooks.ps1 -Verbose     # Show pass detail
+#   .github/scripts/test-hooks.ps1 -PreflightOnly # Validate the pytest fixture host
 #
-# Exit codes: 0 = all passed, 1 = failures
+# Exit codes: 0 = all passed, 1 = failures or missing pytest prerequisite
 
 param(
     [switch]$Verbose,
@@ -33,6 +34,70 @@ if (-not (Test-Path $scriptDir)) {
     exit 1
 }
 
+function Test-ImportsPytest([string]$Py) {
+    # Native stderr terminates under this suite's policy; probes must convert failure to false.
+    try { $null = & $Py -c 'import pytest' 2>&1; return ($LASTEXITCODE -eq 0) } catch { return $false }
+}
+
+$tvBase = $null
+$tvVenv = $null
+trap {
+    if ($tvBase -and (Test-Path -LiteralPath $tvBase)) {
+        Remove-Item -LiteralPath $tvBase -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    throw
+}
+
+$tvCommon = try { Split-Path (git -C $githubDir rev-parse --path-format=absolute --git-common-dir 2>$null) } catch { $null }
+$tvHost = @(
+    (Join-Path $githubDir '../.venv/Scripts/python.exe'),
+    (Join-Path $githubDir '../../../.venv/Scripts/python.exe'),
+    (Join-Path $githubDir '../mcp-deploy/.venv/Scripts/python.exe'),
+    # A linked worktree has no venv of its own; the main checkout's serves.
+    $(if ($tvCommon) { Join-Path $tvCommon '.venv/Scripts/python.exe' }),
+    'python'
+) | Where-Object { $_ -and ($_ -eq 'python' -or (Test-Path $_)) -and (Test-ImportsPytest $_) } | Select-Object -First 1
+
+if (-not $tvHost) {
+    Write-Output 'ERROR: pytest-capable Python interpreter required before hook tests; no host interpreter could import pytest.'
+    exit 1
+}
+
+$tvBase = Join-Path ([IO.Path]::GetTempPath()) "af473-$(Get-Random)"
+$tvVenv = Join-Path $tvBase 'venv'
+$previousPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$tvSetupError = $null
+try {
+    $tvSite = (& $tvHost -c 'import os, pytest; print(os.path.dirname(os.path.dirname(pytest.__file__)))' 2>&1 | Out-String).Trim()
+    $tvSiteExit = $LASTEXITCODE
+    $null = & $tvHost -m venv --without-pip $tvVenv 2>&1
+    $tvVenvExit = $LASTEXITCODE
+} catch {
+    $tvSetupError = $_.Exception.Message
+} finally {
+    $ErrorActionPreference = $previousPreference
+}
+
+if ($tvSetupError -or $tvSiteExit -ne 0 -or -not $tvSite -or $tvVenvExit -ne 0 -or -not (Test-Path (Join-Path $tvVenv 'Scripts/python.exe'))) {
+    Write-Output "ERROR: pytest-capable Python interpreter required before hook tests; could not prepare the fixture venv. $tvSetupError"
+    Remove-Item -LiteralPath $tvBase -Recurse -Force -ErrorAction SilentlyContinue
+    exit 1
+}
+
+$tvPth = Join-Path $tvVenv 'Lib/site-packages/af473.pth'
+if (-not (Test-Path (Split-Path $tvPth))) {
+    Write-Output 'ERROR: pytest-capable Python interpreter required before hook tests; fixture site-packages were not created.'
+    Remove-Item -LiteralPath $tvBase -Recurse -Force -ErrorAction SilentlyContinue
+    exit 1
+}
+[IO.File]::WriteAllText($tvPth, "$tvSite`n")
+if (-not (Test-ImportsPytest (Join-Path $tvVenv 'Scripts/python.exe'))) {
+    Write-Output 'ERROR: pytest-capable Python interpreter required before hook tests; fixture venv could not import pytest.'
+    Remove-Item -LiteralPath $tvBase -Recurse -Force -ErrorAction SilentlyContinue
+    exit 1
+}
+
 function Test-MissingPytestPreflight {
     $tempRoot = Join-Path ([IO.Path]::GetTempPath()) "af543-preflight-$(Get-Random)"
     $fixtureScripts = Join-Path $tempRoot '.github\scripts'
@@ -47,7 +112,7 @@ function Test-MissingPytestPreflight {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '_suite_env.ps1') -Destination (Join-Path $fixtureScripts '_suite_env.ps1')
         $testCopy = Join-Path $fixtureScripts 'test-hooks.ps1'
         $suiteContents = [IO.File]::ReadAllText($testCopy)
-        $preflightExitPattern = '(?m)^if \(\$PreflightOnly\) \{ exit 0 \}$'
+        $preflightExitPattern = '(?m)^if \(\$PreflightOnly\) \{\r?$'
         $preflightExitMatches = [regex]::Matches($suiteContents, $preflightExitPattern)
         if ($preflightExitMatches.Count -ne 1) {
             throw 'Could not locate the preflight-only exit in the copied suite.'
@@ -103,10 +168,14 @@ exit `$LASTEXITCODE
 }
 
 if (-not $PreflightOnly -and -not (Test-MissingPytestPreflight)) {
+    Remove-Item -LiteralPath $tvBase -Recurse -Force -ErrorAction SilentlyContinue
     exit 1
 }
 
-if ($PreflightOnly) { exit 0 }
+if ($PreflightOnly) {
+    Remove-Item -LiteralPath $tvBase -Recurse -Force -ErrorAction SilentlyContinue
+    exit 0
+}
 
 # ── Declared autonomy policy (issue #108) ────────────────────────────────
 #
@@ -5059,37 +5128,7 @@ Write-Output ""
 
 Write-Output "## producer stop hooks find pytest in the venv (issue #473)"
 
-# A venv whose interpreter imports pytest, built without pip: a .pth points its
-# site-packages at an interpreter that already has pytest. Copyable into a fixture.
-$tvVenv = $null
-$tvBase = Join-Path ([IO.Path]::GetTempPath()) "af473-$(Get-Random)"
-# Native stderr is a terminating error under this suite's policy; a probe must not abort the run.
-function Test-ImportsPytest([string]$Py) {
-    try { $null = & $Py -c 'import pytest' 2>&1; return ($LASTEXITCODE -eq 0) } catch { return $false }
-}
-$tvCommon = try { Split-Path (git -C $githubDir rev-parse --path-format=absolute --git-common-dir 2>$null) } catch { $null }
-$tvHost = @(
-    (Join-Path $githubDir '../.venv/Scripts/python.exe'),
-    (Join-Path $githubDir '../../../.venv/Scripts/python.exe'),
-    (Join-Path $githubDir '../mcp-deploy/.venv/Scripts/python.exe'),
-    # A linked worktree has no venv of its own; the main checkout's serves.
-    $(if ($tvCommon) { Join-Path $tvCommon '.venv/Scripts/python.exe' }),
-    'python'
-) | Where-Object { $_ -and ($_ -eq 'python' -or (Test-Path $_)) -and (Test-ImportsPytest $_) } | Select-Object -First 1
-if ($tvHost) {
-    try {
-        $tvSite = (& $tvHost -c 'import os, pytest; print(os.path.dirname(os.path.dirname(pytest.__file__)))' 2>&1 | Out-String).Trim()
-        $null = & $tvHost -m venv --without-pip (Join-Path $tvBase 'venv') 2>&1
-    } catch {}
-    $tvPth = Join-Path $tvBase 'venv/Lib/site-packages/af473.pth'
-    if (Test-Path (Split-Path $tvPth)) {
-        [IO.File]::WriteAllText($tvPth, "$tvSite`n")
-        if (Test-ImportsPytest (Join-Path $tvBase 'venv/Scripts/python.exe')) { $tvVenv = Join-Path $tvBase 'venv' }
-    }
-}
-Assert-True "a venv with pytest can be built for the #473 cases" ($null -ne $tvVenv) `
-    "no interpreter with pytest found to build one from (host: $tvHost)"
-
+# The fixture venv was prepared by the suite preflight before any hook cases.
 if ($tvVenv) {
     $tvRed = "# copilot:generated | test-writer | 2026-10-28`ndef test_red():`n    assert False`n"
     $r = Invoke-Hook -Script 'test-writer-stop.ps1' -JsonInput $STOP_JSON -Branch 'agent/473-x' `
