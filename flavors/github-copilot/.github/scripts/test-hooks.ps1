@@ -17,12 +17,14 @@
 # Exit codes: 0 = all passed, 1 = failures
 
 param(
-    [switch]$Verbose
+    [switch]$Verbose,
+    [switch]$PreflightOnly
 )
 
 $ErrorActionPreference = 'Stop'
 $githubDir = (Resolve-Path "$PSScriptRoot/..").Path
 $scriptDir = Join-Path $githubDir 'hooks/scripts'
+$suitePath = $MyInvocation.MyCommand.Path
 . "$PSScriptRoot/_suite_env.ps1"
 $inAfSource = Test-AfSourceTree $PSScriptRoot
 
@@ -30,6 +32,81 @@ if (-not (Test-Path $scriptDir)) {
     Write-Output "ERROR: hooks/scripts not found at $scriptDir"
     exit 1
 }
+
+function Test-MissingPytestPreflight {
+    $tempRoot = Join-Path ([IO.Path]::GetTempPath()) "af543-preflight-$(Get-Random)"
+    $fixtureScripts = Join-Path $tempRoot '.github\scripts'
+    $fixtureHooks = Join-Path $tempRoot '.github\hooks\scripts'
+    $fakeBin = Join-Path $tempRoot 'bin'
+    $suiteStartedMarker = Join-Path $tempRoot 'suite-started.log'
+    $failures = @()
+
+    try {
+        New-Item -ItemType Directory -Path $fixtureScripts, $fixtureHooks, $fakeBin -Force | Out-Null
+        Copy-Item -LiteralPath $suitePath -Destination (Join-Path $fixtureScripts 'test-hooks.ps1')
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '_suite_env.ps1') -Destination (Join-Path $fixtureScripts '_suite_env.ps1')
+        $testCopy = Join-Path $fixtureScripts 'test-hooks.ps1'
+        $suiteContents = [IO.File]::ReadAllText($testCopy)
+        $preflightExitPattern = '(?m)^if \(\$PreflightOnly\) \{ exit 0 \}$'
+        $preflightExitMatches = [regex]::Matches($suiteContents, $preflightExitPattern)
+        if ($preflightExitMatches.Count -ne 1) {
+            throw 'Could not locate the preflight-only exit in the copied suite.'
+        }
+        $preflightExitMatch = $preflightExitMatches[0]
+        $markerWrite = "[IO.File]::WriteAllText('$($suiteStartedMarker.Replace("'", "''"))', 'started')"
+        $suiteContents = $suiteContents.Substring(0, $preflightExitMatch.Index) + $markerWrite + [Environment]::NewLine + $suiteContents.Substring($preflightExitMatch.Index)
+        [IO.File]::WriteAllText($testCopy, $suiteContents, [Text.UTF8Encoding]::new($false))
+        Set-Content -LiteralPath (Join-Path $fakeBin 'python.cmd') -Encoding ASCII -Value @'
+@echo off
+if /I "%~1"=="--version" (
+  echo Python 3.11.9
+  exit /b 0
+)
+exit /b 1
+'@
+
+        $powershellExe = (Get-Process -Id $PID).Path
+        $testCommand = @"
+`$ErrorActionPreference = 'Stop'
+`$env:PATH = '$($fakeBin.Replace("'", "''"));`$env:SystemRoot\System32;`$env:SystemRoot\System32\WindowsPowerShell\v1.0'
+`$env:AF_PYTHON_OVERRIDE = `$null
+`$env:VIRTUAL_ENV = `$null
+& '$($testCopy.Replace("'", "''"))' -PreflightOnly
+exit `$LASTEXITCODE
+"@
+        $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($testCommand))
+        $savedPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $output = & $powershellExe -NoProfile -NonInteractive -EncodedCommand $encodedCommand 2>&1 | Out-String
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $savedPreference
+        }
+
+        $expectedDiagnostic = 'pytest-capable Python interpreter required before hook tests'
+        if ($exitCode -eq 0) { $failures += 'missing pytest host did not produce a nonzero exit' }
+        if ($output -notmatch [regex]::Escape($expectedDiagnostic)) { $failures += 'missing pytest host did not produce its prerequisite diagnostic' }
+        if (Test-Path -LiteralPath $suiteStartedMarker) { $failures += 'missing pytest host allowed the test suite to start' }
+    } finally {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($failures.Count -gt 0) {
+        Write-Host '=== Missing Pytest Preflight Contract ==='
+        $failures | ForEach-Object { Write-Host "  FAIL  $_" }
+        return $false
+    }
+
+    Write-Host '  PASS  missing pytest fails before the test suite starts'
+    return $true
+}
+
+if (-not $PreflightOnly -and -not (Test-MissingPytestPreflight)) {
+    exit 1
+}
+
+if ($PreflightOnly) { exit 0 }
 
 # ── Declared autonomy policy (issue #108) ────────────────────────────────
 #
