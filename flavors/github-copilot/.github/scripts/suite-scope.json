@@ -42,6 +42,10 @@
       ".github/skills/**",
       ".github/prompts/**"
     ],
+    "test-copilot-scoped-probe.ps1": [
+      ".github/hooks/scripts/copilot-scoped-probe.py",
+      ".github/hooks/copilot-scoped-probe.json.template"
+    ],
     "test-cost-source.ps1": [
       ".github/scripts/check-cost-source.ps1",
       ".github/scripts/check-cost-source.sh"
