@@ -7,14 +7,14 @@ tools:
   - read/readFile
   - read/problems
   - todo
-  - microsoft/azure-devops-mcp/core_list_projects
-  - microsoft/azure-devops-mcp/repo_repository
-  - microsoft/azure-devops-mcp/repo_file
-  - microsoft/azure-devops-mcp/repo_branch
-  - microsoft/azure-devops-mcp/repo_pull_request
-  - microsoft/azure-devops-mcp/repo_pull_request_write
-  - microsoft/azure-devops-mcp/repo_pull_request_thread_write
-  - microsoft/azure-devops-mcp/wit_work_item_link_write
+  - ado-remote-mcp/core_list_projects
+  - ado-remote-mcp/repo_repository
+  - ado-remote-mcp/repo_file
+  - ado-remote-mcp/repo_branch
+  - ado-remote-mcp/repo_pull_request
+  - ado-remote-mcp/repo_pull_request_write
+  - ado-remote-mcp/repo_pull_request_thread_write
+  - ado-remote-mcp/wit_work_item_link_write
 ---
 
 # PR Manager Agent (Optional Capability Worker)

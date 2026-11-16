@@ -7,13 +7,13 @@ tools:
   - read/readFile
   - read/problems
   - todo
-  - microsoft/azure-devops-mcp/core_list_projects
-  - microsoft/azure-devops-mcp/search_workitem
-  - microsoft/azure-devops-mcp/wit_work_item
-  - microsoft/azure-devops-mcp/wit_query
-  - microsoft/azure-devops-mcp/wit_work_item_write
-  - microsoft/azure-devops-mcp/wit_work_item_comment_write
-  - microsoft/azure-devops-mcp/wit_work_item_link_write
+  - ado-remote-mcp/core_list_projects
+  - ado-remote-mcp/search_workitem
+  - ado-remote-mcp/wit_work_item
+  - ado-remote-mcp/wit_query
+  - ado-remote-mcp/wit_work_item_write
+  - ado-remote-mcp/wit_work_item_comment_write
+  - ado-remote-mcp/wit_work_item_link_write
 ---
 
 # ADO Work Item Manager Agent

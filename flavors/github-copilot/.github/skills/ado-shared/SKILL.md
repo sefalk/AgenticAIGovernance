@@ -73,6 +73,7 @@ a tool does not exist*. Diagnose in this order before changing anything:
 | Symptom | Cause | Fix |
 |---|---|---|
 | One tool name rejected; agent silently drops it | **Toolset consolidation upstream** — the tool was merged into a grouped tool with an `action` parameter | Run `.github/scripts/check-mcp-tool-ids.py`; migrate the ids it reports |
+| Every ADO tool absent in a subagent, no error | **Server name** — the `.vscode/mcp.json` key is not `ado-remote-mcp` | See *Server Name* below |
 | A whole family is absent (all wiki tools, all pipeline tools) | **Tool filtering** — `-d` args (local) or `X-MCP-Toolsets` / `X-MCP-Tools` headers (remote) exclude that group | Add the group to the filter; keep `core` enabled |
 | Reads work, every write is rejected | `X-MCP-Readonly` is set (remote only) | Remove the header for workflows that create or update artifacts |
 | Tools are listed, but every call returns 401/403 | **Identity/tenant**, not the toolset | See *Authentication* above |
@@ -101,6 +102,24 @@ enough to outweigh the feature lag. (`@next` is nightly and drifts more.)
 Microsoft now recommends the **remote** server (`https://mcp.dev.azure.com/{org}`,
 transport `http`) over the local `npx` server and is focusing new work there.
 See *Remote vs Local Server* below.
+
+## Server Name
+
+The ADO agents grant `ado-remote-mcp/<tool>`. A subagent's grant resolves only
+as `<server name>/<tool>`, where the server name is the key in
+`.vscode/mcp.json`, so register the server under exactly that key, remote or
+local (#550):
+
+```jsonc
+{ "servers": { "ado-remote-mcp": { "type": "http", "url": "https://mcp.dev.azure.com/{org}",
+  "headers": { "X-MCP-Toolsets": "wit,wiki,repos,pipelines" } } } }
+```
+
+Any other key leaves every ADO worker with no ADO tools and no error. A tool
+filter (`X-MCP-Toolsets` / `X-MCP-Tools`) must include every tool the workers
+grant (`core_*` is always on). The local `npx` server works under the same key.
+`check-mcp-tool-ids.py` flags the old `microsoft/azure-devops-mcp`
+prefix.
 
 ## Remote vs Local Server
 
