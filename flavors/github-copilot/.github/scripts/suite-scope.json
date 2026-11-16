@@ -64,6 +64,10 @@
       "deploy.sh",
       ".github/.af-manifest"
     ],
+    "test-github-mcp-registration.ps1": [
+      "deploy.ps1",
+      ".github/agents/**"
+    ],
     "test-hook-decision-contract.ps1": [
       ".github/hooks/README.md",
       ".github/hooks/scripts/scan-secrets.py",
