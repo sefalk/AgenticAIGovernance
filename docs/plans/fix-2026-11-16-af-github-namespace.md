@@ -30,7 +30,7 @@ AF #547: in the Copilot harness, `gh-issue-manager` and `gh-pr-manager` run as s
 - **Files:** `.github/scripts/test-github-mcp-registration.ps1`, `.github/scripts/test-deploy-nonrepo.sh`, `.github/scripts/suite-scope.json`, `.github/scripts/suite-budgets.json`
 - **Acceptance criteria:** Each new case fails for the missing behavior, not for a harness error; existing cases keep passing.
 - **Exit criterion:** The canonical runner reports the new PS suite failing on the grant and registration cases; the bash suite fails only on its new cases.
-- **Status:** TODO
+- **Status:** DONE (18c8153: PS suite 8 checks red, bash 6 checks red in E-G)
 
 ### 2. Shipping the `af-github` namespace and registration
 
@@ -38,7 +38,7 @@ AF #547: in the Copilot harness, `gh-issue-manager` and `gh-pr-manager` run as s
 - **Files:** `templates/mcp.json`, `deploy.ps1`, `deploy.sh`, `.github/agents/gh-issue-manager.agent.md`, `.github/agents/gh-pr-manager.agent.md`, `.github/skills/gh-issue/SKILL.md`, `changelog.d/547-af-github-namespace.md`
 - **Acceptance criteria:** All cases from subtask 1 pass; `test-suite-scope.ps1` and `test-suite-budgets.ps1` pass.
 - **Exit criterion:** Scoped sweep and the bash deploy suite green locally and in CI.
-- **Status:** TODO
+- **Status:** DONE locally (registration, suite-scope, suite-budgets, deploy-flags PASS; bash 22/22); CI pending
 
 ### 3. Verifying in the probe after merge
 
@@ -75,3 +75,4 @@ AF #547: in the Copilot harness, `gh-issue-manager` and `gh-pr-manager` run as s
 | Date | Agent | Change |
 |---|---|---|
 | 2026-11-16 | coordinator | Initial plan from AF #547 |
+| 2026-11-16 | coordinator | Subtasks 1 and 2 done; template also mapped in suite-scope.json |

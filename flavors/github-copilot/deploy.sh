@@ -1252,6 +1252,22 @@ if [[ "$DRY_RUN" == "true" ]]; then
 fi
 echo ""
 
+# ── af-github MCP registration (#547) ── twin of the deploy.ps1 step; same reasons.
+MCP_TEMPLATE="$AF_ROOT/templates/mcp.json"
+TARGET_MCP="$TARGET_DIR/.mcp.json"
+if [[ -f "$TARGET_MCP" ]]; then
+    if ! grep -qE -e '"af-github"[[:space:]]*:[[:space:]]*\{' "$TARGET_MCP"; then
+        echo '  WARN    .mcp.json has no "af-github" server -- GitHub agents get no tools in the Copilot harness (#547).'
+        echo '          Merge this entry into mcpServers (the token comes from the AF_GH_TOKEN environment variable):'
+        while IFS= read -r line || [[ -n "$line" ]]; do echo "          ${line%$'\r'}"; done <"$MCP_TEMPLATE"
+        echo ""
+    fi
+elif [[ -f "$MCP_TEMPLATE" ]]; then
+    if [[ "$DRY_RUN" != "true" ]]; then cp "$MCP_TEMPLATE" "$TARGET_MCP"; fi
+    echo "  CREATE  .mcp.json  (af-github MCP server; token from AF_GH_TOKEN)"
+    echo ""
+fi
+
 # Deploy .github/ directories
 echo "  .github/ directories:"
 for dir in "${MANIFEST_DIRS[@]}"; do

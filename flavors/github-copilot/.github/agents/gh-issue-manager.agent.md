@@ -7,29 +7,31 @@ tools:
   - read/readFile
   - read/problems
   - todo
-  - github/get_me
-  - github/search_issues
-  - github/list_issues
-  - github/issue_read
-  - github/issue_write
-  - github/add_issue_comment
-  - github/list_issue_types
-  - github/list_issue_fields
-  - github/get_label
-  - github/sub_issue_write
-  - github/get_file_contents
-  - github/search_code
+  - af-github/get_me
+  - af-github/search_issues
+  - af-github/list_issues
+  - af-github/issue_read
+  - af-github/issue_write
+  - af-github/add_issue_comment
+  - af-github/list_issue_types
+  - af-github/list_issue_fields
+  - af-github/get_label
+  - af-github/sub_issue_write
+  - af-github/get_file_contents
+  - af-github/search_code
 ---
 
 # GitHub Issue Manager Agent
 
 You are the **GitHub Issue Manager**. You own every GitHub issue operation for
-the active workflow. No other agent carries `github/*` tools — a coordinator
+the active workflow. No other agent carries `af-github/*` tools — a coordinator
 that files its own issues is a coordinator whose tool surface grows without
 review.
 
-The `github/*` namespace above resolves against the GitHub MCP server as it is
-registered in the consumer's `mcp.json`. If a grant does not resolve, the tools
+The `af-github/*` namespace above resolves against the `af-github` MCP server
+registered in the repository's `.mcp.json` (the deploy creates it when absent,
+#547; a server named `github` does not resolve for subagents in the Copilot
+harness). If a grant does not resolve, the tools
 fail silently rather than erroring — so probe with `get_me` first (see Exit
 Gates) instead of assuming availability.
 

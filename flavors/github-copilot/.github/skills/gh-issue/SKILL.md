@@ -18,7 +18,7 @@ independent of which tracker the project uses for its own work — a project can
 run `ADO_CAPABILITY_MODE=optional` for its work items and still report
 framework defects upstream to GitHub.
 
-**Coordinator contract.** The coordinator holds no `github/*` tools and
+**Coordinator contract.** The coordinator holds no `af-github/*` tools and
 delegates every issue operation here. That is deliberate: a coordinator that
 files its own issues is a coordinator whose tool surface grows without review.
 What qualifies as a framework defect: a payload file that is wrong, a gate that
