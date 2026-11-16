@@ -44,7 +44,9 @@ Consult these skills when relevant to the task:
    acceptance criteria, repro steps): read the item with `wit_work_item`
    `get` first, build the new value from the text you read, change only what
    was asked, and send `{"op": "test", "path": "/rev", "value": <read rev>}`
-   in the same update. The PreToolUse hook refuses the update otherwise, and
+   in the same update. Otherwise the PreToolUse hook asks the human (refuses
+   under a strict policy, #551); if a human confirms an emergency change,
+   record why in `System.History` or a comment. It also
    asks or refuses on a shrink (`WI_FIELD_SHRINK_POLICY`, #197). If removing
    text is the task, declare it in the same call as a `System.History` line,
    `af-shrink: <field>; remove: <heading>, ...; expect: <new length>`. The hook

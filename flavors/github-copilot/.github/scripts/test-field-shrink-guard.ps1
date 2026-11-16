@@ -7,7 +7,9 @@
 #   - PostToolUse (rides in scan-secrets) caches what MCP actually returned for a
 #     read: per item the revision, and per field its length and headings.
 #   - PreToolUse (rides in block-dangerous, next to the #36 owner gate) compares
-#     an update against that cache. No read -> deny. No `test /rev` -> deny.
+#     an update against that cache. No read, or no matching `test /rev` -> the
+#     policy verdict: ask by default (a human may let an emergency change
+#     through, #551), deny under `deny` / `declared-strict`.
 #     A shrink or a lost heading -> the WI_FIELD_SHRINK_POLICY verdict, where a
 #     declaration in System.History lets a precisely predicted shrink through.
 #
@@ -133,22 +135,29 @@ try {
     $ask = New-Conf 'ask'
 
     # -- read before write --------------------------------------------------
+    # The read-first and test-/rev rules are not hard blocks (#551): they follow
+    # WI_FIELD_SHRINK_POLICY, so a human can let an emergency change through,
+    # while the strict policies keep refusing.
     $s = New-Session
     $r = Write-Item $s @((Rev 3), (Desc $withoutTests)) $ask
-    Add-Result 'G1_an_unread_long_field_update_is_denied' ($r.Decision -eq 'deny' -and $r.Reason -match '(?i)read') "decision='$($r.Decision)' reason='$($r.Reason)'"
+    Add-Result 'G1_an_unread_long_field_update_asks' ($r.Decision -eq 'ask' -and $r.Reason -match '(?i)read' -and $r.Reason -match 'System\.History') "decision='$($r.Decision)' reason='$($r.Reason)'"
+
+    $denyUnread = Write-Item (New-Session) @((Rev 3), (Desc $withoutTests)) (New-Conf 'deny')
+    $strictUnread = Write-Item (New-Session) @((Rev 3), (Desc $withoutTests)) (New-Conf 'declared-strict')
+    Add-Result 'G1b_the_strict_policies_still_deny_an_unread_update' ($denyUnread.Decision -eq 'deny' -and $strictUnread.Decision -eq 'deny') "deny='$($denyUnread.Decision)' declared-strict='$($strictUnread.Decision)'"
 
     $s = New-Session
     Read-Item $s (New-Item7 3 @{ 'System.Title' = 'x' })
     $r = Write-Item $s @((Rev 3), (Desc $withoutTests)) $ask
-    Add-Result 'G2_a_partial_read_without_the_field_is_not_a_read' ($r.Decision -eq 'deny') "decision='$($r.Decision)' reason='$($r.Reason)'"
+    Add-Result 'G2_a_partial_read_without_the_field_is_not_a_read' ($r.Decision -eq 'ask' -and $r.Reason -match '(?i)not read') "decision='$($r.Decision)' reason='$($r.Reason)'"
 
     $s = New-Session
     Read-Item $s (New-Item7 3 @{ 'System.Description' = $fullDesc })
     $r = Write-Item $s @((Desc $editedInPlace)) $ask
-    Add-Result 'G3_a_guarded_update_without_test_rev_is_denied' ($r.Decision -eq 'deny' -and $r.Reason -match '/rev') "decision='$($r.Decision)' reason='$($r.Reason)'"
+    Add-Result 'G3_a_guarded_update_without_test_rev_asks' ($r.Decision -eq 'ask' -and $r.Reason -match '/rev') "decision='$($r.Decision)' reason='$($r.Reason)'"
 
     $r = Write-Item $s @((Rev 2), (Desc $editedInPlace)) $ask
-    Add-Result 'G4_a_test_rev_that_disagrees_with_the_read_is_denied' ($r.Decision -eq 'deny' -and $r.Reason -match '(?i)re-?read|stale|revision') "decision='$($r.Decision)' reason='$($r.Reason)'"
+    Add-Result 'G4_a_test_rev_that_disagrees_with_the_read_asks' ($r.Decision -eq 'ask' -and $r.Reason -match '(?i)re-?read|stale|revision') "decision='$($r.Decision)' reason='$($r.Reason)'"
 
     # -- what is not a shrink -------------------------------------------------
     $r = Write-Item $s @((Rev 3), (Desc $editedInPlace)) $ask
@@ -233,6 +242,21 @@ try {
     $r = Write-Item $s4 @((Rev 4), (Desc $editedInPlace)) $ask
     Add-Result 'G19_an_update_response_refreshes_the_cached_revision' ($r.Decision -eq '') "decision='$($r.Decision)' reason='$($r.Reason)'"
 
+    # -- the Copilot harness payload (#551) --------------------------------------
+    # Copilot sends no tool_response: the result text sits in
+    # tool_result.text_result_for_llm, unwrapped, under the server's own tool name.
+    $s7 = New-Session
+    $copilotRead = @{
+        session_id = $s7; hook_event_name = 'PostToolUse'; tool_name = 'ado-remote-mcp-wit_work_item'
+        tool_input = @{ action = 'get'; id = 7; project = 'P' }; tool_use_id = 'r7'
+        tool_result = @{ result_type = 'success'; text_result_for_llm = ((New-Item7 3 @{ 'System.Description' = $fullDesc }) | ConvertTo-Json -Depth 8) }
+    }
+    $null = Invoke-Hook $postHook $copilotRead $ask
+    $inPlace = Write-Item $s7 @((Rev 3), (Desc $editedInPlace)) $ask
+    $shrunk = Write-Item $s7 @((Rev 3), (Desc $withoutTestsAndQuestions)) $ask
+    Add-Result 'G24_a_copilot_shaped_read_is_recorded' ($inPlace.Decision -eq '' -and $shrunk.Decision -eq 'ask' -and $shrunk.Reason -match 'Key Tests') `
+        "in-place='$($inPlace.Decision)' shrunk='$($shrunk.Decision)' reason='$($inPlace.Reason)'"
+
     # -- the other dialect gives the same verdicts ------------------------------
     if ($script:bashExe) {
         $s5 = New-Session
@@ -242,7 +266,7 @@ try {
         Read-Item $s6 (New-Item7 3 @{ 'System.Description' = $fullDesc }) 'get' 'sh'
         $b = Write-Item $s6 @((Rev 3), (Desc $withoutTests), (Hist $declTests)) $declared 'update' 'sh'
         $c = Write-Item (New-Session) @((Rev 3), (Desc $withoutTests)) $ask 'update' 'sh'
-        Add-Result 'G20_the_bash_twins_give_the_same_verdicts' ($a.Decision -eq 'ask' -and $b.Decision -eq '' -and $c.Decision -eq 'deny') "ask='$($a.Decision)' declared='$($b.Decision)' unread='$($c.Decision)'"
+        Add-Result 'G20_the_bash_twins_give_the_same_verdicts' ($a.Decision -eq 'ask' -and $b.Decision -eq '' -and $c.Decision -eq 'ask') "ask='$($a.Decision)' declared='$($b.Decision)' unread='$($c.Decision)'"
     } else {
         Add-Result 'G20_the_bash_twins_give_the_same_verdicts' $false 'no bash found -- this case would prove nothing'
     }

@@ -465,10 +465,18 @@ PreToolUse side compares each field op against that cache:
 
 | Situation | Verdict |
 |---|---|
-| Long field, item never read in this session | deny — read first |
-| Guarded field (read value > `WI_FIELD_GUARD_MIN_CHARS`) without `test /rev` | deny |
-| `test /rev` differs from the cached revision | deny — re-read |
+| Long field, item never read in this session | ask — read first (deny under `deny` / `declared-strict`) |
+| Guarded field (read value > `WI_FIELD_GUARD_MIN_CHARS`) without `test /rev` | ask (deny under `deny` / `declared-strict`) |
+| `test /rev` differs from the cached revision | ask — re-read (deny under `deny` / `declared-strict`) |
 | Shrink over `WI_FIELD_SHRINK_PCT` % and `WI_FIELD_SHRINK_CHARS`, or a lost heading | `WI_FIELD_SHRINK_POLICY` |
+
+A missing read or revision pin is a traceability gap, not proof of loss, so the
+default lets a human confirm an intended or emergency change; the agent then
+records why in `System.History` or a comment (#551). `ask` is treated as deny
+where no human can answer (cloud agent, CLI autopilot).
+
+The PostToolUse side reads the result from `tool_response` (Local) or
+`tool_result.text_result_for_llm` / `toolResult.textResultForLlm` (Copilot).
 
 `WI_FIELD_SHRINK_POLICY`: `ask` (default) asks the human; `declared` allows a
 shrink declared in the same call and asks otherwise; `declared-strict` allows a
