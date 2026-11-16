@@ -7,13 +7,13 @@ tools:
   - read/readFile
   - read/problems
   - todo
-  - github/get_me
-  - github/list_branches
-  - github/create_pull_request
-  - github/update_pull_request
-  - github/pull_request_read
-  - github/merge_pull_request
-  - github/add_issue_comment
+  - af-github/get_me
+  - af-github/list_branches
+  - af-github/create_pull_request
+  - af-github/update_pull_request
+  - af-github/pull_request_read
+  - af-github/merge_pull_request
+  - af-github/add_issue_comment
 ---
 
 # GitHub PR Manager Agent (Optional Capability Worker)
@@ -119,8 +119,8 @@ At the start of each invocation:
    `GH_PR_DEFAULT_TARGET_BRANCH` (default `dev`), `GH_PR_AUTOMERGE_BRANCHES`
    (default `dev`), `GH_PR_HUMAN_ONLY_BRANCHES` (default `main`),
    `GH_PR_MERGE_METHOD` (default `merge`), `GH_PR_DEFAULT_REVIEWERS`.
-3. Probe capability with `get_me`. The `github/*` namespace resolves against the
-   consumer's `mcp.json`; an unresolved grant fails silently rather than
+3. Probe capability with `get_me`. The `af-github/*` namespace resolves against the
+   `af-github` server in the repository's `.mcp.json` (#547); an unresolved grant fails silently rather than
    erroring, so never assume availability.
    - **required** — unavailable access is `BLOCKED`; halt and escalate.
    - **optional** — return `DEGRADED` with the full drafted pull request body,

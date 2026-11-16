@@ -1239,6 +1239,26 @@ if (Test-TargetIsGitRepo -RepoDir $TargetDir) {
 if ($DryRun) { Write-Host '  [DRY RUN -- no changes will be made]' -ForegroundColor Yellow }
 Write-Host ""
 
+# ── af-github MCP registration (#547) ─────────────────────────────────────────
+# The Copilot harness reads a repo-root .mcp.json, and a subagent grant against a
+# server named `github` never resolves -- so the GitHub agents grant af-github/<tool>.
+# Ahead of the payload copy so the bash twin's suite can stop once it is past here.
+# A project's own .mcp.json is never edited, only told what it lacks.
+$mcpTemplate = Join-Path $AFRoot 'templates\mcp.json'
+$targetMcp = Join-Path $TargetDir '.mcp.json'
+if (Test-Path -LiteralPath $targetMcp -PathType Leaf) {
+    if ([string](Get-Content -LiteralPath $targetMcp -Raw) -notmatch '"af-github"\s*:\s*\{') {
+        Write-Host '  WARN    .mcp.json has no "af-github" server -- GitHub agents get no tools in the Copilot harness (#547).' -ForegroundColor Yellow
+        Write-Host '          Merge this entry into mcpServers (the token comes from the AF_GH_TOKEN environment variable):' -ForegroundColor Yellow
+        foreach ($l in (Get-Content -LiteralPath $mcpTemplate)) { Write-Host "          $l" -ForegroundColor Yellow }
+        Write-Host ""
+    }
+} elseif (Test-Path -LiteralPath $mcpTemplate) {
+    if (-not $DryRun) { Copy-Item -LiteralPath $mcpTemplate -Destination $targetMcp }
+    Write-Host '  CREATE  .mcp.json  (af-github MCP server; token from AF_GH_TOKEN)' -ForegroundColor Green
+    Write-Host ""
+}
+
 # Deploy .github/ directories
 Write-Host "  .github/ directories:" -ForegroundColor White
 foreach ($dir in $ManifestDirs) {

@@ -4,6 +4,7 @@
 #
 # This is the bash counterpart of the same assertion in test-deploy-flags.ps1.
 # The two deploy paths are only equivalent if both are executed (#190).
+# Cases E-H do the same for the .mcp.json registration (#547).
 #
 # Each case stops the deploy once it is provably past the branch check rather
 # than waiting for it to finish: a full dry run of ~213 files takes over five
@@ -92,6 +93,61 @@ assert_contains "$WORK/d.log" "WARNING: .github/ is gitignored in the target" "A
 assert_contains "$WORK/d.log" ".gitignore:2" "The warning names the rule that ignores it"
 assert_contains "$WORK/d.log" "WARNING: .vscode/ is gitignored in the target" "An ignored .vscode/ is announced too"
 assert_absent "$WORK/c.log" "is gitignored in the target" "control: case C (nothing ignored) drew no warning"
+
+# #547: the bash twin of test-github-mcp-registration.ps1. The registration
+# runs before the payload copy, so each case stops once the copy announces itself.
+MCP_PAST='.github/ directories:'
+MCP_WARN='has no "af-github" server'
+
+run_past_registration() {
+    local target="$1" log="$2" mode="$3"
+    : >"$log"
+    if [[ "$mode" == "dry" ]]; then
+        bash "$DEPLOY" -t "$target" -n </dev/null >"$log" 2>&1 &
+    else
+        bash "$DEPLOY" -t "$target" </dev/null >"$log" 2>&1 &
+    fi
+    local pid=$! waited=0
+    while kill -0 "$pid" 2>/dev/null; do
+        grep -qF -- "$MCP_PAST" "$log" && break
+        [[ "$waited" -ge "$MAX_WAIT" ]] && break
+        sleep 1
+        waited=$((waited + 1))
+    done
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+}
+
+echo "== E: no .mcp.json -> created with af-github =="
+mkdir -p "$WORK/e"
+run_past_registration "$WORK/e" "$WORK/e.log" real
+if [[ -f "$WORK/e/.mcp.json" ]]; then pass "An absent .mcp.json is created"; else fail "An absent .mcp.json is created"; fi
+assert_contains "$WORK/e/.mcp.json" '"af-github"' "The created file registers af-github" 2>/dev/null
+assert_contains "$WORK/e/.mcp.json" 'Bearer ${AF_GH_TOKEN}' "The token is an env reference, not a secret" 2>/dev/null
+
+echo "== F: no .mcp.json, dry run -> nothing written =="
+mkdir -p "$WORK/f"
+run_past_registration "$WORK/f" "$WORK/f.log" dry
+if [[ -e "$WORK/f/.mcp.json" ]]; then fail "A dry run writes no .mcp.json"; else pass "A dry run writes no .mcp.json"; fi
+assert_contains "$WORK/f.log" "CREATE  .mcp.json" "The dry run announces the creation"
+
+echo "== G: project .mcp.json without af-github -> untouched, warned =="
+mkdir -p "$WORK/g"
+printf '{\r\n  "mcpServers": { "other": { "type": "stdio", "command": "x" } }\r\n}\r\n' >"$WORK/g/.mcp.json"
+cp "$WORK/g/.mcp.json" "$WORK/g.orig"
+run_past_registration "$WORK/g" "$WORK/g.log" real
+if cmp -s "$WORK/g/.mcp.json" "$WORK/g.orig"; then pass "A project .mcp.json stays byte-identical"; else fail "A project .mcp.json stays byte-identical"; fi
+assert_contains "$WORK/g.log" "$MCP_WARN" "A missing af-github entry is warned about"
+assert_contains "$WORK/g.log" 'Bearer ${AF_GH_TOKEN}' "The warning carries the snippet"
+
+echo "== H: project .mcp.json with af-github -> no warning =="
+mkdir -p "$WORK/h"
+printf '{"mcpServers":{"af-github":{"type":"http","url":"https://example.invalid/mcp/"}}}' >"$WORK/h/.mcp.json"
+cp "$WORK/h/.mcp.json" "$WORK/h.orig"
+run_past_registration "$WORK/h" "$WORK/h.log" dry
+assert_contains "$WORK/h.log" "$MCP_PAST" "control: the deploy got past the registration step"
+assert_absent "$WORK/h.log" "$MCP_WARN" "A registered af-github draws no warning"
+if cmp -s "$WORK/h/.mcp.json" "$WORK/h.orig"; then pass "A registered .mcp.json is untouched"; else fail "A registered .mcp.json is untouched"; fi
 
 echo ""
 echo "=== Summary ==="
