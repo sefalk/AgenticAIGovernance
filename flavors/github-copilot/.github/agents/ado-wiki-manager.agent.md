@@ -7,12 +7,12 @@ tools:
   - read/readFile
   - read/problems
   - todo
-  - microsoft/azure-devops-mcp/core_list_projects
-  - microsoft/azure-devops-mcp/search_wiki
-  - microsoft/azure-devops-mcp/wiki
-  - microsoft/azure-devops-mcp/wiki_upsert_page
-  - microsoft/azure-devops-mcp/repo_create_branch
-  - microsoft/azure-devops-mcp/repo_pull_request_write
+  - ado-remote-mcp/core_list_projects
+  - ado-remote-mcp/search_wiki
+  - ado-remote-mcp/wiki
+  - ado-remote-mcp/wiki_upsert_page
+  - ado-remote-mcp/repo_create_branch
+  - ado-remote-mcp/repo_pull_request_write
 ---
 
 # ADO Wiki Manager Agent

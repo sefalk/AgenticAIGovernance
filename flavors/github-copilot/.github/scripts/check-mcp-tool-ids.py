@@ -13,6 +13,8 @@ produces false passes, and every hit carries a concrete migration target.
 Checks:
     1. Frontmatter ``tools:`` entries naming a legacy identifier.
     2. Prose references (backticked or bare) naming a legacy identifier.
+    3. Grants behind a server prefix that resolves to no configured server
+       (``microsoft/azure-devops-mcp/<tool>`` -> ``ado-remote-mcp/<tool>``, #550).
 
 Usage:
     python check-mcp-tool-ids.py [--root <dir>] [--quiet]
@@ -106,6 +108,12 @@ MIGRATIONS: dict[str, tuple[str, str | None]] = {
 # Word-boundary match so `repo_file` never matches inside `repo_file_content`.
 LEGACY_PATTERN = re.compile(r"\b(" + "|".join(sorted(MIGRATIONS, key=len, reverse=True)) + r")\b")
 
+# A Copilot subagent grant resolves only as `<server name>/<tool>`, the server
+# name being the key in .vscode/mcp.json. `microsoft/azure-devops-mcp/` names no
+# server, so every tool behind it is dropped (#550).
+SERVER_PREFIXES = {"microsoft/azure-devops-mcp/": "ado-remote-mcp/"}
+PREFIX_PATTERN = re.compile(r"(" + "|".join(re.escape(p) for p in SERVER_PREFIXES) + r")(\w+)")
+
 SCAN_GLOB = "**/*.md"
 SKIP_DIRS = {".venv", "node_modules", "site-packages", ".git"}
 
@@ -132,6 +140,9 @@ def scan_file(path: Path) -> list[tuple[int, str, str]]:
         return findings
 
     for lineno, line in enumerate(text.splitlines(), start=1):
+        for match in PREFIX_PATTERN.finditer(line):
+            prefix, tool = match.groups()
+            findings.append((lineno, prefix + tool, SERVER_PREFIXES[prefix] + tool))
         for match in LEGACY_PATTERN.finditer(line):
             legacy = match.group(1)
             tool, action = MIGRATIONS[legacy]

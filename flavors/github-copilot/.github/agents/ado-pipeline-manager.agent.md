@@ -5,14 +5,14 @@ description: 'Manage Azure DevOps pipelines via MCP — register a pipeline from
 user-invocable: false
 tools:
   - read/readFile
-  - microsoft/azure-devops-mcp/core_list_projects
-  - microsoft/azure-devops-mcp/repo_repository
-  - microsoft/azure-devops-mcp/repo_branch
-  - microsoft/azure-devops-mcp/repo_file
-  - microsoft/azure-devops-mcp/pipelines_definition
-  - microsoft/azure-devops-mcp/pipelines_build
-  - microsoft/azure-devops-mcp/pipelines_build_log
-  - microsoft/azure-devops-mcp/pipelines_write
+  - ado-remote-mcp/core_list_projects
+  - ado-remote-mcp/repo_repository
+  - ado-remote-mcp/repo_branch
+  - ado-remote-mcp/repo_file
+  - ado-remote-mcp/pipelines_definition
+  - ado-remote-mcp/pipelines_build
+  - ado-remote-mcp/pipelines_build_log
+  - ado-remote-mcp/pipelines_write
 ---
 
 # Pipeline Manager Agent (Optional Capability Worker)
