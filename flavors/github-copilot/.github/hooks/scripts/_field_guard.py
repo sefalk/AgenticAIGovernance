@@ -11,8 +11,9 @@ write's own response -- returned.
 ``check`` (PreToolUse, via work-item-owner.py) judges an ``update`` or
 ``update_batch`` against that cache:
 
-- a guarded field the session never read -> deny, read it first;
-- no ``test /rev`` op, or one that disagrees with the read -> deny;
+- a guarded field the session never read, no ``test /rev`` op, or one that
+  disagrees with the read -> ask by default, so a human can let an emergency
+  change through; deny under the ``deny`` and ``declared-strict`` policies (#551);
 - a shrink (over PCT % and over CHARS) or a lost heading -> the
   ``WI_FIELD_SHRINK_POLICY`` verdict. A declaration in ``System.History``,
   ``af-shrink: <field>; remove: <heading>, ...; expect: <length>``, counts only
@@ -110,6 +111,33 @@ def _tool_input(payload: dict[str, object]) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
 
 
+def tool_result(payload: dict[str, object]) -> object:
+    """Return what the tool returned, whichever harness shaped the PostToolUse payload.
+
+    Local sends ``tool_response``; the Copilot harness sends
+    ``tool_result.text_result_for_llm`` (PascalCase hooks) or
+    ``toolResult.textResultForLlm`` (camelCase hooks) instead (#551).
+    """
+    if payload.get("tool_response") is not None:
+        return payload["tool_response"]
+    for outer, inner in (("tool_result", "text_result_for_llm"), ("toolResult", "textResultForLlm")):
+        result = payload.get(outer)
+        if isinstance(result, dict) and result.get(inner) is not None:
+            return result[inner]
+    return None
+
+
+def _strict(policy: str) -> str:
+    # A missing read or revision pin is a traceability gap, not proof of loss: a human may let an
+    # emergency change through (ask); only the strict policies refuse outright (#551).
+    return "deny" if policy in ("deny", "declared-strict") else "ask"
+
+
+_OVERRIDE = (
+    " If a human confirms this as an intended or emergency change, record why in System.History or a work item comment."
+)
+
+
 # -- PostToolUse: record what was read ------------------------------------------
 
 
@@ -140,7 +168,7 @@ def record(payload: dict[str, object]) -> None:
         or (tool.endswith("wit_work_item_write") and action in WRITE_ACTIONS)
     ):
         return
-    response = payload.get("tool_response")
+    response = tool_result(payload)
     items = _items(_unwrap(response)) if isinstance(response, str) else []
     if not items:
         return
@@ -276,11 +304,11 @@ def check(payload: dict[str, object], conf_path: str) -> dict[str, object] | Non
                 looks_long = field.casefold() in MULTILINE_FIELDS or "\n" in new_text or len(new_text) > min_chars
                 if looks_long:
                     return _verdict(
-                        "deny",
+                        _strict(policy),
                         f"Field guard (#197): work item {item_id} field {field} was not read in this session, so "
                         "this update cannot be compared with what it replaces. Read the item first "
                         "(wit_work_item action=get, without a fields filter that omits this field), then retry "
-                        "with a test op on /rev set to the revision you read.",
+                        "with a test op on /rev set to the revision you read." + _OVERRIDE,
                     )
                 continue
             if int(cached.get("len", 0)) > min_chars:
@@ -291,10 +319,10 @@ def check(payload: dict[str, object], conf_path: str) -> dict[str, object] | Non
         rev = int(entry.get("rev", -1))
         if test_rev is None:
             return _verdict(
-                "deny",
+                _strict(policy),
                 f"Field guard (#197): this update replaces long text on work item {item_id} without "
                 f'{{"op": "test", "path": "/rev", "value": {rev}}}. Add it, so Azure DevOps itself rejects '
-                "the write if the item changed since you read it.",
+                "the write if the item changed since you read it." + _OVERRIDE,
             )
         try:
             same_rev = int(test_rev) == rev
@@ -302,9 +330,9 @@ def check(payload: dict[str, object], conf_path: str) -> dict[str, object] | Non
             same_rev = False
         if not same_rev:
             return _verdict(
-                "deny",
+                _strict(policy),
                 f"Field guard (#197): test /rev is {test_rev}, but this session last read work item {item_id} "
-                f"at revision {rev}. Re-read the item and rebuild the update from what you read.",
+                f"at revision {rev}. Re-read the item and rebuild the update from what you read." + _OVERRIDE,
             )
 
         marks = entry.get("marks") if isinstance(entry.get("marks"), list) else []

@@ -41,6 +41,7 @@ from _field_guard import (
     _tool_input,
     _verdict,
     headings,
+    tool_result,
 )
 
 READ_SUFFIXES = (
@@ -148,7 +149,7 @@ def record_body(payload: dict[str, object]) -> None:
     kind = _gh_kind(str(payload.get("tool_name") or ""))
     if not kind:
         return
-    parsed = _parse(payload.get("tool_response"))
+    parsed = _parse(tool_result(payload))
     if parsed is None:
         return
     tool_input = _tool_input(payload)
