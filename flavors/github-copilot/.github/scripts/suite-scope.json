@@ -238,6 +238,11 @@
     "test-suite-scope.ps1": [
       ".github/scripts/suite-scope.json"
     ],
+    "test-mcp-tool-ids.ps1": [
+      ".github/scripts/check-mcp-tool-ids.py",
+      ".github/agents/**",
+      ".github/skills/**"
+    ],
     "test-workflow-log-schema.ps1": [
       ".github/hooks/scripts/check-workflow-log.py",
       ".github/scripts/analyze-retry-economy.py",
