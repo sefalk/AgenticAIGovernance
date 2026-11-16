@@ -160,6 +160,17 @@ try {
     $r = Write-Issue (Fresh) (Body $editedInPlace) $ask
     Add-Result 'B2_an_in_place_edit_passes' ($r.Decision -eq '') "decision='$($r.Decision)' out=$($r.Out)"
 
+    # Copilot sends the read result as tool_result.text_result_for_llm, not tool_response (#551).
+    $sCop = New-Session
+    $copilotRead = @{
+        session_id = $sCop; hook_event_name = 'PostToolUse'; tool_name = 'af-github-issue_read'; tool_use_id = 'p9'
+        tool_input = @{ method = 'get'; owner = 'o'; repo = 'r'; issue_number = 5 }
+        tool_result = @{ result_type = 'success'; text_result_for_llm = (ConvertTo-JsonText ([ordered]@{ number = 5; title = 't'; body = $issueBody; state = 'open'; html_url = $issueUrl })) }
+    }
+    $null = Invoke-Hook $postHook $copilotRead $ask
+    $r = Write-Issue $sCop (Body $editedInPlace) $ask
+    Add-Result 'B2b_a_copilot_shaped_read_is_recorded' ($r.Decision -eq '') "decision='$($r.Decision)' reason='$($r.Reason)'"
+
     $r = Write-Issue (Fresh) (Body $withoutTestsAndQuestions) $ask
     Add-Result 'B3_the_197_replay_on_github_asks_and_names_the_loss' ($r.Decision -eq 'ask' -and $r.Reason -match 'Key Tests' -and $r.Reason -match 'Open Questions') "decision='$($r.Decision)' reason='$($r.Reason)'"
 
