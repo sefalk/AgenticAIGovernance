@@ -74,6 +74,26 @@ def test_mcp_apply_then_ps1_dryrun_is_clean(tmp_path: Path) -> None:
     assert "CONFLICT " not in res.stdout, res.stdout
 
 
+def test_ps1_effort_override_matches_mcp(tmp_path: Path) -> None:
+    # #557: a project effort override reaches the deployed agent, and both paths agree.
+    target = tmp_path / "proj"
+    (target / ".github").mkdir(parents=True)
+    (target / ".github" / "af-env.conf").write_text("AF_EFFORT_TIER_EFFICIENT=xhigh\n", encoding="utf-8")
+    res = _run_ps1(target, "-Force")
+    assert res.returncode == 0, res.stdout + res.stderr
+
+    efficient = [
+        p
+        for p in (AF_ROOT / ".github" / "agents").glob("*.agent.md")
+        if "__AF_TIER_EFFICIENT__" in p.read_text(encoding="utf-8")
+    ]
+    assert efficient
+    deployed = (target / ".github" / "agents" / efficient[0].name).read_text(encoding="utf-8")
+    assert "\nreasoning-effort: xhigh\n" in deployed
+    counts = deploy_core.dry_run(AF_ROOT, target)["counts"]
+    assert counts.get("UPDATE", 0) == 0 and counts.get("CONFLICT", 0) == 0
+
+
 @pytest.mark.skipif(
     not usable("bash") or not DEPLOY_SH.is_file(),
     reason="bash or deploy.sh not available",
