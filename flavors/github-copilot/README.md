@@ -304,6 +304,10 @@ Agents are deployed with a **model tier**, configured once in
   path reads it from the payload being deployed, so a re-deploy always brings
   the current line-up.
 - Re-deploy after editing the tiers to propagate them into the agent files.
+- Each tier also sets the subagent's **reasoning effort** (#557):
+  `AF_EFFORT_TIER_*` (blank = framework default PREMIUM `high`, BALANCED
+  `medium`, EFFICIENT `low`; `inherit` = no line, the subagent runs at the
+  calling chat's effort). An agent's own `reasoning-effort:` wins.
 - Every deploy checks the tier models against Copilot's model catalogue
   (`.github/scripts/check-model-tiers.py`) and prints a `WARN` per unknown
   model. VS Code itself only greys such an entry out. The catalogue is the

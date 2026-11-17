@@ -59,20 +59,46 @@ def _tier_models(tier: str, af_env_path: Path, default_af_env: Path | None) -> l
     return models
 
 
+EFFORT_VALUES = ("low", "medium", "high", "xhigh", "max")
+_OWN_EFFORT_RE = re.compile(r"(?m)^reasoning-effort:")
+
+
+def _tier_effort(tier: str, af_env_path: Path, default_af_env: Path | None) -> str:
+    """Project ``AF_EFFORT_TIER_*``, else framework ``AF_EFFORT_DEFAULT_*``; '' = inherit (#557)."""
+    key = f"AF_EFFORT_TIER_{tier}"
+    val = get_af_env_value(af_env_path, key)
+    if not val and default_af_env is not None:
+        key = f"AF_EFFORT_DEFAULT_{tier}"
+        val = get_af_env_value(default_af_env, key)
+    if val == "inherit":
+        return ""
+    if val and val not in EFFORT_VALUES:
+        raise ValueError(
+            f"{key}={val} is not a reasoning effort; use one of {', '.join(EFFORT_VALUES)}, inherit, or leave it blank"
+        )
+    return val
+
+
 def resolve_tier_tokens(text: str, af_env_path: Path, default_af_env: Path | None = None) -> str:
     """Replace ``model: __AF_TIER_X__`` lines with the resolved model list.
 
     Byte-compatible with ``deploy.ps1`` Resolve-TierTokens: preserves the file's
     dominant newline, emits a single ``model: X`` for one entry or a YAML array
-    for several, and never consumes the line break (lookahead).
+    for several, and never consumes the line break (lookahead). A
+    ``reasoning-effort:`` line follows when the tier has one and the agent does
+    not declare its own (#557).
     """
     nl = "\r\n" if "\r\n" in text else "\n"
+    own_effort = bool(_OWN_EFFORT_RE.search(text))
     for tier in ("PREMIUM", "BALANCED", "EFFICIENT"):
         token = f"__AF_TIER_{tier}__"
         if token not in text:
             continue
         models = _tier_models(tier, af_env_path, default_af_env)
+        effort = _tier_effort(tier, af_env_path, default_af_env)
         repl = f"model: {models[0]}" if len(models) <= 1 else "model:" + "".join(f"{nl}  - {m}" for m in models)
+        if effort and not own_effort:
+            repl += f"{nl}reasoning-effort: {effort}"
         pattern = re.compile(r"(?m)^model:[ \t]*" + re.escape(token) + r"[ \t]*(?=\r?\n|$)")
         text = pattern.sub(lambda _m, r=repl: r, text)
     return text
