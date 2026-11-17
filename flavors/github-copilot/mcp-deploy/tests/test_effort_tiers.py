@@ -67,6 +67,12 @@ def test_blank_everywhere_emits_no_line_so_the_agent_inherits(tmp_path: Path) ->
     assert "reasoning-effort" not in out
 
 
+def test_project_inherit_suppresses_the_default(tmp_path: Path) -> None:
+    src = _source(tmp_path, "AF_EFFORT_DEFAULT_BALANCED=medium\n")
+    out = deploy_core.resolve_tier_tokens(PLANNER, _target(tmp_path, "AF_EFFORT_TIER_BALANCED=inherit\n"), src)
+    assert "reasoning-effort" not in out
+
+
 def test_an_agents_own_effort_is_kept(tmp_path: Path) -> None:
     src = _source(tmp_path, "AF_EFFORT_DEFAULT_BALANCED=medium\n")
     agent = "---\nname: planner\nmodel: __AF_TIER_BALANCED__\nreasoning-effort: low\n---\n"

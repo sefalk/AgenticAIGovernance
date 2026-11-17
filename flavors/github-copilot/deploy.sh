@@ -355,17 +355,37 @@ tier_value() {
     fi
     printf '%s' "$val"
 }
+EFFORT_VALUES="low medium high xhigh max"
+tier_effort() {
+    # $1 = tier; prints the reasoning effort or nothing (#557). Exits on a bad value.
+    local tier="$1" key val line
+    key="AF_EFFORT_TIER_$tier"
+    val="$(get_af_env_value "$key" "")"
+    if [[ -z "$val" && -f "$SOURCE_AF_ENV" ]]; then
+        key="AF_EFFORT_DEFAULT_$tier"
+        line="$(grep -E "^${key}=" "$SOURCE_AF_ENV" | head -1 || true)"
+        val="$(printf '%s' "${line#*=}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    fi
+    [[ "$val" == "inherit" ]] && return 0
+    if [[ -n "$val" && " $EFFORT_VALUES " != *" $val "* ]]; then
+        echo "Error: $key=$val is not a reasoning effort; use one of ${EFFORT_VALUES// /, }, inherit, or leave it blank" >&2
+        return 1
+    fi
+    printf '%s' "$val"
+}
 if grep -rqlE '__AF_TIER_' "$SOURCE_GITHUB/agents" 2>/dev/null; then
     for _tier in PREMIUM BALANCED EFFICIENT; do
         if [[ -z "$(tier_value "$_tier" | tr -d ', ')" ]]; then
             echo "Error: no model list for tier $_tier: set AF_MODEL_DEFAULT_$_tier in the framework af-env.conf" >&2
             exit 1
         fi
+        tier_effort "$_tier" >/dev/null || exit 1
     done
 fi
 tier_yaml() {
-    # $1 = tier name; prints a `model:` line or a multi-line YAML array
-    local tier="$1" val
+    # $1 = tier name, $2 = 1 when the agent declares its own effort;
+    # prints a `model:` line or a multi-line YAML array, then the tier effort
+    local tier="$1" own="${2:-0}" val effort
     val="$(tier_value "$tier")"
     local IFS=',' arr m count=0
     read -ra arr <<< "$val"
@@ -384,17 +404,22 @@ tier_yaml() {
             printf '\n  - %s' "$m"
         done
     fi
+    effort="$(tier_effort "$tier")"
+    if [[ -n "$effort" && "$own" != 1 ]]; then
+        printf '\nreasoning-effort: %s' "$effort"
+    fi
 }
 has_tier_token() { grep -qE '__AF_TIER_(PREMIUM|BALANCED|EFFICIENT)__' "$1"; }
 tier_resolve_file() {
     # $1 = source path; writes resolved content to a new temp file, echoes path
-    local src="$1" tmp line stripped cr tier
+    local src="$1" tmp line stripped cr tier own=0
     tmp="$(mktemp)"
+    grep -q '^reasoning-effort:' "$src" && own=1
     while IFS= read -r line || [[ -n "$line" ]]; do
         stripped="${line%$'\r'}"; cr=""; [[ "$stripped" != "$line" ]] && cr=$'\r'
         if [[ "$stripped" =~ ^model:[[:space:]]*__AF_TIER_(PREMIUM|BALANCED|EFFICIENT)__[[:space:]]*$ ]]; then
             tier="${BASH_REMATCH[1]}"
-            printf '%s\n' "$(tier_yaml "$tier")"
+            printf '%s\n' "$(tier_yaml "$tier" "$own")"
         else
             printf '%s%s\n' "$stripped" "$cr"
         fi

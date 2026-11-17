@@ -172,20 +172,40 @@ function Get-TierModels([string]$Tier) {
     if ($models.Count -eq 0) { throw "no model list for tier ${Tier}: set AF_MODEL_DEFAULT_$Tier in the framework af-env.conf" }
     return $models
 }
+# Reasoning effort per tier (#557): project AF_EFFORT_TIER_*, else the SOURCE
+# AF_EFFORT_DEFAULT_*. '' (or the override `inherit`) emits no line.
+$EffortValues = @('low', 'medium', 'high', 'xhigh', 'max')
+function Get-TierEffort([string]$Tier) {
+    $key = "AF_EFFORT_TIER_$Tier"
+    $val = Get-AFEnvValue -Key $key -Default ''
+    if (-not $val -and (Test-Path $SourceAFEnv)) {
+        $key = "AF_EFFORT_DEFAULT_$Tier"
+        $m = Select-String -Path $SourceAFEnv -Pattern "^$key=(.+)$" -ErrorAction SilentlyContinue
+        if ($m) { $val = $m.Matches[0].Groups[1].Value.Trim() }
+    }
+    if ($val -eq 'inherit') { return '' }
+    if ($val -and ($EffortValues -cnotcontains $val)) {
+        throw "$key=$val is not a reasoning effort; use one of $($EffortValues -join ', '), inherit, or leave it blank"
+    }
+    return $val
+}
 $tierSources = @(Get-ChildItem (Join-Path $SourceGitHub 'agents') -Filter '*.agent.md' -ErrorAction SilentlyContinue |
     Where-Object { Select-String -Path $_.FullName -Pattern '__AF_TIER_' -Quiet })
-if ($tierSources.Count -gt 0) { foreach ($t in 'PREMIUM', 'BALANCED', 'EFFICIENT') { $null = Get-TierModels $t } }
+if ($tierSources.Count -gt 0) { foreach ($t in 'PREMIUM', 'BALANCED', 'EFFICIENT') { $null = Get-TierModels $t; $null = Get-TierEffort $t } }
 function Resolve-TierTokens([string]$Text) {
     $nl = if ($Text.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $ownEffort = $Text -cmatch '(?m)^reasoning-effort:'
     foreach ($tier in 'PREMIUM', 'BALANCED', 'EFFICIENT') {
         $placeholder = "__AF_TIER_${tier}__"
         if ($Text -notmatch [regex]::Escape($placeholder)) { continue }
         $models = Get-TierModels $tier
+        $effort = Get-TierEffort $tier
         if ($models.Count -le 1) {
             $repl = "model: $($models[0])"
         } else {
             $repl = "model:$nl" + (($models | ForEach-Object { "  - $_" }) -join $nl)
         }
+        if ($effort -and -not $ownEffort) { $repl += "${nl}reasoning-effort: $effort" }
         # Match the whole `model: <token>` line without consuming the line break
         # (lookahead), so CRLF/LF endings are preserved. Model names contain no
         # '$', so a literal replacement string is safe.

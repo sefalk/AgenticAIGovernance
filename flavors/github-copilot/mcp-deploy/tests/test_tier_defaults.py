@@ -56,7 +56,11 @@ def test_blank_project_tier_takes_the_framework_default(tmp_path):
     target = tmp_path / "af-env.conf"
     target.write_text("AF_MODEL_TIER_BALANCED=\n", encoding="utf-8")
     resolved = deploy_core.resolve_tier_tokens(PLANNER, target, SOURCE_ENV)
-    assert resolved == "---\nname: planner\nmodel:\n" + "".join(f"  - {m}\n" for m in _defaults()["BALANCED"]) + "---\n"
+    assert resolved == (
+        "---\nname: planner\nmodel:\n"
+        + "".join(f"  - {m}\n" for m in _defaults()["BALANCED"])
+        + "reasoning-effort: medium\n---\n"
+    )
 
 
 def test_project_tier_overrides_the_default(tmp_path):

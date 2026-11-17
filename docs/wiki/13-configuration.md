@@ -51,6 +51,18 @@ coordinator stays unpinned.
 Format: `Model Name (vendor)`; comma-separated entries become a prioritized
 array. Blank = deploy's curated built-in default.
 
+Each tier also sets the subagent's `reasoning-effort:` (#557). Without it a
+subagent runs at the effort of the chat that called it.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `AF_EFFORT_TIER_PREMIUM` | `high` | blank = default, `inherit` = no line |
+| `AF_EFFORT_TIER_BALANCED` | `medium` | |
+| `AF_EFFORT_TIER_EFFICIENT` | `low` | |
+
+Values: `low`, `medium`, `high`, `xhigh`, `max` (the last two only on models
+that offer them). An agent's own `reasoning-effort:` wins.
+
 ## Dependencies & quality
 
 | Key | Purpose |
