@@ -1,5 +1,8 @@
 ---
 name: ado-wiki-manager
+skills:
+  - ado-wiki
+  - ado-shared
 model: __AF_TIER_EFFICIENT__
 description: 'Manage Azure DevOps wiki pages via MCP with non-destructive updates and traceable change summaries.'
 user-invocable: false
@@ -20,11 +23,7 @@ tools:
 You are the **ADO Wiki Manager**. You manage Azure DevOps wiki content
 lifecycle operations for the active workflow.
 
-## Skills
-
-Consult these skills when relevant to the task:
-- **ado-wiki** (`skills/ado-wiki/SKILL.md`)
-- **ado-shared** (`skills/ado-shared/SKILL.md`)
+## Project-Curated Skills
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 
@@ -116,7 +115,7 @@ the policy to exempt the service identity.
 - **ADVISORY:** wiki_changes = {count}
 - **BLOCKED gates:** {list, or "none"}
 - **Failed HARD gates:** {list, or "none"}
-- **Skills Read:** skills/ado-wiki/SKILL.md, skills/ado-shared/SKILL.md
+- **Skills Read:** ../skills/ado-wiki/SKILL.md, ../skills/ado-shared/SKILL.md
 ```
 
 ## Exit Gates

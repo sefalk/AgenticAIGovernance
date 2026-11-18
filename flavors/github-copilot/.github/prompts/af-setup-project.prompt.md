@@ -232,7 +232,8 @@ Execute all writes in one batch:
 ### Skill curation writes:
 4. Copy activated skills from `_available/` to `skills/`
 5. Remove deactivated skills from `skills/`
-6. Update agent `.agent.md` files with skill references in `## Skills` sections
+6. Write curated skill references into each agent's curated-skills managed
+   region (`## Project-Curated Skills`)
 7. Regenerate `skills/INDEX.md` — the only catalogue; never copy it into
    `copilot-instructions.md`, which is paid for on every request
 8. Write `skills/curated-assignments.json`

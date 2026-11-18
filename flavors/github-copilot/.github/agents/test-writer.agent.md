@@ -1,5 +1,10 @@
 ---
 name: test-writer
+skills:
+  - unit-testing
+  - test-execution
+  - error-handling
+  - human-escalation
 model: __AF_TIER_EFFICIENT__
 description: 'Write failing tests that express requirements (Red phase of TDD). Creates test files but does NOT write production code.'
 user-invocable: false
@@ -28,6 +33,7 @@ tools:
   - read/readNotebookCellOutput
   - ms-toolsai.jupyter/configureNotebook
   - ms-python.python/configurePythonEnvironment
+  - skill
 hooks:
   SubagentStop:
     - type: command
@@ -48,15 +54,12 @@ You are the **Test Writer** — a testing specialist. You are invoked as a
 express requirements **before** any production code is written. This is the
 **Red phase** of TDD.
 
-## Skills
+## Conditional Skills
 
-Consult these skills when relevant to the task:
-- **unit-testing** (`skills/unit-testing/SKILL.md`) — test structure, patterns, fixtures
-- **test-execution** (`skills/test-execution/SKILL.md`) — task labels, scoping, test budget, test log
-- **property-testing** (`skills/property-testing/SKILL.md`) — property categories, strategies, discovery checklist
-- **error-handling** (`skills/error-handling/SKILL.md`) — error classification for writing error-path tests
-- **human-escalation** (`skills/human-escalation/SKILL.md`) — halt protocol when blocked or uncertain
-- **notebook-execution** (`skills/notebook-execution/SKILL.md`) — inspect `.ipynb` via the notebook tools, never terminal scripts
+- property-testing
+- notebook-execution
+
+## Project-Curated Skills
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 

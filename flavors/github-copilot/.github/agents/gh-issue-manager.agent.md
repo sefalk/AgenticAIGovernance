@@ -1,5 +1,8 @@
 ---
 name: gh-issue-manager
+skills:
+  - gh-issue
+  - work-item-state
 model: __AF_TIER_EFFICIENT__
 description: 'Manage GitHub issues via MCP — the project''s own tracker and, separately, evidence-grounded defect reports filed upstream against the Agent Framework repository. No terminal, no git.'
 user-invocable: false
@@ -35,12 +38,7 @@ harness). If a grant does not resolve, the tools
 fail silently rather than erroring — so probe with `get_me` first (see Exit
 Gates) instead of assuming availability.
 
-## Skills
-
-Consult these skills when relevant to the task:
-- **gh-issue** (`skills/gh-issue/SKILL.md`)
-- **work-item-state** (`skills/work-item-state/SKILL.md`) — required before any
-  read of, or write to, an existing issue
+## Project-Curated Skills
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 
@@ -107,7 +105,7 @@ that leaves no artifact is a silently dropped finding.
 - **ADVISORY:** issues_written = {count}
 - **BLOCKED gates:** {list, or "none"}
 - **Failed HARD gates:** {list, or "none"}
-- **Skills Read:** skills/gh-issue/SKILL.md, skills/work-item-state/SKILL.md
+- **Skills Read:** ../skills/gh-issue/SKILL.md, ../skills/work-item-state/SKILL.md
 ```
 
 ## Exit Gates

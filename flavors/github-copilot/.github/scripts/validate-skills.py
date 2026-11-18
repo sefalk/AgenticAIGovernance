@@ -11,6 +11,8 @@ Checks:
 4. INDEX.md lists all active and available skills
 5. No orphan directories (skill dir exists but not in INDEX.md)
 6. No phantom entries (INDEX.md lists skill that doesn't exist)
+7. Agent preloads and conditional skills resolve to active SKILL.md files
+8. Conditional skills can be invoked, and skill tool grants match declarations
 
 Usage:
     python validate-skills.py                    # validate .github/skills/
@@ -42,6 +44,12 @@ INDEX_FILENAME = "INDEX.md"
 NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 XML_TAG_RE = re.compile(r"<[^>]+>")
 FRONTMATTER_RE = re.compile(r"^---\n(.+?)\n---", re.DOTALL)
+AGENT_FRONTMATTER_RE = re.compile(r"^---\r?\n(.*?)\r?\n---", re.DOTALL)
+CONDITIONAL_SKILLS_HEADING_RE = re.compile(r"^## Conditional Skills\s*$", re.MULTILINE)
+MANAGED_SKILLS_START = "<!-- AF:MANAGED:curated-skills:START -->"
+MANAGED_SKILLS_END = "<!-- AF:MANAGED:curated-skills:END -->"
+STALE_SKILL_PATH_RE = re.compile(r"(?<!\.github/)(?<!\.\./)skills/[A-Za-z0-9._-]+/SKILL\.md")
+SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 # Directories that are not skills
 SKIP_DIRS = {AVAILABLE_DIR_NAME, "__pycache__", ".git", "node_modules"}
@@ -92,6 +100,220 @@ def parse_frontmatter(content: str) -> dict | None:
             if key and value:
                 result[key] = value
     return result if result else None
+
+
+def _frontmatter_scalar(value: str) -> str:
+    return value.strip().strip("\"'`")
+
+
+def parse_agent_frontmatter(content: str) -> dict[str, object] | None:
+    """Parse the scalar and list fields used by agent skill loading."""
+    match = AGENT_FRONTMATTER_RE.match(content)
+    if not match:
+        return None
+
+    fields: dict[str, object] = {}
+    list_key: str | None = None
+    for line in match.group(1).splitlines():
+        field_match = re.match(r"^([A-Za-z0-9_-]+):(?:\s*(.*))?$", line)
+        if field_match:
+            key = field_match.group(1)
+            value = (field_match.group(2) or "").strip()
+            list_key = None
+            if key in {"skills", "tools"}:
+                if value.startswith("[") and value.endswith("]"):
+                    items = value[1:-1].split(",")
+                    fields[key] = [_frontmatter_scalar(item) for item in items if item.strip()]
+                else:
+                    fields[key] = []
+                    list_key = key if not value else None
+            elif value:
+                fields[key] = _frontmatter_scalar(value)
+            continue
+
+        if list_key:
+            item_match = re.match(r"^\s+-\s+(.+?)\s*$", line)
+            if item_match:
+                values = fields[list_key]
+                if isinstance(values, list):
+                    values.append(_frontmatter_scalar(item_match.group(1)))
+            elif line.strip() and not line[0].isspace():
+                list_key = None
+    return fields
+
+
+def _without_managed_skills(content: str) -> str:
+    start = content.find(MANAGED_SKILLS_START)
+    end = content.find(MANAGED_SKILLS_END)
+    if start >= 0 and end > start:
+        return content[:start] + content[end + len(MANAGED_SKILLS_END) :]
+    return content
+
+
+def conditional_skill_names(agent_content: str, agent_name: str) -> tuple[list[str], list[str]]:
+    """Return conditional skill names and syntax errors for an agent file."""
+    content = _without_managed_skills(agent_content)
+    heading = CONDITIONAL_SKILLS_HEADING_RE.search(content)
+    if not heading:
+        return [], []
+
+    next_heading = re.search(r"^#{1,6}\s+", content[heading.end() :], re.MULTILINE)
+    end = heading.end() + next_heading.start() if next_heading else len(content)
+    section = content[heading.end() : end]
+    names: list[str] = []
+    errors: list[str] = []
+    in_fence = False
+    for line_number, line in enumerate(section.splitlines(), start=1):
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence or not stripped:
+            continue
+        bullet = re.fullmatch(r"\s*-\s+([a-z0-9]+(?:-[a-z0-9]+)*)\s*", line)
+        if not bullet:
+            errors.append(
+                f"agent '{agent_name}': Conditional Skills entries must be plain skill-name bullets "
+                f"(section line {line_number})"
+            )
+            continue
+        names.append(bullet.group(1))
+    return names, errors
+
+
+def required_activation_agents(skill_content: str) -> set[str]:
+    """Return agents named by a skill's required activation metadata."""
+    match = AGENT_FRONTMATTER_RE.match(skill_content)
+    if not match:
+        return set()
+
+    lines = match.group(1).splitlines()
+    in_metadata = False
+    in_activation = False
+    priority = ""
+    agents: list[str] = []
+    reading_agents = False
+    for line in lines:
+        if line == "metadata:":
+            in_metadata = True
+            continue
+        if in_metadata and re.match(r"^  activation:\s*$", line):
+            in_activation = True
+            continue
+        if not in_activation:
+            if line and not line.startswith(" "):
+                in_metadata = False
+            continue
+        if line.strip() and not line.startswith("    "):
+            break
+        priority_match = re.match(r"^    priority:\s*(\S+)\s*$", line)
+        if priority_match:
+            priority = _frontmatter_scalar(priority_match.group(1)).lower()
+            reading_agents = False
+            continue
+        agents_match = re.match(r"^    agents:\s*(.*)$", line)
+        if agents_match:
+            value = agents_match.group(1).strip()
+            if value.startswith("[") and value.endswith("]"):
+                agents = [_frontmatter_scalar(item) for item in value[1:-1].split(",") if item.strip()]
+                reading_agents = False
+            else:
+                reading_agents = not value
+            continue
+        if reading_agents:
+            item_match = re.match(r"^\s+-\s+(.+?)\s*$", line)
+            if item_match:
+                agents.append(_frontmatter_scalar(item_match.group(1)))
+            elif line.strip():
+                reading_agents = False
+    return set(agents) if priority == "required" else set()
+
+
+def validate_agent_skill_loading(github_dir: Path, active_skills: set[str]) -> list[str]:
+    """Validate agent preloads, conditional skills, and lazy-loading tool grants."""
+    agents_dir = github_dir / "agents"
+    if not agents_dir.is_dir():
+        return []
+
+    errors: list[str] = []
+    skills_root = github_dir / SKILLS_DIR_NAME
+    required_by_agent: dict[str, set[str]] = {}
+    for skill_name in sorted(active_skills):
+        skill_path = skills_root / skill_name / "SKILL.md"
+        if not skill_path.is_file():
+            continue
+        try:
+            skill_content = skill_path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError) as exc:
+            errors.append(f"skill '{skill_name}': cannot read activation metadata: {exc}")
+            continue
+        for agent_name in required_activation_agents(skill_content):
+            required_by_agent.setdefault(agent_name, set()).add(skill_name)
+
+    for path in sorted(agents_dir.glob("*.agent.md")):
+        agent_name = path.name.removesuffix(".agent.md")
+        try:
+            content = path.read_text(encoding="utf-8-sig")
+        except OSError as exc:
+            errors.append(f"agent '{agent_name}': cannot read agent file: {exc}")
+            continue
+
+        frontmatter = parse_agent_frontmatter(content)
+        if frontmatter is None:
+            errors.append(f"agent '{agent_name}': missing or invalid YAML frontmatter")
+            continue
+
+        preloads = frontmatter.get("skills", [])
+        tools = frontmatter.get("tools", [])
+        if not isinstance(preloads, list) or not all(isinstance(item, str) for item in preloads):
+            errors.append(f"agent '{agent_name}': skills must be a list of skill names")
+            preloads = []
+        if not isinstance(tools, list) or not all(isinstance(item, str) for item in tools):
+            errors.append(f"agent '{agent_name}': tools must be a list")
+            tools = []
+
+        for skill_name in sorted(required_by_agent.get(agent_name, set()) - set(preloads)):
+            errors.append(
+                f"agent '{agent_name}': required skill '{skill_name}' from activation metadata must be preloaded"
+            )
+
+        conditionals, syntax_errors = conditional_skill_names(content, agent_name)
+        errors.extend(syntax_errors)
+        for field_name, names in (("skills", preloads), ("Conditional Skills", conditionals)):
+            duplicates = sorted({name for name in names if names.count(name) > 1})
+            for name in duplicates:
+                errors.append(f"agent '{agent_name}': skill '{name}' is duplicated in {field_name}")
+            for name in names:
+                if not SKILL_NAME_RE.fullmatch(name):
+                    errors.append(f"agent '{agent_name}': invalid skill name '{name}' in {field_name}")
+                elif name not in active_skills or not (skills_root / name / "SKILL.md").is_file():
+                    errors.append(f"agent '{agent_name}': {field_name} skill '{name}' has no active SKILL.md")
+
+        overlap = sorted(set(preloads) & set(conditionals))
+        for name in overlap:
+            errors.append(f"agent '{agent_name}': skill '{name}' is both preloaded and conditional")
+
+        has_skill_tool = "skill" in tools
+        if conditionals and not has_skill_tool:
+            errors.append(f"agent '{agent_name}': Conditional Skills require 'skill' in tools")
+        elif has_skill_tool and not conditionals:
+            errors.append(f"agent '{agent_name}': tools grants 'skill' without a Conditional Skills section")
+
+        for name in conditionals:
+            skill_path = skills_root / name / "SKILL.md"
+            if not skill_path.is_file():
+                continue
+            skill_metadata = parse_frontmatter(skill_path.read_text(encoding="utf-8-sig"))
+            if skill_metadata and str(skill_metadata.get("disable-model-invocation", "")).lower() == "true":
+                errors.append(f"agent '{agent_name}': conditional skill '{name}' sets disable-model-invocation: true")
+
+        framework_content = _without_managed_skills(content)
+        for match in STALE_SKILL_PATH_RE.finditer(framework_content):
+            errors.append(
+                f"agent '{agent_name}': obsolete framework skill path '{match.group()}' "
+                "must use '.github/skills/<name>/SKILL.md'"
+            )
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -441,7 +663,7 @@ def discover_agent_names(github_dir: Path) -> set[str]:
 def main(argv: list[str] | None = None) -> int:
     """Run validation and return exit code."""
     parser = argparse.ArgumentParser(
-        description="Validate AF skill structure and INDEX.md consistency.",
+        description="Validate AF skills, agent loading declarations, and INDEX.md consistency.",
     )
     parser.add_argument(
         "--root",
@@ -522,6 +744,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- INDEX.md cross-reference ---
     errors.extend(validate_index_consistency(skills_root, active_dirs, available_dirs))
+
+    # --- Agent preload and conditional skill declarations ---
+    errors.extend(validate_agent_skill_loading(github_dir, active_dirs))
 
     # --- Report ---
     total_skills = len(active_dirs) + len(available_dirs)

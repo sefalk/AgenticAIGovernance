@@ -2,7 +2,6 @@
 name: dependency-management
 description: Dependency selection, version pinning, lockfiles, vulnerability scanning, and license compliance. Use when adding or auditing dependencies.
 argument-hint: '[package name or "audit"] [action: add|remove|update|scan]'
-disable-model-invocation: true
 ---
 
 # Dependency Management Skill

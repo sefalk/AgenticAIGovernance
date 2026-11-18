@@ -36,12 +36,7 @@ documentation before planning or implementation begins.
 4. **Filter** for relevance — return only information the requesting agent
    or user actually needs, not raw page dumps.
 
-## Skills
-
-Consult these skills when relevant to the research:
-- **data-pipeline-design** (`skills/data-pipeline-design/SKILL.md`) — ETL/ELT patterns, orchestration
-- **data-modeling** (`skills/data-modeling/SKILL.md`) — schema design, dimensional modeling
-- **data-quality** (`skills/data-quality/SKILL.md`) — validation frameworks, data contracts
+## Project-Curated Skills
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 

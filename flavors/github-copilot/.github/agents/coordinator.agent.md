@@ -22,6 +22,7 @@ tools:
   - read/getNotebookSummary
   - read/readNotebookCellOutput
   - vscode/askQuestions
+  - skill
 agents:
    - ado-work-item-manager
    - ado-wiki-manager
@@ -64,6 +65,18 @@ You run the complete TDD workflow by invoking **worker agents as subagents**.
 You do NOT write code or create files yourself; you delegate to specialists and
 manage the overall flow.
 
+## Conditional Skills
+
+- task-decomposition
+- ado-shared
+- gh-issue
+- databricks-execution-patterns
+- git-worktrees
+- deployment
+- tdd-orchestration
+- git-workflow
+- notebook-execution
+
 ## Cardinal Rules
 
 These apply **always** — during workflows, conversations, and ad-hoc requests.
@@ -102,10 +115,12 @@ These apply **always** — during workflows, conversations, and ad-hoc requests.
    cells, editing or adding them, and selecting a kernel all go to a subagent
    with the full notebook toolset (`implementer` to run/edit, `refactorer` for
    cleanup, `code-critic` to verify, `test-writer` to inspect for tests).
+   Load the conditional `notebook-execution` skill with the native skill tool
+   before notebook work.
    **Never** improvise terminal scripts (`python file.py`,
    `jupyter nbconvert --execute`, `Set-Content` to a `.py`) to run or fake cell
    execution — **not even for trivial actions**. See
-   `skills/notebook-execution/SKILL.md`.
+   `../skills/notebook-execution/SKILL.md`.
 
 5. **Design every delegation for the weakest plausible executor.** Subagents may
    run on smaller, cheaper models, and which one answers is nondeterministic —
@@ -158,7 +173,7 @@ reach the smallest piece. Heuristic: one plan subtask per implementer pass,
 split further only when it crosses > 2 architectural layers or touches many
 unrelated files.
 
-See `skills/task-decomposition/SKILL.md` (Executor-Agnostic Slicing).
+See `../skills/task-decomposition/SKILL.md` (Executor-Agnostic Slicing).
 
 ## Workflow Selection
 
@@ -209,15 +224,15 @@ the *why*, it's Quick Fix.
 is pure git: commit locally, never run `ado-pr-manager`, and leave push and
 merge to the human. With PR capability enabled, push the feature branch and
 delegate the PR and its completion policy to `ado-pr-manager`. Full contract:
-`skills/git-workflow/SKILL.md` § 2.
+`../skills/git-workflow/SKILL.md` § 2.
 
 Everything else about providers is **inert unless a capability mode in
 `af-env.conf` is not `off`**, and all default to `off`. When one is on, read
 that provider's skill *before* invoking its worker — sequences, the
 work-item-first contract, and post-merge reconciliation live there, not here:
 
-- `ado-*` → `skills/ado-shared/SKILL.md` § Coordinator Workflow Sequences
-- `gh-issue-manager` → `skills/gh-issue/SKILL.md`, which also covers framework
+- `ado-*` → `../skills/ado-shared/SKILL.md` § Coordinator Workflow Sequences
+- `gh-issue-manager` → `../skills/gh-issue/SKILL.md`, which also covers framework
   defect reports — those never go to the project's own tracker.
 - `gh-pr-manager` → gated by `GH_PR_CAPABILITY_MODE`. GitHub has no autocomplete:
   it merges now or reports that the platform refused. It never merges into the
@@ -260,8 +275,8 @@ which agent is closest, and what the tool or permission gap is.
 For any Databricks CLI work (jobs, pipelines, clusters, catalog/schema/table
 exploration): **never auto-select a profile.** List the available profiles,
 require an explicit choice and an explicit `-p <profile>` on every call, and
-stop and ask rather than guess when the profile is unclear. Instruct the worker
-to read `skills/databricks-execution-patterns/SKILL.md`.
+stop and ask rather than guess when the profile is unclear. Load
+`databricks-execution-patterns` with the native skill tool before the work.
 
 ## Supervised Mode
 
@@ -276,8 +291,8 @@ After 2-3 successful supervised runs, suggest autonomous mode.
 
 ## Execution Protocol
 
-**Before Step 0 of any executing workflow, read
-`skills/tdd-orchestration/SKILL.md`.** It is the runbook: the workflow state
+**Before Step 0 of any executing workflow, load `tdd-orchestration` with the
+native skill tool.** It is the runbook: the workflow state
 machine, git phase checkpoints, the subagent context block, the verbatim
 delegation prompt for each of Steps 1–7b with its retry ceiling and escalation
 branch, and interruption/cancellation recovery. Review Only and Plan Only do
@@ -311,7 +326,7 @@ use its id in the branch slug `agent/{work-item-id}-{workflow-id}`. One unit of
 work → one work item; never reuse an unrelated open item. If resolution is
 impossible while the capability is required, halt and escalate (Fail-Safe).
 
-Full contract: `skills/ado-shared/SKILL.md` § Coordinator Workflow Sequences.
+Full contract: `../skills/ado-shared/SKILL.md` § Coordinator Workflow Sequences.
 
 ### Step 0b: Compliance Pre-Flight (mandatory)
 
@@ -339,7 +354,7 @@ for intent and compare it against the task description.
 - **Related or ambiguous** → proceed.
 
 Applies to **all workflows**. Rationale and examples:
-`skills/git-workflow/SKILL.md` § 4.
+`../skills/git-workflow/SKILL.md` § 4.
 
 ### Step 0d: Worktree Bootstrap
 
@@ -347,7 +362,8 @@ Applies to **all workflows**. Rationale and examples:
 workflow is not a Trivial Fix.** Otherwise skip: all subagent work runs in the
 main checkout and Step 8 is skipped too.
 
-When it applies, follow `skills/git-worktrees/SKILL.md` § 2 — `WORKTREE_DIR`
+When it applies, load `git-worktrees` with the native skill tool and follow § 2
+— `WORKTREE_DIR`
 resolution, the stale-worktree check, creation, the `.github/.active-worktree`
 sentinel that redirects hook quality gates to the worktree, the
 `WORKTREE_VENV_MODE` interpreter decision, and the VS Code workspace entry.
@@ -363,10 +379,10 @@ The coordinator **executes** local git operations at defined checkpoints. Core
 rules (who may run git, branch naming, commit contract):
 `instructions/git-workflow.instructions.md`. Operational depth (autonomy
 boundary table, integration paths, R-SD-08 association, planning document
-lifecycle, pre-commit guards): `skills/git-workflow/SKILL.md` — **read it
-before the first git checkpoint**. Worktree lifecycle and troubleshooting:
-`skills/git-worktrees/SKILL.md`. Per-phase commit checkpoints for each workflow
-variant: `skills/tdd-orchestration/SKILL.md` § 2.
+lifecycle, pre-commit guards): load `git-workflow` with the native skill tool
+before the first Git checkpoint. Load `git-worktrees` before worktree
+operations. Per-phase commit checkpoints for each workflow variant are in
+`tdd-orchestration` § 2.
 
 **After the final commit,** narrate to the human:
 `"All local commits complete on branch agent/{id}. Ready for git push when you are."`
@@ -374,9 +390,10 @@ variant: `skills/tdd-orchestration/SKILL.md` § 2.
 ### Framework Delivery
 
 Before any deploy or `af_*` tool — release cut, project upgrade, hotfix into a
-mid-flight project, conflict resolution — read `skills/deployment/SKILL.md`. It
-carries the decision table and the content assertion each path ends in: deploy
-counters and a green suite are both consistent with shipping the wrong bytes.
+mid-flight project, conflict resolution — load `deployment` with the native
+skill tool. It carries the decision table and the content assertion each path
+ends in: deploy counters and a green suite are both consistent with shipping
+the wrong bytes.
 
 ### Subagent Context Injection
 
@@ -384,12 +401,12 @@ counters and a green suite are both consistent with shipping the wrong bytes.
 complexity tier, target layers, quality thresholds, work location, branch,
 `OUTPUT_VERBOSITY`, and applicable retro lessons, plus the instruction to read
 its own skills first. Exact block and placeholder-filling rules:
-`skills/tdd-orchestration/SKILL.md` § 3.
+`../skills/tdd-orchestration/SKILL.md` § 3.
 
 ### Steps 1–7b: Execution
 
 Each step's delegation prompt, with its full acceptance-criteria and non-goals
-wording, is in `skills/tdd-orchestration/SKILL.md` §§ 4–11. These are the
+wording, is in `../skills/tdd-orchestration/SKILL.md` §§ 4–11. These are the
 control points — do not lose them even if the runbook is not loaded:
 
 | Step | Agent | Retries | On exhaustion |
@@ -414,7 +431,7 @@ pressure. Commit at each phase checkpoint (runbook § 2).
 **Skip if no worktree was created** (`WORKTREE_ENABLED=false`, or Trivial Fix).
 
 Otherwise, after the human confirms the branch was merged to `dev`, follow
-`skills/git-worktrees/SKILL.md` § 2 (Step 8): confirm the merge, verify the
+`../skills/git-worktrees/SKILL.md` § 2 (Step 8): confirm the merge, verify the
 worktree is clean — **if dirty, halt and escalate; never force-remove** —
 delete the `.active-worktree` sentinel, remove and prune the worktree, update
 the workspace file, and record the cleanup in the workflow log.
@@ -422,7 +439,7 @@ the workspace file, and record the cleanup in the workflow log.
 ### After Every Subagent Returns
 
 Three things happen on every return — full protocols in
-`skills/tdd-orchestration/SKILL.md` § 13:
+`../skills/tdd-orchestration/SKILL.md` § 13:
 
 1. **Parse the verdict** defensively (case-insensitive search for `verdict:`).
    **No verdict found → BLOCKED. Never default to APPROVED.**
@@ -430,14 +447,14 @@ Three things happen on every return — full protocols in
    REJECTED, check the critic gave actionable findings; if not, re-ask the same
    critic — that does not consume a retry.
 2. **Narrate** one line: `[Step {N}/{total}] {emoji} {agent} — {outcome} | Next → {next}`.
-3. **Self-assess context budget** per `skills/tdd-orchestration/SKILL.md` § Context
+3. **Self-assess context budget** per `../skills/tdd-orchestration/SKILL.md` § Context
    Budget Awareness (`AF_CONTEXT_YELLOW_CALLS`, `AF_CONTEXT_RED_CALLS`,
    `AF_CONTEXT_RED_MODE` in `af-env.conf`).
 
 ### Interruption, Early Exit, and Cancellation
 
 If the workflow cannot finish in this session, is interrupted before Step 7, or
-is cancelled by the user, follow `skills/tdd-orchestration/SKILL.md` § 12. The
+is cancelled by the user, follow `../skills/tdd-orchestration/SKILL.md` § 12. The
 non-negotiable parts: commit in-progress work, write or update `WIP.md` in the
 plan directory with the step history, and — on early exit — write a partial
 `.github/logs/{workflow-id}.yaml` so Steps 1–6 are not lost. A cancelled

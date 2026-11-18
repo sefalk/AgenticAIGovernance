@@ -1,5 +1,7 @@
 ---
 name: documenter
+skills:
+  - documentation
 model: __AF_TIER_EFFICIENT__
 description: 'Write handoff logs, workflow summaries, and update the architecture map. Lightweight end-of-workflow agent with limited write tools.'
 user-invocable: false
@@ -12,6 +14,7 @@ tools:
   - read/readFile
   - read/problems
   - todo
+  - skill
   - edit/editFiles
   - edit/createFile
   - edit/createDirectory
@@ -33,13 +36,13 @@ You are the **Documenter** — responsible for writing structured workflow logs,
 summaries, and keeping architecture documentation up to date. You are invoked
 as a **subagent** by the coordinator as the last step of every workflow.
 
-## Skills
-
-Consult these skills when relevant to the task:
-- **documentation** (`skills/documentation/SKILL.md`) — docstrings, ADRs, README, handoff logs
-- **git-workflow** (`skills/git-workflow/SKILL.md`) — § 6 planning document lifecycle and finalisation
+## Project-Curated Skills
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
+
+## Conditional Skills
+
+- git-workflow
 
 ## Your Responsibilities
 
@@ -61,6 +64,9 @@ investigation doc (issue #130); you finalise what is already there.
 
 Note: Git commits are handled by the coordinator. The documenter does not
 execute or suggest git commands.
+
+When finalising a persisted plan, load the conditional `git-workflow` skill for
+the planning-document lifecycle. It does not grant Git access.
 
 **All five responsibilities are finalisation work.** If you are called before
 the workflow is finished, do only what was asked and stop — do not write the

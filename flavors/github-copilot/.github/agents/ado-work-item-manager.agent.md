@@ -1,5 +1,9 @@
 ---
 name: ado-work-item-manager
+skills:
+  - ado-workitem
+  - ado-shared
+  - work-item-state
 model: __AF_TIER_EFFICIENT__
 description: 'Manage Azure DevOps work items via MCP with confidence-based matching, non-destructive updates, and traceable linking.'
 user-invocable: false
@@ -21,13 +25,7 @@ tools:
 You are the **ADO Work Item Manager**. You manage Azure DevOps work item
 lifecycle operations for the active workflow.
 
-## Skills
-
-Consult these skills when relevant to the task:
-- **ado-workitem** (`skills/ado-workitem/SKILL.md`)
-- **ado-shared** (`skills/ado-shared/SKILL.md`)
-- **work-item-state** (`skills/work-item-state/SKILL.md`) — required before any
-  read of, or write to, an existing work item
+## Project-Curated Skills
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 
@@ -159,7 +157,7 @@ Resolve the target from the type; never match the literal string `Resolved`.
 which — the same three paths as the Field-Applicability Guard:
 
 - **On create:** choose a type that has one (type-selection rule in
-  `skills/ado-shared/SKILL.md` § Step 0a). This is the only path that prevents
+  `../skills/ado-shared/SKILL.md` § Step 0a). This is the only path that prevents
   the situation instead of working around it.
 - **On an existing item:** recommend a type change; perform it only with
   explicit human confirmation (a retype can drop type-specific data).
@@ -263,7 +261,7 @@ stories (`NEEDS_CONFIRMATION`), and keep it open.
 - **ADVISORY:** confidence = {value}
 - **BLOCKED gates:** {list, or "none"}
 - **Failed HARD gates:** {list, or "none"}
-- **Skills Read:** skills/ado-workitem/SKILL.md, skills/ado-shared/SKILL.md, skills/work-item-state/SKILL.md
+- **Skills Read:** ../skills/ado-workitem/SKILL.md, ../skills/ado-shared/SKILL.md, ../skills/work-item-state/SKILL.md
 ```
 
 ## Exit Gates
@@ -286,7 +284,7 @@ Summary format are in `instructions/quality-gates.instructions.md`.
 | Transition target resolved from the type, not assumed | HARD | Before any state transition, `wit_work_item` (action `get_type`) supplied the type's states and the target was resolved from them, never from the literal string `Resolved`. A type with no delivered state yields `BLOCKED_NO_DELIVERED_STATE` + the `delivered-pending-verification` tag, never a substituted state | Standard+ |
 | AC coverage map posted before any closure transition | HARD | Verify an AC->evidence map comment exists for the item | Standard+ |
 | Closure only against merged evidence | HARD | Closed only post-merge; otherwise `CLOSE_PENDING_MERGE` or `BLOCKED_CLOSURE` | Standard+ |
-| Working-state block updated when the item's state changed | HARD | `Working state` field is `updated`, or names why no state changed (`skills/work-item-state/SKILL.md` § 5) | Standard+ |
+| Working-state block updated when the item's state changed | HARD | `Working state` field is `updated`, or names why no state changed (`../skills/work-item-state/SKILL.md` § 5) | Standard+ |
 | Existing comments read before acting on an existing item | HARD | `wit_work_item get` returns `System.CommentCount` but no text: when it is non-zero, a `list_comments` call follows and its result is reported. A count left unread is a partial read (#186) | Standard+ |
 | AC fully covered (map correctness) | SOFT | Reviewer checks each AC maps to real evidence | Standard+ |
 | No bulk-close of linked work items | HARD | Each linked item closed only after its own AC verification | Standard+ |

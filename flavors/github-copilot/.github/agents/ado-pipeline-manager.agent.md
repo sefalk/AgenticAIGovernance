@@ -1,5 +1,7 @@
 ---
 name: ado-pipeline-manager
+skills:
+  - ado-shared
 model: __AF_TIER_EFFICIENT__
 description: 'Manage Azure DevOps pipelines via MCP — register a pipeline from a repo YAML, run it, and monitor build status/logs to operate a PR quality gate. Emits Build Validation branch-policy settings for a human to apply (policy creation is REST/UI-only). No terminal/git access.'
 user-invocable: false
@@ -46,10 +48,7 @@ The Azure DevOps MCP **covers pipelines but NOT branch policies**. Therefore:
 You never create, relax, or disable branch policies yourself, and you never
 complete or merge pull requests.
 
-## Skills
-
-Consult these skills when relevant to the task:
-- **ado-shared** (`../skills/ado-shared/SKILL.md`) — ADO defaults resolution, link policy, and fallback behavior
+## Project-Curated Skills
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 

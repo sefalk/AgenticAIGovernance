@@ -1,10 +1,12 @@
 """Curated-skills managed region in shipped agents (measure #2c-i).
 
 Guards the payload shape that makes curated-skill lines CONFLICT-free: every
-framework agent with a ``## Skills`` section ships exactly one *empty*
-``AF:MANAGED:curated-skills`` region, and filling that region is classification-
-invariant (``deploy_core`` strips it back to the empty-region source). Agents
-without a ``## Skills`` section (coordinator, compliance-checker) carry no region.
+framework agent with a ``## Project-Curated Skills`` section ships exactly one
+*empty* ``AF:MANAGED:curated-skills`` region, and filling that region is
+classification-invariant (``deploy_core`` strips it back to the empty-region
+source). Agents without that section (coordinator, compliance-checker) carry no
+region. Base skills moved to ``skills:`` frontmatter and ``## Conditional
+Skills`` in #549; only project-curated skills live in the region.
 """
 
 from __future__ import annotations
@@ -22,7 +24,9 @@ REGION = "curated-skills"
 START = f"<!-- AF:MANAGED:{REGION}:START -->"
 END = f"<!-- AF:MANAGED:{REGION}:END -->"
 
-# Agents without a ## Skills section must NOT carry the region.
+SECTION = "## Project-Curated Skills"
+
+# Agents without the curated section must NOT carry the region.
 NO_SKILLS_AGENTS = {"coordinator", "compliance-checker"}
 
 
@@ -40,12 +44,12 @@ def test_expected_agents_carry_exactly_one_empty_region() -> None:
     with_region = 0
     for path in agents:
         text = path.read_text(encoding="utf-8")
-        has_skills = "\n## Skills" in text or text.startswith("## Skills")
+        has_skills = f"\n{SECTION}\n{START}\n" in text
         stem = path.stem.replace(".agent", "")
         if stem in NO_SKILLS_AGENTS:
             assert START not in text, f"{path.name} should not carry the region"
             continue
-        assert has_skills, f"{path.name}: no '## Skills' section and not listed in NO_SKILLS_AGENTS"
+        assert has_skills, f"{path.name}: region not directly under '{SECTION}' and not listed in NO_SKILLS_AGENTS"
         assert text.count(START) == 1, f"{path.name}: expected exactly one START"
         assert text.count(END) == 1, f"{path.name}: expected exactly one END"
         # Empty body: END immediately follows the START line.
