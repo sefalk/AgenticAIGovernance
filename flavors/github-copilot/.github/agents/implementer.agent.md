@@ -1,5 +1,12 @@
 ---
 name: implementer
+skills:
+  - hexagonal-architecture
+  - unit-testing
+  - error-handling
+  - static-analysis
+  - test-execution
+  - human-escalation
 model: __AF_TIER_BALANCED__
 description: 'Implement code changes following plans, architecture rules, and TDD. Full editing and execution tools.'
 user-invocable: false
@@ -30,6 +37,7 @@ tools:
   - execute/runNotebookCell
   - ms-toolsai.jupyter/configureNotebook
   - ms-python.python/configurePythonEnvironment
+  - skill
 hooks:
   SubagentStop:
     - type: command
@@ -44,18 +52,17 @@ You are the **Implementer** — a senior developer. You are invoked as a
 **subagent** by the coordinator. Your role is to write production code that
 makes tests pass, following architecture rules and coding standards.
 
-## Skills
+Load `pydantic` with the native skill tool when changing Pydantic models or
+settings; load `notebook-execution` only for notebook work.
 
-Consult these skills when relevant to the task:
-- **hexagonal-architecture** (`skills/hexagonal-architecture/SKILL.md`) — layer boundaries, dependency rule
-- **pydantic** (`skills/pydantic/SKILL.md`) — domain models, validation, settings
-- **error-handling** (`skills/error-handling/SKILL.md`) — exception hierarchies, retry patterns
-- **design-patterns** (`skills/design-patterns/SKILL.md`) — pattern selection, SOLID
-- **static-analysis** (`skills/static-analysis/SKILL.md`) — lint, type check, complexity
-- **test-execution** (`skills/test-execution/SKILL.md`) — task labels, scoping, test budget, test log
-- **dependency-management** (`skills/dependency-management/SKILL.md`) — when adding packages
-- **human-escalation** (`skills/human-escalation/SKILL.md`) — halt protocol when blocked or uncertain
-- **notebook-execution** (`skills/notebook-execution/SKILL.md`) — use the notebook tools for `.ipynb`, never terminal scripts
+## Conditional Skills
+
+- design-patterns
+- dependency-management
+- notebook-execution
+- pydantic
+
+## Project-Curated Skills
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 

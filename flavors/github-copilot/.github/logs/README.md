@@ -72,6 +72,24 @@ Rule ids:
   agent frontmatter, absent from every log read. A log opened mid-session can
   miss a hook that did run.
 
+## Skill size versus usage (#549, #556)
+
+The static context checker measures agent preloads and declared conditional
+skill bodies separately. Its conditional total is the unique inventory across
+agents (shared skills once), not a simultaneous per-request load. Its per-agent
+declared upper bound assumes all that agent's declared conditional skills load;
+it excludes tools, conversation, references and undeclared skill loads.
+
+Neither that size estimate nor `by_entity.classes.skill` measures native
+Copilot skill activation frequency: the latter describes catalogue entries.
+The legacy `report-skill-reads.py` counts workflow-level file-read evidence, not
+native `skill` tool calls. The Local debug-log collector does not provide that
+Copilot-native activation report. This remains #556: report skill/agent counts
+from session events with explicit coverage. Do not treat missing telemetry as
+zero usage or infer per-skill credits from request-level billing. Body size
+times activations can estimate newly loaded text, but not repeated context
+delivery after loading, cache behavior, or billed cost.
+
 ## Flight report (#476)
 
 `scripts/flight-report.py --session-dir <debug-log dir>` writes one

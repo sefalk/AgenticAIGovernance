@@ -1,5 +1,10 @@
 ---
 name: refactorer
+skills:
+  - refactoring
+  - hexagonal-architecture
+  - test-execution
+  - human-escalation
 model: __AF_TIER_EFFICIENT__
 description: 'Clean up code without changing behaviour (Refactor phase of TDD). All tests must remain green after changes.'
 user-invocable: false
@@ -29,6 +34,7 @@ tools:
   - execute/runNotebookCell
   - ms-toolsai.jupyter/configureNotebook
   - ms-python.python/configurePythonEnvironment
+  - skill
 hooks:
   SubagentStop:
     - type: command
@@ -48,16 +54,16 @@ You are the **Refactorer** — a code improvement specialist. You are invoked
 as a **subagent** by the coordinator. Your job is to clean up code structure
 without changing observable behaviour. This is the **Refactor phase** of TDD.
 
-## Skills
+Load `pydantic` with the native skill tool when refactoring Pydantic models or
+settings; load `notebook-execution` only for notebook work.
 
-Consult these skills when relevant to the task:
-- **refactoring** (`skills/refactoring/SKILL.md`) — code smells, technique catalog, IDE-assisted moves
-- **design-patterns** (`skills/design-patterns/SKILL.md`) — when to apply/avoid patterns
-- **hexagonal-architecture** (`skills/hexagonal-architecture/SKILL.md`) — layer boundaries for move-function decisions
-- **pydantic** (`skills/pydantic/SKILL.md`) — when converting dataclasses/dicts to Pydantic models
-- **test-execution** (`skills/test-execution/SKILL.md`) — task labels, scoping, test budget, test log
-- **human-escalation** (`skills/human-escalation/SKILL.md`) — halt protocol when blocked or uncertain
-- **notebook-execution** (`skills/notebook-execution/SKILL.md`) — use the notebook tools for `.ipynb`, never terminal scripts
+## Conditional Skills
+
+- design-patterns
+- notebook-execution
+- pydantic
+
+## Project-Curated Skills
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 

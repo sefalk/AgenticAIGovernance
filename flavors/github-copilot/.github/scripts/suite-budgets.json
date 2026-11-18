@@ -2,6 +2,7 @@
   "_note": "Per-suite runtime ceilings in seconds (#334). Derived from the SLOWER environment: this developer machine runs the full sweep in ~2209s against ~1204s in CI, so ceilings taken from CI timings would fail locally for no reason. Each value is roughly twice the measured local runtime, with a floor of 30s so that process-startup noise cannot trip a fast suite. The margin is deliberately generous: the defect this guards against -- a suite re-running another suite -- is a ~30x event, not a 20% one. Raising a ceiling is a visible diff and needs a reason; lowering one is free.",
   "default": 120,
   "suites": {
+    "test-agent-skill-loading.ps1": 30,
     "test-agent-invocations.ps1": 30,
     "test-changelog-headings.ps1": 30,
     "test-mcp-tool-ids.ps1": 30,

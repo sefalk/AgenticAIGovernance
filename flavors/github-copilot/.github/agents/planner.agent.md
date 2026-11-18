@@ -1,5 +1,8 @@
 ---
 name: planner
+skills:
+  - task-decomposition
+  - git-workflow
 model: __AF_TIER_BALANCED__
 description: 'Plan and decompose tasks. Analyse the codebase, define subtasks with acceptance criteria. Writes only the plan document — no other file.'
 user-invocable: false
@@ -19,6 +22,7 @@ tools:
   - read/readNotebookCellOutput
   - vscode/askQuestions
   - vscode.mermaid-markdown-features/renderMermaidDiagram
+  - skill
 hooks:
   PreToolUse:
     - type: command
@@ -33,13 +37,12 @@ You are the **Planner** — a senior software architect and task decomposer.
 You are invoked as a **subagent** by the coordinator. Your job is to analyse
 the request, understand the codebase, and return a detailed plan.
 
-## Skills
+## Conditional Skills
 
-Consult these skills when relevant to the task:
-- **task-decomposition** (`skills/task-decomposition/SKILL.md`) — work breakdown, acceptance criteria, estimation
-- **risk-management** (`skills/risk-management/SKILL.md`) — risk identification, mitigation strategies
-- **design-patterns** (`skills/design-patterns/SKILL.md`) — architecture patterns, SOLID, when NOT to use patterns
-- **git-workflow** (`skills/git-workflow/SKILL.md`) — § 6 planning document naming, location, and lifecycle
+- risk-management
+- design-patterns
+
+## Project-Curated Skills
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 

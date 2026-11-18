@@ -37,6 +37,8 @@ function New-Fixture {
         [hashtable]$Instructions = @{},   # name -> @{ Tokens; ApplyTo }  (ApplyTo $null = omit)
         [hashtable]$Agents = @{},         # name -> tokens
         [hashtable]$Skills = @{},         # dir -> @{ Description; Block } (omit Description = none)
+        [hashtable]$PreloadedSkills = @{}, # agent -> skill names listed in frontmatter
+        [hashtable]$ConditionalSkills = @{}, # agent -> declared on-demand skill names
         [string]$Conf = $null,
         [byte[]]$ConfBytes = $null,
         [string[]]$Customizable = @(),    # manifest paths marked [customizable]
@@ -74,7 +76,21 @@ function New-Fixture {
         New-Item -ItemType Directory -Path $agentDir -Force | Out-Null
         if ($Agents.Count -eq 0) { $Agents = @{ 'stub' = 10 } }
         foreach ($name in $Agents.Keys) {
-            [IO.File]::WriteAllText((Join-Path $agentDir "$name.agent.md"), ('x' * ($Agents[$name] * 4)))
+            $agentText = ''
+            if ($PreloadedSkills.ContainsKey($name)) {
+                $agentText = "---`nname: $name`nskills:`n"
+                foreach ($skillName in $PreloadedSkills[$name]) { $agentText += "  - $skillName`n" }
+                $agentText += "---`n"
+                $padding = [Math]::Max(0, ($Agents[$name] * 4) - $agentText.Length)
+                $agentText += 'x' * $padding
+            } else {
+                $agentText = 'x' * ($Agents[$name] * 4)
+            }
+            if ($ConditionalSkills.ContainsKey($name)) {
+                $agentText += "`n`n## Conditional Skills`n`n"
+                foreach ($skillName in $ConditionalSkills[$name]) { $agentText += "- $skillName`n" }
+            }
+            [IO.File]::WriteAllText((Join-Path $agentDir "$name.agent.md"), $agentText)
         }
     }
     if ($Skills.Count -gt 0) {
@@ -83,13 +99,24 @@ function New-Fixture {
             $spec = $Skills[$dir]
             $skillDir = Join-Path $skillRoot $dir
             New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
+            if ($spec.Unreadable) {
+                [IO.File]::WriteAllBytes((Join-Path $skillDir 'SKILL.md'), [byte[]](0xff, 0xfe, 0xfa))
+                continue
+            }
             $front = "---`nname: $dir`n"
             if ($spec.ContainsKey('Description')) {
                 $front += if ($spec.Block) { "description: >-`n  $($spec.Description)`n" }
                           else { "description: $($spec.Description)`n" }
             }
             $front += "---`n"
-            [IO.File]::WriteAllText((Join-Path $skillDir 'SKILL.md'), $front + ('x' * 400))
+            $content = $front + ('x' * 400)
+            if ($spec.BomCrLf) {
+                $content = ([string][char]0xFEFF) + $content.Replace("`n", "`r`n")
+                $bytes = [System.Text.Encoding]::UTF8.GetBytes($content)
+                [IO.File]::WriteAllBytes((Join-Path $skillDir 'SKILL.md'), $bytes)
+            } else {
+                [IO.File]::WriteAllText((Join-Path $skillDir 'SKILL.md'), $content)
+            }
         }
     }
     if ($null -ne $ConfBytes) {
@@ -121,6 +148,25 @@ function New-Fixture {
 function Invoke-Checker([string]$githubDir, [string[]]$extraArgs = @()) {
     $out = & $python $checker '--github-dir' $githubDir @extraArgs 2>&1 | Out-String
     return @{ Code = $LASTEXITCODE; Output = $out }
+}
+
+function Get-NormalizedTokens([string]$Path) {
+    $text = [IO.File]::ReadAllText($Path).TrimStart([char]0xFEFF)
+    $text = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+    return [int][Math]::Floor($text.Length / 4)
+}
+
+function Test-ReportedAgentOwnTokens([hashtable]$Result, [string]$GithubDir, [string]$AgentName, [string[]]$Preloads) {
+    $agentsDir = Join-Path $GithubDir 'agents'
+    $expected = Get-NormalizedTokens (Join-Path $agentsDir "$AgentName.agent.md")
+    foreach ($skillName in $Preloads) {
+        $skillPath = Join-Path (Join-Path (Join-Path $GithubDir 'skills') $skillName) 'SKILL.md'
+        $expected += Get-NormalizedTokens $skillPath
+    }
+    $agentLine = [regex]::Match($Result.Output, "$AgentName\s+\(agent \+ preloads ([\d,]+),")
+    if (-not $agentLine.Success) { return $false }
+    $actual = [int]($agentLine.Groups[1].Value -replace ',', '')
+    return $actual -eq $expected
 }
 
 $results = [ordered]@{}
@@ -209,6 +255,126 @@ try {
     # J: the real payload must satisfy its own budgets
     $realGh = (Resolve-Path (Join-Path $scriptDir '..')).Path
     $results['J_real_payload_within_budget'] = ((Invoke-Checker $realGh).Code -eq 0)
+
+    # J2: skill bodies are charged only for skills listed in an agent's preload field.
+    $gh = New-Fixture -RootTokens 100 -Conf $conf -Agents @{ solo = 100 } -Skills @{
+        alpha = @{ Description = 'fixture' }
+    }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh @('--verbose')
+    $results['J2_unlisted_skill_not_charged'] = (Test-ReportedAgentOwnTokens $r $gh 'solo' @())
+
+    $gh = New-Fixture -RootTokens 100 -Conf $conf -Agents @{ solo = 100 } `
+        -Skills @{ alpha = @{ Description = 'fixture' } } `
+        -PreloadedSkills @{ solo = @('alpha') }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh @('--verbose')
+    $results['J2_single_preload_body_counted'] = (Test-ReportedAgentOwnTokens $r $gh 'solo' @('alpha'))
+
+    $gh = New-Fixture -RootTokens 100 -Conf $conf -Agents @{ solo = 100 } `
+        -Skills @{ alpha = @{ Description = 'fixture' }; beta = @{ Description = 'fixture' } } `
+        -PreloadedSkills @{ solo = @('alpha', 'beta') }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh @('--verbose')
+    $results['J2_multiple_preload_bodies_counted'] = (Test-ReportedAgentOwnTokens $r $gh 'solo' @('alpha', 'beta'))
+
+    $gh = New-Fixture -RootTokens 100 -Conf $conf -Agents @{ solo = 100 } `
+        -PreloadedSkills @{ solo = @('missing') }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh
+    $results['J2_missing_preload_blocks'] = ($r.Code -eq 2 -and $r.Output -match "agent 'solo' preloaded skill 'missing'")
+
+    $gh = New-Fixture -RootTokens 100 -Conf $conf -Agents @{ solo = 100 } `
+        -Skills @{ broken = @{ Unreadable = $true } } `
+        -PreloadedSkills @{ solo = @('broken') }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh
+    $results['J2_unreadable_preload_blocks'] = ($r.Code -eq 2 -and $r.Output -match 'not valid UTF-8')
+
+    $gh = New-Fixture -RootTokens 100 -Conf $conf -Agents @{ solo = 100 } `
+        -Skills @{ alpha = @{ Description = 'fixture'; BomCrLf = $true } } `
+        -PreloadedSkills @{ solo = @('alpha') }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh @('--verbose')
+    $results['J2_preload_count_ignores_bom_and_line_endings'] =
+        (Test-ReportedAgentOwnTokens $r $gh 'solo' @('alpha'))
+
+    # J3: declared conditional bodies are a separate inventory, not preloads
+    # or billed usage. Shared skills count once in the inventory.
+    $gh = New-Fixture -Conf $conf -Agents @{ solo = 100; peer = 100 } `
+        -Skills @{ alpha = @{ Description = 'fixture' }; beta = @{ Description = 'fixture' } } `
+        -ConditionalSkills @{ solo = @('alpha', 'beta'); peer = @('alpha') }
+    $fixtures += $gh
+    $alpha = Get-NormalizedTokens (Join-Path $gh 'skills/alpha/SKILL.md')
+    $beta = Get-NormalizedTokens (Join-Path $gh 'skills/beta/SKILL.md')
+    $sum = $alpha + $beta
+    $r = Invoke-Checker $gh @('--verbose')
+    $results['J3_unbudgeted_inventory_explicit'] =
+        ($r.Code -eq 0 -and $r.Output -match "conditional skills $sum tok.*UNBUDGETED")
+    $results['J3_conditional_not_preloaded'] = (Test-ReportedAgentOwnTokens $r $gh 'solo' @())
+    $results['J3_agent_conditional_sum'] =
+        ($r.Output -match "solo\s+.*declared conditional skills $sum,")
+    $results['J3_shared_skill_unique_inventory'] =
+        ($r.Output -match "conditional skills $sum tok")
+    $results['J3_declared_upper_bound'] =
+        ($r.Output -match 'declared skill upper bound' -and $r.Output -match 'not.*usage')
+    $baseline = 100 + (Get-NormalizedTokens (Join-Path $gh 'agents/solo.agent.md'))
+    $results['J3_bound_adds_skills_once'] =
+        ($r.Output -match "solo\s+\(preload baseline $baseline, declared conditional skills $sum, baseline \+ skills $($baseline + $sum),")
+
+    $limits = "AF_CONDITIONAL_SKILL_BUDGET_TOKENS=$alpha`nAF_CONDITIONAL_SKILLS_BUDGET_TOKENS=$sum`n"
+    [IO.File]::WriteAllText((Join-Path $gh 'af-env.conf'), $conf + $limits)
+    $results['J3_exact_limits_pass'] = ((Invoke-Checker $gh).Code -eq 0)
+    $tightSkill = "AF_CONDITIONAL_SKILL_BUDGET_TOKENS=$($alpha - 1)`n"
+    [IO.File]::WriteAllText((Join-Path $gh 'af-env.conf'), $conf + $tightSkill)
+    $r = Invoke-Checker $gh
+    $results['J3_individual_limit_fails'] =
+        ($r.Code -eq 1 -and $r.Output -match "FAIL.*conditional skill 'alpha'")
+    $tightSum = "AF_CONDITIONAL_SKILLS_BUDGET_TOKENS=$($sum - 1)`n"
+    [IO.File]::WriteAllText((Join-Path $gh 'af-env.conf'), $conf + $tightSum)
+    $r = Invoke-Checker $gh
+    $results['J3_aggregate_limit_fails'] =
+        ($r.Code -eq 1 -and $r.Output -match 'FAIL.*conditional skills total')
+    [IO.File]::WriteAllText((Join-Path $gh 'af-env.conf'), $conf + "AF_CONDITIONAL_SKILL_BUDGET_TOKENS=many`n")
+    $results['J3_malformed_individual_limit_blocks'] = ((Invoke-Checker $gh).Code -eq 2)
+    [IO.File]::WriteAllText((Join-Path $gh 'af-env.conf'), $conf + "AF_CONDITIONAL_SKILLS_BUDGET_TOKENS=0`n")
+    $results['J3_nonpositive_aggregate_limit_blocks'] = ((Invoke-Checker $gh).Code -eq 2)
+
+    $gh = New-Fixture -Conf $conf -Agents @{ solo = 100 } `
+        -ConditionalSkills @{ solo = @('missing') }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh
+    $results['J3_missing_conditional_blocks'] =
+        ($r.Code -eq 2 -and $r.Output -match "agent 'solo'.*conditional skill 'missing'")
+    $gh = New-Fixture -Conf $conf -Agents @{ solo = 100 } `
+        -ConditionalSkills @{ solo = @('alpha: invalid') }
+    $fixtures += $gh
+    $r = Invoke-Checker $gh
+    $results['J3_invalid_declaration_blocks'] =
+        ($r.Code -eq 2 -and $r.Output -match 'plain skill-name bullets')
+
+    $gh = New-Fixture -Conf $conf -Agents @{ solo = 100 }
+    $fixtures += $gh
+    [IO.File]::AppendAllText((Join-Path $gh 'agents/solo.agent.md'),
+        "`n<!-- AF:MANAGED:curated-skills:START -->`n## Conditional Skills`n- project-only`n<!-- AF:MANAGED:curated-skills:END -->`n")
+    $results['J3_managed_region_excluded'] = ((Invoke-Checker $gh).Code -eq 0)
+
+    $gh = New-Fixture -Conf ($conf + "AF_CONDITIONAL_SKILL_BUDGET_TOKENS=1`nAF_CONDITIONAL_SKILLS_BUDGET_TOKENS=1`n") `
+        -Agents @{ solo = 100 } -Skills @{ optional = @{ Description = 'fixture' } } `
+        -ConditionalSkills @{ solo = @('optional') } -DefaultSkills @()
+    $fixtures += $gh
+    $r = Invoke-Checker $gh @('--verbose')
+    $results['J3_project_skills_not_charged_to_AF'] =
+        ($r.Code -eq 0 -and $r.Output -match 'project conditional skills.*UNBUDGETED')
+    [IO.File]::AppendAllText((Join-Path $gh 'af-env.conf'), "AF_PROJECT_CONDITIONAL_SKILL_BUDGET_TOKENS=1`n")
+    $r = Invoke-Checker $gh
+    $results['J3_project_individual_limit_enforced'] =
+        ($r.Code -eq 1 -and $r.Output -match "FAIL.*project conditional skill 'optional'")
+    [IO.File]::WriteAllText((Join-Path $gh 'af-env.conf'),
+        $conf + "AF_PROJECT_CONDITIONAL_SKILLS_BUDGET_TOKENS=1`n")
+    $r = Invoke-Checker $gh
+    $results['J3_project_aggregate_limit_enforced'] =
+        ($r.Code -eq 1 -and $r.Output -match 'FAIL.*project conditional skills total')
 
     # --- Conditional set (issue #44) -------------------------------------
     # Before this, the gate measured only applyTo:'**' files -- the smaller
@@ -682,6 +848,16 @@ try {
         }
     }
 
+    $gh = New-Fixture -Conf ($guardConf + "AF_CONDITIONAL_SKILL_BUDGET_TOKENS=1`n") `
+        -Instructions @{ 'shared.instructions.md' = @{ Tokens = 50; ApplyTo = '**' } } `
+        -Agents @{ solo = 100 } -Skills @{ alpha = @{ Description = 'fixture' } } `
+        -ConditionalSkills @{ solo = @('alpha') }
+    $fixtures += $gh
+    $r = Invoke-Guard (New-StagedRepo $gh)
+    $results['J3_staged_conditional_limit_enforced'] =
+        ($r.Code -eq 1 -and $r.Output -match "conditional skill 'alpha'")
+    if (-not $results['J3_staged_conditional_limit_enforced']) { Write-Host "  (guard: $($r.Output.Trim()))" }
+
     # X: a staged payload over budget blocks the commit, naming the offender.
     $gh = New-OverBudgetFixture; $fixtures += $gh
     $repoOver = New-StagedRepo $gh
@@ -844,7 +1020,8 @@ try {
     # Copies guard and checker into a fixture, so the guard can locate its own
     # payload from where it is installed -- as it does in a real deployment.
     function Install-Guard([string]$GithubDir) {
-        foreach ($pair in @(@('hooks/scripts', $guard), @('scripts', $checker))) {
+        foreach ($pair in @(@('hooks/scripts', $guard), @('scripts', $checker),
+            @('scripts', (Join-Path $scriptDir 'validate-skills.py')))) {
             $dst = Join-Path $GithubDir $pair[0]
             New-Item -ItemType Directory -Path $dst -Force | Out-Null
             Copy-Item -LiteralPath $pair[1] -Destination $dst
@@ -948,7 +1125,7 @@ Write-Host "  Checks skipped: $($skipped.Count)"
 # silently stops matching, as one nearly did in #209 -- shows up as a shortfall
 # instead of as a smaller green number nobody compares. Raise it deliberately
 # when adding a check.
-$EXPECTED_CHECK_TOTAL = 104
+$EXPECTED_CHECK_TOTAL = 128
 $actualTotal = $results.Count + $skipped.Count
 if ($actualTotal -ne $EXPECTED_CHECK_TOTAL) {
     Write-Host "  FAIL: check inventory is $actualTotal, expected $EXPECTED_CHECK_TOTAL -- a check was added without raising the total, or one stopped running without announcing a skip"

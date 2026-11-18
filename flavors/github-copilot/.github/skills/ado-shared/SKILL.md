@@ -2,7 +2,6 @@
 name: ado-shared
 description: Shared Azure DevOps integration patterns — defaults resolution, required-vs-optional availability checks, fallback behavior, authentication and toolset-drift recovery, and reference hygiene.
 argument-hint: '[capability: work-item|wiki|repo] [mode: required|optional]'
-disable-model-invocation: true
 ---
 
 # ADO Shared Skill

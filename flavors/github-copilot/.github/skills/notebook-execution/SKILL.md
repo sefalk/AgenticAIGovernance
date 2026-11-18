@@ -2,11 +2,10 @@
 name: notebook-execution
 description: Interact with Jupyter / .ipynb notebooks through the VS Code notebook tools (run/edit cells, select kernel, read outputs) instead of terminal scripts. Use when a task involves executing, editing, or inspecting notebook cells.
 argument-hint: '[notebook.ipynb] [action: run|edit|inspect|configure]'
-disable-model-invocation: true
 metadata:
   activation:
     agents: [coordinator, implementer, refactorer, code-critic, test-writer]
-    priority: required
+    priority: recommended
 ---
 
 # Notebook Execution Skill

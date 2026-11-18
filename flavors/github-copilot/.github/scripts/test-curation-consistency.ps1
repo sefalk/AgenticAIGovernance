@@ -46,6 +46,7 @@ function New-Fixture {
         [hashtable]$Assignments = @{},
         [hashtable]$Regions = @{},
         [hashtable]$BaseSkills = @{},
+        [hashtable]$FrontmatterSkills = @{},
         [hashtable]$Sentinel = @{},
         [hashtable]$Matrix = @{},
         [string[]]$Activated = @(),
@@ -68,10 +69,15 @@ function New-Fixture {
         ($payload | ConvertTo-Json -Depth 5) | Set-Content -LiteralPath (Join-Path $gh 'skills/curated-assignments.json') -Encoding utf8
     }
 
-    $agents = @($Assignments.Keys) + @($Regions.Keys) + @($BaseSkills.Keys) + @($Matrix.Keys)
+    $agents = @($Assignments.Keys) + @($Regions.Keys) + @($BaseSkills.Keys) + @($FrontmatterSkills.Keys) + @($Matrix.Keys)
     foreach ($skillAgents in $Sentinel.Values) { $agents += $skillAgents }
     foreach ($agent in ($agents | Sort-Object -Unique)) {
-        $lines = @("# $agent", '', '## Skills', '')
+        $lines = @('---', "name: $agent")
+        if ($FrontmatterSkills.ContainsKey($agent)) {
+            $lines += 'skills:'
+            foreach ($skill in @($FrontmatterSkills[$agent])) { $lines += "  - $skill" }
+        }
+        $lines += @('---', '', "# $agent", '', '## Skills', '')
         foreach ($base in @($BaseSkills[$agent])) {
             if ($base) { $lines += "- **$base** (``skills/$base/SKILL.md``) -- base skill" }
         }
@@ -178,6 +184,15 @@ $root = New-Fixture -Activated @('python-dev') `
     -Sentinel    @{ 'python-dev' = @('researcher') } `
     -Matrix      @{ researcher = @('python-dev') }
 Test-Scenario -Label 'A promoted base skill is not mistaken for drift' -Root $root -ExpectCode 0
+
+# Promoting a skill to agent frontmatter is the new base-skill representation.
+$root = New-Fixture -Activated @('python-dev') `
+    -Assignments @{ researcher = @() } `
+    -Regions     @{ researcher = @() } `
+    -FrontmatterSkills @{ researcher = @('python-dev') } `
+    -Sentinel    @{ 'python-dev' = @('researcher') } `
+    -Matrix      @{ researcher = @('python-dev') }
+Test-Scenario -Label 'A frontmatter preload is not mistaken for curation drift' -Root $root -ExpectCode 0
 
 # A base skill in the matrix says nothing about curation and must not be read as it.
 $root = New-Fixture -Activated @('python-dev') `

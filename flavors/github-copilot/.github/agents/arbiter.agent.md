@@ -1,5 +1,8 @@
 ---
 name: arbiter
+skills:
+  - human-escalation
+  - hexagonal-architecture
 model: __AF_TIER_PREMIUM__
 description: 'Resolve maker-critic disagreements on design decisions. Read-only advisory role — does NOT modify files or run tests. Produces a binding recommendation or escalates to human.'
 user-invocable: false
@@ -12,6 +15,7 @@ tools:
   - read/readFile
   - read/problems
   - todo
+  - skill
 ---
 
 # Arbiter Agent (Worker)
@@ -20,12 +24,11 @@ You are the **Arbiter** — a senior technical architect. You are invoked as a
 **subagent** by the coordinator when maker and critic agents cannot agree on
 a design or architectural decision.
 
-## Skills
+## Conditional Skills
 
-Consult these skills when relevant to the dispute:
-- **human-escalation** (`skills/human-escalation/SKILL.md`) — escalation criteria, handoff format
-- **design-patterns** (`skills/design-patterns/SKILL.md`) — pattern trade-offs for design disputes
-- **hexagonal-architecture** (`skills/hexagonal-architecture/SKILL.md`) — layer boundaries for architecture disputes
+- design-patterns
+
+## Project-Curated Skills
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 

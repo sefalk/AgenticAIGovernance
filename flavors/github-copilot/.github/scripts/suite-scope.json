@@ -19,6 +19,11 @@
     ".github/retros/**"
   ],
   "suites": {
+    "test-agent-skill-loading.ps1": [
+      ".github/scripts/validate-skills.py",
+      ".github/agents/**",
+      ".github/skills/**"
+    ],
     "test-agent-invocations.ps1": [
       ".github/hooks/scripts/collect-agent-invocations.py"
     ],
@@ -34,6 +39,7 @@
     ],
     "test-context-budget.ps1": [
       ".github/scripts/check-context-budget.py",
+      ".github/scripts/validate-skills.py",
       ".github/hooks/scripts/check-context-budget-staged.py",
       ".github/af-env.conf",
       ".github/copilot-instructions.md",
@@ -52,6 +58,7 @@
     ],
     "test-curation-consistency.ps1": [
       ".github/scripts/check-curation-consistency.py",
+      ".github/agents/**",
       ".github/skills/**"
     ],
     "test-deploy-flags.ps1": [

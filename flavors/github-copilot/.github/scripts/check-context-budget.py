@@ -9,8 +9,14 @@ Instruction files grow by accretion: every new rule looks small in isolation,
 and ``applyTo: '**'`` is the path of least resistance for an author who wants a
 rule to be seen. This check turns that drift into a build failure.
 
-Also reports the per-agent total (agent file + always-on set), so a single
-agent prompt cannot silently regrow either.
+Also reports the per-agent total (agent file + preloaded skill bodies +
+always-on set), so a single agent prompt cannot silently regrow either.
+
+Declared conditional skills are measured separately, once per unique skill,
+with optional per-skill and aggregate ceilings for AF and project ownership.
+Per-agent declared upper bounds include their conditional bodies; these are
+static size bounds, not invocation frequencies or billed usage. Unset skill
+ceilings are explicitly UNBUDGETED until a human chooses a baseline.
 
 The *conditional* files -- those with a narrower ``applyTo`` -- are measured
 too. A narrow glob makes a file load less often; it does not make it cheap, and
@@ -43,9 +49,13 @@ ceiling until it passed, or to shrink the project's own self-description to fit
   AF_AGENT_CONTEXT_BUDGET_TOKENS          -- agent file + AF's always-on set
   AF_CONDITIONAL_BUDGET_TOKENS            -- AF's narrowly-scoped files
   AF_CATALOGUE_BUDGET_TOKENS              -- AF's skill/agent/instruction listings
+  AF_CONDITIONAL_SKILL_BUDGET_TOKENS      -- each declared AF conditional skill
+  AF_CONDITIONAL_SKILLS_BUDGET_TOKENS     -- unique AF conditional skill total
   AF_PROJECT_CONTEXT_BUDGET_TOKENS        -- the project's always-on set
   AF_PROJECT_CONDITIONAL_BUDGET_TOKENS    -- the project's narrowly-scoped files
   AF_PROJECT_CATALOGUE_BUDGET_TOKENS      -- the project's own listings
+  AF_PROJECT_CONDITIONAL_SKILL_BUDGET_TOKENS  -- each project conditional skill
+  AF_PROJECT_CONDITIONAL_SKILLS_BUDGET_TOKENS -- unique project skill total
 
 The project set has no default. Unset, the project share is measured, printed
 and left ungated: a project that never stated a baseline has not drifted from
@@ -63,6 +73,7 @@ Exit codes: 0 pass, 1 over budget, 2 blocked (required input missing/unreadable)
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import re
 import sys
 from datetime import datetime, timezone
@@ -131,7 +142,9 @@ DORMANT_PREFIX = "_"
 # 1,489 for the project's copilot-instructions.md, which AF's own template
 # invites it to fill. That is not a budget, it is a leftover.
 DEFAULT_CONTEXT_BUDGET = 3500
-DEFAULT_AGENT_BUDGET = 9450
+# Owner-approved #549 preload baseline: measured maximum 15,476 + ~20%,
+# rounded up to 18,600. Conditional inventory has separate optional ceilings.
+DEFAULT_AGENT_BUDGET = 18600
 DEFAULT_CONDITIONAL_BUDGET = 3850
 # Calibrated 2026-08-26 against the AF payload: 29 skills 1,906 tok, 17 agents
 # 1,040 tok, 7 instruction entries 376 tok = 3,322 tok, plus ~2.3% headroom.
@@ -166,6 +179,10 @@ class Budgets(NamedTuple):
     project_context: int | None
     project_conditional: int | None
     project_catalogue: int | None
+    af_skill: int | None
+    af_skills: int | None
+    project_skill: int | None
+    project_skills: int | None
 
 
 class CatalogueEntry(NamedTuple):
@@ -175,6 +192,15 @@ class CatalogueEntry(NamedTuple):
     name: str
     tokens: int
     is_project: bool
+
+
+class ConditionalSkill(NamedTuple):
+    """One declared on-demand skill, counted once across all declaring agents."""
+
+    name: str
+    tokens: int
+    is_project: bool
+    agents: tuple[str, ...]
 
 
 class Blocked(Exception):
@@ -239,6 +265,44 @@ def _frontmatter_value(text: str, key: str) -> str:
             body.append(continuation.strip())
         return " ".join(part for part in body if part)
     return ""
+
+
+def _frontmatter_list(text: str, key: str) -> list[str]:
+    """Return a simple block or inline YAML list from an agent frontmatter."""
+    front = _frontmatter(text)
+    if front is None:
+        if text.startswith("---"):
+            raise Blocked("agent frontmatter is missing its closing '---' delimiter")
+        return []
+
+    lines = front.splitlines()
+    for index, line in enumerate(lines):
+        match = re.match(rf"^{re.escape(key)}:\s*(.*)$", line)
+        if not match:
+            continue
+        value = match.group(1).strip()
+        if value.startswith("[") and value.endswith("]"):
+            return [item.strip().strip("\"'`") for item in value[1:-1].split(",") if item.strip()]
+        if value:
+            raise Blocked(f"agent frontmatter field '{key}' must be a YAML list")
+
+        return _frontmatter_list_items(lines[index + 1 :], key)
+    return []
+
+
+def _frontmatter_list_items(lines: list[str], key: str) -> list[str]:
+    """Parse block-list continuations up to the next top-level field."""
+    items: list[str] = []
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if re.match(r"^[A-Za-z0-9_-]+:", line):
+            break
+        item = re.match(r"^\s+-\s+(.+?)\s*$", line)
+        if not item:
+            raise Blocked(f"agent frontmatter field '{key}' contains a non-list entry")
+        items.append(item.group(1).strip().strip("\"'`"))
+    return items
 
 
 def _apply_to(path: Path) -> tuple[str | None, bool]:
@@ -347,9 +411,10 @@ class Ownership:
 
 
 def _read_budgets(conf_path: Path) -> Budgets:
-    """Read the five ceilings from ``af-env.conf``.
+    """Read the instruction, catalogue, preload, and conditional skill ceilings.
 
-    The two project ceilings default to ``None`` -- unbudgeted, not zero. An
+    Project and new conditional skill ceilings default to ``None`` --
+    unbudgeted, not zero. An
     upgraded consumer never receives them (``af-env.conf`` is customizable and
     protected on update), and a project share silently charged against zero
     would fail every one of them on arrival, which is the defect this split
@@ -361,14 +426,18 @@ def _read_budgets(conf_path: Path) -> Budgets:
         "AF_CONDITIONAL_BUDGET_TOKENS": DEFAULT_CONDITIONAL_BUDGET,
         "AF_CATALOGUE_BUDGET_TOKENS": DEFAULT_CATALOGUE_BUDGET,
     }
-    project: dict[str, int | None] = {
+    optional: dict[str, int | None] = {
         "AF_PROJECT_CONTEXT_BUDGET_TOKENS": None,
         "AF_PROJECT_CONDITIONAL_BUDGET_TOKENS": None,
         "AF_PROJECT_CATALOGUE_BUDGET_TOKENS": None,
+        "AF_CONDITIONAL_SKILL_BUDGET_TOKENS": None,
+        "AF_CONDITIONAL_SKILLS_BUDGET_TOKENS": None,
+        "AF_PROJECT_CONDITIONAL_SKILL_BUDGET_TOKENS": None,
+        "AF_PROJECT_CONDITIONAL_SKILLS_BUDGET_TOKENS": None,
     }
     if conf_path.is_file():
         text = _read_text(conf_path)
-        for key in list(values) + list(project):
+        for key in list(values) + list(optional):
             match = re.search(rf"^{key}=(.*)$", text, re.MULTILINE)
             if not match:
                 continue
@@ -380,15 +449,19 @@ def _read_budgets(conf_path: Path) -> Budgets:
             if key in values:
                 values[key] = int(value)
             else:
-                project[key] = int(value)
+                optional[key] = int(value)
     return Budgets(
         af_context=values["AF_CONTEXT_BUDGET_TOKENS"],
         af_agent=values["AF_AGENT_CONTEXT_BUDGET_TOKENS"],
         af_conditional=values["AF_CONDITIONAL_BUDGET_TOKENS"],
         af_catalogue=values["AF_CATALOGUE_BUDGET_TOKENS"],
-        project_context=project["AF_PROJECT_CONTEXT_BUDGET_TOKENS"],
-        project_conditional=project["AF_PROJECT_CONDITIONAL_BUDGET_TOKENS"],
-        project_catalogue=project["AF_PROJECT_CATALOGUE_BUDGET_TOKENS"],
+        project_context=optional["AF_PROJECT_CONTEXT_BUDGET_TOKENS"],
+        project_conditional=optional["AF_PROJECT_CONDITIONAL_BUDGET_TOKENS"],
+        project_catalogue=optional["AF_PROJECT_CATALOGUE_BUDGET_TOKENS"],
+        af_skill=optional["AF_CONDITIONAL_SKILL_BUDGET_TOKENS"],
+        af_skills=optional["AF_CONDITIONAL_SKILLS_BUDGET_TOKENS"],
+        project_skill=optional["AF_PROJECT_CONDITIONAL_SKILL_BUDGET_TOKENS"],
+        project_skills=optional["AF_PROJECT_CONDITIONAL_SKILLS_BUDGET_TOKENS"],
     )
 
 
@@ -500,7 +573,7 @@ def _catalogue(github_dir: Path, ownership: Ownership) -> tuple[list[CatalogueEn
 def _agent_totals(
     github_dir: Path, af_always_on: int, project_always_on: int, conditional_total: int
 ) -> list[tuple[str, int, int, int]]:
-    """Return per-agent ``(name, own, af_total, worst_case)``, worst first.
+    """Return per-agent ``(name, own_and_preloads, af_total, worst_case)``, worst first.
 
     ``af_total`` is the gated figure: the agent file plus the framework's own
     always-on set. The project's always-on set is real cost but not AF's to
@@ -513,15 +586,24 @@ def _agent_totals(
     agents_dir = github_dir / "agents"
     if not agents_dir.is_dir():
         raise Blocked(f"agents/ directory not found in {github_dir}")
-    totals = [
-        (
-            path.stem.replace(".agent", ""),
-            _tokens(path),
-            _tokens(path) + af_always_on,
-            _tokens(path) + af_always_on + project_always_on + conditional_total,
-        )
-        for path in sorted(agents_dir.glob("*.agent.md"))
-    ]
+    skills_dir = github_dir / "skills"
+    totals: list[tuple[str, int, int, int]] = []
+    for path in sorted(agents_dir.glob("*.agent.md")):
+        agent_name = path.name.removesuffix(".agent.md")
+        own = _tokens(path)
+        for skill_name in _frontmatter_list(_read_text(path), "skills"):
+            skill_path = skills_dir / skill_name / "SKILL.md"
+            if not skill_path.is_file():
+                raise Blocked(
+                    f"agent '{agent_name}' preloaded skill '{skill_name}' has no active SKILL.md at {skill_path}"
+                )
+            try:
+                own += _tokens(skill_path)
+            except Blocked as exc:
+                raise Blocked(f"agent '{agent_name}' preloaded skill '{skill_name}': {exc}") from exc
+        af_total = own + af_always_on
+        worst = af_total + project_always_on + conditional_total
+        totals.append((agent_name, own, af_total, worst))
     if not totals:
         raise Blocked(f"no agent files found in {agents_dir}")
     return sorted(totals, key=lambda row: row[2], reverse=True)
@@ -529,6 +611,89 @@ def _agent_totals(
 
 def _owner_label(is_project: bool) -> str:
     return "project" if is_project else "AF"
+
+
+def _conditional_skills(github_dir: Path, ownership: Ownership) -> list[ConditionalSkill]:
+    """Measure declared conditional bodies using the skill validator's grammar."""
+    validator_path = Path(__file__).with_name("validate-skills.py")
+    if not validator_path.is_file():
+        raise Blocked(f"conditional skill parser missing: {validator_path}")
+    spec = importlib.util.spec_from_file_location("af_skill_validator", validator_path)
+    if spec is None or spec.loader is None:
+        raise Blocked(f"cannot load conditional skill parser: {validator_path}")
+    validator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(validator)
+
+    declared: dict[str, set[str]] = {}
+    for path in sorted((github_dir / "agents").glob("*.agent.md")):
+        agent = path.name.removesuffix(".agent.md")
+        text = _read_text(path)
+        names, errors = validator.conditional_skill_names(text, agent)
+        if errors:
+            raise Blocked("; ".join(errors))
+        preloads = set(_frontmatter_list(text, "skills"))
+        for name in names:
+            if name in preloads:
+                raise Blocked(f"agent '{agent}': skill '{name}' is both preloaded and conditional")
+            skill_path = github_dir / "skills" / name / "SKILL.md"
+            if not skill_path.is_file():
+                raise Blocked(f"agent '{agent}' conditional skill '{name}' has no active SKILL.md")
+            declared.setdefault(name, set()).add(agent)
+    return [
+        ConditionalSkill(
+            name,
+            _tokens(github_dir / "skills" / name / "SKILL.md"),
+            ownership.is_project(f"skills/{name}/SKILL.md"),
+            tuple(sorted(agents)),
+        )
+        for name, agents in sorted(declared.items())
+    ]
+
+
+def _print_skill_context(
+    skills: list[ConditionalSkill],
+    agents: list[tuple[str, int, int, int]],
+    budgets: Budgets,
+    catalogue_total: int,
+    verbose: bool,
+) -> bool:
+    """Report unique skill inventory and declared bounds; return any violation."""
+    failed = False
+    for is_project, per_skill, aggregate in (
+        (False, budgets.af_skill, budgets.af_skills),
+        (True, budgets.project_skill, budgets.project_skills),
+    ):
+        rows = [skill for skill in skills if skill.is_project == is_project]
+        if not rows:
+            continue
+        owner = _owner_label(is_project)
+        total = sum(skill.tokens for skill in rows)
+        one_limit = f"budget {per_skill:,}" if per_skill is not None else "UNBUDGETED"
+        sum_limit = f"budget {aggregate:,}" if aggregate is not None else "UNBUDGETED"
+        print(f"{TAG} {owner} conditional skills {total:,} tok (per skill {one_limit}; total {sum_limit})")
+        for skill in sorted(rows, key=lambda row: row.tokens, reverse=True):
+            over = per_skill is not None and skill.tokens > per_skill
+            if verbose or over:
+                print(f"  {skill.tokens:6,} tok  {skill.name} (agents: {', '.join(skill.agents)})")
+            if over:
+                print(f"{TAG} FAIL -- {owner} conditional skill '{skill.name}' exceeds {per_skill:,} tok.")
+                failed = True
+        if aggregate is not None and total > aggregate:
+            print(f"{TAG} FAIL -- {owner} conditional skills total {total:,} exceeds {aggregate:,} tok.")
+            failed = True
+    if skills:
+        print(
+            f"{TAG} declared skill upper bounds -- not measured usage; "
+            "exclude tools, conversation, references, and undeclared skill loads:"
+        )
+        for name, _, baseline, worst in agents:
+            conditional = sum(skill.tokens for skill in skills if name in skill.agents)
+            print(
+                f"  {name:<24} (preload baseline {baseline:,}, declared conditional skills {conditional:,}, "
+                f"baseline + skills {baseline + conditional:,}, "
+                f"with project/instructions/catalogue {worst + conditional + catalogue_total:,})"
+            )
+    return failed
 
 
 def _print_split(af_total: int, af_budget: int, project_total: int, project_budget: int | None) -> None:
@@ -666,9 +831,10 @@ def _print_catalogue(
 
 
 def _print_agents(totals: list[tuple[str, int, int, int]], agent_budget: int, af_always_on: int) -> None:
-    print(f"{TAG} per-agent context (own + AF always-on {af_always_on:,}, gated):")
+    print(f"{TAG} per-agent context (agent + preloaded skills + AF always-on {af_always_on:,}, gated):")
+    print("  'worst case' adds project always-on and conditional instructions only; see separate skill bounds.")
     for name, own, af_total, worst in totals:
-        print(f"  {af_total:6,} tok  {name:<24} (own {own:,}, worst case {worst:,})")
+        print(f"  {af_total:6,} tok  {name:<24} (agent + preloads {own:,}, worst case {worst:,})")
     over = [row for row in totals if row[3] > agent_budget]
     if over:
         # Marking each row instead would repeat one shared cause fifteen times.
@@ -749,7 +915,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Fail when the always-on instruction payload exceeds its budget.",
         epilog="Framework budgets: AF_CONTEXT_BUDGET_TOKENS, AF_AGENT_CONTEXT_BUDGET_TOKENS, "
-        "AF_CONDITIONAL_BUDGET_TOKENS, AF_CATALOGUE_BUDGET_TOKENS. Project budgets: "
+        "AF_CONDITIONAL_BUDGET_TOKENS, AF_CATALOGUE_BUDGET_TOKENS. Optional skill budgets: "
+        "AF_CONDITIONAL_SKILL_BUDGET_TOKENS (each), AF_CONDITIONAL_SKILLS_BUDGET_TOKENS (unique total), "
+        "and corresponding AF_PROJECT_CONDITIONAL_SKILL(S)_BUDGET_TOKENS. Project budgets: "
         "AF_PROJECT_CONTEXT_BUDGET_TOKENS, AF_PROJECT_CONDITIONAL_BUDGET_TOKENS, "
         "AF_PROJECT_CATALOGUE_BUDGET_TOKENS "
         "(seed them with --seed-project-budget). All in .github/af-env.conf.",
@@ -815,6 +983,7 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         agent_totals = _agent_totals(github_dir, af_always_on, project_always_on, conditional_total)
+        conditional_skills = _conditional_skills(github_dir, ownership)
     except Blocked as exc:
         print(f"{TAG} BLOCKED -- {exc}", file=sys.stderr)
         print(f"{TAG} Result unknown, not passing. Fix the input and re-run.", file=sys.stderr)
@@ -823,6 +992,9 @@ def main(argv: list[str] | None = None) -> int:
     for warning in warnings:
         print(f"{TAG} WARNING: {warning}")
 
+    over_skills = _print_skill_context(
+        conditional_skills, agent_totals, budgets, af_catalogue + project_catalogue, args.verbose
+    )
     worst_agent, worst_agent_tokens, worst_af_total, _ = agent_totals[0]
     over_context = af_always_on > budgets.af_context
     over_agent = worst_af_total > budgets.af_agent
@@ -849,7 +1021,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  Record this project's baseline: python {Path(__file__).name} --seed-project-budget")
 
     failures = (
-        over_context
+        over_skills
+        or over_context
         or over_agent
         or over_conditional
         or over_catalogue
@@ -992,15 +1165,16 @@ def main(argv: list[str] | None = None) -> int:
     if over_agent:
         if over_context or over_conditional or over_project_context or over_project_conditional:
             print()
-        print(f"{TAG} agent context totals (agent file + AF always-on set):")
+        print(f"{TAG} agent context totals (agent + preloaded skill bodies + AF always-on set):")
+        print("  'worst case' adds project always-on and conditional instructions only; see separate skill bounds.")
         for name, own, af_total, worst in agent_totals:
             marker = "  <-- over budget" if af_total > budgets.af_agent else ""
-            print(f"  {af_total:6,} tok  {name} (own {own:,}, worst case {worst:,}){marker}")
+            print(f"  {af_total:6,} tok  {name} (agent + preloads {own:,}, worst case {worst:,}){marker}")
         print()
         print(
             f"{TAG} FAIL -- {worst_agent} is {worst_af_total - budgets.af_agent:,} tok over "
             f"budget ({worst_af_total:,} > {budgets.af_agent:,}); "
-            f"own prompt {worst_agent_tokens:,} tok."
+            f"agent + preloaded skill bodies {worst_agent_tokens:,} tok."
         )
 
     return 1

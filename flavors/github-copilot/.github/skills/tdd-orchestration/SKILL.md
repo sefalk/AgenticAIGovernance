@@ -5,7 +5,7 @@ argument-hint: '[workflow-id] [step]'
 metadata:
   activation:
     agents: [coordinator]
-    priority: required
+    priority: recommended
 ---
 
 # TDD Orchestration Runbook

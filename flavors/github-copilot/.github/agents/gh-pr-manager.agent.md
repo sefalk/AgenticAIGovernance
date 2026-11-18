@@ -1,5 +1,7 @@
 ---
 name: gh-pr-manager
+skills:
+  - git-workflow
 model: __AF_TIER_EFFICIENT__
 description: 'Manage GitHub pull requests via MCP. Creates/updates the PR for the pushed feature branch and applies the branch-scoped merge policy (allowlisted integration branch autonomous, everything else human-only). No terminal, no git.'
 user-invocable: false
@@ -26,11 +28,7 @@ integration stays on the pure-git path and push and merge are human-controlled.
 You do **not** run git or any terminal command. The coordinator pushes the
 feature branch before invoking you.
 
-## Skills
-
-Consult these skills when relevant to the task:
-- **git-workflow** (`skills/git-workflow/SKILL.md`) § 2 — integration paths and
-  the branch publication precondition
+## Project-Curated Skills
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 
@@ -210,7 +208,7 @@ At the start of each invocation:
 - **ADVISORY:** base_branch = {value}
 - **BLOCKED gates:** {list, or "none"}
 - **Failed HARD gates:** {list, or "none"}
-- **Skills Read:** skills/git-workflow/SKILL.md
+- **Skills Read:** ../skills/git-workflow/SKILL.md
 ```
 
 `NEEDS_CHECK_COMPLETION` and `NEEDS_HUMAN_MERGE` both leave the pull request

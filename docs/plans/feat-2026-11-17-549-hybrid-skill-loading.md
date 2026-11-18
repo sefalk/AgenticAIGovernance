@@ -76,6 +76,8 @@ Implement the owner-approved hybrid skill-loading policy in [AF #549](https://gi
   - The guard adds only skills listed in that agent's `skills:` field, uses the existing character-based estimator, and reports missing or unreadable preloads as blocked/errors rather than silently undercounting.
   - Tests cover no preloads, one preload, multiple preloads, missing skill files, and line-ending/BOM invariance.
   - The measured maximum and selected ceiling/margin are reported before the budget value is changed.
+  - Report declared conditional skill bodies separately: individual size, unique aggregate inventory (deduplicated across agents), and per-agent declared upper bounds. Optional positive AF/project individual and aggregate limits must enforce when set, and say UNBUDGETED otherwise.
+  - Do not confuse static upper bounds with actual usage frequency or allocate billed session credits to individual skills.
 - **Exit criterion:** `test-context-budget.ps1` and the focused regression selection pass with the measured post-change payload inside the approved ceiling.
 - **Tests needed:** Focused context-budget cases; run the affected regression suites after each TDD phase.
 - **Dependencies:** Subtasks 1 and 2
@@ -109,9 +111,15 @@ Implement the owner-approved hybrid skill-loading policy in [AF #549](https://gi
 ## Follow-Up
 
 - Add a separate report over Copilot session `events.jsonl` for conditional skill invocation frequency under #556. Mandatory preloads cannot be evaluated by invocation frequency.
+- Verified coverage gap: `collect-session-cost.py` reads Local `main.jsonl` debug spans and counts delivered skill catalogue definitions, not native skill activations. `report-skill-reads.py` counts workflow-level `read_file` evidence; it does not count native Copilot `skill` calls. Neither supplies conditional skill invocation frequency. #556 must report per-agent skill activation counts with log coverage and distinguish requests after loading/cache effects from one-off body size; per-skill credits are not observable from request-level billing.
+- Static measurement after optimization: AF always-on 2,728 tokens; maximum agent/preload baseline 15,476 (`ado-work-item-manager`); largest conditional skill 5,954 (`tdd-orchestration`); unique declared conditional inventory 41,132; coordinator conditional sum 28,947 and baseline + declared skills 37,661. These are characters/4 estimates, not billed counts.
+- Budget decision: human approved preload baseline 18,600; individual conditional skill 7,150; unique conditional inventory 49,400 (+~20%, rounded up). The agent default/config and AF conditional skill config now use those values. Unset conditional skill limits remain explicitly UNBUDGETED in upgraded/custom configurations. The inventory ceiling does not replace a runtime context monitor.
+- Verification at the decision checkpoint: context-budget regression 127/128 checks pass; only the real-payload check fails against the unchanged 9,450 ceiling. Native skill-loading and suite-selection suites pass; validator passes all 64 skills; changelog fragments validate; whitespace checks pass. Strict lint reports two pre-existing complexity findings (`_catalogue` and `main`); new parser complexity and formatting findings were fixed. No phase commit or budget override was attempted while the real-payload gate is red.
+- Verification after budget approval: context-budget regression passes 128/128 checks, including staged conditional enforcement and the real payload. Skill-loading, curation-consistency, suite-selection and suite-budget suites pass; 64-skill validation, changelog fragments and whitespace checks pass. Strict lint is format-clean with only the same two pre-existing complexity findings. The implementation remains uncommitted on the feature worktree, pending the wider workflow review/delivery; no main-checkout changes, push or merge were made.
 
 ## Change Log
 
 | Date | Agent | Change |
 |---|---|---|
 | 2026-11-17 | coordinator | Initial draft based on #549 owner decision and measured payload estimates |
+| 2026-11-17 | coordinator | Optimized preloads; added separate conditional skill inventory gates and declared per-agent bounds; verified legacy usage-reporting gap; owner approved 18,600 / 7,150 / 49,400 limits |

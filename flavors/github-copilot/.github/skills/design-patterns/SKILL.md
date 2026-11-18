@@ -2,7 +2,6 @@
 name: design-patterns
 description: Proven design patterns — creational, structural, behavioural, DDD, architecture. When to use, when NOT to use, and Python-idiomatic examples.
 argument-hint: '[pattern name or problem] [category: creational|structural|behavioural|ddd|architecture]'
-disable-model-invocation: true
 ---
 
 # Design Patterns Skill

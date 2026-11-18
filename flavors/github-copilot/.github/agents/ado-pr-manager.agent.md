@@ -1,5 +1,8 @@
 ---
 name: ado-pr-manager
+skills:
+  - ado-pr
+  - ado-shared
 model: __AF_TIER_EFFICIENT__
 description: 'Manage Azure DevOps pull requests via MCP. Creates/updates PRs for the pushed feature branch, links work items and plans, and applies the branch-scoped autocomplete policy (integration branch autonomous, protected branch human-only). No terminal/git access.'
 user-invocable: false
@@ -29,11 +32,7 @@ You do **not** run git or any terminal commands. The coordinator publishes
 (pushes) the feature branch to the remote before invoking you; you operate
 purely against the Azure DevOps API via MCP.
 
-## Skills
-
-Consult these skills when relevant to the task:
-- **ado-pr** (`../skills/ado-pr/SKILL.md`) — PR lifecycle, target-branch autocomplete policy, branch publication precondition, and reviewer/link strategy
-- **ado-shared** (`../skills/ado-shared/SKILL.md`) — ADO defaults resolution, link policy, and fallback behavior
+## Project-Curated Skills
 <!-- AF:MANAGED:curated-skills:START -->
 <!-- AF:MANAGED:curated-skills:END -->
 

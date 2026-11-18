@@ -36,6 +36,34 @@ BULLET_NAME = re.compile(r"^\s*-\s+\*\*(?P<name>[a-z0-9][a-z0-9-]*)\*\*")
 BULLET_TARGET = re.compile(r"skills/(?P<name>[a-z0-9][a-z0-9-]*)/SKILL\.md")
 # `| **agent-name** | skill-a, skill-b |`
 MATRIX_ROW = re.compile(r"^\|\s*\*\*(?P<agent>[a-z0-9][a-z0-9-]*)\*\*\s*\|(?P<skills>[^|]*)\|")
+AGENT_FRONTMATTER = re.compile(r"^---\r?\n(?P<body>.*?)\r?\n---", re.DOTALL)
+SKILLS_FIELD = re.compile(r"^skills:\s*(?P<value>.*)$")
+SKILL_LIST_ITEM = re.compile(r"^\s+-\s+(?P<name>[a-z0-9][a-z0-9-]*)\s*$")
+
+
+def frontmatter_skills(text: str) -> set[str]:
+    """Return skill names from the agent's top-level `skills` list."""
+    match = AGENT_FRONTMATTER.match(text)
+    if not match:
+        return set()
+
+    lines = match.group("body").splitlines()
+    for index, line in enumerate(lines):
+        field = SKILLS_FIELD.match(line)
+        if not field:
+            continue
+        inline = field.group("value").strip()
+        if inline.startswith("[") and inline.endswith("]"):
+            return {item.strip().strip("\"'`") for item in inline[1:-1].split(",") if item.strip()}
+        skills: set[str] = set()
+        for item_line in lines[index + 1 :]:
+            if item_line.strip() and not item_line[0].isspace():
+                break
+            item = SKILL_LIST_ITEM.match(item_line)
+            if item:
+                skills.add(item.group("name"))
+        return skills
+    return set()
 
 
 class CurationState:
@@ -152,7 +180,7 @@ class CurationState:
 
         Curation deliberately drops these from the region (a skill promoted into
         the framework base would otherwise appear twice), so a name missing from
-        a region is only drift if it is not a base bullet.
+        a region is only drift if it is not a base preload or legacy base bullet.
         """
         path = self.agent_path(agent)
         if not path.exists():
@@ -162,7 +190,7 @@ class CurationState:
         end = text.find(REGION_END)
         if start != -1 and end != -1 and end > start:
             text = text[:start] + text[end + len(REGION_END) :]
-        return {m.group("name") for m in BULLET_TARGET.finditer(text)}
+        return frontmatter_skills(text) | {m.group("name") for m in BULLET_TARGET.finditer(text)}
 
 
 def check(state: CurationState) -> list[str]:
