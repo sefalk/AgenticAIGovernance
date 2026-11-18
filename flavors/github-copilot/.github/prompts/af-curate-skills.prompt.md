@@ -160,25 +160,26 @@ below.
 Curated skill references live **only** inside the agent's managed region so they
 never CONFLICT on redeploy: the deploy strips the region for classification and
 transplants its content on write. **Never** write curated skills as bare
-`## Skills` bullets.
+bullets outside the region, and never into `skills:` or `## Conditional Skills`.
 
 For each agent in the assignment map:
 
 1. Open `.github/agents/{agent}.agent.md` and locate the region delimited by
    `<!-- AF:MANAGED:curated-skills:START -->` and
-   `<!-- AF:MANAGED:curated-skills:END -->` inside the `## Skills` section.
-   - If the markers are **absent** (un-migrated agent), insert an empty region at
-     the end of the base skill bullet list, then continue. (Normally the deploy
-     ships the empty markers; this is only a safety net.)
-   - If the agent has **no `## Skills` section** (e.g. `coordinator`,
+   `<!-- AF:MANAGED:curated-skills:END -->` inside the `## Project-Curated Skills`
+   section.
+   - If the markers are **absent** (un-migrated agent), insert an empty region
+     directly under that heading, then continue. (Normally the deploy ships the
+     empty markers; this is only a safety net.)
+   - If the agent has **no `## Project-Curated Skills` section** (e.g. `coordinator`,
      `compliance-checker`), **skip it and warn** — a curated assignment to a
      skill-less agent cannot be applied (see also the assignment-time warning
      in Step 8).
 2. Build the curated line set for this agent from `assignments[{agent}]`:
    `- **{name}** (\`skills/{name}/SKILL.md\`) — {description}`
 3. **Base dedup (promoted-curation guard):** drop any skill already referenced in
-   the agent's **base** skills — a bullet OUTSIDE the region whose target is
-   `skills/{name}/`. Also remove it from `assignments[{agent}]` in
+   the agent's **base** skills — listed in its `skills:` frontmatter (preloaded)
+   or its `## Conditional Skills` section (on demand). Also remove it from `assignments[{agent}]` in
    `curated-assignments.json` so it is not re-added next time. (This is the case
    where a curated skill has since been promoted into the framework base.)
 4. **Replace the entire region body** with the deduped curated lines — an
@@ -221,7 +222,7 @@ Write `skills/curated-assignments.json`:
 ```
 
 **Validate assignments before writing:** every agent key in `assignments` must
-be an agent that has a `## Skills` section (i.e. carries a curated-skills managed
+be an agent that has a `## Project-Curated Skills` section (i.e. carries a curated-skills managed
 region). If an assignment targets a skill-less agent (e.g. `coordinator`,
 `compliance-checker`), **warn and drop that key** — the reference cannot be
 applied and would be silently lost on reapply. List any dropped assignments in
@@ -309,8 +310,8 @@ re-discovery, no user confirmation.
 4. For each agent in `assignments`: write the assigned curated skills into the
    agent's managed region per the **Managed region write protocol** (Step 7) —
    full idempotent region-body replace, base dedup, and defensive removal of any
-   stale bare curated bullets. Never write curated skills as bare `## Skills`
-   bullets.
+   stale bare curated bullets. Never write curated skills outside the managed
+   region.
 5. Regenerate `skills/INDEX.md` from current active/available skill folders.
 6. Print summary: "Reapplied curated skills: {N} activated, {M} deactivated,
    {K} agent files updated."

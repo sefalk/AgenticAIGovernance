@@ -20,9 +20,10 @@ issues. This is a **read-only** audit — do not fix anything, only report.
 
 For each `.agent.md` file in `.github/agents/`:
 
-1. Parse the `skills:` list from the agent description body (look for
-   `## Skills` sections or inline skill references like
-   `Read the skill: skills/{name}/SKILL.md`).
+1. Collect skill names from the `skills:` frontmatter (preloaded), the
+   `## Conditional Skills` bullets (on demand), the curated-skills managed
+   region, and inline references like `skills/{name}/SKILL.md`.
+   `python .github/scripts/validate-skills.py` checks the first two.
 2. For each referenced skill name, verify that
    `.github/skills/{name}/SKILL.md` exists.
 3. Report any broken references as **FAIL**.

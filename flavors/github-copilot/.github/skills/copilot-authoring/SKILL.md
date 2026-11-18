@@ -114,7 +114,7 @@ Syntax — a matched marker pair, one region per name, name in `[A-Za-z0-9_.-]`:
   it once populated.
 - The framework ships regions **empty** (START/END on adjacent lines). Empty
   regions strip to themselves, so never-populated projects stay UNCHANGED.
-- The only current consumer is agent `## Skills` (`AF:MANAGED:curated-skills`,
+- The only current consumer is agent `## Project-Curated Skills` (`AF:MANAGED:curated-skills`,
   written by `/af-curate-skills`). Byte-identical strip/merge is implemented in
   `deploy_core.py`, `deploy.ps1`, and `deploy.sh`.
 
