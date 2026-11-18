@@ -161,7 +161,10 @@ def main() -> int:
 
     # Registered where an agent would look for it.
     check("INDEX.md lists the skill", "`deployment`" in INDEX.read_text(encoding="utf-8"))
-    check("coordinator points at the skill", "skills/deployment/SKILL.md" in COORDINATOR.read_text(encoding="utf-8"))
+    # #549: the coordinator loads it on demand via its Conditional Skills list.
+    _, heading, rest = COORDINATOR.read_text(encoding="utf-8").partition("\n## Conditional Skills\n")
+    conditional = rest.split("\n## ", 1)[0] if heading else ""
+    check("coordinator points at the skill", "\n- deployment\n" in conditional)
 
     for f in failures:
         print(f"FAIL {f}")
