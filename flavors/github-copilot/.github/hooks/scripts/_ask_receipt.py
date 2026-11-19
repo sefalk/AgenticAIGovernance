@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -58,19 +59,17 @@ def _base_dir() -> Path:
         user_key = str(os.getuid())
     except AttributeError:
         user_key = getuser()
-    suffix = hashlib.sha256(user_key.encode("utf-8")).hexdigest()[:16]
+    suffix = hashlib.sha256(user_key.encode()).hexdigest()[:16]
     return Path(tempfile.gettempdir()) / f"af-ask-receipts-{suffix}"
 
 
 def _receipt_key(session: str, call: str) -> str:
-    return hashlib.sha256(f"{session}\0{call}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{session}\0{call}".encode()).hexdigest()
 
 
 def _remove_empty_directory(directory: Path) -> None:
-    try:
+    with contextlib.suppress(OSError):
         directory.rmdir()
-    except OSError:
-        pass
 
 
 def _prune(root: Path, now: float) -> None:
@@ -138,10 +137,8 @@ def record_ask(payload: object, gate: str, reason: str) -> bool:
         return True
     except (ImportError, OSError, TypeError, ValueError) as error:
         if temporary is not None:
-            try:
+            with contextlib.suppress(OSError):
                 temporary.unlink(missing_ok=True)
-            except OSError:
-                pass
         _warn("not recorded", error)
         return False
 
