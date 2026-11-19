@@ -66,6 +66,24 @@ def defer() -> int:
     return 0
 
 
+def record_ask_safely(payload: dict[str, object], gate: str, reason: str) -> None:
+    """Record advisory context without changing a policy verdict."""
+    try:
+        from _ask_receipt import record_ask
+
+        record_ask(payload, gate, reason)
+    except Exception as error:
+        print(f"AF ask receipt not recorded ({type(error).__name__}).", file=sys.stderr)
+
+
+def _emit_guard_verdict(payload: dict[str, object], verdict: dict[str, object], gate: str) -> int:
+    hook_output = verdict.get("hookSpecificOutput")
+    if isinstance(hook_output, dict) and hook_output.get("permissionDecision") == "ask":
+        record_ask_safely(payload, gate, str(hook_output.get("permissionDecisionReason") or ""))
+    print(json.dumps(verdict, separators=(",", ":")))
+    return 0
+
+
 def has_owner(fields: object) -> bool:
     return bool(field_value(fields, OWNER_FIELD).strip())
 
@@ -132,8 +150,7 @@ def main() -> int:
     if not str(payload.get("tool_name") or "").endswith("wit_work_item_write"):
         verdict = body_guard({**payload, "tool_input": tool_input}, os.environ.get("AF_CONF_RESOLVED", ""))
         if verdict:
-            print(json.dumps(verdict, separators=(",", ":")))
-            return 0
+            return _emit_guard_verdict(payload, verdict, "github-body-guard")
         return defer()
 
     action = str(tool_input.get("action", "")).lower()
@@ -162,8 +179,7 @@ def main() -> int:
     if action in ("update", "update_batch") and isinstance(payload, dict):
         verdict = field_guard({**payload, "tool_input": tool_input}, os.environ.get("AF_CONF_RESOLVED", ""))
         if verdict:
-            print(json.dumps(verdict, separators=(",", ":")))
-            return 0
+            return _emit_guard_verdict(payload, verdict, "work-item-field-guard")
 
     return defer()
 

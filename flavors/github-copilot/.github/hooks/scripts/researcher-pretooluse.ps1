@@ -47,13 +47,16 @@ if ($urls.Count -eq 0) {
 
 # Check for embedded credentials in URL
 $credPatterns = @(
-    @{ name = "Basic auth"; pattern = '://[^/@]+:[^/@]+@' }
-    @{ name = "Token query param"; pattern = '[?&](token|access_token|api_key|apikey|auth|key|secret|password)=' }
+    @{ name = "URL userinfo"; pattern = '://[^/?#\\@]+@' }
+    @{ name = "Credential query parameter"; pattern = '[?&](token|access_token|api_key|apikey|auth|key|secret|password)=' }
     @{ name = "Authorization query param"; pattern = '[?&]Authorization=' }
     @{ name = "Credential fragment"; pattern = '#(access_token|token)=' }
 )
 
 function Emit-Fetch([string]$decision, [string]$reason) {
+    if ($decision -eq 'ask') {
+        [void](Record-AfAsk -Gate 'researcher-fetch-allowlist' -Reason $reason -Payload $raw)
+    }
     @{
         hookSpecificOutput = @{
             hookEventName            = 'PreToolUse'
@@ -78,16 +81,20 @@ $matchedAny = $false
 foreach ($u in $urls) {
     $hits = @($credPatterns | Where-Object { $u -match $_.pattern } | ForEach-Object { $_.name })
     if ($hits.Count -gt 0) {
-        $sanitized = $u -replace '://([^/@]+):([^/@]+)@', '://***:***@'
-        $sanitized = $sanitized -replace '([?&])(token|access_token|api_key|apikey|auth|key|secret|password)=[^&]*', '$1$2=***'
-        $findings += "$($hits -join ', ') in $sanitized"
+        $findings += "$($hits -join ', ') in URL (credential values redacted)"
     }
 
     # The host is what follows the last `@` in the authority. Stopping at the
     # first `:` reads the userinfo instead, so `https://docs.python.org:x@evil/`
     # would pass the allowlist as `docs.python.org`.
+    # A `\` in the authority is read as `/` by WHATWG parsers but as userinfo
+    # by RFC 3986 parsers, so the host the client fetches is ambiguous: ask.
+    if ($u -match '^[a-zA-Z][a-zA-Z0-9+.-]*://[^/?#]*\\') {
+        $unlisted += 'ambiguous host (backslash in authority)'
+        continue
+    }
     $fetchHost = ''
-    if ($u -match '^[a-zA-Z][a-zA-Z0-9+.-]*://([^/?#]+)') {
+    if ($u -match '^[a-zA-Z][a-zA-Z0-9+.-]*://([^/?#\\]+)') {
         $fetchHost = ($Matches[1] -replace '^.*@', '' -replace ':\d*$', '').ToLower()
     }
     if (-not $fetchHost) { continue }

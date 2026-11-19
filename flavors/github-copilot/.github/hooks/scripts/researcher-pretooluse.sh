@@ -23,10 +23,9 @@ if [ -z "$RAW" ]; then echo '{}'; exit 0; fi
 # Only fetch calls are inspected -- named once, so the no-interpreter path and
 # the classifier below cannot drift apart.
 rs_is_gated_tool() {
-    case "$1" in
-        *fetch*|*Fetch*) return 0 ;;
-    esac
-    return 1
+    local tool_name
+    tool_name=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+    [[ "$tool_name" == *fetch* ]]
 }
 
 # No interpreter means the URL allowlist cannot be evaluated, so fetches are
@@ -71,16 +70,16 @@ if [ -z "$URLS" ]; then echo '{}'; exit 0; fi
 
 scan_credentials() {
     local url="$1" found=""
-    if echo "$url" | grep -qE '://[^/@]+:[^/@]+@'; then
-        found="Basic auth"
+    if echo "$url" | grep -qiE '://[^/?#\\@]+@'; then
+        found="URL userinfo"
     fi
     if echo "$url" | grep -qiE '[?&](token|access_token|api_key|apikey|auth|key|secret|password)='; then
-        found="${found:+$found, }Token query param"
+        found="${found:+$found, }Credential query parameter"
     fi
     if echo "$url" | grep -qiE '[?&]Authorization='; then
         found="${found:+$found, }Authorization query param"
     fi
-    if echo "$url" | grep -qE '#(access_token|token)='; then
+    if echo "$url" | grep -qiE '#(access_token|token)='; then
         found="${found:+$found, }Credential fragment"
     fi
     printf '%s' "$found"
@@ -88,16 +87,12 @@ scan_credentials() {
 
 # `#` as the s-delimiter: `|` was both the delimiter and the alternation in the
 # same expression, so sed aborted the hook on exactly the URLs it exists for.
-sanitize_url() {
-    printf '%s' "$1" | sed -E 's#://([^/@]+):([^/@]+)@#://***:***@#g; s#([?&])(token|access_token|api_key|apikey|auth|key|secret|password)=[^&]*#\1\2=***#gI'
-}
-
 # The host is what follows the last `@` in the authority. Stopping at the first
 # `:` reads the userinfo instead, so `https://docs.python.org:x@evil/` would
 # pass the allowlist as `docs.python.org`.
 url_host() {
     printf '%s' "$1" \
-        | sed -E 's|^[a-zA-Z][a-zA-Z0-9+.-]*://||; s|[/?#].*$||; s|^.*@||; s|:[0-9]*$||' \
+        | sed -E 's|^[a-zA-Z][a-zA-Z0-9+.-]*://||; s|[/?#\\].*$||; s|^.*@||; s|:[0-9]*$||' \
         | tr '[:upper:]' '[:lower:]'
 }
 
@@ -133,7 +128,14 @@ while IFS= read -r u; do
 
     found=$(scan_credentials "$u")
     if [ -n "$found" ]; then
-        FINDINGS="${FINDINGS:+$FINDINGS; }$found in $(sanitize_url "$u")"
+        FINDINGS="${FINDINGS:+$FINDINGS; }$found in URL (credential values redacted)"
+    fi
+
+    # A `\` in the authority is read as `/` by WHATWG parsers but as userinfo
+    # by RFC 3986 parsers, so the host the client fetches is ambiguous: ask.
+    if printf '%s' "$u" | grep -qE '^[a-zA-Z][a-zA-Z0-9+.-]*://[^/?#]*\\'; then
+        UNLISTED="${UNLISTED:+$UNLISTED, }ambiguous host (backslash in authority)"
+        continue
     fi
 
     fetch_host=$(url_host "$u")
@@ -152,7 +154,7 @@ EOF
 if [ -n "$FINDINGS" ]; then
     # Build a warning note; do NOT short-circuit to allow here -- a credentialed
     # URL to a non-allowlisted domain must still go through the prompt below.
-    CRED_NOTE=" WARNING: URL contains embedded credentials ($(af_json_escape "$FINDINGS")). Strip them from your research brief output."
+    CRED_NOTE=" WARNING: URL contains embedded credentials ($FINDINGS). Strip them from your research brief output."
 else
     CRED_NOTE=""
 fi
@@ -162,27 +164,34 @@ fi
 # array, so approving on the first match would wave the rest through unseen.
 if [ -n "$UNLISTED" ]; then
     if [ "$CONF_FOUND" -eq 1 ]; then
-        WHY="Not in WEB_FETCH_ALLOWLIST: $(af_json_escape "$UNLISTED")."
+        WHY="Not in WEB_FETCH_ALLOWLIST: $UNLISTED."
     else
-        WHY="No allowlist available: .github/af-env.conf was not found at $(af_json_escape "$CONF")."
+        WHY="No allowlist available: .github/af-env.conf was not found at $CONF."
     fi
+    reason="$WHY Approve to fetch once. To auto-approve in future, add the domain to WEB_FETCH_ALLOWLIST in .github/af-env.conf (the agent can do this on your confirmation).$CRED_NOTE"
+    af_record_ask "researcher-fetch-allowlist" "$reason" "$RAW" || :
+    reason_json=$(af_json_escape "$reason")
     cat <<EOF
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"$WHY Approve to fetch once. To auto-approve in future, add the domain to WEB_FETCH_ALLOWLIST in .github/af-env.conf (the agent can do this on your confirmation).$CRED_NOTE"}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"$reason_json"}}
 EOF
     exit 0
 fi
 
 if [ "$MATCHED_ANY" -eq 1 ]; then
+    reason="Allowlisted documentation domain.$CRED_NOTE"
+    reason_json=$(af_json_escape "$reason")
     cat <<EOF
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"Allowlisted documentation domain.$CRED_NOTE"}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"$reason_json"}}
 EOF
     exit 0
 fi
 
 # No parseable host: keep the fetch flowing but surface any credential warning.
 if [ -n "$CRED_NOTE" ]; then
+    reason="URL fetch.$CRED_NOTE"
+    reason_json=$(af_json_escape "$reason")
     cat <<EOF
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"URL fetch.$CRED_NOTE"}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"$reason_json"}}
 EOF
     exit 0
 fi

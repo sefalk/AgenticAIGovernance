@@ -12,6 +12,8 @@
 $afGuardedTools = 'terminal|bash|powershell|task|update|create|write|edit|insert|apply|replace|runcodesnippet|notebook_?cell|playwright|browser_|vs_?code_?command'
 # Calls the body guard records (#376): its READ_SUFFIXES plus comment declarations.
 $afGuardReads = '(issue_read|pull_request_read|list_issues|search_issues|list_pull_requests|search_pull_requests|add_issue_comment)$'
+# Calls whose ask receipts are delivered by PostToolUse.
+$afReceiptTools = 'fetch'
 
 function Read-AfStdinRaw {
     $ms = New-Object System.IO.MemoryStream
@@ -41,6 +43,6 @@ function Test-AfScanSkippable {
     param([string]$Raw)
     $tool = Get-AfFastToolName $Raw
     if (-not (Test-AfUnguardedTool $tool) -or $Raw.Length -ge 4096) { return $false }
-    if ($tool -match $afGuardReads -or $tool -eq 'runSubagent') { return $false }
+    if ($tool -match $afGuardReads -or $tool -eq 'runSubagent' -or $tool -match $afReceiptTools) { return $false }
     return -not ($tool -match 'wit_work_item$' -and $Raw -match '"action"\s*:\s*"(get|get_batch)"')
 }

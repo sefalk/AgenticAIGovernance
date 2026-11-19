@@ -234,6 +234,9 @@ emit() {
     # JSON, and an unparsable verdict is indistinguishable from no verdict --
     # the gate would disarm itself precisely when it had something to say.
     local reason
+    if [ "$1" = "ask" ]; then
+        af_record_ask "block-dangerous" "$2" "$raw" || :
+    fi
     reason=$(af_json_escape "$2")
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$1" "$reason"
     exit 0
@@ -567,7 +570,15 @@ if printf '%s' "$command_str" | grep -qE 'git[[:space:]].*(checkout|restore|stas
     if [ -n "$PYTHON" ] && [ -n "$AF_CODE_ROOT" ] && [ -f "$fg_core" ]; then
         fg_sid=$(printf '%s' "$raw" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
         fg_out=$(AF_FG_COMMAND="$command_str" AF_FG_SESSION="$fg_sid" "$PYTHON" "$fg_core" check "$AF_CODE_ROOT" 2>/dev/null)
-        if [ -n "$fg_out" ]; then printf '%s\n' "$fg_out"; exit 0; fi
+        if [ -n "$fg_out" ]; then
+            fg_decision=$(printf '%s' "$fg_out" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('hookSpecificOutput',{}).get('permissionDecision',''))" 2>/dev/null)
+            if [ "$fg_decision" = "ask" ]; then
+                fg_reason=$(printf '%s' "$fg_out" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('hookSpecificOutput',{}).get('permissionDecisionReason',''))" 2>/dev/null)
+                af_record_ask "foreign-work" "$fg_reason" "$raw" || :
+            fi
+            printf '%s\n' "$fg_out"
+            exit 0
+        fi
     fi
 fi
 

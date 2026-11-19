@@ -520,6 +520,41 @@ for that text, until the text changes. Issue and PR text from the last
 block as the one replaceable part. Reads are taken as verbatim, which holds
 from github-mcp-server 1.12.0 on.
 
+#### PostToolUse: AF Ask-Override Notice
+
+The PreToolUse ask-producing gates record a short-lived receipt keyed by the
+session and tool-call IDs. The existing `scan-secrets.py` PostToolUse hook
+consumes a matching receipt and adds `additionalContext` after the call runs.
+Covered gates include `block-dangerous` (including the foreign-work guard),
+work-item field/body guards, and the scoped coordinator and researcher hooks.
+This does not change an `ask`, `allow`, or `deny` decision.
+
+The notice names the gate and reason, then states that a human or host
+permission policy may have authorized the call. Hook stdin does not identify
+the decision source, so the notice never claims that the IDE auto-approved it.
+It recommends aligning AF policy and IDE permissions: use `deny` or
+`declared-strict` when no human is available, or restore the IDE's default
+permission mode so `ask` reaches a human. Where traceability applies, record
+the reason in `System.History` or an issue comment.
+
+Receipts live in the operating system's temporary directory and expire after
+one hour. A missing interpreter or writable temp directory is reported to
+the hook's stderr; a payload without session and tool-call IDs is skipped
+silently, because that host cannot receive the notice. Either way the
+original gate verdict is unchanged and no PostToolUse notice can be
+guaranteed. Fetch PostToolUse
+calls are kept out of the scan wrapper's small-payload fast path so researcher
+receipts can be delivered. Receipts contain the gate reason, which can include
+command or host details; gate authors must not put credentials in that reason.
+The researcher fetch hook's credential warning deliberately omits URL
+components, so userinfo, query parameters, and fragments are not copied into
+the reason or receipt.
+IDs are hashed, POSIX receipt directories use mode `0700`, and Windows uses the
+user's OS temp directory. The notice uses both top-level and
+`hookSpecificOutput.additionalContext` shapes. Live Copilot-session verification
+of ID correlation and delivery to the parent and subagents remains pending; no
+SessionStart permission-setting detection is implemented.
+
 #### PostToolUse: Secret Detection Scan
 
 **Scripts:** `scripts/scan-secrets.ps1` (Windows) / `scripts/scan-secrets.sh` (Unix)

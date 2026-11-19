@@ -90,11 +90,13 @@ if ($toolName -match 'terminal') {
                 exit 0
             }
         } elseif ($bootstrapMode -eq 'ask') {
+            $reason = "Python environment (.venv) is missing. Allow running '.github/scripts/bootstrap-python-env.ps1' now to prepare venv + dependencies?"
+            [void](Record-AfAsk -Gate 'coordinator-python-bootstrap' -Reason $reason -Payload $raw)
             @{
                 hookSpecificOutput = @{
                     hookEventName      = 'PreToolUse'
                     permissionDecision = 'ask'
-                    permissionDecisionReason = "Python environment (.venv) is missing. Allow running '.github/scripts/bootstrap-python-env.ps1' now to prepare venv + dependencies?"
+                    permissionDecisionReason = $reason
                 }
             } | ConvertTo-Json -Depth 3 -Compress
             exit 0

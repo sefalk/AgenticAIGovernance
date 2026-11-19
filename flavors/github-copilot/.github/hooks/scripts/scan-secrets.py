@@ -155,18 +155,45 @@ def emit(verdict: dict[str, object] | None, code: int) -> int:
     return code
 
 
+def safe_ask_notice(payload: dict) -> dict | None:
+    """Keep optional receipt failures from disabling PostToolUse gates."""
+    try:
+        from _ask_receipt import notice
+
+        return notice(payload)
+    except Exception as error:
+        print(f"AF ask receipt notice failed ({type(error).__name__}).", file=sys.stderr)
+        return None
+
+
 def _with_context(first: dict | None, second: dict | None) -> dict | None:
-    """One PostToolUse statement carrying both additionalContext texts."""
-    if not first or not second:
+    """One PostToolUse statement carrying all distinct additionalContext texts."""
+    if not first and not second:
+        return None
+    texts: list[str] = []
+    for item in (first, second):
+        if not isinstance(item, dict):
+            continue
+        top = item.get("additionalContext")
+        nested = item.get("hookSpecificOutput")
+        nested_text = nested.get("additionalContext") if isinstance(nested, dict) else None
+        for value in (top, nested_text):
+            if isinstance(value, str) and value.strip() and value not in texts:
+                texts.append(value)
+    if not texts:
         return first or second
-    a = first.get("hookSpecificOutput", {}).get("additionalContext", "")
-    b = second["hookSpecificOutput"]["additionalContext"]
-    out = first.setdefault("hookSpecificOutput", {"hookEventName": "PostToolUse"})
-    out["additionalContext"] = f"{a}\n\n{b}".strip()
-    return first
+    out = dict(first or second or {})
+    hook_output = out.get("hookSpecificOutput")
+    hook_output = dict(hook_output) if isinstance(hook_output, dict) else {}
+    context = "\n\n".join(texts)
+    out["additionalContext"] = context
+    hook_output.setdefault("hookEventName", "PostToolUse")
+    hook_output["additionalContext"] = context
+    out["hookSpecificOutput"] = hook_output
+    return out
 
 
-def block(verdict: dict[str, str], reason: str) -> int:
+def block(verdict: dict[str, str], reason: str, context: dict | None = None) -> int:
     """Refuse the call in the shape each harness honours, at exit 0.
 
     Exit 0 is the strong answer here, not the weak one. Every published
@@ -190,7 +217,7 @@ def block(verdict: dict[str, str], reason: str) -> int:
         },
     }
     payload.update(verdict)
-    return emit(payload, 0)
+    return emit(_with_context(payload, context), 0)
 
 
 def main() -> int:
@@ -201,6 +228,7 @@ def main() -> int:
         return emit(None, 0)
     if not isinstance(payload, dict):
         return emit(None, 0)
+    ask_context = safe_ask_notice(payload)
 
     # The only PostToolUse process, so it also carries the long-line notice
     # and the work-item read cache (#197) rather than costing every tool call
@@ -215,11 +243,11 @@ def main() -> int:
         receipt = None
         with contextlib.suppress(Exception):
             receipt = subagent_receipt(payload)
-        return emit(_with_context(notice, receipt), 0)
+        return emit(_with_context(_with_context(notice, receipt), ask_context), 0)
 
     paths = [p for p in write_paths(payload.get("tool_input")) if os.path.isfile(p)]
     if not paths:
-        return emit(None, 0)
+        return emit(ask_context, 0)
 
     has_gitleaks = shutil.which("gitleaks") is not None
 
@@ -236,6 +264,7 @@ def main() -> int:
                     verdict,
                     f"Secret detected by gitleaks in {path}. The write already landed on "
                     f"disk -- remove the secret before continuing.",
+                    ask_context,
                 )
             continue
 
@@ -255,6 +284,7 @@ def main() -> int:
                 },
                 f"Secret detected in {path} ({', '.join(findings)}). The write already "
                 f"landed on disk -- remove the secret before continuing.",
+                ask_context,
             )
 
         if advisory is None and path.endswith(".py") and not has_provenance_marker(content):
@@ -265,7 +295,7 @@ def main() -> int:
                 "detail": PROVENANCE_DETAIL,
             }
 
-    return emit(advisory, 0)
+    return emit(_with_context(advisory, ask_context), 0)
 
 
 if __name__ == "__main__":
