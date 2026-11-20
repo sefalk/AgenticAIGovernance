@@ -54,14 +54,15 @@ jobs:
       # below runs test-hooks.ps1 on every pull request: it pipes JSON into
       # each hook script and checks the decision, so hook *logic* is covered
       # here. What a hosted runner cannot answer is whether the hooks fire in a
-      # live VS Code session -- it has no %APPDATA%\Code\logs. That is what
-      # test-hooks-integration.ps1 reads, and why it is excluded from the sweep.
+      # live Copilot session -- it has no developer session events. Those are
+      # what test-hooks-integration.ps1 reads, bound to workspace and session.
+      # It checks lifecycle, not script identity or hook verdicts (#553).
       #
       # The trigger stays on every path under hooks/, scripts included. A body
       # change can break a hook only in the live environment -- interpreter
       # resolution, the working directory VS Code starts it in, an output
-      # shape VS Code ignores -- and the live log records that as
-      # `Completed (Failure)` while test-hooks.ps1 stays green. The cost of the
+      # shape VS Code ignores -- and a hook.end success=false can expose a
+      # lifecycle failure while test-hooks.ps1 stays green. The cost of the
       # gate is one line in the pull request body (decision recorded on #184).
       #
       # It is attestation, not verification. It records that someone states
@@ -123,7 +124,7 @@ jobs:
             Write-Host "::error::This pull request changes files under flavors/github-copilot/.github/hooks/. The body has a 'local-check:' line, but not one this gate can read -- most often because the line names the suite in bold, as a link, or inside a fenced code block. Backticks around the filename are fine. Write it as: $marker"
             exit 1
           }
-          Write-Host "::error::This pull request changes files under flavors/github-copilot/.github/hooks/. CI ran test-hooks.ps1 on their logic; whether they still fire in a live VS Code session is what test-hooks-integration.ps1 checks, and CI cannot run it. Run it locally after a session with the change deployed, then add this line to the pull request body and re-run this job: $marker"
+          Write-Host "::error::This pull request changes files under flavors/github-copilot/.github/hooks/. CI ran test-hooks.ps1 on their logic; test-hooks-integration.ps1 checks observed lifecycle in a live Copilot session, not individual gate verdicts. CI cannot run that local check. Run it locally after a fresh session with the change deployed, then add this line to the pull request body and re-run this job: $marker"
           exit 1
 
       # The files that govern this repository's own development -- editor
@@ -631,9 +632,9 @@ jobs:
           ruff check --no-respect-gitignore @files
 
       # test-hooks-integration.ps1 is excluded on purpose. It does not test the
-      # payload: it reads VS Code's own hook log under %APPDATA%\Code\logs to
-      # confirm that hooks actually fired during a real agent session on a
-      # developer's machine. A hosted runner has no such log, so it exits 2.
+      # payload: it reads workspace-bound Copilot events.jsonl to check observed
+      # hook lifecycle pairs and failures in a developer's real session.
+      # A hosted runner has no such evidence, so it exits 2.
       # Excluding it is honest; leaving it in would fail every run for a reason
       # unrelated to the code under review.
       #

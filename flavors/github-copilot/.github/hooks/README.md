@@ -62,11 +62,19 @@ declaration firing twice. Over all 6,415 retained invocations, every global
 hook ran in every call of its event, so the copies guarded nothing (#345).
 
 The concern behind the old rule still holds: a guard that quietly stops
-running is a hole nobody sees. It is now a check rather than a duplicate:
+running is a hole nobody sees. The available checks have different limits:
 
-- `test-hooks-integration.ps1` Check 10 **fails** when an invocation did not
-  run a global hook registered for its event. Check 9 **warns** when a script
-  runs twice in one call.
+- On the Local release line, the output-channel reader checked individual
+  global script coverage and warned about duplicate scripts. Copilot session
+  events do not expose those script identities; those checks are **not**
+  silently carried forward as passing.
+- On dev, `test-hooks-integration.ps1 -Workspace <project> -SessionId <id>`
+  checks the exact recorded workspace and complete hook lifecycle pairs in
+  Copilot session events, with counts, failures and durations per hook type.
+  Missing, ambiguous or incomplete evidence is a non-pass (exit 2).
+  Verdicts, individual script coverage/duplicates and timeout-specific
+  metadata are not observable in this source. In particular, a successful
+  hook lifecycle event does not prove that `block-dangerous` enforced a deny.
 - `test-hook-declarations.ps1` **fails** when an agent re-declares a global
   hook for the same event.
 
