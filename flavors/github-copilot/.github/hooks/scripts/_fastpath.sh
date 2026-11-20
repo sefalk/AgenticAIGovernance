@@ -13,6 +13,8 @@
 AF_GUARDED_TOOLS='terminal|bash|powershell|task|update|create|write|edit|insert|apply|replace|runcodesnippet|notebook_?cell|playwright|browser_|vs_?code_?command'
 # Calls the body guard records (#376): its READ_SUFFIXES plus comment declarations.
 AF_GUARD_READS='(issue_read|pull_request_read|list_issues|search_issues|list_pull_requests|search_pull_requests|add_issue_comment)$'
+# Calls whose ask receipts are delivered by PostToolUse.
+AF_RECEIPT_TOOLS='fetch'
 
 # af_fast_tool_name RAW -- the payload's tool_name when it appears exactly
 # once, else nothing. A second occurrence (nested JSON) takes the full path.
@@ -37,11 +39,13 @@ af_unguarded_tool() {
 # an unguarded call, unless a write guard records it (#197, #376) or it is a
 # returning subagent (#515). Under 4096 chars no result reaches the spill (#341).
 af_scan_skippable() {
-    local _ss_raw="$1" _ss_tool
+    local _ss_raw="$1" _ss_tool _ss_tool_lc
     _ss_tool=$(af_fast_tool_name "$_ss_raw") || return 1
     af_unguarded_tool "$_ss_tool" && [ "${#_ss_raw}" -lt 4096 ] || return 1
     [[ $_ss_tool =~ $AF_GUARD_READS ]] && return 1
     [ "$_ss_tool" = runSubagent ] && return 1
+    _ss_tool_lc=$(printf '%s' "$_ss_tool" | tr '[:upper:]' '[:lower:]')
+    [[ $_ss_tool_lc =~ $AF_RECEIPT_TOOLS ]] && return 1
     if [[ $_ss_tool == *wit_work_item ]] && [[ $_ss_raw =~ \"action\"[[:space:]]*:[[:space:]]*\"(get|get_batch)\" ]]; then
         return 1
     fi

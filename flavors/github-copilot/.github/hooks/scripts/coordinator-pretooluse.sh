@@ -99,6 +99,8 @@ except Exception:
                     exit 0
                 }
             elif [[ "$BOOTSTRAP_MODE" == "ask" ]]; then
+                reason="Python environment (.venv) is missing. Allow running .github/scripts/bootstrap-python-env.sh now to prepare venv + dependencies?"
+                af_record_ask "coordinator-python-bootstrap" "$reason" "$RAW" || :
                 printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"Python environment (.venv) is missing. Allow running .github/scripts/bootstrap-python-env.sh now to prepare venv + dependencies?"}}'
                 exit 0
             fi

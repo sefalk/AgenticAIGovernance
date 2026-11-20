@@ -40,11 +40,12 @@ function Add-Result([string]$Name, [bool]$Ok, [string]$Detail) {
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ("af120-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
 $hooks = Join-Path $fixture '.github/hooks/scripts'
 New-Item -ItemType Directory -Path $hooks -Force | Out-Null
-foreach ($f in @('block-dangerous.ps1', 'block-dangerous.sh', 'session-context.ps1', 'session-context.sh', '_common.ps1', '_common.sh', '_foreign_guard.py')) {
+foreach ($f in @('block-dangerous.ps1', 'block-dangerous.sh', 'session-context.ps1', 'session-context.sh', '_common.ps1', '_common.sh', '_foreign_guard.py', '_ask_receipt.py')) {
     Copy-Item (Join-Path $hookSrc $f) $hooks
 }
 Copy-Item $shippedConf (Join-Path $fixture '.github/af-env.conf')
 $prevConf = $env:AF_CONF_PATH
+$prevReceiptDir = $env:AF_ASK_RECEIPT_DIR
 $env:AF_CONF_PATH = Join-Path $fixture '.github/af-env.conf'
 
 # Not named Git: PowerShell resolves names case-insensitively, so it would shadow git itself.
@@ -82,8 +83,8 @@ function Invoke-Hook([string]$Hook, [string]$Dialect, [hashtable]$Payload) {
 function Start-Session([string]$Session, [string]$Dialect) {
     return Invoke-Hook 'session-context' $Dialect @{ session_id = $Session; hook_event_name = 'SessionStart'; source = 'startup'; transcript_path = '/none' }
 }
-function Pre([string]$Session, [string]$Dialect, [string]$Command) {
-    return Invoke-Hook 'block-dangerous' $Dialect @{ session_id = $Session; hook_event_name = 'PreToolUse'; tool_name = 'run_in_terminal'; tool_input = @{ command = $Command }; tool_use_id = 't1' }
+function Pre([string]$Session, [string]$Dialect, [string]$Command, [string]$ToolUseId = 't1') {
+    return Invoke-Hook 'block-dangerous' $Dialect @{ session_id = $Session; hook_event_name = 'PreToolUse'; tool_name = 'run_in_terminal'; tool_input = @{ command = $Command }; tool_use_id = $ToolUseId }
 }
 
 # A repository where src/foreign.py is dirty before the session starts and an
@@ -115,6 +116,28 @@ try {
     foreach ($d in $dialects) {
         Reset-Fixture
         $sc = Start-Session 's1' $d
+        $receiptDir = Join-Path $fixture '.github/ask-receipts'
+        $env:AF_ASK_RECEIPT_DIR = $receiptDir
+        $receiptCall = 'foreign-guard-receipt'
+        $foreignAsk = Pre 's1' $d 'git restore src/foreign.py' $receiptCall
+        $postPayload = [ordered]@{
+            session_id = 's1'
+            tool_use_id = $receiptCall
+            tool_name = 'run_in_terminal'
+            tool_response = 'command ran'
+        } | ConvertTo-Json -Depth 4 -Compress
+        $scanScript = Join-Path $hookSrc 'scan-secrets.py'
+        $postOut = $postPayload | & $python $scanScript 2>$null | Out-String
+        $postContext = ''
+        try {
+            $postOutput = $postOut | ConvertFrom-Json
+            $postContext = [string]$postOutput.hookSpecificOutput.additionalContext
+        } catch { }
+        Add-Result "F00_${d}_foreign_guard_ask_receipt_reaches_post_tooluse" `
+            ($foreignAsk.Decision -eq 'ask' -and $postContext.Contains('foreign-work')) `
+            "decision=$($foreignAsk.Decision) notice=$([bool]$postContext)"
+        $env:AF_ASK_RECEIPT_DIR = $prevReceiptDir
+
         Write-Text 'src/own.py' "y = 2  # this session's edit`n"
         $base = Join-Path $fixture '.github/logs/.worktree-baseline-s1'
         $baseText = if (Test-Path $base) { Get-Content $base -Raw } else { '' }
@@ -166,6 +189,7 @@ try {
     }
 } finally {
     $env:AF_CONF_PATH = $prevConf
+    $env:AF_ASK_RECEIPT_DIR = $prevReceiptDir
     Remove-Item $fixture -Recurse -Force -ErrorAction SilentlyContinue
 }
 

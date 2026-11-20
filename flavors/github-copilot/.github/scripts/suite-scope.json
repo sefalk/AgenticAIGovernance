@@ -19,6 +19,9 @@
     ".github/retros/**"
   ],
   "suites": {
+    "test-ask-receipt.ps1": [
+      ".github/hooks/scripts/**"
+    ],
     "test-agent-skill-loading.ps1": [
       ".github/scripts/validate-skills.py",
       ".github/agents/**",

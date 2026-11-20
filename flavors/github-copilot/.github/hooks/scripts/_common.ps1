@@ -147,6 +147,44 @@ function Find-AfPython {
 
 $script:AfPython = Find-AfPython
 
+function Record-AfAsk {
+    param(
+        [Parameter(Mandatory = $true)][string]$Gate,
+        [Parameter(Mandatory = $true)][string]$Reason,
+        [Parameter(Mandatory = $true)][string]$Payload
+    )
+    $receiptScript = Join-Path $script:AfScriptDir '_ask_receipt.py'
+    if (-not $script:AfPython -or -not (Test-Path -LiteralPath $receiptScript -PathType Leaf)) {
+        [Console]::Error.WriteLine('AF ask receipt not recorded: Python or _ask_receipt.py is unavailable.')
+        return $false
+    }
+
+    $oldGate = $env:AF_ASK_GATE
+    $oldReason = $env:AF_ASK_REASON
+    $recordOutput = @()
+    $exitCode = 1
+    try {
+        $env:AF_ASK_GATE = $Gate
+        $env:AF_ASK_REASON = $Reason
+        $recordOutput = @($Payload | & $script:AfPython $receiptScript record 2>&1)
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $env:AF_ASK_GATE = $oldGate
+        $env:AF_ASK_REASON = $oldReason
+    }
+    if ($exitCode -eq 3) {
+        # Host supplied no correlation ids; _ask_receipt.py skips by design.
+        return $false
+    }
+    if ($exitCode -ne 0) {
+        $message = ($recordOutput | ForEach-Object { [string]$_ }) -join ' '
+        if (-not $message) { $message = 'AF ask receipt not recorded.' }
+        [Console]::Error.WriteLine($message)
+        return $false
+    }
+    return $true
+}
+
 # The project's test runner: the venv interpreter run-tests.ps1 itself uses,
 # PATH last. The extension host starts hooks without the venv on PATH, so a
 # PATH lookup alone found nothing and every producer test gate skipped (#473).

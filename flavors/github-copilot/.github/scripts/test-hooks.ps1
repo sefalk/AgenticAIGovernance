@@ -2058,12 +2058,18 @@ Assert-True "one unlisted entry decides the batch" ($rMixed.Decision -eq 'ask') 
 
 $rCred = Get-FetchDecision $fetchUrlsCred
 Assert-True "credentialed url is reported without echoing the secret" `
-    ($rCred.Output.Contains('***') -and -not $rCred.Output.Contains('hunter2')) `
+    ($rCred.Output.Contains('credential values redacted') -and -not $rCred.Output.Contains('hunter2')) `
     "got: $($rCred.Output)"
 
 $rSpoof = Get-FetchDecision $fetchUrlsSpoof
 Assert-True "userinfo cannot spoof an allowlisted host" ($rSpoof.Decision -eq 'ask') `
     "expected ask, got: $($rSpoof.Output)"
+
+# WHATWG reads `\` as `/` (host docs.python.org), RFC 3986 as userinfo (host
+# evil.example.com); an ambiguous host must not be auto-approved.
+$rBackslash = Get-FetchDecision '{"tool_name":"fetch_webpage","tool_input":{"urls":["https://docs.python.org\\@evil.example.com/"],"query":"x"}}'
+Assert-True "backslash in the authority cannot spoof an allowlisted host" ($rBackslash.Decision -eq 'ask') `
+    "expected ask, got: $($rBackslash.Output)"
 
 Write-Output ""
 

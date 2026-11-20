@@ -4,6 +4,7 @@
   "suites": {
     "test-agent-skill-loading.ps1": 30,
     "test-agent-invocations.ps1": 30,
+    "test-ask-receipt.ps1": 180,
     "test-changelog-headings.ps1": 30,
     "test-mcp-tool-ids.ps1": 30,
     "test-cli-callers.ps1": 120,

@@ -823,7 +823,7 @@ run_case "userinfo cannot spoof an allowlisted host" researcher-pretooluse.sh ag
 cred_out=$(printf '%s' "$FETCH_URLS_CRED" | bash "$HOOK_DIR/researcher-pretooluse.sh" 2>&1 || true)
 cred_ok=0
 case "$cred_out" in
-    *'***'*) case "$cred_out" in *hunter2*) cred_ok=0 ;; *) cred_ok=1 ;; esac ;;
+    *'credential values redacted'*) case "$cred_out" in *hunter2*) cred_ok=0 ;; *) cred_ok=1 ;; esac ;;
 esac
 assert_true "credentialed url is sanitised rather than fatal" "$cred_ok" "got: ${cred_out:-<no output>}"
 

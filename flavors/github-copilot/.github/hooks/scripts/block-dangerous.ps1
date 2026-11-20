@@ -264,6 +264,9 @@ function Split-TopLevel([string]$cmd) {
 }
 
 function Emit([string]$decision, [string]$reason) {
+    if ($decision -eq 'ask') {
+        [void](Record-AfAsk -Gate 'block-dangerous' -Reason $reason -Payload $raw)
+    }
     @{
         hookSpecificOutput = @{
             hookEventName            = 'PreToolUse'
@@ -523,7 +526,15 @@ if ($command -match 'git\s.*\b(checkout|restore|stash|clean|switch)\b') {
         $env:AF_FG_COMMAND = $command
         $env:AF_FG_SESSION = [string]$inputData.session_id
         $fg = (& $AfPython $fgCore check $AfCodeRoot 2>$null | Out-String).Trim()
-        if ($fg) { Write-Output $fg; exit 0 }
+        if ($fg) {
+            if ($fg -match '"permissionDecision"\s*:\s*"ask"') {
+                $fgVerdict = $fg | ConvertFrom-Json
+                [void](Record-AfAsk -Gate 'foreign-work' `
+                    -Reason ([string]$fgVerdict.hookSpecificOutput.permissionDecisionReason) -Payload $raw)
+            }
+            Write-Output $fg
+            exit 0
+        }
     }
 }
 

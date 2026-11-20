@@ -150,6 +150,19 @@ af_find_python() {
 
 AF_PYTHON=$(af_find_python "${AF_PYTHON_OVERRIDE:-}" python3 python py)
 
+# af_record_ask GATE REASON RAW
+#
+# Best-effort correlation for an existing ask verdict. Failure is reported on
+# stderr and never changes the verdict the caller is about to emit.
+af_record_ask() {
+    local _gate="$1" _reason="$2" _raw="$3" _helper="$AF_SCRIPT_DIR/_ask_receipt.py"
+    if [ -z "$AF_PYTHON" ] || [ ! -f "$_helper" ]; then
+        printf '%s\n' 'AF ask receipt not recorded: Python or _ask_receipt.py is unavailable.' >&2
+        return 1
+    fi
+    printf '%s' "$_raw" | AF_ASK_GATE="$_gate" AF_ASK_REASON="$_reason" "$AF_PYTHON" "$_helper" record
+}
+
 # af_resolve_pytest [ROOT] -- sets AF_PYTEST to the project's test runner
 # (venv interpreter + "-m pytest", PATH pytest last); returns 1 when none
 # imports pytest. Twin of Get-AfPytest: the extension host starts hooks
