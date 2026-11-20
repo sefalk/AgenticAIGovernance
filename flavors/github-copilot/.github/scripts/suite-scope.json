@@ -93,10 +93,6 @@
       ".github/agents/**",
       ".github/hooks/agent-hooks.json"
     ],
-    "test-hook-log-attribution.ps1": [
-      ".github/scripts/test-hooks-integration.ps1",
-      ".github/hooks/agent-hooks.json"
-    ],
     "test-dialect-wrappers.ps1": [
       ".github/scripts/check-dialect-wrappers.py",
       ".github/hooks/scripts/**"

@@ -21,6 +21,7 @@ import tempfile
 import unittest
 
 subject = sys.argv.pop()
+shell = sys.argv.pop()
 
 
 class EvidenceTests(unittest.TestCase):
@@ -204,8 +205,9 @@ class EvidenceTests(unittest.TestCase):
                 self.invoke(2)
 
     def test_malformed_truncated_and_non_object_records_are_explicit_non_passes(self):
-        for suffix in ('{"type":', "[]\n", '{"type":"hook.start","data":null}\n'):
-            with self.subTest(suffix=suffix):
+        deep = '{"type":"tool.execution_complete","data":' + "[" * 10000 + "0\n"
+        for index, suffix in enumerate(('{"type":', "[]\n", '{"type":"hook.start","data":null}\n', deep)):
+            with self.subTest(case=index):
                 path = self.write()
                 with path.open("a", encoding="utf-8") as handle:
                     handle.write(suffix)
@@ -229,15 +231,46 @@ class EvidenceTests(unittest.TestCase):
         self.sessions.rename(self.root / "moved")
         self.invoke(2)
 
+    def test_invalid_recorded_path_is_inconclusive_and_does_not_poison_discovery(self):
+        broken = copy.deepcopy(self.events)
+        broken[0]["data"]["sessionId"] = "broken"
+        broken[0]["data"]["context"]["cwd"] = str(self.workspace) + os.sep + "\0" + self.marker
+        self.write("broken", broken)
+        self.invoke(2, "--session-id", "broken")
+        self.write()
+        self.assertEqual(self.invoke(0)["session_id"], "session-a")
 
-unittest.main(verbosity=2)
+    def test_missing_arguments_return_private_json_not_usage_or_traceback(self):
+        result = subprocess.run([sys.executable, subject], capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(json.loads(result.stdout)["status"], "inconclusive")
+        self.assertEqual(result.stderr, "")
+
+    def test_powershell_wrapper_preserves_selection_and_exit_codes(self):
+        self.write()
+        wrapper = Path(subject).with_name("test-hooks-integration.ps1")
+        for workspace, expected in ((self.workspace, 0), (self.root / "foreign", 2)):
+            with self.subTest(expected=expected):
+                result = subprocess.run([
+                    shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                    "-File", str(wrapper), "-Workspace", str(workspace),
+                    "-SessionStateRoot", str(self.sessions), "-SessionId", "session-a"
+                ], capture_output=True, text=True, timeout=15)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout)["status"],
+                                 "pass" if expected == 0 else "inconclusive")
+                self.assertEqual(result.stderr, "")
+
+
+unittest.main(testRunner=unittest.TextTestRunner(stream=sys.stdout, verbosity=2))
 '@
 
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('af553-tests-' + [guid]::NewGuid().ToString('N') + '.py')
 try {
     [IO.File]::WriteAllText($fixture, $probe)
     $ErrorActionPreference = 'Continue'
-    $output = & $python $fixture $subject 2>&1 | Out-String
+    $hostExecutable = (Get-Process -Id $PID).Path
+    $output = & $python $fixture $hostExecutable $subject 2>&1 | Out-String
     $code = $LASTEXITCODE
     Write-Output $output
 } finally {
