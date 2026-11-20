@@ -246,3 +246,4 @@ an existing gate verdict. SessionStart permission detection is out of scope.
 | 2026-11-19 | coordinator | Narrow the regression failure from recorded output without rerunning the denied probe |
 | 2026-11-19 | coordinator | Resolve the hook-suite regression: silent skip for missing ids, unique helper names, updated redaction assertion |
 | 2026-11-19 | coordinator | Record integration attestation and the backslash-authority fix from review |
+| 2026-11-20 | coordinator | Fix PR #561 CI: assemble the secret-scan fixture at run time, rename marker variables, add the suite budget |

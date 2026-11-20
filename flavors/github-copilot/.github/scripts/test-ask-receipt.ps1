@@ -402,10 +402,10 @@ try {
             (Get-Context $wrapperPost.Out).Contains('researcher-fetch-allowlist')) `
         "tool=fetchWebPage decision=$(Get-Decision $wrapperAsk.Out) notice=$([bool](Get-Context $wrapperPost.Out))"
 
-    $fragmentSecret = 'af447-fragment-secret-marker'
-    $userinfoSecret = 'af447-userinfo-secret-marker'
-    $clientSecret = 'af447-client-secret-marker'
-    $querySecret = 'af447-query-secret-marker'
+    $fragmentMarker = 'af447-fragment-secret-marker'
+    $userinfoMarker = 'af447-userinfo-secret-marker'
+    $clientMarker = 'af447-client-secret-marker'
+    $queryMarker = 'af447-query-secret-marker'
     $fragmentSid = 'a5541200-0000-4000-8000-000000000554'
     $fragmentCall = 'call-554-fragment-credential'
     $fragmentPayload = [ordered]@{
@@ -413,7 +413,7 @@ try {
         tool_use_id = $fragmentCall
         tool_name = 'fetch'
         tool_input = @{
-            urls = @("https://$userinfoSecret@outside.test\af447-path-secret?client_secret=$clientSecret&token=$querySecret#access_token=$fragmentSecret")
+            urls = @("https://$userinfoMarker@outside.test\af447-path-secret?client_secret=$clientMarker&token=$queryMarker#access_token=$fragmentMarker")
         }
     } | ConvertTo-Json -Depth 4 -Compress
     $fragmentAsk = Invoke-PowerShellHook $researcherScript $fragmentPayload
@@ -425,23 +425,23 @@ try {
             $fragmentAsk.Out.Contains('URL userinfo') -and
             $fragmentAsk.Out.Contains('Credential query parameter') -and
             $fragmentAsk.Out.Contains('Credential fragment') -and
-            -not $fragmentAsk.Out.Contains($fragmentSecret) -and
-            -not $fragmentAsk.Out.Contains($userinfoSecret) -and
-            -not $fragmentAsk.Out.Contains($clientSecret) -and
-            -not $fragmentAsk.Out.Contains($querySecret) -and
+            -not $fragmentAsk.Out.Contains($fragmentMarker) -and
+            -not $fragmentAsk.Out.Contains($userinfoMarker) -and
+            -not $fragmentAsk.Out.Contains($clientMarker) -and
+            -not $fragmentAsk.Out.Contains($queryMarker) -and
             -not $fragmentAsk.Out.Contains('af447-path-secret') -and
             $fragmentReceipt -and
-            -not $fragmentReceipt.raw.Contains($fragmentSecret) -and
-            -not $fragmentReceipt.raw.Contains($userinfoSecret) -and
-            -not $fragmentReceipt.raw.Contains($clientSecret) -and
-            -not $fragmentReceipt.raw.Contains($querySecret) -and
+            -not $fragmentReceipt.raw.Contains($fragmentMarker) -and
+            -not $fragmentReceipt.raw.Contains($userinfoMarker) -and
+            -not $fragmentReceipt.raw.Contains($clientMarker) -and
+            -not $fragmentReceipt.raw.Contains($queryMarker) -and
             -not $fragmentReceipt.raw.Contains('af447-path-secret') -and
             $fragmentReceipt.reason.Contains('credential values redacted') -and
-            -not $fragmentReceipt.reason.Contains($fragmentSecret) -and
-            -not $fragmentReceipt.reason.Contains($userinfoSecret) -and
-            -not $fragmentReceipt.reason.Contains($clientSecret) -and
-            -not $fragmentReceipt.reason.Contains($querySecret)) `
-        "decision=$(Get-Decision $fragmentAsk.Out) receipt=$([bool]$fragmentReceipt) secret_leaked=$($fragmentAsk.Out.Contains($fragmentSecret) -or ($fragmentReceipt -and $fragmentReceipt.raw.Contains($fragmentSecret)))"
+            -not $fragmentReceipt.reason.Contains($fragmentMarker) -and
+            -not $fragmentReceipt.reason.Contains($userinfoMarker) -and
+            -not $fragmentReceipt.reason.Contains($clientMarker) -and
+            -not $fragmentReceipt.reason.Contains($queryMarker)) `
+        "decision=$(Get-Decision $fragmentAsk.Out) receipt=$([bool]$fragmentReceipt) secret_leaked=$($fragmentAsk.Out.Contains($fragmentMarker) -or ($fragmentReceipt -and $fragmentReceipt.raw.Contains($fragmentMarker)))"
 
     $atInQueryAsk = Invoke-PowerShellHook $researcherScript ([ordered]@{
         session_id = 'a5541400-0000-4000-8000-000000000554'
@@ -493,7 +493,7 @@ try {
         "ask=$(Get-Decision $storageAsk.Out) post=$($storagePost.Exit) notice=$([bool](Get-Context $storagePost.Out))"
 
     New-Item -ItemType Directory -Path $emptyBin -Force | Out-Null
-    [IO.File]::WriteAllText($secretPath, "password='fake-value-for-test-only-12345'`n")
+    [IO.File]::WriteAllText($secretPath, (Get-AfSecretFixture password) + "`n")
     $oldPath = $env:PATH
     $env:PATH = $emptyBin
     $env:AF_ASK_RECEIPT_DIR = $receiptBlocker
@@ -736,17 +736,17 @@ try {
                 (Get-Context $wrapperShPost.Out).Contains('researcher-fetch-allowlist')) `
             "tool=fetchWebPage decision=$(Get-Decision $wrapperShAsk.Out) notice=$([bool](Get-Context $wrapperShPost.Out))"
 
-        $fragmentShSecret = 'af447-bash-fragment-secret-marker'
-        $fragmentShUserinfoSecret = 'af447-bash-userinfo-secret-marker'
-        $fragmentShClientSecret = 'af447-bash-client-secret-marker'
-        $fragmentShQuerySecret = 'af447-bash-query-secret-marker'
+        $fragmentShMarker = 'af447-bash-fragment-secret-marker'
+        $fragmentShUserinfoMarker = 'af447-bash-userinfo-secret-marker'
+        $fragmentShClientMarker = 'af447-bash-client-secret-marker'
+        $fragmentShQueryMarker = 'af447-bash-query-secret-marker'
         $fragmentShCall = 'call-554-bash-fragment-credential'
         $fragmentShPayload = [ordered]@{
             session_id = 'a5541300-0000-4000-8000-000000000554'
             tool_use_id = $fragmentShCall
             tool_name = 'fetch'
             tool_input = @{
-                urls = @("https://$fragmentShUserinfoSecret@outside.test\af447-bash-path-secret?client_secret=$fragmentShClientSecret&token=$fragmentShQuerySecret#token=$fragmentShSecret")
+                urls = @("https://$fragmentShUserinfoMarker@outside.test\af447-bash-path-secret?client_secret=$fragmentShClientMarker&token=$fragmentShQueryMarker#token=$fragmentShMarker")
             }
         } | ConvertTo-Json -Depth 4 -Compress
         $fragmentShAsk = Invoke-BashHook $researcherSh $fragmentShPayload
@@ -758,23 +758,23 @@ try {
                 $fragmentShAsk.Out.Contains('URL userinfo') -and
                 $fragmentShAsk.Out.Contains('Credential query parameter') -and
                 $fragmentShAsk.Out.Contains('Credential fragment') -and
-                -not $fragmentShAsk.Out.Contains($fragmentShSecret) -and
-                -not $fragmentShAsk.Out.Contains($fragmentShUserinfoSecret) -and
-                -not $fragmentShAsk.Out.Contains($fragmentShClientSecret) -and
-                -not $fragmentShAsk.Out.Contains($fragmentShQuerySecret) -and
+                -not $fragmentShAsk.Out.Contains($fragmentShMarker) -and
+                -not $fragmentShAsk.Out.Contains($fragmentShUserinfoMarker) -and
+                -not $fragmentShAsk.Out.Contains($fragmentShClientMarker) -and
+                -not $fragmentShAsk.Out.Contains($fragmentShQueryMarker) -and
                 -not $fragmentShAsk.Out.Contains('af447-bash-path-secret') -and
                 $fragmentShReceipt -and
-                -not $fragmentShReceipt.raw.Contains($fragmentShSecret) -and
-                -not $fragmentShReceipt.raw.Contains($fragmentShUserinfoSecret) -and
-                -not $fragmentShReceipt.raw.Contains($fragmentShClientSecret) -and
-                -not $fragmentShReceipt.raw.Contains($fragmentShQuerySecret) -and
+                -not $fragmentShReceipt.raw.Contains($fragmentShMarker) -and
+                -not $fragmentShReceipt.raw.Contains($fragmentShUserinfoMarker) -and
+                -not $fragmentShReceipt.raw.Contains($fragmentShClientMarker) -and
+                -not $fragmentShReceipt.raw.Contains($fragmentShQueryMarker) -and
                 -not $fragmentShReceipt.raw.Contains('af447-bash-path-secret') -and
                 $fragmentShReceipt.reason.Contains('credential values redacted') -and
-                -not $fragmentShReceipt.reason.Contains($fragmentShSecret) -and
-                -not $fragmentShReceipt.reason.Contains($fragmentShUserinfoSecret) -and
-                -not $fragmentShReceipt.reason.Contains($fragmentShClientSecret) -and
-                -not $fragmentShReceipt.reason.Contains($fragmentShQuerySecret)) `
-            "decision=$(Get-Decision $fragmentShAsk.Out) receipt=$([bool]$fragmentShReceipt) secret_leaked=$($fragmentShAsk.Out.Contains($fragmentShSecret) -or ($fragmentShReceipt -and $fragmentShReceipt.raw.Contains($fragmentShSecret)))"
+                -not $fragmentShReceipt.reason.Contains($fragmentShMarker) -and
+                -not $fragmentShReceipt.reason.Contains($fragmentShUserinfoMarker) -and
+                -not $fragmentShReceipt.reason.Contains($fragmentShClientMarker) -and
+                -not $fragmentShReceipt.reason.Contains($fragmentShQueryMarker)) `
+            "decision=$(Get-Decision $fragmentShAsk.Out) receipt=$([bool]$fragmentShReceipt) secret_leaked=$($fragmentShAsk.Out.Contains($fragmentShMarker) -or ($fragmentShReceipt -and $fragmentShReceipt.raw.Contains($fragmentShMarker)))"
 
         $atInQueryShAsk = Invoke-BashHook $researcherSh ([ordered]@{
             session_id = 'a5541500-0000-4000-8000-000000000554'
