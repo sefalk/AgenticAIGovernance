@@ -9,6 +9,7 @@
     "test-mcp-tool-ids.ps1": 30,
     "test-cli-callers.ps1": 120,
     "test-context-budget.ps1": 170,
+    "test-copilot-hook-events.ps1": 30,
     "test-copilot-scoped-probe.ps1": 30,
     "test-cost-source.ps1": 30,
     "test-curation-consistency.ps1": 30,
