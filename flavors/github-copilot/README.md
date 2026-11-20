@@ -59,9 +59,37 @@ Run the regression with
 For a **live** native-source check, use
 `.github\scripts\test-copilot-scoped-probe.ps1 -LogPath <routing-log> -SessionIds <root-id>,<child-ids>`.
 Pass root **and** child IDs: child hook `sessionId` may equal `agentId`.
-This separate, owner-approved Copilot check does not change or claim coverage
-from the existing Local-only `test-hooks-integration.ps1`. Preserve the probe
+This separate, owner-approved routing check does not claim coverage from
+`test-hooks-integration.ps1`'s lifecycle report. Preserve the probe
 registration hashes before activation and restore them afterwards.
+
+### Copilot hook lifecycle attestation
+
+After a fresh Copilot session in the deployed project, run:
+
+```powershell
+.\.github\scripts\test-hooks-integration.ps1 -Workspace <project-path> -SessionId <copilot-session-id>
+```
+
+The reader streams `~/.copilot/session-state/<id>/events.jsonl` and verifies
+the recorded workspace, pairs hook invocation ids and reports per-event
+counts, failures and elapsed durations. It requires sessionStart, preToolUse
+and postToolUse observations. With no id, exactly one workspace-matching
+session must exist; file modification times never choose a session.
+Use `-SessionStateRoot` for an explicitly exported session-state directory.
+
+Exit 0 means complete observed lifecycle without hook failures; exit 1 means
+an observed hook failure; exit 2 means missing, ambiguous, malformed or
+incomplete evidence. Retain the JSON report and session id with the
+`local-check: test-hooks-integration.ps1` attestation. Reports omit raw
+inputs, prompts, tool arguments and personal paths.
+
+**Limits:** lifecycle events expose neither individual script identities nor
+hook stdout/verdicts or timeout-specific metadata. These are reported as
+`not_observable`, not as passed checks. The old Local output-channel reader
+exists only on `release/local-1.28`. Automatic CLI CI attestation and its
+repository-seat / supplied-PAT / no-licence cases remain separate work under
+#553; no automatic licensed run is enabled by this reader.
 
 ### Runtime prerequisites
 
