@@ -59,10 +59,16 @@ WRITE_TOOLS = {
     "writeFile",
     "applyPatch",
     "insertEdit",
+    # Copilot harness (#564): see Test-AfWriteTool in _common.ps1.
+    "Edit",
+    "Write",
+    "create",
+    "edit",
 }
 
 _WRITE_VERB = re.compile(r"create|write|edit|insert|apply|replace")
 _WRITE_NOUN = re.compile(r"file|notebook|dir")
+_PATCH_PATH = re.compile(r"(?m)^\*\*\* (?:(?:Add|Update|Delete) File|Move to): *(.+?)\r?$")
 
 SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("AWS Key", re.compile(r"AKIA[0-9A-Z]{16}")),
@@ -93,11 +99,16 @@ def is_write_tool(name: str) -> bool:
 
 def write_paths(tool_input: object) -> list[str]:
     """Every workspace path a write-tool payload refers to, in payload order."""
+    # apply_patch keeps its paths in the patch text: the whole tool_input under
+    # the Copilot harness (#564), under `input` under Local.
+    patch = tool_input if isinstance(tool_input, str) else None
+    if isinstance(tool_input, dict) and isinstance(tool_input.get("input"), str):
+        patch = tool_input["input"]
+    found: list[str] = [m.strip() for m in _PATCH_PATH.findall(patch)] if patch else []
     if not isinstance(tool_input, dict):
-        return []
+        return list(dict.fromkeys(found))
 
     # Payload order, so a batched edit always reports the same file first.
-    found: list[str] = []
     for key, value in tool_input.items():
         if key in PATH_KEYS and isinstance(value, str) and value:
             found.append(value)

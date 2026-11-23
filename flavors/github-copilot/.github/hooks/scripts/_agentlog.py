@@ -85,6 +85,11 @@ EDIT_TOOLS = frozenset(
         "writeFile",
         "applyPatch",
         "insertEdit",
+        # Copilot harness (#564): see Test-AfWriteTool in _common.ps1.
+        "Edit",
+        "Write",
+        "create",
+        "edit",
     }
 )
 EDIT_VERB = re.compile(r"create|write|edit|insert|apply|replace")

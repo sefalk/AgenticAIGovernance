@@ -368,6 +368,10 @@ $script:AfWriteToolNames = @(
     'create_new_jupyter_notebook'
     'editFiles', 'editFile', 'createFile', 'createDirectory', 'createDir'
     'editNotebook', 'writeFile', 'applyPatch', 'insertEdit'
+    # Copilot harness (#564). A native apply_patch reaches a PascalCase hook as
+    # `Edit` (captured); `create`/`edit` are the native names, `Write` the
+    # PascalCase counterpart of create. The comparison is case-insensitive.
+    'Edit', 'Write', 'create', 'apply_patch'
 )
 
 function Test-AfWriteTool {
@@ -406,6 +410,18 @@ function Get-AfWritePaths {
 
     $paths = New-Object System.Collections.Generic.List[string]
     if (-not $ToolInput) { return @() }
+
+    # apply_patch carries its paths inside the patch text: as the whole
+    # tool_input under the Copilot harness (#564), under `input` under Local.
+    $patch = $null
+    if ($ToolInput -is [string]) { $patch = $ToolInput }
+    elseif ($ToolInput.input -is [string]) { $patch = $ToolInput.input }
+    if ($patch) {
+        foreach ($m in [regex]::Matches($patch, '(?m)^\*\*\* (?:(?:Add|Update|Delete) File|Move to): *(.+?)\r?$')) {
+            $paths.Add($m.Groups[1].Value.Trim())
+        }
+    }
+    if ($ToolInput -is [string]) { return @($paths | Select-Object -Unique) }
 
     foreach ($key in @('filePath', 'path', 'dirPath', 'notebookUri', 'uri')) {
         $value = $ToolInput.$key
