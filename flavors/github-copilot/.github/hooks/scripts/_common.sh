@@ -427,6 +427,10 @@ af_is_write_tool() {
         create_directory|edit_notebook_file|create_new_jupyter_notebook) return 0 ;;
         editFiles|editFile|createFile|createDirectory|createDir) return 0 ;;
         editNotebook|writeFile|applyPatch|insertEdit) return 0 ;;
+        # Copilot harness (#564): a native apply_patch reaches a PascalCase hook
+        # as `Edit` (captured); create/edit are the native names, Write the
+        # PascalCase counterpart of create.
+        Edit|Write|create|edit|apply_patch) return 0 ;;
     esac
     # An exact list cannot recognise a tool that does not exist yet, and a gate
     # that has never heard of a tool fails open. A writing verb plus a file
@@ -451,13 +455,20 @@ af_is_write_tool() {
 af_write_paths() {
     [ -n "$AF_PYTHON" ] || return 0
     "$AF_PYTHON" -c '
-import json, sys
+import json, re, sys
 try:
     data = json.load(sys.stdin)
 except Exception:
     sys.exit(0)
 tool_input = data.get("tool_input") or {}
 found = []
+# apply_patch keeps its paths in the patch text: the whole tool_input under
+# the Copilot harness (#564), under `input` under Local.
+patch = tool_input if isinstance(tool_input, str) else (tool_input.get("input") if isinstance(tool_input, dict) else None)
+if isinstance(patch, str):
+    found += [m.strip() for m in re.findall(r"(?m)^\*\*\* (?:(?:Add|Update|Delete) File|Move to): *(.+?)\r?$", patch)]
+if not isinstance(tool_input, dict):
+    tool_input = {}
 for key in ("filePath", "path", "dirPath", "notebookUri", "uri"):
     value = tool_input.get(key)
     if isinstance(value, str) and value:

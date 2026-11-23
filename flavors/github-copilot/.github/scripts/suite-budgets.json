@@ -11,6 +11,7 @@
     "test-context-budget.ps1": 170,
     "test-copilot-hook-events.ps1": 60,
     "test-copilot-scoped-probe.ps1": 30,
+    "test-copilot-write-tools.ps1": 110,
     "test-cost-source.ps1": 30,
     "test-curation-consistency.ps1": 30,
     "test-deploy-flags.ps1": 60,

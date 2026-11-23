@@ -55,6 +55,14 @@
       ".github/scripts/check-copilot-hook-events.py",
       ".github/scripts/test-hooks-integration.ps1"
     ],
+    "test-copilot-write-tools.ps1": [
+      ".github/hooks/scripts/_common.ps1",
+      ".github/hooks/scripts/_common.sh",
+      ".github/hooks/scripts/scan-secrets.py",
+      ".github/hooks/scripts/_agentlog.py",
+      ".github/hooks/scripts/planner-pretooluse.ps1",
+      ".github/hooks/scripts/planner-pretooluse.sh"
+    ],
     "test-copilot-scoped-probe.ps1": [
       ".github/hooks/scripts/copilot-scoped-probe.py",
       ".github/hooks/copilot-scoped-probe.json.template"
