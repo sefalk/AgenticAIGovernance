@@ -71,9 +71,14 @@ $r = Invoke-Adapter 'PreToolUse' $snake $blockDangerous
 $j = Get-Json $r.Out
 $results['A2_snake_control_denied'] = ($j -and $j.permissionDecision -eq 'deny')
 
-# B: a harmless command stays silent -- the adapter adds no verdict of its own.
+# B: a harmless command gets the verdict the snake_case control gets -- the
+#    adapter adds no verdict of its own.
 $r = Invoke-Adapter 'preToolUse' (New-CamelPre 'powershell' @{ command = 'Write-Output ok'; description = 'x' }) $blockDangerous
-$results['B_harmless_still_empty'] = ($r.Out -eq '{}' -and $r.Code -eq 0)
+$snakeOk = @{ session_id = 's-566'; timestamp = 1; cwd = $payloadRoot; tool_use_id = 'c'; hook_event_name = 'PreToolUse'
+    tool_name = 'powershell'; tool_input = @{ command = 'Write-Output ok'; description = 'x' } } | ConvertTo-Json -Compress -Depth 6
+$rs = Invoke-Adapter 'PreToolUse' $snakeOk $blockDangerous
+$j = Get-Json $r.Out; $js = Get-Json $rs.Out
+$results['B_harmless_same_as_snake'] = ($r.Code -eq 0 -and $j -and $js -and $j.permissionDecision -ne 'deny' -and $j.permissionDecision -eq $js.permissionDecision -and $j.permissionDecisionReason -eq $js.permissionDecisionReason)
 
 # C: snake_case input passes through byte-equal.
 $r = Invoke-Adapter 'PreToolUse' $snake $echoTarget
