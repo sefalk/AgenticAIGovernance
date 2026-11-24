@@ -63,6 +63,17 @@
       ".github/hooks/scripts/planner-pretooluse.ps1",
       ".github/hooks/scripts/planner-pretooluse.sh"
     ],
+    "test-native-adapter.ps1": [
+      ".github/hooks/scripts/_native_adapter.py",
+      ".github/hooks/scripts/block-dangerous.ps1",
+      ".github/hooks/scripts/block-dangerous.sh",
+      ".github/hooks/scripts/scan-secrets.py"
+    ],
+    "test-gh-token-check.ps1": [
+      ".github/hooks/scripts/_gh_token_check.py",
+      ".github/hooks/scripts/session-mcp-readiness.ps1",
+      ".github/hooks/scripts/session-mcp-readiness.sh"
+    ],
     "test-copilot-scoped-probe.ps1": [
       ".github/hooks/scripts/copilot-scoped-probe.py",
       ".github/hooks/copilot-scoped-probe.json.template"

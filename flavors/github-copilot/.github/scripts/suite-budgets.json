@@ -8,6 +8,7 @@
     "test-changelog-headings.ps1": 30,
     "test-mcp-tool-ids.ps1": 30,
     "test-gh-token-check.ps1": 60,
+    "test-native-adapter.ps1": 60,
     "test-cli-callers.ps1": 120,
     "test-context-budget.ps1": 170,
     "test-copilot-hook-events.ps1": 60,
