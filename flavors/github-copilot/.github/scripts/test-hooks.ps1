@@ -1509,9 +1509,12 @@ Assert-True "block-dangerous answers read_file without starting Python" `
 $r = Invoke-RoProbe 'block-dangerous.ps1' '{"tool_name":"mcp_azure_devops__wit_work_item_write","tool_input":{"action":"update","id":1,"updates":[]}}'
 Assert-True "block-dangerous still runs the full path for a work-item write (control)" `
     $r.Started "out=$($r.Output)"
-$r = Invoke-RoProbe 'block-dangerous.ps1' '{"tool_name":"read_file","tool_input":{"note":"{\"tool_name\":\"x\"}","tool_name":"runInTerminal"}}'
+$r = Invoke-RoProbe 'block-dangerous.ps1' '{"tool_input":{"tool_name":"read_file","command":"git push --force origin main"},"tool_name":"powershell"}'
+# Judged by the verdict, not by a Python start: since #570 the full path runs
+# without the interpreter unless a verdict needs it. Only the full path can
+# deny here -- the first tool_name in the text is an unguarded read.
 Assert-True "block-dangerous takes the full path when tool_name is ambiguous" `
-    $r.Started "out=$($r.Output)"
+    ($r.Output -match '"permissionDecision"\s*:\s*"deny"') "out=$($r.Output)"
 
 $r = Invoke-RoProbe 'scan-secrets.ps1' $roList
 Assert-True "scan-secrets answers a small MCP read without starting Python" `
@@ -1551,8 +1554,8 @@ $r = Invoke-RoProbe 'refactorer-pretooluse.ps1' '{"tool_name":"create_file","too
 Assert-True "refactorer-pretooluse refuses a new file without starting Python" `
     ($r.Output -match '"permissionDecision"\s*:\s*"deny"' -and -not $r.Started) "out=$($r.Output) started=$($r.Started)"
 $r = Invoke-RoProbe 'test-writer-pretooluse.ps1' '{"tool_name":"create_file","tool_input":{"filePath":"src/x.py","content":"x"}}'
-Assert-True "test-writer-pretooluse answers without starting Python" `
-    ($r.Output -eq '{}' -and -not $r.Started) "out=$($r.Output) started=$($r.Started)"
+Assert-True "test-writer-pretooluse confines a write without starting Python" `
+    ($r.Output -match '"permissionDecision"\s*:\s*"deny"' -and -not $r.Started) "out=$($r.Output) started=$($r.Started)"
 
 # The pattern decides what skips the guards, so it must cover every tool a
 # guard acts on, and both dialects must hold the same pattern.

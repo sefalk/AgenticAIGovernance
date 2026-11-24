@@ -25,6 +25,8 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Interpreter probed only when a verdict needs it; read it via Get-AfPython (#570).
+$AfLazyPython = $true
 . "$PSScriptRoot/_common.ps1"
 
 $raw = [Console]::In.ReadToEnd()

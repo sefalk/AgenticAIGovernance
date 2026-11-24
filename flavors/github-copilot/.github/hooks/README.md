@@ -221,6 +221,7 @@ What the preamble provides:
 | `AF_CODE_ROOT` | `$AfCodeRoot` | Active worktree if `.github/.active-worktree` points at one, else main root |
 | `AF_CONF` / `AF_CONF_FOUND` | `$AfConfPath` / `$AfConfFound` | Path to the config (`AF_CONF_PATH` if set, else `af-env.conf`) and whether it exists |
 | `AF_PYTHON` | `$AfPython` | An interpreter **proven to run**, or empty |
+| — | `Get-AfPython` | The same interpreter, probed on first call and then reused |
 | `af_conf_get KEY [DEFAULT]` | `Get-AfConfig -Key <name> [-Default <value>]` | Config lookup that never fails the hook |
 
 Use `AF_MAIN_ROOT` for framework assets (`.github/scripts/...`, logs, config)
@@ -228,6 +229,14 @@ and `AF_CODE_ROOT` for the code under review — they differ whenever the work
 runs in a git worktree. Set `AF_PYTHON_OVERRIDE` to force a specific
 interpreter; the preamble probes it like any other candidate, so an override
 pointing at something broken is rejected rather than trusted.
+
+Probing costs about half a second per hook call on Windows (#570). A
+PowerShell hook whose verdict usually needs no Python can defer it by setting
+`$AfLazyPython = $true` before dot-sourcing `_common.ps1`. In such a hook
+`$AfPython` stays empty and the interpreter must be read through
+`Get-AfPython`; `check-hook-resolution.py` rejects a direct read (AF006),
+because an empty `$AfPython` would silently switch off every Python-backed
+check behind it. Hooks without the opt-in keep the eager `$AfPython`.
 
 Set `AF_CONF_PATH` to make a different file the config for one process. It
 exists so a test can state the policy it asserts under instead of inheriting
