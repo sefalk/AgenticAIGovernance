@@ -94,6 +94,9 @@ repository-seat / supplied-PAT / no-licence cases remain separate work under
 ### Runtime prerequisites
 
 - VS Code with GitHub Copilot extension (agent mode enabled)
+- Credentials: the harness sign-in runs the agents; a fine-grained PAT in
+  `AF_GH_TOKEN` and/or Git Credential Manager reach extra repositories. See
+  [docs/IDENTITIES.md](docs/IDENTITIES.md) (#563).
 - **Python 3.10+, required by the hooks.** Gate logic lives in Python cores
   behind thin `.ps1`/`.sh` wrappers (#287): secret scan, quality and lint
   gates, plan and context-budget checks, the work-item owner gate and the
