@@ -13,6 +13,8 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 # Root, config and interpreter come from this script's location, never from the
 # cwd the agent happens to run in (issue #54).
+# Interpreter probed only when a verdict needs it; read it via Get-AfPython (#570).
+$AfLazyPython = $true
 . "$PSScriptRoot/_common.ps1"
 
 # Read and parse stdin

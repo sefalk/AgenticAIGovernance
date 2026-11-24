@@ -14,6 +14,10 @@ Each path may be a file or a directory (scanned recursively for ``*.sh`` and
 
 Escape hatch: append ``af-resolution-ok`` in a comment on the offending line
 together with a reason. Deliberate exceptions should be visible, not silent.
+
+AF006 is file-scoped: only a ``.ps1`` that opts into the deferred interpreter
+probe (``$AfLazyPython = $true``, #570) is checked for direct ``$AfPython``
+reads, so project hooks written against the eager variable keep passing.
 """
 
 from __future__ import annotations
@@ -85,6 +89,13 @@ RULES: list[tuple[str, re.Pattern[str], str]] = [
 ]
 
 
+# A hook that defers the interpreter probe (#570) sees $AfPython as '' -- a
+# direct read there silently switches off every Python-backed check behind it.
+LAZY_OPT_IN = re.compile(r"^\s*\$AfLazyPython\s*=\s*\$true\b", re.MULTILINE)
+EAGER_READ = re.compile(r"\$(?:script:)?AfPython\b")
+AF006_HINT = "hook defers the interpreter probe ($AfLazyPython) but reads $AfPython, which stays '' -- use Get-AfPython"
+
+
 def is_comment(line: str, suffix: str) -> bool:
     """Return True if the line is a pure comment for the given file type."""
     stripped = line.strip()
@@ -103,9 +114,12 @@ def check_file(path: Path) -> list[str]:
         return [f"{path}: cannot read ({exc})"]
 
     found: list[str] = []
+    lazy = path.suffix == ".ps1" and bool(LAZY_OPT_IN.search(text))
     for lineno, line in enumerate(text.splitlines(), start=1):
         if ESCAPE_HATCH in line or is_comment(line, path.suffix):
             continue
+        if lazy and EAGER_READ.search(line):
+            found.append(f"{path}:{lineno}: AF006 {AF006_HINT}\n    {line.strip()}")
         for code, pattern, hint in RULES:
             if not pattern.search(line):
                 continue

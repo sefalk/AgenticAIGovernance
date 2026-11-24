@@ -45,6 +45,8 @@ if (Test-Path "$PSScriptRoot/_fastpath.ps1") {
 
 # Root, config and interpreter come from this script's location, never from
 # the cwd the agent happens to run in (issue #54).
+# Interpreter probed only when a verdict needs it; read it via Get-AfPython (#570).
+$AfLazyPython = $true
 . "$PSScriptRoot/_common.ps1"
 if ($null -eq $raw) { $raw = Read-AfStdin }
 
@@ -79,14 +81,15 @@ $toolName = $inputData.tool_name
 # been captured. sub_issue_write only links issues and is not a body write.
 if ([string]$toolName -match '(wit_work_item_write|(?<!sub_)issue_write|update_pull_request|update_issue_comment)$') {
     $ownerCore = Join-Path $PSScriptRoot 'work-item-owner.py'
-    if (-not $AfPython -or -not (Test-Path $ownerCore)) {
+    $ownerPython = Get-AfPython
+    if (-not $ownerPython -or -not (Test-Path $ownerCore)) {
         @{ hookSpecificOutput = @{ hookEventName = 'PreToolUse'; permissionDecision = 'deny'
                 permissionDecisionReason = 'Policy hard-deny: the work-item gates found no working Python interpreter (tried AF_PYTHON_OVERRIDE, python3, python, py) or work-item-owner.py is missing, and cannot check this write for an owner or for lost text (#36, #197, #376, #251). Install Python 3, or set AF_PYTHON_OVERRIDE.' }
         } | ConvertTo-Json -Depth 3 -Compress
         exit 0
     }
     $env:AF_CONF_RESOLVED = if ($AfConfFound) { $AfConfPath } else { '' }
-    $raw | & $AfPython $ownerCore
+    $raw | & $ownerPython $ownerCore
     exit 0
 }
 
@@ -522,10 +525,11 @@ if ($catDatabricks -eq 'deny' -and (Test-AnyUnit '(?i)\bdatabricks\b')) {
 # ===========================================================================
 if ($command -match 'git\s.*\b(checkout|restore|stash|clean|switch)\b') {
     $fgCore = Join-Path $PSScriptRoot '_foreign_guard.py'
-    if ($AfPython -and $AfCodeRoot -and (Test-Path $fgCore)) {
+    $fgPython = if ($AfCodeRoot -and (Test-Path $fgCore)) { Get-AfPython } else { '' }
+    if ($fgPython) {
         $env:AF_FG_COMMAND = $command
         $env:AF_FG_SESSION = [string]$inputData.session_id
-        $fg = (& $AfPython $fgCore check $AfCodeRoot 2>$null | Out-String).Trim()
+        $fg = (& $fgPython $fgCore check $AfCodeRoot 2>$null | Out-String).Trim()
         if ($fg) {
             if ($fg -match '"permissionDecision"\s*:\s*"ask"') {
                 $fgVerdict = $fg | ConvertFrom-Json

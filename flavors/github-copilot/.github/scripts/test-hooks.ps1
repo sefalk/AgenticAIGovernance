@@ -1509,9 +1509,12 @@ Assert-True "block-dangerous answers read_file without starting Python" `
 $r = Invoke-RoProbe 'block-dangerous.ps1' '{"tool_name":"mcp_azure_devops__wit_work_item_write","tool_input":{"action":"update","id":1,"updates":[]}}'
 Assert-True "block-dangerous still runs the full path for a work-item write (control)" `
     $r.Started "out=$($r.Output)"
-$r = Invoke-RoProbe 'block-dangerous.ps1' '{"tool_name":"read_file","tool_input":{"note":"{\"tool_name\":\"x\"}","tool_name":"runInTerminal"}}'
+$r = Invoke-RoProbe 'block-dangerous.ps1' '{"tool_input":{"tool_name":"read_file","command":"git push --force origin main"},"tool_name":"powershell"}'
+# Judged by the verdict, not by a Python start: since #570 the full path runs
+# without the interpreter unless a verdict needs it. Only the full path can
+# deny here -- the first tool_name in the text is an unguarded read.
 Assert-True "block-dangerous takes the full path when tool_name is ambiguous" `
-    $r.Started "out=$($r.Output)"
+    ($r.Output -match '"permissionDecision"\s*:\s*"deny"') "out=$($r.Output)"
 
 $r = Invoke-RoProbe 'scan-secrets.ps1' $roList
 Assert-True "scan-secrets answers a small MCP read without starting Python" `
@@ -1526,6 +1529,33 @@ $roBig = '{"tool_name":"mcp_azure_devops__wit_work_item","tool_input":{"action":
 $r = Invoke-RoProbe 'scan-secrets.ps1' $roBig
 Assert-True "scan-secrets still inspects a read large enough to spill (#341)" `
     $r.Started "out=$($r.Output.Substring(0, [Math]::Min(80, $r.Output.Length)))"
+
+# ── Interpreter probed on demand (issue #570) ────────────────────────────
+#
+# Loading _common.ps1 used to probe every interpreter candidate up front:
+# ~0.5 s per call on Windows, where `python3` is an alias that fails only
+# after a full process start. A verdict that needs no Python must not pay it,
+# and one that needs it must still get the same proven interpreter.
+Write-Output ""
+Write-Output "## guard hooks: interpreter probed only on demand (#570)"
+$r = Invoke-RoProbe 'block-dangerous.ps1' '{"tool_name":"powershell","tool_input":{"command":"git status"}}'
+Assert-True "block-dangerous allows a read-only command without starting Python" `
+    ($r.Output -match '"permissionDecision"\s*:\s*"allow"' -and -not $r.Started) "out=$($r.Output) started=$($r.Started)"
+$r = Invoke-RoProbe 'block-dangerous.ps1' '{"tool_name":"powershell","tool_input":{"command":"git push --force origin main"}}'
+Assert-True "block-dangerous hard-denies a force push without starting Python" `
+    ($r.Output -match '"permissionDecision"\s*:\s*"deny"' -and -not $r.Started) "out=$($r.Output) started=$($r.Started)"
+$r = Invoke-RoProbe 'block-dangerous.ps1' '{"tool_name":"powershell","tool_input":{"command":"git restore a.py"}}'
+Assert-True "block-dangerous still starts Python for a discarding git command (control)" `
+    $r.Started "out=$($r.Output)"
+$r = Invoke-RoProbe 'planner-pretooluse.ps1' '{"tool_name":"create_file","tool_input":{"filePath":"src/x.py","content":"x"}}'
+Assert-True "planner-pretooluse confines a write without starting Python" `
+    ($r.Output -match '"permissionDecision"\s*:\s*"deny"' -and -not $r.Started) "out=$($r.Output) started=$($r.Started)"
+$r = Invoke-RoProbe 'refactorer-pretooluse.ps1' '{"tool_name":"create_file","tool_input":{"filePath":"tests/test_x.py","content":"x"}}'
+Assert-True "refactorer-pretooluse refuses a new file without starting Python" `
+    ($r.Output -match '"permissionDecision"\s*:\s*"deny"' -and -not $r.Started) "out=$($r.Output) started=$($r.Started)"
+$r = Invoke-RoProbe 'test-writer-pretooluse.ps1' '{"tool_name":"create_file","tool_input":{"filePath":"src/x.py","content":"x"}}'
+Assert-True "test-writer-pretooluse confines a write without starting Python" `
+    ($r.Output -match '"permissionDecision"\s*:\s*"deny"' -and -not $r.Started) "out=$($r.Output) started=$($r.Started)"
 
 # The pattern decides what skips the guards, so it must cover every tool a
 # guard acts on, and both dialects must hold the same pattern.
@@ -4660,6 +4690,19 @@ if ((Test-Path $resolveChecker) -and $pyExe) {
     Remove-Item (Join-Path $seed 'seeded-hook.ps1') -Force -ErrorAction SilentlyContinue
     & $pyExe $resolveChecker $seed *> $null
     Assert-True "checker flags an unvalidated interpreter lookup" ($LASTEXITCODE -ne 0) "checker exit $LASTEXITCODE"
+
+    # A hook that defers the probe and then reads the variable reads $null --
+    # every Python-backed check behind it would silently stop running (#570).
+    Remove-Item (Join-Path $seed 'seeded-hook.sh') -Force -ErrorAction SilentlyContinue
+    Set-Content -Path (Join-Path $seed 'seeded-hook.ps1') `
+        -Value @('$AfLazyPython = $true', '. "$PSScriptRoot/_common.ps1"', 'if ($AfPython) { & $AfPython -c pass }')
+    & $pyExe $resolveChecker $seed *> $null
+    Assert-True "checker flags a lazy hook that reads `$AfPython directly" ($LASTEXITCODE -ne 0) "checker exit $LASTEXITCODE"
+
+    Set-Content -Path (Join-Path $seed 'seeded-hook.ps1') `
+        -Value @('$AfLazyPython = $true', '. "$PSScriptRoot/_common.ps1"', '$py = Get-AfPython', 'if ($py) { & $py -c pass }')
+    & $pyExe $resolveChecker $seed *> $null
+    Assert-True "checker clears a lazy hook that resolves through Get-AfPython" ($LASTEXITCODE -eq 0) "checker exit $LASTEXITCODE"
 
     Remove-Item $seed -Recurse -Force -ErrorAction SilentlyContinue
 }

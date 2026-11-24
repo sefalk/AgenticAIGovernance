@@ -11,7 +11,8 @@
 #   $AfConfPath    absolute path to the config: $env:AF_CONF_PATH if set,
 #                  else .github/af-env.conf
 #   $AfConfFound   $true if that file exists
-#   $AfPython      an interpreter that was proven to run, or ''
+#   $AfPython      an interpreter that was proven to run, or '' (eager)
+#   Get-AfPython   the same interpreter, probed on first call (#570)
 #   Get-AfConfig -Key <name> [-Default <value>]
 #
 # Why this exists: every value is derived from this file's own location, never
@@ -145,7 +146,22 @@ function Find-AfPython {
     return ''
 }
 
-$script:AfPython = Find-AfPython
+# Probing costs ~0.5 s per hook call on Windows (#570). A hook that sets
+# `$AfLazyPython = $true` before dot-sourcing defers it to the first
+# Get-AfPython call, so a verdict that needs no Python never pays it. Such a
+# hook must read the interpreter only through Get-AfPython: $AfPython stays ''
+# there, and check-hook-resolution.py (AF006) rejects a direct read. Every
+# other hook keeps the eager $AfPython it was written against.
+function Get-AfPython {
+    if ($null -eq $script:AfPythonResolved) { $script:AfPythonResolved = Find-AfPython }
+    return $script:AfPythonResolved
+}
+
+$script:AfPythonResolved = $null
+$script:AfPython = ''
+if (-not $AfLazyPython) {
+    $script:AfPython = Get-AfPython
+}
 
 function Record-AfAsk {
     param(
@@ -154,7 +170,8 @@ function Record-AfAsk {
         [Parameter(Mandatory = $true)][string]$Payload
     )
     $receiptScript = Join-Path $script:AfScriptDir '_ask_receipt.py'
-    if (-not $script:AfPython -or -not (Test-Path -LiteralPath $receiptScript -PathType Leaf)) {
+    $python = Get-AfPython
+    if (-not $python -or -not (Test-Path -LiteralPath $receiptScript -PathType Leaf)) {
         [Console]::Error.WriteLine('AF ask receipt not recorded: Python or _ask_receipt.py is unavailable.')
         return $false
     }
@@ -166,7 +183,7 @@ function Record-AfAsk {
     try {
         $env:AF_ASK_GATE = $Gate
         $env:AF_ASK_REASON = $Reason
-        $recordOutput = @($Payload | & $script:AfPython $receiptScript record 2>&1)
+        $recordOutput = @($Payload | & $python $receiptScript record 2>&1)
         $exitCode = $LASTEXITCODE
     } finally {
         $env:AF_ASK_GATE = $oldGate
@@ -656,7 +673,7 @@ function Get-AfPeerEdits {
 
     $python = Join-Path $CodeRoot '.venv/Scripts/python.exe'
     if (-not (Test-Path $python)) {
-        $python = if ($AfPython) { $AfPython } else { $null }
+        $python = Get-AfPython
     }
     if (-not $python) { return @() }
 
@@ -686,11 +703,13 @@ function Get-AfPeerEdits {
 function Invoke-AfRepoGates {
     param([string]$StdinRaw, [string]$HookPath)
 
-    if ($env:AF_GATE_CHILD -or -not $StdinRaw -or -not $script:AfPython) { return }
+    if ($env:AF_GATE_CHILD -or -not $StdinRaw) { return }
+    $python = Get-AfPython
+    if (-not $python) { return }
     $core = Join-Path $script:AfScriptDir 'repo-gates.py'
     if (-not (Test-Path $core)) { return }
     $shell = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
-    $out = $StdinRaw | & $script:AfPython $core --hook-path $HookPath --shell $shell `
+    $out = $StdinRaw | & $python $core --hook-path $HookPath --shell $shell `
         --main-root $script:AfMainRoot --code-root $script:AfCodeRoot 2>$null
     if ($LASTEXITCODE -ne 0 -or -not $out) { return }
     Write-Output ((@($out) -join "`n").Trim())
@@ -741,7 +760,7 @@ function Get-AfSubagentReturn {
 
     $python = Join-Path $CodeRoot '.venv/Scripts/python.exe'
     if (-not (Test-Path $python)) {
-        $python = if ($AfPython) { $AfPython } else { $null }
+        $python = Get-AfPython
     }
     if (-not $python) { return $blocked }
 
@@ -795,7 +814,7 @@ function Get-AfUndeclaredScratch {
 
     $python = Join-Path $CodeRoot '.venv/Scripts/python.exe'
     if (-not (Test-Path $python)) {
-        $python = if ($AfPython) { $AfPython } else { $null }
+        $python = Get-AfPython
     }
     if (-not $python) { return @() }
 

@@ -13,6 +13,8 @@ $ErrorActionPreference = 'SilentlyContinue'
 # same condition (issue #72). They differ in force, not in what they consider
 # wrong: this one is advisory and fires at session end, where a workflow may
 # legitimately still be running.
+# Interpreter probed only when a verdict needs it; read it via Get-AfPython (#570).
+$AfLazyPython = $true
 . "$PSScriptRoot/_common.ps1"
 
 # ---------- Gate 2: Workflow Artifact Compliance (advisory) ----------
