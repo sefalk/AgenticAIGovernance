@@ -123,9 +123,23 @@ if [[ -n "$wiki_identifier" ]]; then
     msg="$msg | wiki=$wiki_identifier"
 fi
 
+# #563: a renewed PAT has a new value, so presence says nothing about
+# validity. A warning leads the line so it is not lost behind ADO details.
+token_check="$(dirname -- "${BASH_SOURCE[0]}")/_gh_token_check.py"
+if [[ -n "${AF_PYTHON:-}" && -f "$token_check" ]]; then
+    token_line=$("$AF_PYTHON" "$token_check" --root "$repo_root" 2>/dev/null || true)
+    if [[ "$token_line" == WARNING* ]]; then
+        msg="$token_line || $msg"
+    elif [[ -n "$token_line" ]]; then
+        msg="$msg || $token_line"
+    fi
+fi
+
 # Backslashes first -- escaping quotes before backslashes would re-escape the
 # backslash this step just introduced.
 msg_escaped=$(af_json_escape "$msg")
-printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$msg_escaped"
+# The Copilot harness hands the model only a top-level additionalContext
+# (#447); the nested form stays for the hosts that read it.
+printf '{"additionalContext":"%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$msg_escaped" "$msg_escaped"
 
 exit 0

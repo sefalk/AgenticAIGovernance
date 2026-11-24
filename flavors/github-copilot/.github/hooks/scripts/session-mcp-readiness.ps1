@@ -129,7 +129,19 @@ if ($wikiIdentifier) {
     $msg += " | wiki=$wikiIdentifier"
 }
 
+# #563: a renewed PAT has a new value, so presence says nothing about
+# validity. A warning leads the line so it is not lost behind ADO details.
+$tokenCheck = Join-Path $PSScriptRoot '_gh_token_check.py'
+if ($AfPython -and (Test-Path $tokenCheck)) {
+    $tokenLine = ("" + (& $AfPython $tokenCheck --root $repoRoot 2>$null)).Trim()
+    if ($tokenLine -like 'WARNING*') { $msg = "$tokenLine || $msg" }
+    elseif ($tokenLine) { $msg += " || $tokenLine" }
+}
+
+# The Copilot harness hands the model only a top-level additionalContext
+# (#447); the nested form stays for the hosts that read it.
 @{
+    additionalContext  = $msg
     hookSpecificOutput = @{
         hookEventName     = 'SessionStart'
         additionalContext = $msg
