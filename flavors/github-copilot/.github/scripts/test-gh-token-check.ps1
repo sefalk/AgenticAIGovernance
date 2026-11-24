@@ -19,7 +19,7 @@ if (-not $python) { Write-Host 'FAIL python -- no Python 3 interpreter for the c
 $results = [ordered]@{}
 $work = Join-Path ([IO.Path]::GetTempPath()) ("af-gh-token-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force $work | Out-Null
-$token = 'af563-fixture-' + [guid]::NewGuid().ToString('N')
+$fixtureBearer = 'af563-fixture-' + [guid]::NewGuid().ToString('N')
 
 # Stub API: /<scenario>/user answers like GET /user does, and only for the
 # expected bearer token, so a checker that drops the header reads as rejected.
@@ -58,7 +58,7 @@ open(PORTFILE, "w").write(str(srv.server_address[1]))
 srv.serve_forever()
 '@
 $portFile = Join-Path $work 'port.txt'
-$server = Start-Process -FilePath $python -ArgumentList @("`"$stub`"", $token, "`"$portFile`"") -PassThru -WindowStyle Hidden
+$server = Start-Process -FilePath $python -ArgumentList @("`"$stub`"", $fixtureBearer, "`"$portFile`"") -PassThru -WindowStyle Hidden
 $deadline = (Get-Date).AddSeconds(15)
 while (-not (Test-Path $portFile) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
 Start-Sleep -Milliseconds 200
@@ -87,36 +87,36 @@ $in40 = (Get-Date).Date.AddDays(40).ToString('yyyy-MM-dd')
 $in5 = (Get-Date).Date.AddDays(5).ToString('yyyy-MM-dd')
 
 # A: a valid token reports login and expiry, and is no warning.
-$r = Track (Invoke-Check 'ok' $token)
+$r = Track (Invoke-Check 'ok' $fixtureBearer)
 $results['A_valid_reports_login_and_expiry'] = ($r.Code -eq 0 -and $r.Out -match 'AF_GH_TOKEN' -and $r.Out -match 'valid' -and $r.Out -match 'login=probe-user' -and $r.Out -match [regex]::Escape($in40) -and $r.Out -match 'in 40 days')
 $results['A_valid_is_not_a_warning'] = ($r.Out -notmatch 'WARNING')
 
 # B: expiry inside 14 days is a visible warning naming the date.
-$r = Track (Invoke-Check 'soon' $token)
+$r = Track (Invoke-Check 'soon' $fixtureBearer)
 $results['B_expiring_warns'] = ($r.Code -eq 0 -and $r.Out -match '^WARNING' -and $r.Out -match [regex]::Escape($in5) -and $r.Out -match 'in 5 days')
-$r13 = Track (Invoke-Check 'edge13' $token); $r14 = Track (Invoke-Check 'edge14' $token)
+$r13 = Track (Invoke-Check 'edge13' $fixtureBearer); $r14 = Track (Invoke-Check 'edge14' $fixtureBearer)
 $results['B_threshold_is_14_days'] = ($r13.Out -match '^WARNING' -and $r14.Out -notmatch 'WARNING' -and $r14.Out -match 'in 14 days')
 
 # C: a rejected token is a visible warning that says what breaks.
-$r = Track (Invoke-Check 'bad' $token)
+$r = Track (Invoke-Check 'bad' $fixtureBearer)
 $results['C_rejected_warns'] = ($r.Code -eq 0 -and $r.Out -match '^WARNING' -and $r.Out -match '401' -and $r.Out -match 'af-github')
 
 # D: the expiry header in its UTC form parses too; a missing header is said.
-$r = Track (Invoke-Check 'utc' $token)
+$r = Track (Invoke-Check 'utc' $fixtureBearer)
 $results['D_utc_expiry_parsed'] = ($r.Out -match [regex]::Escape($in40) -and $r.Out -notmatch 'WARNING')
-$r = Track (Invoke-Check 'noexp' $token)
+$r = Track (Invoke-Check 'noexp' $fixtureBearer)
 $results['D_no_expiry_reported'] = ($r.Out -match 'valid' -and $r.Out -match 'expires=not reported' -and $r.Out -notmatch 'WARNING')
 
 # E: an unreachable or failing API is "not verified" -- not valid, not rejected.
-$r = Track (Invoke-Check 'err' $token)
+$r = Track (Invoke-Check 'err' $fixtureBearer)
 $results['E_server_error_not_verified'] = ($r.Code -eq 0 -and $r.Out -match 'not verified' -and $r.Out -match '500' -and $r.Out -notmatch 'valid \|')
 $saved = $base; $base = 'http://127.0.0.1:9'
-$r = Track (Invoke-Check 'ok' $token)
+$r = Track (Invoke-Check 'ok' $fixtureBearer)
 $base = $saved
 $results['E_unreachable_not_verified'] = ($r.Code -eq 0 -and $r.Out -match 'not verified')
 
 # F: a slow API cannot hold the session start hostage.
-$r = Track (Invoke-Check 'slow' $token)
+$r = Track (Invoke-Check 'slow' $fixtureBearer)
 $results['F_slow_api_times_out'] = ($r.Code -eq 0 -and $r.Out -match 'not verified' -and $r.Secs -lt 7)
 
 # G: no token and no consumer is silence; no token with a consumer is a warning.
@@ -130,7 +130,7 @@ $results['G_unset_referenced_warns'] = ($r.Code -eq 0 -and $r.Out -match '^WARNI
 
 # H: the readiness hook carries the line to the model, top level and nested.
 $savedT = $env:AF_GH_TOKEN; $savedU = $env:AF_GH_API_URL
-$env:AF_GH_TOKEN = $token; $env:AF_GH_API_URL = "$base/bad"
+$env:AF_GH_TOKEN = $fixtureBearer; $env:AF_GH_API_URL = "$base/bad"
 try { $hookOut = '{}' | powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $hooksDir 'session-mcp-readiness.ps1') 2>$null | Out-String }
 finally { $env:AF_GH_TOKEN = $savedT; $env:AF_GH_API_URL = $savedU }
 $all.Add($hookOut)
@@ -139,7 +139,7 @@ $results['H_hook_carries_warning'] = ($j -and $j.hookSpecificOutput.additionalCo
 $results['H_hook_top_level_context'] = ($j -and $j.additionalContext -and $j.additionalContext -eq $j.hookSpecificOutput.additionalContext)
 
 # I: the token value never appears in any output.
-$results['I_token_never_printed'] = -not ($all | Where-Object { $_ -and $_.Contains($token) })
+$results['I_token_never_printed'] = -not ($all | Where-Object { $_ -and $_.Contains($fixtureBearer) })
 
 Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
