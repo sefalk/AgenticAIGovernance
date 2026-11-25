@@ -259,6 +259,45 @@ function Invoke-HookScript {
     return @{ Output = ($output | Out-String).Trim(); ExitCode = $exitCode }
 }
 
+# ── block-dangerous policy, in-process (#572) ────────────────────────────
+#
+# Most block-dangerous cases ask the policy a question; the process around it
+# is the same every time. Starting `powershell -File` per case spent most of
+# the suite's wall time waiting on process starts, so the policy is loaded once
+# and called directly. The branch is an explicit input (default agent/fixture),
+# never the developer's checkout; refs do not exist (an empty fixture repo);
+# the foreign-work guard has no baseline, so no opinion. The module keeps
+# _common.ps1's script state out of this suite's scope.
+#
+# The entry point -- stdin, exit code, ask receipt, work-item routing -- is not
+# covered by this and keeps its own subprocess contract cases (-Subprocess).
+# AF_TEST_BD_SUBPROCESS=1 sends every case through the subprocess as before;
+# AF_TEST_BD_CROSSCHECK=1 runs both and reports every byte difference.
+$script:bdCore = New-Module -Name AfBlockDangerousCore -ScriptBlock {
+    param([string]$HookDir)
+    $AfLazyPython = $true
+    . (Join-Path $HookDir '_common.ps1')
+    . (Join-Path $HookDir 'block-dangerous.ps1') -AfLibrary
+    Export-ModuleMember -Function Invoke-AfBlockDangerousPolicy -Variable AfWorkItemWritePattern
+} -ArgumentList $scriptDir
+$script:bdInProcessCalls = 0
+$script:bdCrossChecked = 0
+$script:bdCrossDiffs = @()
+
+function Invoke-BlockDangerousInProcess {
+    param([string]$JsonInput, [string]$Branch, [scriptblock]$BranchResolver)
+    try { $data = $JsonInput | ConvertFrom-Json -ErrorAction Stop } catch { return @{ Output = '{}'; ExitCode = 0 } }
+    $confPath = if ($env:AF_CONF_PATH) { $env:AF_CONF_PATH } else { Join-Path $githubDir 'af-env.conf' }
+    $conf = if (Test-Path -LiteralPath $confPath) { @(Get-Content -LiteralPath $confPath) } else { @() }
+    if (-not $BranchResolver) {
+        $name = if ($Branch) { $Branch } else { 'agent/fixture' }
+        $BranchResolver = { $name }.GetNewClosure()
+    }
+    $script:bdInProcessCalls++
+    $v = Invoke-AfBlockDangerousPolicy -InputData $data -ConfLines $conf -BranchResolver $BranchResolver -RefExists { $false }
+    return @{ Output = $v.Output; ExitCode = 0; Verdict = $v }
+}
+
 function Invoke-Hook {
     param(
         [string]$Script,
@@ -271,11 +310,32 @@ function Invoke-Hook {
         [hashtable]$StubFiles,
         [string[]]$Track,
         [hashtable]$CopyIn,
-        [string]$PathWithout
+        [string]$PathWithout,
+        # Run the hook as the harness does, even where the policy could be
+        # called directly: the case is about the entry point.
+        [switch]$Subprocess
     )
     $hookPath = Join-Path $scriptDir $Script
     if (-not (Test-Path $hookPath)) {
         throw "Hook not found: $hookPath"
+    }
+    $inProcess = $Script -eq 'block-dangerous.ps1' -and -not $Subprocess -and -not $Detached -and -not $Files -and
+        -not $ReadBack -and -not $StubBin -and -not $StubFiles -and -not $Track -and -not $CopyIn -and -not $PathWithout -and
+        $env:AF_TEST_BD_SUBPROCESS -ne '1' -and $JsonInput -notmatch ('"tool_name"\s*:\s*"[^"]*' + $AfWorkItemWritePattern.TrimEnd('$') + '"')
+    if ($inProcess) {
+        $mine = Invoke-BlockDangerousInProcess -JsonInput $JsonInput -Branch $Branch
+        if ($env:AF_TEST_BD_CROSSCHECK -eq '1') {
+            $theirs = Invoke-Hook -Script $Script -JsonInput $JsonInput -Branch $Branch -Subprocess
+            # Compare like with like: the subprocess sees the fixture's unborn
+            # branch (HEAD) or the developer's checkout, not the case's branch.
+            $mirrorBranch = if ($Branch) { { 'HEAD' } } else { { git rev-parse --abbrev-ref HEAD 2>$null } }
+            $mirror = Invoke-BlockDangerousInProcess -JsonInput $JsonInput -BranchResolver $mirrorBranch
+            $script:bdCrossChecked++
+            if ($mirror.Output -cne $theirs.Output -or $theirs.ExitCode -ne 0) {
+                $script:bdCrossDiffs += "branch='$Branch' json=$JsonInput`n      in-process: $($mirror.Output)`n      subprocess: $($theirs.Output) (exit $($theirs.ExitCode))"
+            }
+        }
+        return $mine
     }
     if (-not $Branch -and -not $Detached -and -not $Files) {
         return (Invoke-HookScript -HookPath $hookPath -JsonInput $JsonInput)
@@ -613,7 +673,8 @@ function Assert-NotDeny {
 function Assert-ExitCode {
     param([string]$TestName, [string]$Script, [string]$Json, [int]$Expected)
     try {
-        $result = Invoke-Hook -Script $Script -JsonInput $Json
+        # An exit code is a property of the process, never of the policy.
+        $result = Invoke-Hook -Script $Script -JsonInput $Json -Subprocess
         if ($result.ExitCode -eq $Expected) {
             $script:passed++
             if ($Verbose) { Write-Output "  PASS  $TestName" }
@@ -1233,7 +1294,7 @@ Assert-True "two different ask rules give two different reasons" `
 # back in the other is a confirmation that appears on one platform only.
 $bdPs1Text = Get-Content (Join-Path $scriptDir 'block-dangerous.ps1') -Raw
 $bdShText  = Get-Content (Join-Path $scriptDir 'block-dangerous.sh') -Raw
-$psAskCount = (( [regex]::Match($bdPs1Text, '(?s)\$askRules = @\((.*?)\r?\n\)') ).Groups[1].Value `
+$psAskCount = (( [regex]::Match($bdPs1Text, '(?s)\$askRules = @\((.*?)\r?\n\s*\)') ).Groups[1].Value `
                 -split "`n" | Where-Object { $_ -match '^\s+@\{ p = ' }).Count
 $shAskCount = (( [regex]::Match($bdShText, '(?s)ask_patterns=\((.*?)\r?\n\)') ).Groups[1].Value `
                 -split "`n" | Where-Object { $_ -match "^\s+'" }).Count
@@ -1344,6 +1405,35 @@ foreach ($case in $sharedCases) {
     Assert-Decision -TestName $case[0] -Expected $case[2] -Script 'block-dangerous.ps1' `
         -Json $case[3] -Branch $case[1]
 }
+
+# ── Entry-point contract: the cases above call the policy in-process (#572) ──
+# One case per verdict through the real `powershell -File` path, so the
+# translation from verdict to stdout and exit code stays under test too.
+$bdContract = @(
+    @('deny',   '{"tool_name":"run_in_terminal","tool_input":{"command":"git push --force origin main"}}'),
+    @('allow',  '{"tool_name":"run_in_terminal","tool_input":{"command":"git status"}}'),
+    @('ask',    '{"tool_name":"run_in_terminal","tool_input":{"command":"Remove-Item build.log"}}'),
+    @('silent', '{"tool_name":"read_file","tool_input":{"filePath":"README.md"}}')
+)
+foreach ($c in $bdContract) {
+    $r = Invoke-Hook -Script 'block-dangerous.ps1' -JsonInput $c[1] -Branch 'agent/fixture' -Subprocess
+    $inp = Invoke-Hook -Script 'block-dangerous.ps1' -JsonInput $c[1] -Branch 'agent/fixture'
+    $got = Resolve-Decision $r.Output $r.ExitCode
+    Assert-True "entry point: $($c[0]) verdict leaves the process as the policy returned it" `
+        ($got -eq $c[0] -and $r.ExitCode -eq 0 -and $r.Output -ceq $inp.Output) `
+        "subprocess: '$got' exit $($r.ExitCode) output $($r.Output); in-process: $($inp.Output)" -Subject $r.Output
+}
+
+# A bare `git push` names no branch; the hook resolves the current one, and
+# only when it needs it. Before #572 the fixture's unborn branch read as HEAD,
+# so the branch half of this rule was never exercised by the suite. On a
+# protected branch the policy has no auto-allow and no rule of its own: it
+# stays silent and the harness's own approval applies.
+$barePush = '{"tool_name":"run_in_terminal","tool_input":{"command":"git push"}}'
+Assert-Decision -TestName "bare git push on a protected branch is not auto-allowed" -Expected 'silent' `
+    -Script 'block-dangerous.ps1' -Json $barePush -Branch 'main'
+Assert-Decision -TestName "bare git push on an agent branch is allowed" -Expected 'allow' `
+    -Script 'block-dangerous.ps1' -Json $barePush -Branch 'agent/x'
 
 # ── ALLOW: safe under balanced defaults (PowerShell-specific) ────────────
 # pip show via call-operator + quoted python path is read-only. It now runs
@@ -5279,6 +5369,11 @@ $catLine = ($script:basePolicy.Keys | Where-Object { $_ -like 'AUTONOMY_CAT_*' }
 Write-Output "  Policy: AUTONOMY_LEVEL=$($script:basePolicy['AUTONOMY_LEVEL']) $catLine"
 Write-Output "  Passed: $($script:passed)"
 Write-Output "  Failed: $($script:failed)"
+Write-Output "  block-dangerous in-process calls: $($script:bdInProcessCalls)"
+if ($env:AF_TEST_BD_CROSSCHECK -eq '1') {
+    Write-Output "  block-dangerous cross-checked: $($script:bdCrossChecked), differing: $($script:bdCrossDiffs.Count)"
+    foreach ($d in $script:bdCrossDiffs) { $script:errors += "CROSS $d" }
+}
 
 # The declared policy lives in the temp directory; nothing here should outlive
 # the run, and no later process should keep reading a file this suite wrote.
