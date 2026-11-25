@@ -4,7 +4,8 @@
       "type": "http",
       "url": "https://api.githubcopilot.com/mcp/",
       "headers": {
-        "Authorization": "Bearer ${AF_GH_TOKEN}"
+        "Authorization": "Bearer ${AF_GH_TOKEN}",
+        "X-MCP-Features": "mcp_apps_disable_form_deferral"
       }
     }
   }

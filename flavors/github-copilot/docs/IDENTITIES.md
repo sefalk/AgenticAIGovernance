@@ -32,6 +32,15 @@ The `af-github` MCP server in `.mcp.json` authenticates with
 `Authorization: Bearer ${AF_GH_TOKEN}` (#547). The file contains no secret; the
 value comes from your environment.
 
+The same entry sends `X-MCP-Features: mcp_apps_disable_form_deferral` (#573).
+Without it, the GitHub MCP server does not run `issue_write`,
+`create_pull_request` or `update_pull_request` in VS Code: it shows a form
+you must submit by hand, whatever chat permission level is set. To keep the
+form, remove that header from your project's `.mcp.json`. Deploy never edits
+an existing `.mcp.json`, so a project deployed before this change adds the
+line itself and restarts the server (`MCP: List Servers` → `af-github` →
+Restart).
+
 Create the token with the minimum it needs:
 
 - **Resource owner:** the account or organisation that owns the repository.
