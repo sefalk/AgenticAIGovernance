@@ -28,6 +28,679 @@
 # (prompt) -- it never accidentally auto-approves. An
 # unresolvable run_task answers 'ask', never silence: silence is what a gate
 # that cannot run and a gate with nothing to say have in common (issue #68).
+#
+# Policy and entry point are split (#572). Invoke-AfBlockDangerousPolicy is the
+# verdict: no stdin, no host output, no exit, and the three lookups that depend
+# on the machine -- current branch, ref existence, foreign-work guard -- come in
+# as scriptblocks. The entry point at the bottom binds them to git and Python,
+# records the ask receipt and prints. `-AfLibrary` stops after the definitions,
+# so a test can load the policy and pass the branch as an input instead of
+# copying the hook into a throwaway repository for every case. The caller must
+# provide Test-AfWriteTool and Get-AfWritePaths (from _common.ps1).
+
+param([switch]$AfLibrary)
+
+# Only inspect terminal tool calls, the two task-launch tools, or a
+# code-execution surface.
+# `create_and_run_task` and `run_task` are the names VS Code actually sends;
+# the camelCase spellings never occur in a captured payload and are kept only
+# so a rename upstream degrades to a stale alias rather than to an inert gate.
+#
+# The code-execution tools are gated as a class, not for what they run but for
+# what they are: a second way to reach a subprocess. Issue #138 recorded a
+# subagent denied in the terminal re-running the same CLI call through the
+# Pylance snippet tool, and this hook allowing it -- not because it was
+# misconfigured, but because it looked at the tool name, matched nothing, and
+# emitted `{}`, which is consent. A gate whose set is an allowlist grants
+# everything it forgot to name. Kept identical to bd_is_exec_surface in the
+# .sh twin; test-hooks.sh compares the two lists mechanically.
+$execSurfacePattern = 'runCodeSnippet|run_notebook_cell|runNotebookCell|run_playwright_code|browser_run_code|browser_evaluate|run_vscode_command|runVsCodeCommand'
+
+# Work-item writes: ADO owner (#36) and field shrink (#197), GitHub body shrink
+# (#376). Matched by suffix: the hook-side spelling of an MCP tool id has not
+# been captured. sub_issue_write only links issues and is not a body write.
+# Routed by the entry point, before the policy: the owner core is Python.
+$AfWorkItemWritePattern = '(wit_work_item_write|(?<!sub_)issue_write|update_pull_request|update_issue_comment)$'
+
+function New-BdVerdict([string]$Output, [string]$Decision = '', [string]$AskGate = '', [string]$AskReason = '') {
+    [pscustomobject]@{ Decision = $Decision; Output = $Output; AskGate = $AskGate; AskReason = $AskReason }
+}
+
+function Invoke-AfBlockDangerousPolicy {
+    param(
+        # The parsed PreToolUse payload.
+        $InputData,
+        # af-env.conf lines; empty means no config (shipped defaults).
+        [string[]]$ConfLines = @(),
+        # Current branch name. Called only for a bare `git push`.
+        [scriptblock]$BranchResolver = { '' },
+        # $true when the argument names an existing commit-ish.
+        [scriptblock]$RefExists = { $false },
+        # Foreign-work guard (#120): (command, session id) -> verdict JSON or ''.
+        # $null means no opinion, as with no interpreter or no baseline.
+        [scriptblock]$ForeignGuard = $null
+    )
+    $ErrorActionPreference = 'SilentlyContinue'
+    $toolName = $InputData.tool_name
+
+    $isTaskShaped = ($toolName -eq 'create_and_run_task' -or $toolName -eq 'createAndRunTask')
+    $isTaskRun = ($toolName -eq 'run_task' -or $toolName -eq 'runTask')
+    $isExecSurface = ($toolName -match $execSurfacePattern)
+
+    # The command server's trust store (#60): an agent that could edit it would
+    # approve its own script. Judged on target paths only, never on content.
+    if (Test-AfWriteTool $toolName) {
+        foreach ($target in (Get-AfWritePaths $InputData.tool_input)) {
+            if ([string]$target -match 'af-command-mcp[\\/]+trust([\\/]|$)') {
+                $out = @{ hookSpecificOutput = @{ hookEventName = 'PreToolUse'; permissionDecision = 'deny'
+                        permissionDecisionReason = "Policy hard-deny: '$target' is in the command server's trust store (#60). Approving an agent script is the user's decision, made through the server's prompt; an agent may not write the store." }
+                } | ConvertTo-Json -Depth 3 -Compress
+                return (New-BdVerdict $out 'deny')
+            }
+        }
+    }
+
+    # Copilot harness shell tools (#529, captured in #447): `Bash` from agent-hooks.json, `powershell` from a version-1 hook file.
+    $isShell = ($toolName -match 'terminal' -or $toolName -match '^(bash|powershell)$')
+    if (-not $isShell -and -not $isTaskShaped -and -not $isTaskRun -and -not $isExecSurface) {
+        return (New-BdVerdict '{}')
+    }
+
+    # --- Execution-surface switch (issue #138) ---------------------------------
+    # Deliberately not a re-classification of the snippet. Reconstructing the
+    # command a program will eventually assemble means guessing, and a gate that
+    # guesses is worse than none -- it produces the appearance of coverage. What is
+    # decidable is whether the snippet reaches for a subprocess at all, and on
+    # these tools that is never legitimate: a gated terminal is available for
+    # exactly that. So the rule removes a bypass rather than a capability.
+    #
+    # Strings are collected recursively because the field holding the code differs
+    # per tool (`code`, `snippet`, `cell`, ...) and enumerating them is the same
+    # allowlist mistake one level down. Recursion also keeps the two dialects
+    # honest: searching the serialised JSON instead would put a notebook's leading
+    # `!` off a line start, so .ps1 and .sh would have disagreed about the shell
+    # escape from the first commit.
+    if ($isExecSurface) {
+        function Get-PayloadStrings($v) {
+            if ($null -eq $v) { return @() }
+            if ($v -is [string]) { return @($v) }
+            if ($v -is [System.Collections.IEnumerable]) {
+                $acc = @()
+                foreach ($x in $v) { $acc += Get-PayloadStrings $x }
+                return $acc
+            }
+            if ($v.PSObject -and $v.PSObject.Properties) {
+                $acc = @()
+                foreach ($p in $v.PSObject.Properties) { $acc += Get-PayloadStrings $p.Value }
+                return $acc
+            }
+            return @()
+        }
+
+        $payloadText = (Get-PayloadStrings $InputData.tool_input) -join "`n"
+        $spawnPattern = 'subprocess|os\.(system|popen|exec|spawn)|Popen|pty\.spawn|child_process|Start-Process|Invoke-Expression|%%(bash|sh)|%system|%sx'
+
+        $spawnHit = ''
+        if ($payloadText -match $spawnPattern) {
+            $spawnHit = $Matches[0]
+        } elseif ($payloadText -match '(?m)^\s*!') {
+            $spawnHit = 'notebook shell escape'
+        }
+
+        if ($spawnHit) {
+            $out = @{
+                hookSpecificOutput = @{
+                    hookEventName            = 'PreToolUse'
+                    permissionDecision       = 'deny'
+                    permissionDecisionReason = "Policy hard-deny: a code-execution tool may not spawn a process. This payload reaches for one ($spawnHit) on $toolName, which is not the surface this hook classifies commands on. Run it in the terminal instead, where it is classified. If the terminal already denied it, that denial stands -- report BLOCKED and escalate. Looking for another route is itself the finding (issue #138)."
+                }
+            } | ConvertTo-Json -Depth 5 -Compress
+            return (New-BdVerdict $out 'deny')
+        }
+
+        return (New-BdVerdict '{}')
+    }
+
+    # Removed for agents, not classified (#60): every shape denies, so the old
+    # creation allowlist and the #396 duplicate check have nothing left to judge.
+    if ($isTaskShaped) {
+        $out = @{ hookSpecificOutput = @{ hookEventName = 'PreToolUse'; permissionDecision = 'deny'
+                permissionDecisionReason = 'Policy hard-deny: create_and_run_task is removed for agents (#60). It writes an agent-authored task into tasks.json and can never be auto-approved. Run a fixed task with runTask, or a reviewed script with arguments through af-command run_script. If af-command is not registered in this workspace, report BLOCKED and ask the user to register it.' }
+        } | ConvertTo-Json -Depth 3 -Compress
+        return (New-BdVerdict $out 'deny')
+    }
+
+    # Extract the command string (runInTerminal / terminal shape only, from here).
+    # For run_task the command is not in the payload at all -- it is resolved from
+    # tasks.json further down, once Emit is defined.
+    $command = [string]$InputData.tool_input.command
+    if (-not $command -and -not $isTaskRun) {
+        return (New-BdVerdict '{}')
+    }
+
+    # ---------------------------------------------------------------------------
+    # Load autonomy config (path resolved by the shared preamble, read once).
+    # ---------------------------------------------------------------------------
+    $confLines = @($ConfLines)
+    function Get-AfEnv([string]$key, [string]$default) {
+        foreach ($l in $confLines) {
+            if ($l -match "^\s*$([regex]::Escape($key))=(.*)$") { return $Matches[1].Trim() }
+        }
+        return $default
+    }
+
+    $level = (Get-AfEnv 'AUTONOMY_LEVEL' 'balanced').ToLower()
+    $protected = @((Get-AfEnv 'PROTECTED_BRANCHES' 'main,master,dev') -split ',' |
+        ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($protected.Count -eq 0) { $protected = @('main', 'master', 'dev') }
+    $protAlt = ($protected | ForEach-Object { [regex]::Escape($_) }) -join '|'
+    # Optional executable path prefix (e.g. .venv\Scripts\, ./, /usr/bin/) and .exe suffix,
+    # so path-invoked tools like `.venv\Scripts\pytest.exe` are recognised.
+    $pathPfx = '([^\s]*[\\/])?'
+    $exe = '(\.exe)?'
+
+    # Category defaults per level. Per-category overrides win when non-empty.
+    $levelDefaults = @{
+        conservative = @{ git_read = 'auto'; fs_read = 'auto'; fs_write = 'ask';  tests = 'ask';  git_feature = 'ask';  git_merge = 'ask';  pkg = 'ask';  databricks = 'ask'; cloud_read = 'ask'  }
+        balanced     = @{ git_read = 'auto'; fs_read = 'auto'; fs_write = 'ask';  tests = 'auto'; git_feature = 'auto'; git_merge = 'auto'; pkg = 'ask';  databricks = 'ask'; cloud_read = 'auto' }
+        autonomous   = @{ git_read = 'auto'; fs_read = 'auto'; fs_write = 'auto'; tests = 'auto'; git_feature = 'auto'; git_merge = 'auto'; pkg = 'auto'; databricks = 'ask'; cloud_read = 'auto' }
+    }
+    if (-not $levelDefaults.ContainsKey($level)) { $level = 'balanced' }
+    function Resolve-Category([string]$name, [string]$envKey) {
+        $ov = Get-AfEnv $envKey ''
+        if ($ov) { return $ov.ToLower() }
+        return $levelDefaults[$level][$name]
+    }
+    $catGitRead    = Resolve-Category 'git_read'    'AUTONOMY_CAT_GIT_READ'
+    $catGitFeature = Resolve-Category 'git_feature' 'AUTONOMY_CAT_GIT_FEATURE'
+    $catGitMerge   = Resolve-Category 'git_merge'   'AUTONOMY_CAT_GIT_MERGE'
+    $catTests      = Resolve-Category 'tests'       'AUTONOMY_CAT_TESTS'
+    $catFsRead     = Resolve-Category 'fs_read'     'AUTONOMY_CAT_FS_READ'
+    $catPkg        = Resolve-Category 'pkg'         'AUTONOMY_CAT_PKG_INSTALL'
+    $catDatabricks = Resolve-Category 'databricks'  'AUTONOMY_CAT_DATABRICKS'
+    $catCloudRead  = Resolve-Category 'cloud_read'  'AUTONOMY_CAT_CLOUD_READ'
+    $catFsWrite    = Resolve-Category 'fs_write'    'AUTONOMY_CAT_FS_WRITE'
+
+    # Split a command into top-level segments on ; && || | and newlines, honoring
+    # single/double quotes so separators INSIDE a quoted string (e.g. a commit
+    # message or a -Pattern 'a|b') do not split the command.
+    function Split-TopLevel([string]$cmd) {
+        $segs = New-Object System.Collections.Generic.List[string]
+        $sb = New-Object System.Text.StringBuilder
+        $q = [char]0
+        for ($i = 0; $i -lt $cmd.Length; $i++) {
+            $c = $cmd[$i]
+            if ($q -ne [char]0) {
+                [void]$sb.Append($c)
+                if ($c -eq $q) { $q = [char]0 }
+                continue
+            }
+            if ($c -eq '"' -or $c -eq "'") { $q = $c; [void]$sb.Append($c); continue }
+            $n = if ($i + 1 -lt $cmd.Length) { $cmd[$i + 1] } else { [char]0 }
+            if (($c -eq '&' -and $n -eq '&') -or ($c -eq '|' -and $n -eq '|')) {
+                $segs.Add($sb.ToString()); [void]$sb.Clear(); $i++; continue
+            }
+            if ($c -eq ';' -or $c -eq '|' -or $c -eq "`n") {
+                $segs.Add($sb.ToString()); [void]$sb.Clear(); continue
+            }
+            if ($c -eq "`r") { continue }
+            [void]$sb.Append($c)
+        }
+        $segs.Add($sb.ToString())
+        return , $segs.ToArray()
+    }
+
+    # Builds the verdict; the caller returns it. The ask receipt is the entry
+    # point's to record (Record-AfAsk), so the policy stays free of I/O.
+    function Emit([string]$decision, [string]$reason) {
+        $out = @{
+            hookSpecificOutput = @{
+                hookEventName            = 'PreToolUse'
+                permissionDecision       = $decision
+                permissionDecisionReason = $reason
+            }
+        } | ConvertTo-Json -Depth 3 -Compress
+        $gate = if ($decision -eq 'ask') { 'block-dangerous' } else { '' }
+        return (New-BdVerdict $out $decision $gate $reason)
+    }
+
+    $denyTail = "The agent will not run this. If it is genuinely required, either (a) run it yourself " +
+        "-- the agent can prepare the exact command for you to paste and execute -- or (b) make a conscious " +
+        "decision to relax the autonomy policy in .github/af-env.conf."
+
+    # ===========================================================================
+    # run_task -- resolve the launch into a command line before classifying it.
+    #
+    # The payload names a task; a name is not a command. The command lives in the
+    # project's .vscode/tasks.json, so it is read back here and every scope is
+    # reconstructed into a command line. From that point on a task launch is
+    # classified by exactly the same tiers as a terminal command -- which is the
+    # point: `run_task` was a hole straight through the classifier.
+    #
+    # Anything that cannot be resolved answers 'ask', never silence. The gate says
+    # "I could not judge this" instead of producing the same bytes as consent.
+    # ===========================================================================
+    if ($isTaskRun) {
+        $askTail = "The task launch could not be classified, so this needs a human decision. Check what the task runs in .vscode/tasks.json."
+        $wsFolder = [string]$InputData.tool_input.workspaceFolder
+        $taskId = [string]$InputData.tool_input.id
+        if (-not $wsFolder -or -not $taskId) {
+            return Emit 'ask' "Unclassified task launch: the payload carries no workspaceFolder/id, so the task cannot be looked up. $askTail"
+        }
+        $tasksPath = Join-Path $wsFolder '.vscode/tasks.json'
+        if (-not (Test-Path $tasksPath)) {
+            return Emit 'ask' "Unclassified task launch: no .vscode/tasks.json under '$wsFolder', so task '$taskId' cannot be resolved to a command. $askTail"
+        }
+        $tasksDoc = $null
+        try {
+            $tasksDoc = (Get-Content $tasksPath -Raw -ErrorAction Stop) | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            # tasks.json accepts JSONC in VS Code, so a comment or trailing comma
+            # parses here as nothing at all. Unreadable is not the same as safe.
+            return Emit 'ask' "Unclassified task launch: .vscode/tasks.json is not strict JSON (comments or trailing commas), so task '$taskId' cannot be resolved. $askTail"
+        }
+        # VS Code addresses a task as '{type}: {label}' -- captured ids look like
+        # 'shell: tests: all'. Only the first type prefix is stripped; the label
+        # itself may contain a colon.
+        $bareId = $taskId -replace '^[A-Za-z]+:\s+', ''
+        $taskDef = $null
+        foreach ($t in @($tasksDoc.tasks)) {
+            if (-not $t) { continue }
+            $lbl = [string]$t.label
+            if ($lbl -and ($lbl -eq $taskId -or $lbl -eq $bareId)) { $taskDef = $t; break }
+        }
+        if (-not $taskDef) {
+            return Emit 'ask' "Unclassified task launch: no task labelled '$bareId' in .vscode/tasks.json. $askTail"
+        }
+        # Variables whose value is produced elsewhere (a prompt, a VS Code command,
+        # a setting) hide the payload from the classifier.
+        $taskText = $taskDef | ConvertTo-Json -Depth 10 -Compress
+        foreach ($v in @('${input:', '${command:', '${config:')) {
+            if ($taskText.Contains($v)) {
+                return Emit 'ask' "Unclassified task launch: task '$bareId' contains a '$v...}' variable, so its effective command line is not visible here. $askTail"
+            }
+        }
+        # An OS-specific scope overrides the task scope, so every variant present
+        # must be classified -- reading only `command` classifies a decoy.
+        $runScopes = @($taskDef)
+        foreach ($os in @('windows', 'linux', 'osx')) {
+            if ($taskDef.$os) { $runScopes += $taskDef.$os }
+        }
+        $cmdLines = @()
+        foreach ($o in $runScopes) {
+            if ($o.options -and $o.options.shell) {
+                return Emit 'ask' "Unclassified task launch: task '$bareId' overrides options.shell, which moves the executed payload into the shell's own arguments where it cannot be classified. $askTail"
+            }
+            $c = if ($o.command) { [string]$o.command } else { [string]$taskDef.command }
+            $a = if ($null -ne $o.args) { $o.args } else { $taskDef.args }
+            if (-not $c) { continue }
+            $line = if ($a) { ($c + ' ' + ((@($a) | ForEach-Object { [string]$_ }) -join ' ')) } else { $c }
+            $cmdLines += $line.Trim()
+        }
+        $cmdLines = @($cmdLines | Where-Object { $_ })
+        if ($cmdLines.Count -eq 0) {
+            return Emit 'ask' "Unclassified task launch: task '$bareId' declares no command (composite or extension-provided task). $askTail"
+        }
+        # Newline-joined: the deny tier scans the whole string and the allow tier
+        # splits on newlines, so every scope must clear the bar independently.
+        $command = $cmdLines -join "`n"
+    }
+
+    # ---------------------------------------------------------------------------
+    # Scan units -- what the DENY tier matches against.
+    #
+    # The raw command string conflates two things: text that will be executed and
+    # text that is merely data. Matching deny patterns against it blocked real work
+    # (issue #62): a commit message containing "--force", a probe whose JSON test
+    # data contained "Remove-Item -Recurse -Force". Worse, `(\S+\s+)*` in the git
+    # rules matched across a `;`, so a genuine `git add` in one statement joined up
+    # with prose in the next.
+    #
+    # Stripping quotes globally would be the wrong fix: the payload of `bash -c
+    # "..."` lives inside quotes, and blinding the deny tier to it defeats its
+    # purpose. So each statement becomes its own unit, quoted arguments that are
+    # themselves executed are promoted to units of their own, and quoted text is
+    # dropped only where it is unambiguously prose.
+    # ---------------------------------------------------------------------------
+
+    # Command words whose quoted arguments are prose, not commands.
+    $dataCarrierRe = '^\s*(echo|printf|Write-Host|Write-Output|Write-Error|Write-Verbose|Write-Debug)\b|^\s*git\s+(commit|tag|notes|stash)\b'
+    # Flags and commands whose quoted argument is executed.
+    $payloadRe = '(?:^|\s)(?:-c|--command|-Command|-e|--eval|-ScriptBlock|-ArgumentList|-Args|/c|/k|iex|Invoke-Expression|eval)\s+(?:"([^"]*)"|''([^'']*)'')'
+
+    function Remove-QuotedData([string]$seg) {
+        # An interpolation inside quotes still executes, so those quotes are not data.
+        if ($seg -match '\$\(' -or $seg -match '`') { return $seg }
+        return ($seg -replace '"[^"]*"', '' -replace "'[^']*'", '')
+    }
+
+    # Git's global options sit between `git` and the subcommand, where every rule
+    # anchored at `git <subcommand>` could not see past them (#431). Deny-side only:
+    # the allow tier still judges the command as written.
+    $gitValue = '(?:"[^"]*"|''[^'']*''|\S+)'
+    $gitGlobalRe = '^(\s*git)((?:\s+(?:-[Cc]\s+' + $gitValue + '|--(?:git-dir|work-tree|namespace|config-env)\s+' + $gitValue +
+        '|--[A-Za-z][\w-]*=' + $gitValue + '|--(?:no-pager|paginate|bare|no-replace-objects|literal-pathspecs|glob-pathspecs|noglob-pathspecs|icase-pathspecs|no-optional-locks|no-advice)|-[pP]))+)(?=\s|$)'
+    function Remove-GitGlobalOptions([string]$seg) {
+        return ($seg -creplace $gitGlobalRe, '$1')
+    }
+
+    function Get-ScanUnits([string]$cmd) {
+        $units = New-Object System.Collections.Generic.List[string]
+        foreach ($raw in (Split-TopLevel $cmd)) {
+            if (-not $raw.Trim()) { continue }
+            $seg = Remove-GitGlobalOptions $raw
+            $isBareLiteral = $seg -match '^\s*("[^"]*"|''[^'']*'')\s*$'
+            if ($isBareLiteral -or $seg -match $dataCarrierRe) {
+                $units.Add((Remove-QuotedData $seg))
+            } else {
+                $units.Add($seg)
+            }
+            foreach ($m in [regex]::Matches($seg, $payloadRe)) {
+                $payload = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
+                foreach ($p in (Split-TopLevel $payload)) { if ($p.Trim()) { $units.Add($p) } }
+            }
+        }
+        if ($units.Count -eq 0) { $units.Add($cmd) }
+        return , $units.ToArray()
+    }
+
+    $scanUnits = Get-ScanUnits $command
+
+    # Raw-scanned rules match the whole command line, because the thing they look
+    # for spans units. That must not make quoting meaningless for them alone: the
+    # same literal was data for every other rule and a command for these (#122).
+    # Two strengths, because the two rules have different threat models.
+    function Get-InterpreterPayloads([string]$cmd) {
+        $found = New-Object System.Collections.Generic.List[string]
+        foreach ($m in [regex]::Matches($cmd, $payloadRe)) {
+            $v = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
+            if ($v) { $found.Add($v) }
+        }
+        return , $found.ToArray()
+    }
+
+    # 'exec'  -- every quoted literal is data unless an interpreter executes it. A
+    #            `|` inside quotes is not a pipe; only an interpreter makes it one.
+    # 'prose' -- only recognised prose carriers are exempted. SQL clients take a
+    #            statement positionally (`sqlite3 db "DROP TABLE x"`) as well as
+    #            behind a flag, so blanket stripping would launder the real case.
+    function Get-RawTargets([string]$cmd, [string]$Strength) {
+        $payloads = Get-InterpreterPayloads $cmd
+        if ($Strength -eq 'exec') {
+            $t = $cmd
+            foreach ($pl in $payloads) { $t = $t.Replace('"' + $pl + '"', ' ').Replace("'" + $pl + "'", ' ') }
+            # An interpolation elsewhere no longer makes every literal a command (#122, 2026-09-29):
+            # single quotes never interpolate; a double-quoted string executes only via $( or a backtick.
+            $t = [regex]::Replace($t, '"[^"]*"|''[^'']*''', {
+                    param($m) if ($m.Value.StartsWith('"') -and $m.Value -match '\$\(|`') { $m.Value } else { '' } })
+            return , (@($t) + $payloads)
+        }
+        if ($cmd -match '\$\(' -or $cmd -match '`') { return , (@($cmd) + $payloads) }
+        $stripped = ((Split-TopLevel $cmd | ForEach-Object { Remove-GitGlobalOptions $_ } | ForEach-Object {
+                    if ($_ -match $dataCarrierRe -or $_ -match '^\s*("[^"]*"|''[^'']*'')\s*$') { Remove-QuotedData $_ } else { $_ }
+                }) -join ' ; ')
+        return , (@($stripped) + $payloads)
+    }
+
+    $rawTargetsExec = Get-RawTargets $command 'exec'
+    $rawTargetsProse = Get-RawTargets $command 'prose'
+
+    function Test-AnyUnit([string]$pattern, [switch]$CaseSensitive) {
+        foreach ($u in $scanUnits) {
+            if ($CaseSensitive) { if ($u -cmatch $pattern) { return $true } }
+            elseif ($u -match $pattern) { return $true }
+        }
+        return $false
+    }
+
+    # ===========================================================================
+    # TIER 1 -- DENY (hard, level-independent). Checked first.
+    # Rules are matched per scan unit unless marked rawScan, which is reserved for
+    # rules about structure or payload content that legitimately spans units. Those
+    # still respect quoting -- see Get-RawTargets for the two strengths.
+    # ===========================================================================
+    $denyRules = @(
+        @{ p = 'git\s+push\b.*(--force|-f)\b';            why = 'force push (remote history rewrite)' }
+        @{ p = "git\s+push\b.*(\s|:)($protAlt)(\s|$)";    why = 'push to a protected branch' }
+        @{ p = 'git\s+reset\s+--hard';                    why = 'hard reset (state rewrite)' }
+        @{ p = 'git\s+rebase\b';                          why = 'rebase (history rewrite)' }
+        @{ p = 'git\s+branch\b.*--force\b';                why = 'force branch deletion (--force)' }
+        @{ p = "git\s+branch\s+-d\b.*(\s|:)($protAlt)(\s|$)"; why = 'deleting a protected branch' }
+        @{ p = 'git\s+add\s+(\S+\s+)*(--force|-f)(\s|$)'; why = 'git add --force (bypass .gitignore)' }
+        @{ p = 'git\s+add\s+(-\S+\s+)*\.(\s|$)';          why = 'git add . (banned wildcard)' }
+        @{ p = 'git\s+add\s+(\S+\s+)*-A(\s|$)';           why = 'git add -A (banned wildcard)' }
+        @{ p = '--no-verify';                             why = 'bypassing git hooks' }
+        @{ p = 'rm\s+-r[f ].*(\s|=)(/|~|\*)';             why = 'recursive delete of a broad path' }
+        @{ p = 'Remove-Item.*-Recurse.*-Force';           why = 'recursive force delete' }
+        @{ p = 'dd\s+if=.*of=/dev/';                      why = 'raw disk write' }
+        @{ p = 'mkfs\.';                                  why = 'filesystem format' }
+        @{ p = 'format\s+[A-Za-z]:';                      why = 'drive format' }
+        @{ p = 'chmod\s+-R\s+777';                        why = 'world-writable permissions' }
+        @{ p = '\|\s*(bash|sh|iex|Invoke-Expression)\b';  why = 'pipe-to-shell execution'; rawScan = 'exec' }
+        @{ p = 'DROP\s+(TABLE|DATABASE)';                 why = 'destructive SQL'; rawScan = 'prose' }
+        @{ p = 'TRUNCATE\s+TABLE';                        why = 'destructive SQL'; rawScan = 'prose' }
+    )
+    foreach ($r in $denyRules) {
+        $hit = if ($r.rawScan) {
+            $targets = if ($r.rawScan -eq 'prose') { $rawTargetsProse } else { $rawTargetsExec }
+            [bool]($targets | Where-Object { $_ -match $r.p })
+        } else { Test-AnyUnit $r.p }
+        if ($hit) {
+            return Emit 'deny' ("Policy hard-deny: $($r.why). $denyTail")
+        }
+    }
+    # Branch force-deletion (-D) needs a CASE-SENSITIVE check so that the safe
+    # lowercase -d (which git only allows for already-merged branches) is not denied.
+    if (Test-AnyUnit 'git\s+branch\s+(\S+\s+)*-D(\s|$)' -CaseSensitive) {
+        return Emit 'deny' ("Policy hard-deny: force branch deletion (-D deletes unmerged commits). $denyTail")
+    }
+    # Category-scoped deny (when autonomy policy sets a category to 'deny').
+    if ($catPkg -eq 'deny' -and (Test-AnyUnit '(?i)\bpip3?\s+(install|uninstall)\b|(?i)\bconda\s+(install|remove)\b')) {
+        return Emit 'deny' ("Policy hard-deny: package management (AUTONOMY_CAT_PKG_INSTALL=deny). $denyTail")
+    }
+    if ($catDatabricks -eq 'deny' -and (Test-AnyUnit '(?i)\bdatabricks\b')) {
+        return Emit 'deny' ("Policy hard-deny: Databricks CLI (AUTONOMY_CAT_DATABRICKS=deny). $denyTail")
+    }
+
+    # ===========================================================================
+    # Foreign work (#120) -- ask before a git command discards a path that was
+    # already uncommitted when this session started. Ahead of TIER 2, which
+    # auto-allows `git restore`. No interpreter or no baseline: no opinion here.
+    # ===========================================================================
+    if ($ForeignGuard -and $command -match 'git\s.*\b(checkout|restore|stash|clean|switch)\b') {
+        $fg = [string](& $ForeignGuard $command ([string]$InputData.session_id))
+        if ($fg) {
+            $decision = if ($fg -match '"permissionDecision"\s*:\s*"ask"') { 'ask' } else { '' }
+            $gate = ''
+            $why = ''
+            if ($decision -eq 'ask') {
+                $gate = 'foreign-work'
+                $why = [string]($fg | ConvertFrom-Json).hookSpecificOutput.permissionDecisionReason
+            }
+            return (New-BdVerdict $fg $decision $gate $why)
+        }
+    }
+
+    # ===========================================================================
+    # TIER 2 -- ALLOW (auto-approve safe commands), segment-based & category gated.
+    #
+    # The command is split into segments on ; && || | and auto-approved only when
+    # EVERY segment is individually safe. This lets common composites through
+    # (e.g. `cd ... ; pytest ... 2>&1 | Select-Object -Last 30`) while still
+    # refusing anything with an unknown/mutating segment. Command substitution
+    # ($( ) / backticks) and file-write redirects (> file) are never auto-allowed.
+    # Note: DENY already scanned the whole string above, so hidden dangerous
+    # segments (e.g. `... ; rm -rf /`) are blocked before reaching here.
+    # ===========================================================================
+    function Test-WriteRedirect([string]$seg) {
+        # File-write redirect (> file / >> file). Excludes fd duplication (2>&1, >&1).
+        return ($seg -match '>>?\s*[^&\s>]')
+    }
+    function Test-SafeSegment([string]$seg) {
+        $s = $seg.Trim()
+        if (-not $s) { return $true }
+        # strip a leading simple assignment ($x = ...) -- no side effect beyond its RHS
+        if ($s -match '^\s*\$[\w:]+\s*=\s*(.+)$') { $s = $Matches[1].Trim() }
+        # strip a leading call operator (& "path\tool" ...) -- benign invocation wrapper
+        if ($s -match '^\s*&\s+(.+)$') { $s = $Matches[1].Trim() }
+        if (Test-WriteRedirect $s) {
+            if ($catFsWrite -ne 'auto') { return $false }
+            # FS_WRITE=auto: a file redirect is allowed; strip it and vet the left command
+            $s = ($s -replace '>>?\s*[^\s&>|]+', '').Trim()
+            if (-not $s) { return $true }
+        }
+        # background / inline chaining operator ( & ) that the split does not handle;
+        # ( & is not split on because it also appears in fd redirects like 2>&1 )
+        if ($s -match '(?<![0-9>&])&(?!&)') { return $false }
+        # navigation (no data change)
+        if ($s -match '(?i)^(cd|Set-Location|pushd|popd|Push-Location|Pop-Location)\b') { return $true }
+        # safe display / filter commands (typical pipe right-hand side)
+        if ($s -match '(?i)^(Select-Object|Select-String|Sort-Object|Measure-Object|Out-String|Out-Host|Format-Table|Format-List|Get-Unique|Join-Path|Split-Path|Resolve-Path|more|wc|findstr|grep|ConvertFrom-Json|ConvertTo-Json)\b') { return $true }
+        # version probes: <binary> [flags] --version (no positional file arg before it)
+        if ($s -match '(?i)^\s*[\w./\\-]+(\s+-{1,2}[\w=.,-]+)*\s+--version\b') { return $true }
+        # git read-only
+        if ($catGitRead -eq 'auto') {
+            if ($s -match '^\s*git\s+(status|diff|log|show|rev-parse|rev-list|remote|blame|describe|shortlog|for-each-ref|ls-files|config\s+--get|fetch)\b') { return $true }
+            # read-only config access: only recognised read flags + at most one key,
+            # nothing after (a trailing value token would make it a write).
+            if ($s -match '^\s*git\s+config\s+(--(global|local|system|worktree|get|get-all|get-regexp|list|show-origin|show-scope)\s+)*[\w.-]*\s*$') { return $true }
+            if ($s -match '^\s*git\s+stash\s+list\b') { return $true }
+            # branch listing (creating a ref is harmless; delete/rename/copy excluded)
+            if ($s -match '^\s*git\s+branch\b' -and $s -notmatch '\s-[dDmMcC]\b' -and $s -notmatch '--(delete|move|copy|force)\b') { return $true }
+            # tag listing (create/delete/annotate/sign/force excluded)
+            if ($s -match '^\s*git\s+tag\b' -and $s -notmatch '\s-[adfsm]\b' -and $s -notmatch '--(delete|force|sign|annotate)\b' -and $s -notmatch '^\s*git\s+tag\s+[^\s-]') { return $true }
+        }
+        # git feature-branch work
+        if ($catGitFeature -eq 'auto') {
+            if ($s -match '^\s*git\s+commit\b') { return $true }
+            if ($s -match '^\s*git\s+add\s+\S') { return $true }
+            if ($s -match '^\s*git\s+(checkout|switch)\s+-[bc]\s+agent/') { return $true }
+            if ($s -match '^\s*git\s+(checkout|switch)\s+agent/') { return $true }
+            # switch to a branch (never touches files, so always safe)
+            if ($s -match '^\s*git\s+switch\s+[\w./-]+\s*$') { return $true }
+            # checkout an existing ref (branch/tag/commit) -- verified so a file
+            # pathspec (which would discard changes) is NOT auto-approved
+            if ($s -match '^\s*git\s+checkout\s+([\w./-]+)\s*$' -and (& $RefExists $Matches[1])) { return $true }
+            # delete a merged, non-protected branch: `git branch -d` only removes a
+            # branch git considers fully merged (it refuses otherwise) and the ref is
+            # recreatable, so it is safe. Force (-D/--force) and protected are denied above.
+            if ($s -match '^\s*git\s+branch\s+(\S+\s+)*-d(\s|$)' -and $s -cnotmatch '\s-D\b' -and $s -notmatch '--force\b' -and $s -notmatch "(\s|:)($protAlt)(\s|$)") { return $true }
+            if ($s -match '^\s*git\s+push\b' -and $s -notmatch "(\s|:)($protAlt)(\s|$)") {
+                if ($s -match 'agent/') { return $true }                                  # explicit feature target
+                $curBranch = [string](& $BranchResolver)
+                if ($curBranch -and ($protected -notcontains $curBranch)) { return $true } # bare push on a feature branch
+            }
+            if ($s -match '^\s*git\s+(restore|switch\s+agent/)\b') { return $true }
+        }
+        # reversible topology changes (pull / merge / cherry-pick / revert) --
+        # recoverable via reflog / ORIG_HEAD, so safe to run autonomously.
+        if ($catGitMerge -eq 'auto' -and $s -match '^\s*git\s+(pull|merge|cherry-pick|revert)\b') { return $true }
+        # tests / lint / typecheck / static analysis (read-only, no durable change).
+        # Accepts a path prefix so `.venv\Scripts\pytest.exe` etc. are recognised.
+        if ($catTests -eq 'auto' -and (
+                $s -match "(?i)^\s*$pathPfx(pytest|mypy|pyright|tox|nox|radon|bandit|flake8|pylint|vulture|pip-audit)$exe\b" -or
+                $s -match "(?i)^\s*${pathPfx}python(\d)?$exe\s+-m\s+(pytest|mypy|pyright)\b" -or
+                $s -match "(?i)^\s*${pathPfx}ruff$exe\s+(check|format\s+--check)\b" -or
+                $s -match '(?i)run-tests')) { return $true }
+        # read-only filesystem & info commands
+        if ($catFsRead -eq 'auto' -and $s -match '(?i)^\s*(ls|dir|Get-ChildItem|cat|type|Get-Content|head|tail|Test-Path|pwd|Get-Location|where(\.exe)?|Get-Command|Get-Date|whoami|hostname|Get-Process|Get-Service|echo|Write-Output|Write-Host)\b') { return $true }
+        # read-only package / environment queries
+        if ($catFsRead -eq 'auto' -and ($s -match "(?i)^\s*${pathPfx}pip3?$exe\s+(list|show|freeze|check)\b" -or $s -match '(?i)^\s*"?(\S*[\\/])?python(\d)?(\.exe)?"?\s+-m\s+pip\s+(list|show|freeze|check)\b')) { return $true }
+        # package managers (autonomy-gated)
+        if ($catPkg -eq 'auto' -and ($s -match "(?i)^\s*${pathPfx}pip3?$exe\s+(install|uninstall)\b" -or $s -match '(?i)^\s*python(\d)?\s+-m\s+pip\s+(install|uninstall)\b' -or $s -match "(?i)^\s*${pathPfx}conda$exe\s+(install|remove)\b")) { return $true }
+        # read-only cloud CLI queries (databricks list/get, az show/list).
+        # Excludes anything touching secrets/credentials/tokens (would print them).
+        if ($catCloudRead -eq 'auto' -and $s -notmatch '(?i)(secret|credential|token|password|keyvault|get-access-token)' -and ($s -match '(?i)^\s*databricks\s+[\w-]+\s+(list|get|ls|show)\b' -or $s -match '(?i)^\s*databricks\s+current-user\b' -or $s -match '(?i)^\s*az\s+.+\b(show|list)\b')) { return $true }
+        # databricks CLI (autonomy-gated)
+        if ($catDatabricks -eq 'auto' -and $s -match '(?i)^\s*databricks\b') { return $true }
+        # local filesystem writes (opt-in via AUTONOMY_CAT_FS_WRITE). Recursive/force
+        # deletes and broad rm are hard-denied above, so only the safe subset is here.
+        if ($catFsWrite -eq 'auto') {
+            if ($s -match '(?i)^\s*(Out-File|Set-Content|Add-Content|Tee-Object|New-Item|mkdir|md|Move-Item|Copy-Item|mv|cp|touch)\b') { return $true }
+            if ($s -match '(?i)^\s*(Remove-Item|rm|del|erase)\b' -and $s -notmatch '(?i)(-recurse|-force|\*)' -and $s -notmatch '(^|\s)-[rf]{1,2}\b') { return $true }
+        }
+        return $false
+    }
+
+    # Suppress auto-allow when the command uses grouping / subexpression /
+    # scriptblock metacharacters OUTSIDE quotes -- e.g. `Write-Host (Remove-Item x)`
+    # executes the inner command (bash `(cmd)` is a subshell; PowerShell `(cmd)`
+    # is a sub-pipeline). Quote-strip first so conventional-commit messages like
+    # "fix(scope): ..." are not falsely suppressed.
+    $strippedForGuard = $command -replace '"[^"]*"', '' -replace "'[^']*'", ''
+    if ($strippedForGuard -notmatch '[`({]') {
+        $segments = Split-TopLevel $command
+        $anySeg = $false
+        $allSafe = $true
+        foreach ($seg in $segments) {
+            if (-not $seg.Trim()) { continue }
+            $anySeg = $true
+            if (-not (Test-SafeSegment $seg)) { $allSafe = $false; break }
+        }
+        if ($anySeg -and $allSafe) {
+            return Emit 'allow' 'Safe: every command segment is read-only or a known-safe operation.'
+        }
+    }
+
+    # ===========================================================================
+    # TIER 3 -- ASK (durable change, confirm).
+    #
+    # A confirmation prompt is a question put to a human, and a question that does
+    # not say what it is about cannot be answered -- it can only be waved through.
+    # The whole tier used to share one sentence ("This command makes a durable
+    # change") for eleven different rules, naming neither the rule that fired nor
+    # the command it fired on, while the deny tier next door has been specific all
+    # along (issue #78). Each rule now says what it will actually do, and the
+    # command is echoed so the answer is about the command rather than about the
+    # category.
+    #
+    # Emitting 'ask' also preempts Copilot's own assessment, which categorises the
+    # command and describes in plain language what it will do -- better than any
+    # fixed sentence we can write here. So the tier is scoped to what we know that
+    # VS Code cannot: repository and branch state, autonomy policy, effects that
+    # land outside git. Four rules were handed back on that basis (issue #78a):
+    #
+    #   pip install/uninstall, conda install/remove   an ordinary environment
+    #   ruff format                                   change, or a repo-local
+    #   New-Item / mkdir / Copy-Item / Move-Item      rewrite git can undo
+    #
+    # Handing a rule back is not the same as approving it. Returning {} defers to
+    # the user's chat.tools.terminal.autoApprove settings; where those do not cover
+    # the command -- which is the normal case -- the result is a *better* prompt,
+    # not a missing one. Where they do cover it, the user has already said what he
+    # wants and our sentence was overriding him.
+    #
+    # Deletion stays ours because git cannot undo it; checkout/switch stays because
+    # its path form discards uncommitted work and 'git checkout' is a plausible
+    # autoApprove prefix; tag, databricks and az stay because their effect reaches
+    # past this working tree.
+    # ===========================================================================
+    $askRules = @(
+        @{ p = 'git\s+merge\b';      why = "'git merge' rewrites the working tree and may leave conflict markers in tracked files" }
+        @{ p = 'git\s+(checkout|switch)\b'; why = "'git checkout'/'git switch' changes the checked-out branch, and with a path argument it discards uncommitted changes to that path" }
+        @{ p = 'git\s+tag\b';        why = "'git tag' creates or moves a tag, which is a release marker others may already rely on" }
+        @{ p = '(?i)\bdatabricks\b.*\b(submit|run|create|update|delete|import|export|deploy)\b'; why = 'this Databricks CLI call acts on a remote workspace, where the effect is outside this repository and outside git' }
+        @{ p = '(?i)\baz\b.*\b(create|set|delete|update|deploy)\b'; why = 'this Azure CLI call changes cloud resources, where the effect is outside this repository and may cost money' }
+        @{ p = '(?i)Remove-Item\b';  why = "'Remove-Item' deletes files or directories" }
+        @{ p = '(?i)(^|\s)rm\b';     why = "'rm' deletes files or directories" }
+    )
+    # Echoing the command is the point of the prompt, but an unbounded string in a
+    # dialog is its own way of hiding information.
+    $shown = $command -replace '\s+', ' '
+    if ($shown.Length -gt 300) { $shown = $shown.Substring(0, 297) + '...' }
+    # Scan the quote-stripped command so quoted literals (e.g. a commit message
+    # mentioning "databricks ... export") do not falsely trigger an ASK rule.
+    foreach ($r in $askRules) {
+        if ($strippedForGuard -match $r.p) {
+            return Emit 'ask' ("Durable change: $($r.why). Confirm it is intentional. Command: $shown")
+        }
+    }
+
+    # Default: defer to the user's approval settings (fail-safe -- never auto-allow).
+    return (New-BdVerdict '{}')
+}
+
+if ($AfLibrary) { return }
 
 $ErrorActionPreference = 'SilentlyContinue'
 
@@ -58,28 +731,7 @@ try {
     exit 0
 }
 
-# Only inspect terminal tool calls, the two task-launch tools, or a
-# code-execution surface.
-# `create_and_run_task` and `run_task` are the names VS Code actually sends;
-# the camelCase spellings never occur in a captured payload and are kept only
-# so a rename upstream degrades to a stale alias rather than to an inert gate.
-#
-# The code-execution tools are gated as a class, not for what they run but for
-# what they are: a second way to reach a subprocess. Issue #138 recorded a
-# subagent denied in the terminal re-running the same CLI call through the
-# Pylance snippet tool, and this hook allowing it -- not because it was
-# misconfigured, but because it looked at the tool name, matched nothing, and
-# emitted `{}`, which is consent. A gate whose set is an allowlist grants
-# everything it forgot to name. Kept identical to bd_is_exec_surface in the
-# .sh twin; test-hooks.sh compares the two lists mechanically.
-$execSurfacePattern = 'runCodeSnippet|run_notebook_cell|runNotebookCell|run_playwright_code|browser_run_code|browser_evaluate|run_vscode_command|runVsCodeCommand'
-
-$toolName = $inputData.tool_name
-
-# Work-item writes: ADO owner (#36) and field shrink (#197), GitHub body shrink
-# (#376). Matched by suffix: the hook-side spelling of an MCP tool id has not
-# been captured. sub_issue_write only links issues and is not a body write.
-if ([string]$toolName -match '(wit_work_item_write|(?<!sub_)issue_write|update_pull_request|update_issue_comment)$') {
+if ([string]$inputData.tool_name -match $AfWorkItemWritePattern) {
     $ownerCore = Join-Path $PSScriptRoot 'work-item-owner.py'
     $ownerPython = Get-AfPython
     if (-not $ownerPython -or -not (Test-Path $ownerCore)) {
@@ -93,628 +745,25 @@ if ([string]$toolName -match '(wit_work_item_write|(?<!sub_)issue_write|update_p
     exit 0
 }
 
-$isTaskShaped = ($toolName -eq 'create_and_run_task' -or $toolName -eq 'createAndRunTask')
-$isTaskRun = ($toolName -eq 'run_task' -or $toolName -eq 'runTask')
-$isExecSurface = ($toolName -match $execSurfacePattern)
-
-# The command server's trust store (#60): an agent that could edit it would
-# approve its own script. Judged on target paths only, never on content.
-if (Test-AfWriteTool $toolName) {
-    foreach ($target in (Get-AfWritePaths $inputData.tool_input)) {
-        if ([string]$target -match 'af-command-mcp[\\/]+trust([\\/]|$)') {
-            @{ hookSpecificOutput = @{ hookEventName = 'PreToolUse'; permissionDecision = 'deny'
-                    permissionDecisionReason = "Policy hard-deny: '$target' is in the command server's trust store (#60). Approving an agent script is the user's decision, made through the server's prompt; an agent may not write the store." }
-            } | ConvertTo-Json -Depth 3 -Compress
-            exit 0
-        }
-    }
-}
-
-# Copilot harness shell tools (#529, captured in #447): `Bash` from agent-hooks.json, `powershell` from a version-1 hook file.
-$isShell = ($toolName -match 'terminal' -or $toolName -match '^(bash|powershell)$')
-if (-not $isShell -and -not $isTaskShaped -and -not $isTaskRun -and -not $isExecSurface) {
-    Write-Output '{}'
-    exit 0
-}
-
-# --- Execution-surface switch (issue #138) ---------------------------------
-# Deliberately not a re-classification of the snippet. Reconstructing the
-# command a program will eventually assemble means guessing, and a gate that
-# guesses is worse than none -- it produces the appearance of coverage. What is
-# decidable is whether the snippet reaches for a subprocess at all, and on
-# these tools that is never legitimate: a gated terminal is available for
-# exactly that. So the rule removes a bypass rather than a capability.
-#
-# Strings are collected recursively because the field holding the code differs
-# per tool (`code`, `snippet`, `cell`, ...) and enumerating them is the same
-# allowlist mistake one level down. Recursion also keeps the two dialects
-# honest: searching the serialised JSON instead would put a notebook's leading
-# `!` off a line start, so .ps1 and .sh would have disagreed about the shell
-# escape from the first commit.
-if ($isExecSurface) {
-    function Get-PayloadStrings($v) {
-        if ($null -eq $v) { return @() }
-        if ($v -is [string]) { return @($v) }
-        if ($v -is [System.Collections.IEnumerable]) {
-            $acc = @()
-            foreach ($x in $v) { $acc += Get-PayloadStrings $x }
-            return $acc
-        }
-        if ($v.PSObject -and $v.PSObject.Properties) {
-            $acc = @()
-            foreach ($p in $v.PSObject.Properties) { $acc += Get-PayloadStrings $p.Value }
-            return $acc
-        }
-        return @()
-    }
-
-    $payloadText = (Get-PayloadStrings $inputData.tool_input) -join "`n"
-    $spawnPattern = 'subprocess|os\.(system|popen|exec|spawn)|Popen|pty\.spawn|child_process|Start-Process|Invoke-Expression|%%(bash|sh)|%system|%sx'
-
-    $spawnHit = ''
-    if ($payloadText -match $spawnPattern) {
-        $spawnHit = $Matches[0]
-    } elseif ($payloadText -match '(?m)^\s*!') {
-        $spawnHit = 'notebook shell escape'
-    }
-
-    if ($spawnHit) {
-        @{
-            hookSpecificOutput = @{
-                hookEventName            = 'PreToolUse'
-                permissionDecision       = 'deny'
-                permissionDecisionReason = "Policy hard-deny: a code-execution tool may not spawn a process. This payload reaches for one ($spawnHit) on $toolName, which is not the surface this hook classifies commands on. Run it in the terminal instead, where it is classified. If the terminal already denied it, that denial stands -- report BLOCKED and escalate. Looking for another route is itself the finding (issue #138)."
-            }
-        } | ConvertTo-Json -Depth 5 -Compress
-        exit 0
-    }
-
-    Write-Output '{}'
-    exit 0
-}
-
-# Removed for agents, not classified (#60): every shape denies, so the old
-# creation allowlist and the #396 duplicate check have nothing left to judge.
-if ($isTaskShaped) {
-    @{ hookSpecificOutput = @{ hookEventName = 'PreToolUse'; permissionDecision = 'deny'
-            permissionDecisionReason = 'Policy hard-deny: create_and_run_task is removed for agents (#60). It writes an agent-authored task into tasks.json and can never be auto-approved. Run a fixed task with runTask, or a reviewed script with arguments through af-command run_script. If af-command is not registered in this workspace, report BLOCKED and ask the user to register it.' }
-    } | ConvertTo-Json -Depth 3 -Compress
-    exit 0
-}
-
-# Extract the command string (runInTerminal / terminal shape only, from here).
-# For run_task the command is not in the payload at all -- it is resolved from
-# tasks.json further down, once Emit is defined.
-$command = [string]$inputData.tool_input.command
-if (-not $command -and -not $isTaskRun) {
-    Write-Output '{}'
-    exit 0
-}
-
-# ---------------------------------------------------------------------------
-# Load autonomy config (path resolved by the shared preamble, read once).
-# ---------------------------------------------------------------------------
-$repo = $AfMainRoot
+# Bind the policy's lookups to this machine: git in the agent's cwd, as before
+# the split, and the foreign-work guard's Python core.
+$hookDir = $PSScriptRoot
 $confLines = @()
 if ($AfConfFound) { $confLines = Get-Content $AfConfPath }
-function Get-AfEnv([string]$key, [string]$default) {
-    foreach ($l in $confLines) {
-        if ($l -match "^\s*$([regex]::Escape($key))=(.*)$") { return $Matches[1].Trim() }
-    }
-    return $default
-}
-
-$level = (Get-AfEnv 'AUTONOMY_LEVEL' 'balanced').ToLower()
-$protected = @((Get-AfEnv 'PROTECTED_BRANCHES' 'main,master,dev') -split ',' |
-    ForEach-Object { $_.Trim() } | Where-Object { $_ })
-if ($protected.Count -eq 0) { $protected = @('main', 'master', 'dev') }
-$protAlt = ($protected | ForEach-Object { [regex]::Escape($_) }) -join '|'
-$curBranch = (git rev-parse --abbrev-ref HEAD 2>$null)
-# Optional executable path prefix (e.g. .venv\Scripts\, ./, /usr/bin/) and .exe suffix,
-# so path-invoked tools like `.venv\Scripts\pytest.exe` are recognised.
-$pathPfx = '([^\s]*[\\/])?'
-$exe = '(\.exe)?'
-
-# Category defaults per level. Per-category overrides win when non-empty.
-$levelDefaults = @{
-    conservative = @{ git_read = 'auto'; fs_read = 'auto'; fs_write = 'ask';  tests = 'ask';  git_feature = 'ask';  git_merge = 'ask';  pkg = 'ask';  databricks = 'ask'; cloud_read = 'ask'  }
-    balanced     = @{ git_read = 'auto'; fs_read = 'auto'; fs_write = 'ask';  tests = 'auto'; git_feature = 'auto'; git_merge = 'auto'; pkg = 'ask';  databricks = 'ask'; cloud_read = 'auto' }
-    autonomous   = @{ git_read = 'auto'; fs_read = 'auto'; fs_write = 'auto'; tests = 'auto'; git_feature = 'auto'; git_merge = 'auto'; pkg = 'auto'; databricks = 'ask'; cloud_read = 'auto' }
-}
-if (-not $levelDefaults.ContainsKey($level)) { $level = 'balanced' }
-function Resolve-Category([string]$name, [string]$envKey) {
-    $ov = Get-AfEnv $envKey ''
-    if ($ov) { return $ov.ToLower() }
-    return $levelDefaults[$level][$name]
-}
-$catGitRead    = Resolve-Category 'git_read'    'AUTONOMY_CAT_GIT_READ'
-$catGitFeature = Resolve-Category 'git_feature' 'AUTONOMY_CAT_GIT_FEATURE'
-$catGitMerge   = Resolve-Category 'git_merge'   'AUTONOMY_CAT_GIT_MERGE'
-$catTests      = Resolve-Category 'tests'       'AUTONOMY_CAT_TESTS'
-$catFsRead     = Resolve-Category 'fs_read'     'AUTONOMY_CAT_FS_READ'
-$catPkg        = Resolve-Category 'pkg'         'AUTONOMY_CAT_PKG_INSTALL'
-$catDatabricks = Resolve-Category 'databricks'  'AUTONOMY_CAT_DATABRICKS'
-$catCloudRead  = Resolve-Category 'cloud_read'  'AUTONOMY_CAT_CLOUD_READ'
-$catFsWrite    = Resolve-Category 'fs_write'    'AUTONOMY_CAT_FS_WRITE'
-
-# Split a command into top-level segments on ; && || | and newlines, honoring
-# single/double quotes so separators INSIDE a quoted string (e.g. a commit
-# message or a -Pattern 'a|b') do not split the command.
-function Split-TopLevel([string]$cmd) {
-    $segs = New-Object System.Collections.Generic.List[string]
-    $sb = New-Object System.Text.StringBuilder
-    $q = [char]0
-    for ($i = 0; $i -lt $cmd.Length; $i++) {
-        $c = $cmd[$i]
-        if ($q -ne [char]0) {
-            [void]$sb.Append($c)
-            if ($c -eq $q) { $q = [char]0 }
-            continue
-        }
-        if ($c -eq '"' -or $c -eq "'") { $q = $c; [void]$sb.Append($c); continue }
-        $n = if ($i + 1 -lt $cmd.Length) { $cmd[$i + 1] } else { [char]0 }
-        if (($c -eq '&' -and $n -eq '&') -or ($c -eq '|' -and $n -eq '|')) {
-            $segs.Add($sb.ToString()); [void]$sb.Clear(); $i++; continue
-        }
-        if ($c -eq ';' -or $c -eq '|' -or $c -eq "`n") {
-            $segs.Add($sb.ToString()); [void]$sb.Clear(); continue
-        }
-        if ($c -eq "`r") { continue }
-        [void]$sb.Append($c)
-    }
-    $segs.Add($sb.ToString())
-    return , $segs.ToArray()
-}
-
-function Emit([string]$decision, [string]$reason) {
-    if ($decision -eq 'ask') {
-        [void](Record-AfAsk -Gate 'block-dangerous' -Reason $reason -Payload $raw)
-    }
-    @{
-        hookSpecificOutput = @{
-            hookEventName            = 'PreToolUse'
-            permissionDecision       = $decision
-            permissionDecisionReason = $reason
-        }
-    } | ConvertTo-Json -Depth 3 -Compress
-    exit 0
-}
-
-$denyTail = "The agent will not run this. If it is genuinely required, either (a) run it yourself " +
-    "-- the agent can prepare the exact command for you to paste and execute -- or (b) make a conscious " +
-    "decision to relax the autonomy policy in .github/af-env.conf."
-
-# ===========================================================================
-# run_task -- resolve the launch into a command line before classifying it.
-#
-# The payload names a task; a name is not a command. The command lives in the
-# project's .vscode/tasks.json, so it is read back here and every scope is
-# reconstructed into a command line. From that point on a task launch is
-# classified by exactly the same tiers as a terminal command -- which is the
-# point: `run_task` was a hole straight through the classifier.
-#
-# Anything that cannot be resolved answers 'ask', never silence. The gate says
-# "I could not judge this" instead of producing the same bytes as consent.
-# ===========================================================================
-if ($isTaskRun) {
-    $askTail = "The task launch could not be classified, so this needs a human decision. Check what the task runs in .vscode/tasks.json."
-    $wsFolder = [string]$inputData.tool_input.workspaceFolder
-    $taskId = [string]$inputData.tool_input.id
-    if (-not $wsFolder -or -not $taskId) {
-        Emit 'ask' "Unclassified task launch: the payload carries no workspaceFolder/id, so the task cannot be looked up. $askTail"
-    }
-    $tasksPath = Join-Path $wsFolder '.vscode/tasks.json'
-    if (-not (Test-Path $tasksPath)) {
-        Emit 'ask' "Unclassified task launch: no .vscode/tasks.json under '$wsFolder', so task '$taskId' cannot be resolved to a command. $askTail"
-    }
-    $tasksDoc = $null
-    try {
-        $tasksDoc = (Get-Content $tasksPath -Raw -ErrorAction Stop) | ConvertFrom-Json -ErrorAction Stop
-    } catch {
-        # tasks.json accepts JSONC in VS Code, so a comment or trailing comma
-        # parses here as nothing at all. Unreadable is not the same as safe.
-        Emit 'ask' "Unclassified task launch: .vscode/tasks.json is not strict JSON (comments or trailing commas), so task '$taskId' cannot be resolved. $askTail"
-    }
-    # VS Code addresses a task as '{type}: {label}' -- captured ids look like
-    # 'shell: tests: all'. Only the first type prefix is stripped; the label
-    # itself may contain a colon.
-    $bareId = $taskId -replace '^[A-Za-z]+:\s+', ''
-    $taskDef = $null
-    foreach ($t in @($tasksDoc.tasks)) {
-        if (-not $t) { continue }
-        $lbl = [string]$t.label
-        if ($lbl -and ($lbl -eq $taskId -or $lbl -eq $bareId)) { $taskDef = $t; break }
-    }
-    if (-not $taskDef) {
-        Emit 'ask' "Unclassified task launch: no task labelled '$bareId' in .vscode/tasks.json. $askTail"
-    }
-    # Variables whose value is produced elsewhere (a prompt, a VS Code command,
-    # a setting) hide the payload from the classifier.
-    $taskText = $taskDef | ConvertTo-Json -Depth 10 -Compress
-    foreach ($v in @('${input:', '${command:', '${config:')) {
-        if ($taskText.Contains($v)) {
-            Emit 'ask' "Unclassified task launch: task '$bareId' contains a '$v...}' variable, so its effective command line is not visible here. $askTail"
-        }
-    }
-    # An OS-specific scope overrides the task scope, so every variant present
-    # must be classified -- reading only `command` classifies a decoy.
-    $runScopes = @($taskDef)
-    foreach ($os in @('windows', 'linux', 'osx')) {
-        if ($taskDef.$os) { $runScopes += $taskDef.$os }
-    }
-    $cmdLines = @()
-    foreach ($o in $runScopes) {
-        if ($o.options -and $o.options.shell) {
-            Emit 'ask' "Unclassified task launch: task '$bareId' overrides options.shell, which moves the executed payload into the shell's own arguments where it cannot be classified. $askTail"
-        }
-        $c = if ($o.command) { [string]$o.command } else { [string]$taskDef.command }
-        $a = if ($null -ne $o.args) { $o.args } else { $taskDef.args }
-        if (-not $c) { continue }
-        $line = if ($a) { ($c + ' ' + ((@($a) | ForEach-Object { [string]$_ }) -join ' ')) } else { $c }
-        $cmdLines += $line.Trim()
-    }
-    $cmdLines = @($cmdLines | Where-Object { $_ })
-    if ($cmdLines.Count -eq 0) {
-        Emit 'ask' "Unclassified task launch: task '$bareId' declares no command (composite or extension-provided task). $askTail"
-    }
-    # Newline-joined: the deny tier scans the whole string and the allow tier
-    # splits on newlines, so every scope must clear the bar independently.
-    $command = $cmdLines -join "`n"
-}
-
-# ---------------------------------------------------------------------------
-# Scan units -- what the DENY tier matches against.
-#
-# The raw command string conflates two things: text that will be executed and
-# text that is merely data. Matching deny patterns against it blocked real work
-# (issue #62): a commit message containing "--force", a probe whose JSON test
-# data contained "Remove-Item -Recurse -Force". Worse, `(\S+\s+)*` in the git
-# rules matched across a `;`, so a genuine `git add` in one statement joined up
-# with prose in the next.
-#
-# Stripping quotes globally would be the wrong fix: the payload of `bash -c
-# "..."` lives inside quotes, and blinding the deny tier to it defeats its
-# purpose. So each statement becomes its own unit, quoted arguments that are
-# themselves executed are promoted to units of their own, and quoted text is
-# dropped only where it is unambiguously prose.
-# ---------------------------------------------------------------------------
-
-# Command words whose quoted arguments are prose, not commands.
-$dataCarrierRe = '^\s*(echo|printf|Write-Host|Write-Output|Write-Error|Write-Verbose|Write-Debug)\b|^\s*git\s+(commit|tag|notes|stash)\b'
-# Flags and commands whose quoted argument is executed.
-$payloadRe = '(?:^|\s)(?:-c|--command|-Command|-e|--eval|-ScriptBlock|-ArgumentList|-Args|/c|/k|iex|Invoke-Expression|eval)\s+(?:"([^"]*)"|''([^'']*)'')'
-
-function Remove-QuotedData([string]$seg) {
-    # An interpolation inside quotes still executes, so those quotes are not data.
-    if ($seg -match '\$\(' -or $seg -match '`') { return $seg }
-    return ($seg -replace '"[^"]*"', '' -replace "'[^']*'", '')
-}
-
-# Git's global options sit between `git` and the subcommand, where every rule
-# anchored at `git <subcommand>` could not see past them (#431). Deny-side only:
-# the allow tier still judges the command as written.
-$gitValue = '(?:"[^"]*"|''[^'']*''|\S+)'
-$gitGlobalRe = '^(\s*git)((?:\s+(?:-[Cc]\s+' + $gitValue + '|--(?:git-dir|work-tree|namespace|config-env)\s+' + $gitValue +
-    '|--[A-Za-z][\w-]*=' + $gitValue + '|--(?:no-pager|paginate|bare|no-replace-objects|literal-pathspecs|glob-pathspecs|noglob-pathspecs|icase-pathspecs|no-optional-locks|no-advice)|-[pP]))+)(?=\s|$)'
-function Remove-GitGlobalOptions([string]$seg) {
-    return ($seg -creplace $gitGlobalRe, '$1')
-}
-
-function Get-ScanUnits([string]$cmd) {
-    $units = New-Object System.Collections.Generic.List[string]
-    foreach ($raw in (Split-TopLevel $cmd)) {
-        if (-not $raw.Trim()) { continue }
-        $seg = Remove-GitGlobalOptions $raw
-        $isBareLiteral = $seg -match '^\s*("[^"]*"|''[^'']*'')\s*$'
-        if ($isBareLiteral -or $seg -match $dataCarrierRe) {
-            $units.Add((Remove-QuotedData $seg))
-        } else {
-            $units.Add($seg)
-        }
-        foreach ($m in [regex]::Matches($seg, $payloadRe)) {
-            $payload = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
-            foreach ($p in (Split-TopLevel $payload)) { if ($p.Trim()) { $units.Add($p) } }
-        }
-    }
-    if ($units.Count -eq 0) { $units.Add($cmd) }
-    return , $units.ToArray()
-}
-
-$scanUnits = Get-ScanUnits $command
-
-# Raw-scanned rules match the whole command line, because the thing they look
-# for spans units. That must not make quoting meaningless for them alone: the
-# same literal was data for every other rule and a command for these (#122).
-# Two strengths, because the two rules have different threat models.
-function Get-InterpreterPayloads([string]$cmd) {
-    $found = New-Object System.Collections.Generic.List[string]
-    foreach ($m in [regex]::Matches($cmd, $payloadRe)) {
-        $v = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
-        if ($v) { $found.Add($v) }
-    }
-    return , $found.ToArray()
-}
-
-# 'exec'  -- every quoted literal is data unless an interpreter executes it. A
-#            `|` inside quotes is not a pipe; only an interpreter makes it one.
-# 'prose' -- only recognised prose carriers are exempted. SQL clients take a
-#            statement positionally (`sqlite3 db "DROP TABLE x"`) as well as
-#            behind a flag, so blanket stripping would launder the real case.
-function Get-RawTargets([string]$cmd, [string]$Strength) {
-    $payloads = Get-InterpreterPayloads $cmd
-    if ($Strength -eq 'exec') {
-        $t = $cmd
-        foreach ($pl in $payloads) { $t = $t.Replace('"' + $pl + '"', ' ').Replace("'" + $pl + "'", ' ') }
-        # An interpolation elsewhere no longer makes every literal a command (#122, 2026-09-29):
-        # single quotes never interpolate; a double-quoted string executes only via $( or a backtick.
-        $t = [regex]::Replace($t, '"[^"]*"|''[^'']*''', {
-                param($m) if ($m.Value.StartsWith('"') -and $m.Value -match '\$\(|`') { $m.Value } else { '' } })
-        return , (@($t) + $payloads)
-    }
-    if ($cmd -match '\$\(' -or $cmd -match '`') { return , (@($cmd) + $payloads) }
-    $stripped = ((Split-TopLevel $cmd | ForEach-Object { Remove-GitGlobalOptions $_ } | ForEach-Object {
-                if ($_ -match $dataCarrierRe -or $_ -match '^\s*("[^"]*"|''[^'']*'')\s*$') { Remove-QuotedData $_ } else { $_ }
-            }) -join ' ; ')
-    return , (@($stripped) + $payloads)
-}
-
-$rawTargetsExec = Get-RawTargets $command 'exec'
-$rawTargetsProse = Get-RawTargets $command 'prose'
-
-function Test-AnyUnit([string]$pattern, [switch]$CaseSensitive) {
-    foreach ($u in $scanUnits) {
-        if ($CaseSensitive) { if ($u -cmatch $pattern) { return $true } }
-        elseif ($u -match $pattern) { return $true }
-    }
-    return $false
-}
-
-# ===========================================================================
-# TIER 1 -- DENY (hard, level-independent). Checked first.
-# Rules are matched per scan unit unless marked rawScan, which is reserved for
-# rules about structure or payload content that legitimately spans units. Those
-# still respect quoting -- see Get-RawTargets for the two strengths.
-# ===========================================================================
-$denyRules = @(
-    @{ p = 'git\s+push\b.*(--force|-f)\b';            why = 'force push (remote history rewrite)' }
-    @{ p = "git\s+push\b.*(\s|:)($protAlt)(\s|$)";    why = 'push to a protected branch' }
-    @{ p = 'git\s+reset\s+--hard';                    why = 'hard reset (state rewrite)' }
-    @{ p = 'git\s+rebase\b';                          why = 'rebase (history rewrite)' }
-    @{ p = 'git\s+branch\b.*--force\b';                why = 'force branch deletion (--force)' }
-    @{ p = "git\s+branch\s+-d\b.*(\s|:)($protAlt)(\s|$)"; why = 'deleting a protected branch' }
-    @{ p = 'git\s+add\s+(\S+\s+)*(--force|-f)(\s|$)'; why = 'git add --force (bypass .gitignore)' }
-    @{ p = 'git\s+add\s+(-\S+\s+)*\.(\s|$)';          why = 'git add . (banned wildcard)' }
-    @{ p = 'git\s+add\s+(\S+\s+)*-A(\s|$)';           why = 'git add -A (banned wildcard)' }
-    @{ p = '--no-verify';                             why = 'bypassing git hooks' }
-    @{ p = 'rm\s+-r[f ].*(\s|=)(/|~|\*)';             why = 'recursive delete of a broad path' }
-    @{ p = 'Remove-Item.*-Recurse.*-Force';           why = 'recursive force delete' }
-    @{ p = 'dd\s+if=.*of=/dev/';                      why = 'raw disk write' }
-    @{ p = 'mkfs\.';                                  why = 'filesystem format' }
-    @{ p = 'format\s+[A-Za-z]:';                      why = 'drive format' }
-    @{ p = 'chmod\s+-R\s+777';                        why = 'world-writable permissions' }
-    @{ p = '\|\s*(bash|sh|iex|Invoke-Expression)\b';  why = 'pipe-to-shell execution'; rawScan = 'exec' }
-    @{ p = 'DROP\s+(TABLE|DATABASE)';                 why = 'destructive SQL'; rawScan = 'prose' }
-    @{ p = 'TRUNCATE\s+TABLE';                        why = 'destructive SQL'; rawScan = 'prose' }
-)
-foreach ($r in $denyRules) {
-    $hit = if ($r.rawScan) {
-        $targets = if ($r.rawScan -eq 'prose') { $rawTargetsProse } else { $rawTargetsExec }
-        [bool]($targets | Where-Object { $_ -match $r.p })
-    } else { Test-AnyUnit $r.p }
-    if ($hit) {
-        Emit 'deny' ("Policy hard-deny: $($r.why). $denyTail")
-    }
-}
-# Branch force-deletion (-D) needs a CASE-SENSITIVE check so that the safe
-# lowercase -d (which git only allows for already-merged branches) is not denied.
-if (Test-AnyUnit 'git\s+branch\s+(\S+\s+)*-D(\s|$)' -CaseSensitive) {
-    Emit 'deny' ("Policy hard-deny: force branch deletion (-D deletes unmerged commits). $denyTail")
-}
-# Category-scoped deny (when autonomy policy sets a category to 'deny').
-if ($catPkg -eq 'deny' -and (Test-AnyUnit '(?i)\bpip3?\s+(install|uninstall)\b|(?i)\bconda\s+(install|remove)\b')) {
-    Emit 'deny' ("Policy hard-deny: package management (AUTONOMY_CAT_PKG_INSTALL=deny). $denyTail")
-}
-if ($catDatabricks -eq 'deny' -and (Test-AnyUnit '(?i)\bdatabricks\b')) {
-    Emit 'deny' ("Policy hard-deny: Databricks CLI (AUTONOMY_CAT_DATABRICKS=deny). $denyTail")
-}
-
-# ===========================================================================
-# Foreign work (#120) -- ask before a git command discards a path that was
-# already uncommitted when this session started. Ahead of TIER 2, which
-# auto-allows `git restore`. No interpreter or no baseline: no opinion here.
-# ===========================================================================
-if ($command -match 'git\s.*\b(checkout|restore|stash|clean|switch)\b') {
-    $fgCore = Join-Path $PSScriptRoot '_foreign_guard.py'
-    $fgPython = if ($AfCodeRoot -and (Test-Path $fgCore)) { Get-AfPython } else { '' }
-    if ($fgPython) {
+$verdict = Invoke-AfBlockDangerousPolicy -InputData $inputData -ConfLines $confLines `
+    -BranchResolver { git rev-parse --abbrev-ref HEAD 2>$null } `
+    -RefExists { param($ref) [bool](git rev-parse --verify --quiet "$ref^{commit}" 2>$null) } `
+    -ForeignGuard {
+        param($command, $sessionId)
+        $fgCore = Join-Path $hookDir '_foreign_guard.py'
+        $fgPython = if ($AfCodeRoot -and (Test-Path $fgCore)) { Get-AfPython } else { '' }
+        if (-not $fgPython) { return '' }
         $env:AF_FG_COMMAND = $command
-        $env:AF_FG_SESSION = [string]$inputData.session_id
-        $fg = (& $fgPython $fgCore check $AfCodeRoot 2>$null | Out-String).Trim()
-        if ($fg) {
-            if ($fg -match '"permissionDecision"\s*:\s*"ask"') {
-                $fgVerdict = $fg | ConvertFrom-Json
-                [void](Record-AfAsk -Gate 'foreign-work' `
-                    -Reason ([string]$fgVerdict.hookSpecificOutput.permissionDecisionReason) -Payload $raw)
-            }
-            Write-Output $fg
-            exit 0
-        }
+        $env:AF_FG_SESSION = $sessionId
+        (& $fgPython $fgCore check $AfCodeRoot 2>$null | Out-String).Trim()
     }
+if ($verdict.AskGate) {
+    [void](Record-AfAsk -Gate $verdict.AskGate -Reason $verdict.AskReason -Payload $raw)
 }
-
-# ===========================================================================
-# TIER 2 -- ALLOW (auto-approve safe commands), segment-based & category gated.
-#
-# The command is split into segments on ; && || | and auto-approved only when
-# EVERY segment is individually safe. This lets common composites through
-# (e.g. `cd ... ; pytest ... 2>&1 | Select-Object -Last 30`) while still
-# refusing anything with an unknown/mutating segment. Command substitution
-# ($( ) / backticks) and file-write redirects (> file) are never auto-allowed.
-# Note: DENY already scanned the whole string above, so hidden dangerous
-# segments (e.g. `... ; rm -rf /`) are blocked before reaching here.
-# ===========================================================================
-function Test-WriteRedirect([string]$seg) {
-    # File-write redirect (> file / >> file). Excludes fd duplication (2>&1, >&1).
-    return ($seg -match '>>?\s*[^&\s>]')
-}
-function Test-SafeSegment([string]$seg) {
-    $s = $seg.Trim()
-    if (-not $s) { return $true }
-    # strip a leading simple assignment ($x = ...) -- no side effect beyond its RHS
-    if ($s -match '^\s*\$[\w:]+\s*=\s*(.+)$') { $s = $Matches[1].Trim() }
-    # strip a leading call operator (& "path\tool" ...) -- benign invocation wrapper
-    if ($s -match '^\s*&\s+(.+)$') { $s = $Matches[1].Trim() }
-    if (Test-WriteRedirect $s) {
-        if ($catFsWrite -ne 'auto') { return $false }
-        # FS_WRITE=auto: a file redirect is allowed; strip it and vet the left command
-        $s = ($s -replace '>>?\s*[^\s&>|]+', '').Trim()
-        if (-not $s) { return $true }
-    }
-    # background / inline chaining operator ( & ) that the split does not handle;
-    # ( & is not split on because it also appears in fd redirects like 2>&1 )
-    if ($s -match '(?<![0-9>&])&(?!&)') { return $false }
-    # navigation (no data change)
-    if ($s -match '(?i)^(cd|Set-Location|pushd|popd|Push-Location|Pop-Location)\b') { return $true }
-    # safe display / filter commands (typical pipe right-hand side)
-    if ($s -match '(?i)^(Select-Object|Select-String|Sort-Object|Measure-Object|Out-String|Out-Host|Format-Table|Format-List|Get-Unique|Join-Path|Split-Path|Resolve-Path|more|wc|findstr|grep|ConvertFrom-Json|ConvertTo-Json)\b') { return $true }
-    # version probes: <binary> [flags] --version (no positional file arg before it)
-    if ($s -match '(?i)^\s*[\w./\\-]+(\s+-{1,2}[\w=.,-]+)*\s+--version\b') { return $true }
-    # git read-only
-    if ($catGitRead -eq 'auto') {
-        if ($s -match '^\s*git\s+(status|diff|log|show|rev-parse|rev-list|remote|blame|describe|shortlog|for-each-ref|ls-files|config\s+--get|fetch)\b') { return $true }
-        # read-only config access: only recognised read flags + at most one key,
-        # nothing after (a trailing value token would make it a write).
-        if ($s -match '^\s*git\s+config\s+(--(global|local|system|worktree|get|get-all|get-regexp|list|show-origin|show-scope)\s+)*[\w.-]*\s*$') { return $true }
-        if ($s -match '^\s*git\s+stash\s+list\b') { return $true }
-        # branch listing (creating a ref is harmless; delete/rename/copy excluded)
-        if ($s -match '^\s*git\s+branch\b' -and $s -notmatch '\s-[dDmMcC]\b' -and $s -notmatch '--(delete|move|copy|force)\b') { return $true }
-        # tag listing (create/delete/annotate/sign/force excluded)
-        if ($s -match '^\s*git\s+tag\b' -and $s -notmatch '\s-[adfsm]\b' -and $s -notmatch '--(delete|force|sign|annotate)\b' -and $s -notmatch '^\s*git\s+tag\s+[^\s-]') { return $true }
-    }
-    # git feature-branch work
-    if ($catGitFeature -eq 'auto') {
-        if ($s -match '^\s*git\s+commit\b') { return $true }
-        if ($s -match '^\s*git\s+add\s+\S') { return $true }
-        if ($s -match '^\s*git\s+(checkout|switch)\s+-[bc]\s+agent/') { return $true }
-        if ($s -match '^\s*git\s+(checkout|switch)\s+agent/') { return $true }
-        # switch to a branch (never touches files, so always safe)
-        if ($s -match '^\s*git\s+switch\s+[\w./-]+\s*$') { return $true }
-        # checkout an existing ref (branch/tag/commit) -- verified so a file
-        # pathspec (which would discard changes) is NOT auto-approved
-        if ($s -match '^\s*git\s+checkout\s+([\w./-]+)\s*$' -and (git rev-parse --verify --quiet "$($Matches[1])^{commit}" 2>$null)) { return $true }
-        # delete a merged, non-protected branch: `git branch -d` only removes a
-        # branch git considers fully merged (it refuses otherwise) and the ref is
-        # recreatable, so it is safe. Force (-D/--force) and protected are denied above.
-        if ($s -match '^\s*git\s+branch\s+(\S+\s+)*-d(\s|$)' -and $s -cnotmatch '\s-D\b' -and $s -notmatch '--force\b' -and $s -notmatch "(\s|:)($protAlt)(\s|$)") { return $true }
-        if ($s -match '^\s*git\s+push\b' -and $s -notmatch "(\s|:)($protAlt)(\s|$)") {
-            if ($s -match 'agent/') { return $true }                                  # explicit feature target
-            if ($curBranch -and ($protected -notcontains $curBranch)) { return $true } # bare push on a feature branch
-        }
-        if ($s -match '^\s*git\s+(restore|switch\s+agent/)\b') { return $true }
-    }
-    # reversible topology changes (pull / merge / cherry-pick / revert) --
-    # recoverable via reflog / ORIG_HEAD, so safe to run autonomously.
-    if ($catGitMerge -eq 'auto' -and $s -match '^\s*git\s+(pull|merge|cherry-pick|revert)\b') { return $true }
-    # tests / lint / typecheck / static analysis (read-only, no durable change).
-    # Accepts a path prefix so `.venv\Scripts\pytest.exe` etc. are recognised.
-    if ($catTests -eq 'auto' -and (
-            $s -match "(?i)^\s*$pathPfx(pytest|mypy|pyright|tox|nox|radon|bandit|flake8|pylint|vulture|pip-audit)$exe\b" -or
-            $s -match "(?i)^\s*${pathPfx}python(\d)?$exe\s+-m\s+(pytest|mypy|pyright)\b" -or
-            $s -match "(?i)^\s*${pathPfx}ruff$exe\s+(check|format\s+--check)\b" -or
-            $s -match '(?i)run-tests')) { return $true }
-    # read-only filesystem & info commands
-    if ($catFsRead -eq 'auto' -and $s -match '(?i)^\s*(ls|dir|Get-ChildItem|cat|type|Get-Content|head|tail|Test-Path|pwd|Get-Location|where(\.exe)?|Get-Command|Get-Date|whoami|hostname|Get-Process|Get-Service|echo|Write-Output|Write-Host)\b') { return $true }
-    # read-only package / environment queries
-    if ($catFsRead -eq 'auto' -and ($s -match "(?i)^\s*${pathPfx}pip3?$exe\s+(list|show|freeze|check)\b" -or $s -match '(?i)^\s*"?(\S*[\\/])?python(\d)?(\.exe)?"?\s+-m\s+pip\s+(list|show|freeze|check)\b')) { return $true }
-    # package managers (autonomy-gated)
-    if ($catPkg -eq 'auto' -and ($s -match "(?i)^\s*${pathPfx}pip3?$exe\s+(install|uninstall)\b" -or $s -match '(?i)^\s*python(\d)?\s+-m\s+pip\s+(install|uninstall)\b' -or $s -match "(?i)^\s*${pathPfx}conda$exe\s+(install|remove)\b")) { return $true }
-    # read-only cloud CLI queries (databricks list/get, az show/list).
-    # Excludes anything touching secrets/credentials/tokens (would print them).
-    if ($catCloudRead -eq 'auto' -and $s -notmatch '(?i)(secret|credential|token|password|keyvault|get-access-token)' -and ($s -match '(?i)^\s*databricks\s+[\w-]+\s+(list|get|ls|show)\b' -or $s -match '(?i)^\s*databricks\s+current-user\b' -or $s -match '(?i)^\s*az\s+.+\b(show|list)\b')) { return $true }
-    # databricks CLI (autonomy-gated)
-    if ($catDatabricks -eq 'auto' -and $s -match '(?i)^\s*databricks\b') { return $true }
-    # local filesystem writes (opt-in via AUTONOMY_CAT_FS_WRITE). Recursive/force
-    # deletes and broad rm are hard-denied above, so only the safe subset is here.
-    if ($catFsWrite -eq 'auto') {
-        if ($s -match '(?i)^\s*(Out-File|Set-Content|Add-Content|Tee-Object|New-Item|mkdir|md|Move-Item|Copy-Item|mv|cp|touch)\b') { return $true }
-        if ($s -match '(?i)^\s*(Remove-Item|rm|del|erase)\b' -and $s -notmatch '(?i)(-recurse|-force|\*)' -and $s -notmatch '(^|\s)-[rf]{1,2}\b') { return $true }
-    }
-    return $false
-}
-
-# Suppress auto-allow when the command uses grouping / subexpression /
-# scriptblock metacharacters OUTSIDE quotes -- e.g. `Write-Host (Remove-Item x)`
-# executes the inner command (bash `(cmd)` is a subshell; PowerShell `(cmd)`
-# is a sub-pipeline). Quote-strip first so conventional-commit messages like
-# "fix(scope): ..." are not falsely suppressed.
-$strippedForGuard = $command -replace '"[^"]*"', '' -replace "'[^']*'", ''
-if ($strippedForGuard -notmatch '[`({]') {
-    $segments = Split-TopLevel $command
-    $anySeg = $false
-    $allSafe = $true
-    foreach ($seg in $segments) {
-        if (-not $seg.Trim()) { continue }
-        $anySeg = $true
-        if (-not (Test-SafeSegment $seg)) { $allSafe = $false; break }
-    }
-    if ($anySeg -and $allSafe) {
-        Emit 'allow' 'Safe: every command segment is read-only or a known-safe operation.'
-    }
-}
-
-# ===========================================================================
-# TIER 3 -- ASK (durable change, confirm).
-#
-# A confirmation prompt is a question put to a human, and a question that does
-# not say what it is about cannot be answered -- it can only be waved through.
-# The whole tier used to share one sentence ("This command makes a durable
-# change") for eleven different rules, naming neither the rule that fired nor
-# the command it fired on, while the deny tier next door has been specific all
-# along (issue #78). Each rule now says what it will actually do, and the
-# command is echoed so the answer is about the command rather than about the
-# category.
-#
-# Emitting 'ask' also preempts Copilot's own assessment, which categorises the
-# command and describes in plain language what it will do -- better than any
-# fixed sentence we can write here. So the tier is scoped to what we know that
-# VS Code cannot: repository and branch state, autonomy policy, effects that
-# land outside git. Four rules were handed back on that basis (issue #78a):
-#
-#   pip install/uninstall, conda install/remove   an ordinary environment
-#   ruff format                                   change, or a repo-local
-#   New-Item / mkdir / Copy-Item / Move-Item      rewrite git can undo
-#
-# Handing a rule back is not the same as approving it. Returning {} defers to
-# the user's chat.tools.terminal.autoApprove settings; where those do not cover
-# the command -- which is the normal case -- the result is a *better* prompt,
-# not a missing one. Where they do cover it, the user has already said what he
-# wants and our sentence was overriding him.
-#
-# Deletion stays ours because git cannot undo it; checkout/switch stays because
-# its path form discards uncommitted work and 'git checkout' is a plausible
-# autoApprove prefix; tag, databricks and az stay because their effect reaches
-# past this working tree.
-# ===========================================================================
-$askRules = @(
-    @{ p = 'git\s+merge\b';      why = "'git merge' rewrites the working tree and may leave conflict markers in tracked files" }
-    @{ p = 'git\s+(checkout|switch)\b'; why = "'git checkout'/'git switch' changes the checked-out branch, and with a path argument it discards uncommitted changes to that path" }
-    @{ p = 'git\s+tag\b';        why = "'git tag' creates or moves a tag, which is a release marker others may already rely on" }
-    @{ p = '(?i)\bdatabricks\b.*\b(submit|run|create|update|delete|import|export|deploy)\b'; why = 'this Databricks CLI call acts on a remote workspace, where the effect is outside this repository and outside git' }
-    @{ p = '(?i)\baz\b.*\b(create|set|delete|update|deploy)\b'; why = 'this Azure CLI call changes cloud resources, where the effect is outside this repository and may cost money' }
-    @{ p = '(?i)Remove-Item\b';  why = "'Remove-Item' deletes files or directories" }
-    @{ p = '(?i)(^|\s)rm\b';     why = "'rm' deletes files or directories" }
-)
-# Echoing the command is the point of the prompt, but an unbounded string in a
-# dialog is its own way of hiding information.
-$shown = $command -replace '\s+', ' '
-if ($shown.Length -gt 300) { $shown = $shown.Substring(0, 297) + '...' }
-# Scan the quote-stripped command so quoted literals (e.g. a commit message
-# mentioning "databricks ... export") do not falsely trigger an ASK rule.
-foreach ($r in $askRules) {
-    if ($strippedForGuard -match $r.p) {
-        Emit 'ask' ("Durable change: $($r.why). Confirm it is intentional. Command: $shown")
-    }
-}
-
-# Default: defer to the user's approval settings (fail-safe -- never auto-allow).
-Write-Output '{}'
+Write-Output $verdict.Output
+exit 0
