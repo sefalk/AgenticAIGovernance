@@ -153,3 +153,9 @@ Report the issue **number and URL** for every create. A create without a
 returned number cannot be verified and must be treated as a failed create,
 not a successful one — re-run the duplicate search rather than re-creating
 blindly.
+
+A write that returns `"status":"awaiting_user_submission"` has **not** run.
+The server handed it to an interactive form for the human (#573); report it
+as pending and make no call that depends on it. The deployed `.mcp.json` turns
+this off with `X-MCP-Features: mcp_apps_disable_form_deferral`; if you see the
+status anyway, that header is missing — say so in the return.

@@ -124,6 +124,10 @@ At the start of each invocation:
    - **optional** — return `DEGRADED` with the full drafted pull request body,
      so the human can open it by hand. A suppressed request that leaves no
      artifact is a silently dropped piece of work.
+4. A `create_pull_request` or `update_pull_request` result with
+   `"status":"awaiting_user_submission"` has **not** run: the server handed the
+   call to a form for the human (#573). Report it as pending, never as created,
+   and make no dependent call (merge, auto-merge) until a real result arrives.
 
 ## Branch Publication Precondition (Mandatory)
 

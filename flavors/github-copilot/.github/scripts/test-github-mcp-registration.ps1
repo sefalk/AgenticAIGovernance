@@ -1,4 +1,4 @@
-# Regression tests for the af-github MCP namespace and its .mcp.json registration (#547).
+# Regression tests for the af-github MCP namespace and its .mcp.json registration (#547, #573).
 #
 # In the Copilot harness a subagent grant `github/<tool>` does not resolve when
 # the server is named `github`; the same server under another name resolves in
@@ -107,9 +107,14 @@ try {
             $server.url -eq 'https://api.githubcopilot.com/mcp/') (Get-Content -LiteralPath $mcp -Raw)
         Add-Result 'D3_token_is_an_env_reference_not_a_secret' ($null -ne $server -and
             $server.headers.Authorization -eq 'Bearer ${AF_GH_TOKEN}') (Get-Content -LiteralPath $mcp -Raw)
+        # #573: without it the server hands issue/PR writes to a form the human must submit.
+        $features = if ($null -ne $server) { $server.headers.PSObject.Properties['X-MCP-Features'] } else { $null }
+        Add-Result 'D10_writes_execute_without_a_form' ($null -ne $features -and
+            $features.Value -eq 'mcp_apps_disable_form_deferral') (Get-Content -LiteralPath $mcp -Raw)
     } else {
         Add-Result 'D2_created_file_registers_af-github_over_http' $false 'no file'
         Add-Result 'D3_token_is_an_env_reference_not_a_secret' $false 'no file'
+        Add-Result 'D10_writes_execute_without_a_form' $false 'no file'
     }
 
     # --- deploy: absent .mcp.json, dry run ---------------------------------
