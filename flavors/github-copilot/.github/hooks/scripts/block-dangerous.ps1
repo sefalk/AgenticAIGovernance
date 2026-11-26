@@ -474,7 +474,9 @@ function Invoke-AfBlockDangerousPolicy {
         @{ p = 'Remove-Item.*-Recurse.*-Force';           why = 'recursive force delete' }
         @{ p = 'dd\s+if=.*of=/dev/';                      why = 'raw disk write' }
         @{ p = 'mkfs\.';                                  why = 'filesystem format' }
-        @{ p = 'format\s+[A-Za-z]:';                      why = 'drive format' }
+        # A drive format is the command `format`/`format.com` (#577), not the word
+        # in front of an absolute path: `ruff format C:\x.py` is not a drive format.
+        @{ p = '(^\s*(&\s*)?|\bcmd(\.exe)?\s+/[ck]\s+)(\S*[\\/])?format(\.com)?\s+[A-Za-z]:'; why = 'drive format' }
         @{ p = 'chmod\s+-R\s+777';                        why = 'world-writable permissions' }
         @{ p = '\|\s*(bash|sh|iex|Invoke-Expression)\b';  why = 'pipe-to-shell execution'; rawScan = 'exec' }
         @{ p = 'DROP\s+(TABLE|DATABASE)';                 why = 'destructive SQL'; rawScan = 'prose' }
