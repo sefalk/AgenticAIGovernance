@@ -277,6 +277,18 @@
       ".github/scripts/analyze-retry-economy.py",
       ".github/MANIFEST.md"
     ],
+    "test-venv-resolver.ps1": [
+      ".github/scripts/_venv.ps1",
+      ".github/scripts/_venv.sh",
+      ".github/scripts/check-venv-editable.py",
+      ".github/scripts/run-lint.ps1",
+      ".github/scripts/run-lint.sh",
+      ".github/scripts/run-tests.ps1",
+      ".github/scripts/run-tests.sh",
+      ".github/scripts/run-metrics.ps1",
+      ".github/scripts/setup-worktree.ps1",
+      ".github/af-env.conf"
+    ],
     "test-worktree-scripts.ps1": [
       ".github/scripts/setup-worktree.ps1",
       ".github/scripts/setup-worktree.sh",
