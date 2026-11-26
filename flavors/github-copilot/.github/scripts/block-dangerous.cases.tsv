@@ -121,3 +121,13 @@ Copilot Bash: tagging is still ours to ask about	agent/fixture	ask	{"tool_name":
 Copilot task subagent call is not a terminal	agent/fixture	silent	{"tool_name":"task","tool_input":{"agent_type":"arbiter","name":"review"}}
 Copilot Agent subagent call is not a terminal	agent/fixture	silent	{"tool_name":"Agent","tool_input":{"agent_type":"arbiter","name":"review"}}
 Copilot view read is not a terminal	agent/fixture	silent	{"tool_name":"view","tool_input":{"path":"README.md"}}
+
+# Drive format (#577). A Windows drive format is a command named `format`, not
+# the word `format` in front of an absolute path: the unanchored rule
+# hard-denied `ruff format C:\...`, and a hard deny is terminal for an agent.
+a formatter run on an absolute Windows path is not a drive format	agent/fixture	silent	{"tool_name":"runInTerminal","tool_input":{"command":"ruff format C:\\work\\x.py"}}
+a module formatter run on an absolute Windows path is not a drive format	agent/fixture	silent	{"tool_name":"runInTerminal","tool_input":{"command":"python -m ruff format C:\\work\\x.py"}}
+format of a drive is denied	agent/fixture	deny	{"tool_name":"runInTerminal","tool_input":{"command":"format C:"}}
+quick format of a drive is denied	agent/fixture	deny	{"tool_name":"runInTerminal","tool_input":{"command":"format D: /q"}}
+format of a drive through cmd /c is denied	agent/fixture	deny	{"tool_name":"runInTerminal","tool_input":{"command":"cmd /c format E:"}}
+format.com by path is denied	agent/fixture	deny	{"tool_name":"runInTerminal","tool_input":{"command":"C:/Windows/System32/format.com F:"}}

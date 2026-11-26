@@ -524,7 +524,9 @@ deny_patterns=(
     'Remove-Item.*-Recurse.*-Force'
     'dd\s+if=.*of=/dev/'
     'mkfs\.'
-    'format\s+[A-Za-z]:'
+    # A drive format is the command format/format.com (#577), not the word in
+    # front of an absolute path: `ruff format C:\x.py` is not a drive format.
+    '(^\s*(&\s*)?|\bcmd(\.exe)?\s+/[ck]\s+)(\S*[\\/])?format(\.com)?\s+[A-Za-z]:'
     'chmod\s+-R\s+777'
 )
 # Rules about structure or payload content that legitimately spans units, and
