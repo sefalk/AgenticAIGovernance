@@ -71,15 +71,12 @@ case "$SCOPE" in
     *) echo "ERROR: invalid scope '$SCOPE'. Use: all|src|tests|changed"; exit 1 ;;
 esac
 
-# Resolve venv python (same contract as run-tests.sh)
-PYTHON="$WORKSPACE_ROOT/.venv/bin/python"
-if [[ ! -x "$PYTHON" ]]; then
-    PYTHON="$WORKSPACE_ROOT/.venv/Scripts/python.exe"
-fi
-if [[ ! -x "$PYTHON" ]]; then
-    echo "ERROR: venv python not found under $WORKSPACE_ROOT/.venv"
-    exit 1
-fi
+# Resolve venv python (same contract as run-tests.sh; search order in _venv.sh)
+# shellcheck source=_venv.sh
+. "$SCRIPT_DIR/_venv.sh"
+af_resolve_venv "$WORKSPACE_ROOT" || exit 1
+af_enable_venv
+PYTHON="$AF_VENV_PYTHON"
 
 cd "$WORKSPACE_ROOT"
 
@@ -170,8 +167,8 @@ if [[ "$FIX" == true ]]; then
             ;;
     esac
 
-    RUFF="$WORKSPACE_ROOT/.venv/bin/ruff"
-    [[ ! -x "$RUFF" ]] && RUFF="$WORKSPACE_ROOT/.venv/Scripts/ruff.exe"
+    RUFF="$AF_VENV_BIN/ruff"
+    [[ ! -x "$RUFF" ]] && RUFF="$AF_VENV_BIN/ruff.exe"
     if [[ ! -x "$RUFF" ]]; then
         RUFF="$(command -v ruff || true)"
     fi

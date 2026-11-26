@@ -26,12 +26,15 @@ if (Test-Path $confPath) {
 $srcPath = Join-Path $workspaceRoot $srcDir
 $testsPath = Join-Path $workspaceRoot 'tests'
 
-# Resolve venv python
-$python = Join-Path $workspaceRoot '.venv/Scripts/python.exe'
-if (-not (Test-Path $python -ErrorAction SilentlyContinue)) {
-    Write-Output "ERROR: venv python not found at $python"
+# Resolve venv python (search order in _venv.ps1)
+. (Join-Path $PSScriptRoot '_venv.ps1')
+$venv = Resolve-AfVenv $workspaceRoot
+if (-not $venv.Python) {
+    Write-Output $venv.Message
     exit 1
 }
+Enable-AfVenv $venv
+$python = $venv.Python
 
 Push-Location $workspaceRoot
 try {

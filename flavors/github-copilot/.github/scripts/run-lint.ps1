@@ -57,15 +57,15 @@ if (Test-Path $confPath) {
     if ($b) { $baseBranch = $b.Matches[0].Groups[1].Value.Trim() }
 }
 
-# Resolve venv python (same contract as run-tests.ps1)
-$python = Join-Path $workspaceRoot '.venv/Scripts/python.exe'
-if (-not (Test-Path $python -ErrorAction SilentlyContinue)) {
-    $python = Join-Path $workspaceRoot '.venv/bin/python'
-}
-if (-not (Test-Path $python -ErrorAction SilentlyContinue)) {
-    Write-Output "ERROR: venv python not found under $workspaceRoot/.venv"
+# Resolve venv python (same contract as run-tests.ps1; search order in _venv.ps1)
+. (Join-Path $PSScriptRoot '_venv.ps1')
+$venv = Resolve-AfVenv $workspaceRoot
+if (-not $venv.Python) {
+    Write-Output $venv.Message
     exit 1
 }
+Enable-AfVenv $venv
+$python = $venv.Python
 
 # --- Collect target files ---
 # Linting scope is wider than the quality scope: ruff violations in tests/ are
@@ -170,9 +170,9 @@ try {
             exit 1
         }
 
-        $ruff = Join-Path $workspaceRoot '.venv/Scripts/ruff.exe'
+        $ruff = Join-Path $venv.Bin 'ruff.exe'
         if (-not (Test-Path $ruff -ErrorAction SilentlyContinue)) {
-            $ruff = Join-Path $workspaceRoot '.venv/bin/ruff'
+            $ruff = Join-Path $venv.Bin 'ruff'
         }
         if (-not (Test-Path $ruff -ErrorAction SilentlyContinue)) {
             $ruffCmd = Get-Command ruff -ErrorAction SilentlyContinue
