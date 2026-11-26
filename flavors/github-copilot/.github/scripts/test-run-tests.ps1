@@ -44,6 +44,14 @@ $runTestsPs1 = (Resolve-Path (Join-Path $scriptDir 'run-tests.ps1')).Path
 $runTestsSh  = (Resolve-Path (Join-Path $scriptDir 'run-tests.sh')).Path
 $repoRootAF  = (Resolve-Path (Join-Path $scriptDir '..' | Join-Path -ChildPath '..')).Path
 
+# The runners dot-source their venv resolver (#579); a fixture without it is
+# a broken payload, not the runner under test.
+function Copy-RunnerHelpers([string]$ws) {
+    foreach ($h in @('_venv.ps1', '_venv.sh', 'check-venv-editable.py')) {
+        Copy-Item (Join-Path $scriptDir $h) (Join-Path $ws ('.github/scripts/' + $h))
+    }
+}
+
 . (Join-Path $scriptDir '_suite_env.ps1')
 function Resolve-Python { Get-AfSuitePython $scriptDir }
 
@@ -84,6 +92,7 @@ function New-FakePytestWorkspace([string]$tag) {
         Set-Content -Path (Join-Path $ws $f) -Value '' -Encoding ascii
     }
     Copy-Item $runTestsPs1 (Join-Path $ws '.github/scripts/run-tests.ps1')
+    Copy-RunnerHelpers $ws
     Invoke-Py @('-m', 'venv', '--without-pip', (Join-Path $ws '.venv')) *> $null
 
     $fxPy = Join-Path $ws '.venv/Scripts/python.exe'
@@ -245,6 +254,7 @@ for a in sys.argv[1:]:
     New-Item -ItemType Directory -Path (Join-Path $ws '.github/scripts') -Force | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $ws 'tests/domain')     -Force | Out-Null
     Copy-Item $runTestsPs1 (Join-Path $ws '.github/scripts/run-tests.ps1')
+    Copy-RunnerHelpers $ws
 
     Invoke-Py @('-m', 'venv', '--without-pip', (Join-Path $ws '.venv')) *> $null
     $fxPython = Join-Path $ws '.venv/Scripts/python.exe'
@@ -300,6 +310,7 @@ for a in sys.argv[1:]:
     New-Item -ItemType Directory -Path (Join-Path $ws2 '.github/scripts') -Force | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $ws2 'tests') -Force | Out-Null
     Copy-Item $runTestsPs1 (Join-Path $ws2 '.github/scripts/run-tests.ps1')
+    Copy-RunnerHelpers $ws2
     Invoke-Py @('-m', 'venv', '--without-pip', (Join-Path $ws2 '.venv')) *> $null
     $fxPython2 = Join-Path $ws2 '.venv/Scripts/python.exe'
     if (-not (Test-Path $fxPython2)) { $fxPython2 = Join-Path $ws2 '.venv/bin/python' }
@@ -452,6 +463,7 @@ print('3 passed in 0.42s')
         New-Item -ItemType Directory -Path (Join-Path $wsSh 'tests/contracts') -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $wsSh '.venv/bin') -Force | Out-Null
         Copy-Item $runTestsSh (Join-Path $wsSh '.github/scripts/run-tests.sh')
+        Copy-RunnerHelpers $wsSh
 
         # run-tests.sh only requires .venv/bin/python to be executable; a shim
         # that prints a pytest summary is enough and keeps the case hermetic.
@@ -563,6 +575,7 @@ print('3 passed in 0.42s')
         New-Item -ItemType Directory -Path (Join-Path $wsS 'tests/contracts') -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $wsS '.venv/bin') -Force | Out-Null
         Copy-Item $runTestsSh (Join-Path $wsS '.github/scripts/run-tests.sh')
+        Copy-RunnerHelpers $wsS
 
         # The shim copies the log while the runner is blocked on it -- the bash
         # equivalent of the fake pytest snapshot used above.
@@ -802,6 +815,7 @@ print('3 passed in 0.42s')
         New-Item -ItemType Directory -Path (Join-Path $wsQ 'tests/domain') -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $wsQ '.venv/bin') -Force | Out-Null
         Copy-Item $runTestsSh (Join-Path $wsQ '.github/scripts/run-tests.sh')
+        Copy-RunnerHelpers $wsQ
         $shimQ = Join-Path $wsQ '.venv/bin/python'
         # Single-quoted here-string: the shim's own "$@" must survive verbatim.
         $shimBodyQ = @'

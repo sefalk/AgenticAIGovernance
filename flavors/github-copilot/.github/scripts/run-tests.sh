@@ -87,12 +87,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Resolve venv python
-PYTHON="$WORKSPACE_ROOT/.venv/bin/python"
-if [[ ! -x "$PYTHON" ]]; then
-    echo "ERROR: venv python not found at $PYTHON"
-    exit 1
-fi
+# Resolve venv python (search order in _venv.sh)
+# shellcheck source=_venv.sh
+. "$SCRIPT_DIR/_venv.sh"
+af_resolve_venv "$WORKSPACE_ROOT" || exit 1
+af_check_venv_isolation "$SCRIPT_DIR" || exit 1
+af_enable_venv
+PYTHON="$AF_VENV_PYTHON"
 
 # Validate --file if provided
 if [[ -n "$FILE" ]]; then

@@ -41,7 +41,10 @@ Use `run_task` with the task label. Arguments are fixed — no dynamic params.
 | `lint: ruff fix` | `-Scope all -Fix` | refactorer |
 
 All `lint:` tasks call `.github/scripts/run-lint.ps1`, which resolves the venv
-interpreter itself and derives the rule set from `LINTING_STRICTNESS` in
+interpreter itself — the workspace `.venv`, else the git toplevel's, else in a
+`WORKTREE_VENV_MODE=shared` worktree the main checkout's; nothing found is
+BLOCKED with the setup command a human runs (#579) — and derives the rule set
+from `LINTING_STRICTNESS` in
 `af-env.conf`. **Never invoke `ruff` directly** — task shells do not activate
 the venv, so a bare `ruff` command fails with `CommandNotFoundException`, and a
 direct call would bypass the configured strictness. It also would not

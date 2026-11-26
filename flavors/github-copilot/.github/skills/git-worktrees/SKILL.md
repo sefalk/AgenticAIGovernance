@@ -126,6 +126,15 @@ worktree instead of the main-checkout CWD, so quality gates (pytest,
 
 Only ask the human to choose if **both** strategies fail.
 
+The runners (`run-lint`, `run-tests`, `run-metrics`) follow the same rule on
+their own (#579, `.github/scripts/_venv.ps1` / `_venv.sh`): workspace `.venv`,
+then the git toplevel's, then — in `shared` mode only — the main checkout's.
+They print `NOTE: venv: shared -> {repo_root}` when they borrow it. In
+`isolated` mode a worktree without its own `.venv` is BLOCKED, never silently
+pointed at the parent. `run-tests` also refuses a shared venv that holds an
+editable install of the main checkout (pytest would import the main
+checkout's code, not the worktree's): switch that workflow to `isolated`.
+
 **7. Add to the VS Code workspace.** If a `.code-workspace` file exists at the
 repo root, add the worktree folder; otherwise create one with this structure:
 
