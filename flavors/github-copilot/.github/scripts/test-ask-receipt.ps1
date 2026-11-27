@@ -678,7 +678,17 @@ try {
         tool_name = 'runInTerminal'
         tool_input = @{ command = 'python -c "print(1)"' }
     } | ConvertTo-Json -Depth 4 -Compress
-    $coordinatorScript = Join-Path $hookScripts 'coordinator-pretooluse.ps1'
+    # The bootstrap ask fires only when no project venv resolves. The resolver
+    # also finds the git toplevel's and, in a worktree, the main checkout's venv
+    # (#579), so the hook runs from a copy outside any repository: otherwise the
+    # verdict depends on which venvs the host happens to have.
+    $coordinatorRoot = Join-Path $fixture 'coordinator-project'
+    $coordinatorGh = Join-Path $coordinatorRoot '.github'
+    New-Item -ItemType Directory -Path (Join-Path $coordinatorGh 'scripts') -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $ghDir 'hooks') -Destination $coordinatorGh -Recurse -Force
+    Copy-Item -Path (Join-Path $scriptDir '_venv.*') -Destination (Join-Path $coordinatorGh 'scripts') -Force
+    $coordinatorHooks = Join-Path $coordinatorGh 'hooks/scripts'
+    $coordinatorScript = Join-Path $coordinatorHooks 'coordinator-pretooluse.ps1'
     $coordinatorAsk = Invoke-PowerShellHook $coordinatorScript $coordinatorPayload
     $coordinatorPost = Invoke-Post ([ordered]@{
         session_id = $coordinatorSid
@@ -789,7 +799,7 @@ try {
                 -not $atInQueryShAsk.Out.Contains('WARNING:')) `
             "decision=$(Get-Decision $atInQueryShAsk.Out) warning=$($atInQueryShAsk.Out.Contains('WARNING:'))"
 
-        $coordinatorSh = Join-Path $hookScripts 'coordinator-pretooluse.sh'
+        $coordinatorSh = Join-Path $coordinatorHooks 'coordinator-pretooluse.sh'
         $coordinatorShAsk = Invoke-BashHook $coordinatorSh $coordinatorPayload
         $coordinatorShPost = Invoke-Post ([ordered]@{
             session_id = $coordinatorSid

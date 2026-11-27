@@ -193,8 +193,9 @@ if ($mergeBase) { $diffBaseArgs = @('--diff-base', $mergeBase) }
 
 # Resolve Python once -- Gate 3 and Gate 5 both need it. Gate 5 must still run
 # when only tests/ changed, so this cannot live inside the Gate 3 branch.
-$pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
-if (-not (Test-Path $pythonExe)) {
+# The project venv, found where the runners find it (#579).
+$pythonExe = Get-AfProjectPython $codeRoot
+if (-not $pythonExe) {
     $pythonExe = if ($AfPython) { $AfPython } else { $null }
 }
 

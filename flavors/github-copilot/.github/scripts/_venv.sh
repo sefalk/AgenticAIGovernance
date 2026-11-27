@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Shared venv resolution for the runners (#579). Source, then:
 #
-#   af_resolve_venv "$WORKSPACE_ROOT" || exit 1
+#   af_resolve_venv "$WORKSPACE_ROOT" bootstrap || exit 1
 #   af_enable_venv
 #
 # Sets AF_VENV_PYTHON, AF_VENV_BIN, AF_VENV_ROOT, AF_VENV_SOURCE,
@@ -10,9 +10,12 @@
 #   toplevel   <git toplevel>/.venv     -- the payload sits below the repo root
 #   shared     <main checkout>/.venv    -- a worktree, only when
 #                                          WORKTREE_VENV_MODE=shared (default)
-# Nothing found is BLOCKED: creating a venv installs packages, which is a step
-# a human approves (setup-worktree / bootstrap-python-env), never a runner.
-# _venv.ps1 is the PowerShell twin of this file; keep both in step.
+# Nothing found: with "bootstrap" and PY_ENV_BOOTSTRAP=always (default) the
+# caller runs bootstrap-python-env, which creates <workspaceRoot>/.venv, and
+# resolves again -- an agent must not wait on a human for a venv (#579).
+# ask/off, or a failed bootstrap, is BLOCKED and names the script to run.
+# Hooks resolve without "bootstrap": a pip install cannot finish in a hook's
+# timeout. _venv.ps1 is the PowerShell twin of this file; keep both in step.
 
 _af_venv_python_in() {
     local rel
@@ -31,17 +34,20 @@ _af_venv_abs() {
     (cd "$1" 2>/dev/null && pwd -P)
 }
 
+_af_venv_conf() {
+    local val=""
+    [[ -f "$1" ]] && val="$(grep -E "^$2=" "$1" | head -1 | cut -d= -f2- | tr -d "[:space:]\"'")"
+    printf '%s\n' "${val:-$3}"
+}
+
 af_resolve_venv() {
-    local ws conf val top common main dir src searched="" py
+    local ws conf top common main dir src searched="" py policy script why code
     ws="$(_af_venv_abs "$1")" || ws="$1"
     AF_VENV_PYTHON="" AF_VENV_BIN="" AF_VENV_ROOT="" AF_VENV_SOURCE=""
-    AF_VENV_TOPLEVEL="$ws" AF_VENV_MODE="shared"
+    AF_VENV_TOPLEVEL="$ws"
 
     conf="$ws/.github/af-env.conf"
-    if [[ -f "$conf" ]]; then
-        val="$(grep -E '^WORKTREE_VENV_MODE=' "$conf" | head -1 | cut -d= -f2- | tr -d "[:space:]\"'")"
-        [[ -n "$val" ]] && AF_VENV_MODE="$val"
-    fi
+    AF_VENV_MODE="$(_af_venv_conf "$conf" WORKTREE_VENV_MODE shared)"
 
     local -a dirs=("$ws") sources=("workspace")
     if command -v git >/dev/null 2>&1 && top="$(git -C "$ws" rev-parse --show-toplevel 2>/dev/null)" && [[ -n "$top" ]]; then
@@ -82,9 +88,29 @@ af_resolve_venv() {
     done
 
     echo "ERROR: venv python not found under $ws/.venv (searched: $searched; WORKTREE_VENV_MODE=$AF_VENV_MODE)"
-    echo "BLOCKED: no usable venv for this checkout. Creating one installs packages, so a human runs it:"
-    echo "  worktree:       .github/scripts/setup-worktree.sh (isolated mode creates the worktree venv)"
-    echo "  plain checkout: .github/scripts/bootstrap-python-env.sh"
+    policy="$(_af_venv_conf "$conf" PY_ENV_BOOTSTRAP always | tr '[:upper:]' '[:lower:]')"
+    script="$ws/.github/scripts/bootstrap-python-env.sh"
+    if [[ "${2:-}" == "bootstrap" && "$policy" == "always" && -f "$script" ]]; then
+        echo "NOTE: PY_ENV_BOOTSTRAP=always -- creating the venv with .github/scripts/bootstrap-python-env.sh"
+        if bash "$script" 2>&1; then code=0; else code=$?; fi
+        if [[ $code -eq 0 ]] && af_resolve_venv "$ws" >/dev/null; then
+            return 0
+        fi
+        echo "BLOCKED: venv bootstrap failed (bootstrap-python-env.sh exit $code); its output is above."
+        echo "  Fix the cause and run .github/scripts/bootstrap-python-env.sh (task 'env: bootstrap python')."
+        return 1
+    fi
+    if [[ "${2:-}" != "bootstrap" ]]; then
+        why="this caller does not create venvs"
+    elif [[ "$policy" != "always" ]]; then
+        why="PY_ENV_BOOTSTRAP=$policy does not let a runner create one"
+    else
+        why="bootstrap-python-env.sh is not deployed"
+    fi
+    echo "BLOCKED: no usable venv for this checkout, and $why. Create it with:"
+    echo "  .github/scripts/bootstrap-python-env.sh (task 'env: bootstrap python')"
+    echo "  worktree in isolated mode: .github/scripts/setup-worktree.sh"
+    echo "  or set PY_ENV_BOOTSTRAP=always in .github/af-env.conf so the runners create it."
     return 1
 }
 
@@ -110,6 +136,27 @@ af_check_venv_isolation() {
     fi
     printf '%s\n' "$found"
     echo "BLOCKED: the shared venv at $AF_VENV_ROOT imports code from the main checkout, not this worktree."
-    echo "  Set WORKTREE_VENV_MODE=isolated in .github/af-env.conf and have a human run .github/scripts/setup-worktree.sh."
+    echo "  Set WORKTREE_VENV_MODE=isolated in .github/af-env.conf and run .github/scripts/setup-worktree.sh to create the worktree venv."
     return 1
+}
+
+# ruff formats differently between releases, so a local ruff that is not the
+# one CI pins passes `ruff format --check` here and fails it there. Reads the
+# ruff==X pin from DEP_DEV_FILE (workspace, then git toplevel) and prints a
+# warning when the venv's ruff differs. Never blocks: a project without a pin,
+# or a venv without ruff, has nothing to compare. Call after af_resolve_venv.
+af_ruff_pin_warning() {
+    local ws dep dir pin="" have
+    ws="$(_af_venv_abs "$1")" || ws="$1"
+    dep="$(_af_venv_conf "$ws/.github/af-env.conf" DEP_DEV_FILE requirements-dev.txt)"
+    for dir in "$ws" "$AF_VENV_TOPLEVEL"; do
+        [[ -f "$dir/$dep" ]] || continue
+        pin="$(grep -iE "^[[:space:]]*[\"']?ruff[[:space:]]*==" "$dir/$dep" | head -1 \
+            | sed -E "s/^[^=]*==[[:space:]]*([0-9][0-9A-Za-z.+!-]*).*/\1/" | tr -d '\r')"
+        [[ -n "$pin" ]] && break
+    done
+    [[ -n "$pin" ]] || return 0
+    have="$("$AF_VENV_PYTHON" -m ruff --version 2>/dev/null | tr -d '\r' | awk '{print $NF}')" || return 0
+    [[ -n "$have" && "$have" != "$pin" ]] || return 0
+    echo "WARN: venv ruff $have differs from the ruff==$pin pin in $dep; formatting may pass here and fail in CI. Re-run .github/scripts/bootstrap-python-env.sh to install the pinned version."
 }

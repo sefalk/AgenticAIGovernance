@@ -163,6 +163,28 @@ af_record_ask() {
     printf '%s' "$_raw" | AF_ASK_GATE="$_gate" AF_ASK_REASON="$_reason" "$AF_PYTHON" "$_helper" record
 }
 
+# af_project_python [ROOT] -- prints the project's venv interpreter, found
+# exactly where the runners find it (.github/scripts/_venv.sh, #579):
+# workspace, git toplevel, then the main checkout's venv for a worktree in
+# shared mode. Never bootstraps -- a pip install cannot finish inside a hook's
+# timeout. Returns 1 when there is none. Twin of Get-AfProjectPython.
+af_project_python() {
+    local _pp_root="${1:-$AF_CODE_ROOT}" _pp_resolver="$AF_MAIN_ROOT/.github/scripts/_venv.sh" _pp_rel
+    [ -n "$_pp_root" ] || return 1
+    if [ -f "$_pp_resolver" ]; then
+        # shellcheck source=/dev/null
+        . "$_pp_resolver"
+        af_resolve_venv "$_pp_root" >/dev/null || return 1
+        printf '%s\n' "$AF_VENV_PYTHON"
+        return 0
+    fi
+    # A partial deployment without the resolver still finds the workspace venv.
+    for _pp_rel in .venv/Scripts/python.exe .venv/bin/python; do
+        [ -f "$_pp_root/$_pp_rel" ] && { printf '%s\n' "$_pp_root/$_pp_rel"; return 0; }
+    done
+    return 1
+}
+
 # af_resolve_pytest [ROOT] -- sets AF_PYTEST to the project's test runner
 # (venv interpreter + "-m pytest", PATH pytest last); returns 1 when none
 # imports pytest. Twin of Get-AfPytest: the extension host starts hooks
@@ -170,17 +192,12 @@ af_record_ask() {
 # producer test gate live (#473).
 AF_PYTEST=()
 af_resolve_pytest() {
-    local _rp_base _rp_rel
+    local _rp_py
     AF_PYTEST=()
-    for _rp_base in "${1:-$AF_CODE_ROOT}" "$AF_MAIN_ROOT"; do
-        [ -n "$_rp_base" ] || continue
-        for _rp_rel in .venv/bin/python .venv/Scripts/python.exe; do
-            if [ -f "$_rp_base/$_rp_rel" ] && "$_rp_base/$_rp_rel" -c 'import pytest' >/dev/null 2>&1; then
-                AF_PYTEST=("$_rp_base/$_rp_rel" -m pytest)
-                return 0
-            fi
-        done
-    done
+    if _rp_py=$(af_project_python "${1:-$AF_CODE_ROOT}") && "$_rp_py" -c 'import pytest' >/dev/null 2>&1; then
+        AF_PYTEST=("$_rp_py" -m pytest)
+        return 0
+    fi
     if command -v pytest >/dev/null 2>&1; then
         AF_PYTEST=(pytest)
         return 0

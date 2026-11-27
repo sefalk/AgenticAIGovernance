@@ -110,8 +110,9 @@ repository-seat / supplied-PAT / no-licence cases remain separate work under
 - `ruff` (required for refactorer linting hard gate)
 - Optional: `radon` (complexity), `mutmut` (mutation testing)
 - Optional: cost tracking — see below
-- Coordinator auto-bootstrap for missing `.venv` is configurable via
-  `.github/af-env.conf` (`PY_ENV_BOOTSTRAP=ask|always|off`)
+- A missing `.venv` is created by the runners themselves
+  (`bootstrap-python-env`, task `env: bootstrap python`); configurable via
+  `.github/af-env.conf` (`PY_ENV_BOOTSTRAP=always|ask|off`, default `always`)
 
 ### Cost tracking (optional)
 

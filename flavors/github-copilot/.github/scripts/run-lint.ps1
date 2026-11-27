@@ -59,12 +59,14 @@ if (Test-Path $confPath) {
 
 # Resolve venv python (same contract as run-tests.ps1; search order in _venv.ps1)
 . (Join-Path $PSScriptRoot '_venv.ps1')
-$venv = Resolve-AfVenv $workspaceRoot
+$venv = Resolve-AfVenv $workspaceRoot -Bootstrap
 if (-not $venv.Python) {
     Write-Output $venv.Message
     exit 1
 }
 Enable-AfVenv $venv
+$pinWarning = Get-AfRuffPinWarning $venv $workspaceRoot
+if ($pinWarning) { Write-Output $pinWarning }
 $python = $venv.Python
 
 # --- Collect target files ---

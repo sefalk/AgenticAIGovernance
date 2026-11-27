@@ -375,12 +375,14 @@ jobs:
       #
       # ruff is pinned because the formatting gate below compares against its
       # output: an unpinned formatter turns a routine ruff release into a red
-      # build on a pull request that changed no Python at all.
+      # build on a pull request that changed no Python at all. The pin lives in
+      # requirements-dev.txt so run-lint can warn when a local venv drifts
+      # from it (#579).
       - name: Install suite prerequisites
         shell: powershell
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ruff==0.16.2 pyyaml
+          python -m pip install -r requirements-dev.txt
           python -m pip install -e "flavors/github-copilot/mcp-deploy[dev]"
 
       # Several suites build throwaway git repositories and commit inside them.

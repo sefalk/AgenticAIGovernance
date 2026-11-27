@@ -1,0 +1,5 @@
+# Development and CI prerequisites for the AF repository itself.
+# regression.yml installs exactly this file; run-lint warns when a local venv's
+# ruff differs from the pin below (#579).
+ruff==0.16.2
+pyyaml

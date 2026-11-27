@@ -309,6 +309,15 @@
       "detail": "Run integration tests for all Copilot agent hooks",
       "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
       "runOptions": { "instanceLimit": 1 }
+    },
+    {
+      "label": "env: bootstrap python",
+      "type": "shell",
+      "command": ".github/scripts/bootstrap-python-env.ps1",
+      "args": [],
+      "detail": "Create the workspace .venv and install DEP_FILE / DEP_DEV_FILE (#579)",
+      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false, "clear": true },
+      "runOptions": { "instanceLimit": 1 }
     }
   ]
 }

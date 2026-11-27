@@ -48,9 +48,10 @@ if ($toolName -match 'terminal') {
 
     # Config: PROJECT_LANGUAGE and PY_ENV_BOOTSTRAP from af-env.conf
     $projectLanguage = (Get-AfConfig -Key 'PROJECT_LANGUAGE' -Default 'python').ToLower()
-    $bootstrapMode = (Get-AfConfig -Key 'PY_ENV_BOOTSTRAP' -Default 'ask').ToLower()
+    $bootstrapMode = (Get-AfConfig -Key 'PY_ENV_BOOTSTRAP' -Default 'always').ToLower()
 
     $isPyTerminalCommand = $command -match '(\.github/scripts/(run-tests|run-deps|run-metrics)\.ps1)|(\.venv/Scripts/python\.exe)|(^|\s)(python|pip|ruff|mypy)(\s|$)'
+    $isRunnerCommand = $command -match '\.github[\\/]scripts[\\/]run-(tests|lint|metrics)\.(ps1|sh)'
 
     # Match a pytest *invocation*, not the word. The gate used to test the bare
     # substring '\bpytest\b', which denied read-only commands that merely name
@@ -64,33 +65,21 @@ if ($toolName -match 'terminal') {
         ($command -match ($stmtStart + $pathPrefix + '(?:python3?|py)(?:\.exe)?(?:[''"])?\s(?:[^;&|\r\n]*\s)?-m\s+pytest(?:\s|;|$)')) -or
         ($command -match ('(?:^|[;&|`(){}]|\r?\n)\s*(?:uv|uvx|poetry|pdm|hatch|pipenv|nox|tox|conda)\s[^;&|\r\n]*\spytest(?:\s|;|$)'))
 
-    $venvPython = Join-Path $AfCodeRoot '.venv/Scripts/python.exe'
-
     # Bootstrap only for non-pytest Python commands; pytest via terminal is denied below anyway.
-    if ($projectLanguage -eq 'python' -and -not $isPytestViaTerminal -and $isPyTerminalCommand -and -not (Test-Path $venvPython)) {
-        if ($bootstrapMode -eq 'always') {
-            $bootstrapScript = Join-Path $AfMainRoot '.github/scripts/bootstrap-python-env.ps1'
-            if (-not (Test-Path $bootstrapScript)) {
-                @{
-                    hookSpecificOutput = @{
-                        hookEventName      = 'PreToolUse'
-                        permissionDecision = 'deny'
-                        permissionDecisionReason = "Python environment missing and bootstrap script not found at '.github/scripts/bootstrap-python-env.ps1'."
-                    }
-                } | ConvertTo-Json -Depth 3 -Compress
-                exit 0
-            }
-            & $bootstrapScript 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $venvPython)) {
-                @{
-                    hookSpecificOutput = @{
-                        hookEventName      = 'PreToolUse'
-                        permissionDecision = 'deny'
-                        permissionDecisionReason = "Python environment bootstrap failed. Run '.github/scripts/bootstrap-python-env.ps1' manually and retry."
-                    }
-                } | ConvertTo-Json -Depth 3 -Compress
-                exit 0
-            }
+    # The venv is looked up where the runners look (#579), and never created
+    # here: a pip install does not finish inside a hook's timeout. Under
+    # `always` a runner creates it itself, so runner commands pass; a raw
+    # Python command is pointed at the bootstrap instead of the system Python.
+    if ($projectLanguage -eq 'python' -and -not $isPytestViaTerminal -and $isPyTerminalCommand -and -not (Get-AfProjectPython $AfCodeRoot)) {
+        if ($bootstrapMode -eq 'always' -and -not $isRunnerCommand) {
+            @{
+                hookSpecificOutput = @{
+                    hookEventName      = 'PreToolUse'
+                    permissionDecision = 'deny'
+                    permissionDecisionReason = "No project venv yet. Create it first: run '.github/scripts/bootstrap-python-env.ps1' (task 'env: bootstrap python'), or use a runner (run-tests / run-lint), which creates it under PY_ENV_BOOTSTRAP=always. Then retry this command."
+                }
+            } | ConvertTo-Json -Depth 3 -Compress
+            exit 0
         } elseif ($bootstrapMode -eq 'ask') {
             $reason = "Python environment (.venv) is missing. Allow running '.github/scripts/bootstrap-python-env.ps1' now to prepare venv + dependencies?"
             [void](Record-AfAsk -Gate 'coordinator-python-bootstrap' -Reason $reason -Payload $raw)

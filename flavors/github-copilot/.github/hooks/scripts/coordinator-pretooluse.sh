@@ -67,7 +67,7 @@ except Exception:
 " 2>/dev/null)
         # Config: PROJECT_LANGUAGE and PY_ENV_BOOTSTRAP from af-env.conf
         PROJECT_LANGUAGE=$(af_conf_get PROJECT_LANGUAGE python)
-        BOOTSTRAP_MODE=$(af_conf_get PY_ENV_BOOTSTRAP ask)
+        BOOTSTRAP_MODE=$(af_conf_get PY_ENV_BOOTSTRAP always)
 
         # Bootstrap env for non-pytest Python commands when .venv is missing.
         # Match a pytest *invocation*, not the word: the gate used to test the
@@ -88,16 +88,21 @@ except Exception:
             IS_PY_CMD=true
         fi
 
-        if [[ "$PROJECT_LANGUAGE" == "python" ]] && [[ "$IS_PYTEST" == "false" ]] && [[ "$IS_PY_CMD" == "true" ]] && [[ ! -x ".venv/bin/python" ]]; then
+        IS_RUNNER=false
+        if echo "$COMMAND" | grep -qE '\.github[\\/]scripts[\\/]run-(tests|lint|metrics)\.(ps1|sh)'; then
+            IS_RUNNER=true
+        fi
+
+        # The venv is looked up where the runners look (#579), and never
+        # created here: a pip install does not finish inside a hook's timeout.
+        # Under `always` a runner creates it itself, so runner commands pass; a
+        # raw Python command is pointed at the bootstrap instead.
+        if [[ "$PROJECT_LANGUAGE" == "python" ]] && [[ "$IS_PYTEST" == "false" ]] && [[ "$IS_PY_CMD" == "true" ]] && ! af_project_python "$AF_CODE_ROOT" >/dev/null; then
             if [[ "$BOOTSTRAP_MODE" == "always" ]]; then
-                if [[ ! -f ".github/scripts/bootstrap-python-env.sh" ]]; then
-                    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Python environment missing and bootstrap script not found at .github/scripts/bootstrap-python-env.sh."}}'
+                if [[ "$IS_RUNNER" == "false" ]]; then
+                    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"No project venv yet. Create it first: run .github/scripts/bootstrap-python-env.sh (task '\''env: bootstrap python'\''), or use a runner (run-tests / run-lint), which creates it under PY_ENV_BOOTSTRAP=always. Then retry this command."}}'
                     exit 0
                 fi
-                bash .github/scripts/bootstrap-python-env.sh >/dev/null 2>&1 || {
-                    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Python environment bootstrap failed. Run .github/scripts/bootstrap-python-env.sh manually and retry."}}'
-                    exit 0
-                }
             elif [[ "$BOOTSTRAP_MODE" == "ask" ]]; then
                 reason="Python environment (.venv) is missing. Allow running .github/scripts/bootstrap-python-env.sh now to prepare venv + dependencies?"
                 af_record_ask "coordinator-python-bootstrap" "$reason" "$RAW" || :

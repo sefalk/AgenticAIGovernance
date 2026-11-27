@@ -17,6 +17,19 @@
 #   E  run-tests in B                     -> runs, and ruff on PATH is the venv's
 #   F  run-tests, shared venv carries an editable install of the main checkout
 #                                         -> BLOCKED, names isolated
+#   G  no venv anywhere, PY_ENV_BOOTSTRAP unset (default always)
+#                                         -> the runner bootstraps, then runs
+#   H  no venv anywhere, PY_ENV_BOOTSTRAP=ask
+#                                         -> BLOCKED, names the bootstrap script
+#   I  no venv anywhere, bootstrap fails  -> BLOCKED, says the bootstrap failed
+#   J  venv ruff differs from the ruff==X pin in DEP_DEV_FILE -> WARN, still runs
+#   K  venv ruff matches the pin          -> no WARN
+#   L  hook Get-AfPytest / af_resolve_pytest, payload below the toplevel
+#                                         -> the toplevel venv, as the runners
+#   M  coordinator hook, PY_ENV_BOOTSTRAP=always, no venv
+#                                         -> raw python denied (bootstrap named),
+#                                            runner passes, nothing installed
+# The bootstrap is a stub in G-I: it makes a --without-pip venv, no network.
 #
 # Run from anywhere:
 #   powershell -File .github/scripts/test-venv-resolver.ps1
@@ -62,7 +75,7 @@ function Invoke-Git([string]$Dir, [string[]]$GitArgs) {
 # A repository whose payload (.github/scripts + af-env.conf) sits at $Payload
 # below the root. Paths contain a space on purpose: every default OneDrive path
 # does, and a resolver that splits on it is broken where users actually work.
-function New-Repo([string]$Tag, [string]$Mode = 'shared', [string]$Payload = '') {
+function New-Repo([string]$Tag, [string]$Mode = 'shared', [string]$Payload = '', [string]$Extra = 'PY_ENV_BOOTSTRAP=off') {
     $root = Join-Path ([IO.Path]::GetTempPath()) ("af venv $Tag " + [guid]::NewGuid().ToString('N').Substring(0, 8))
     $script:fixtures += $root
     $payloadDir = if ($Payload) { Join-Path $root $Payload } else { $root }
@@ -73,7 +86,7 @@ function New-Repo([string]$Tag, [string]$Mode = 'shared', [string]$Payload = '')
         $src = Join-Path $scriptDir $f
         if (Test-Path $src) { Copy-Item $src (Join-Path $scripts $f) }
     }
-    [IO.File]::WriteAllText((Join-Path $payloadDir '.github/af-env.conf'), "SRC_DIR=src`nWORKTREE_VENV_MODE=$Mode`n")
+    [IO.File]::WriteAllText((Join-Path $payloadDir '.github/af-env.conf'), "SRC_DIR=src`nWORKTREE_VENV_MODE=$Mode`n$Extra`n")
     [IO.File]::WriteAllText((Join-Path $payloadDir 'tests/test_x.py'), "def test_x():`n    pass`n")
     [IO.File]::WriteAllText((Join-Path $root '.gitignore'), ".venv/`n")
     Invoke-Git $root @('init', '-q')
@@ -109,6 +122,10 @@ function New-Venv([string]$Dir, [string]$EditableTarget = '') {
     [IO.File]::WriteAllText((Join-Path $pkg '__init__.py'), '')
     [IO.File]::WriteAllText((Join-Path $pkg '__main__.py'),
         "import shutil`nprint('ruff-at: ' + str(shutil.which('ruff')))`nprint('3 passed in 0.42s')`n")
+    $rpkg = Join-Path $site 'ruff'
+    New-Item -ItemType Directory -Path $rpkg -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $rpkg '__init__.py'), '')
+    [IO.File]::WriteAllText((Join-Path $rpkg '__main__.py'), "print('ruff 0.0.0')`n")
     if (Test-Path (Join-Path $venv 'Scripts')) {
         [IO.File]::WriteAllText((Join-Path $bin 'ruff.bat'), "@echo ruff 0.0.0`r`n")
     } else {
@@ -123,6 +140,29 @@ function New-Venv([string]$Dir, [string]$EditableTarget = '') {
         [IO.File]::WriteAllText((Join-Path $info 'direct_url.json'), "{`"url`": `"$uri`", `"dir_info`": {`"editable`": true}}")
     }
     return $bin
+}
+
+# Stands in for bootstrap-python-env in both dialects: says it ran, then either
+# makes a bare venv at the workspace root (exit 0) or fails with $Exit.
+function Add-BootstrapStub([string]$Payload, [int]$Exit) {
+    $scripts = Join-Path $Payload '.github/scripts'
+    $py = $python[0] -replace '\\', '/'
+    $pre = if ($python.Count -gt 1) { ' ' + ($python[1..($python.Count - 1)] -join ' ') } else { '' }
+    $ps = @(
+        "Write-Output 'stub-bootstrap ran'"
+        "if ($Exit -ne 0) { exit $Exit }"
+        "& '$py'$pre -m venv --without-pip (Join-Path `$PSScriptRoot '../../.venv')"
+        "exit 0"
+    ) -join "`n"
+    $sh = @(
+        '#!/usr/bin/env bash'
+        'echo "stub-bootstrap ran"'
+        "[ $Exit -ne 0 ] && exit $Exit"
+        "'$py'$pre -m venv --without-pip `"`$(dirname `"`$0`")/../../.venv`""
+        'exit 0'
+    ) -join "`n"
+    [IO.File]::WriteAllText((Join-Path $scripts 'bootstrap-python-env.ps1'), "$ps`n")
+    [IO.File]::WriteAllText((Join-Path $scripts 'bootstrap-python-env.sh'), "$sh`n")
 }
 
 function Invoke-Runner([string]$Dialect, [string]$Payload, [string]$Runner, [string[]]$PsArgs, [string]$ShArgs) {
@@ -199,6 +239,104 @@ try {
     $fWt = New-Worktree $f
     Test-Run 'F_shared_venv_with_editable_main_install_is_blocked' $fWt {
         param($r) $r.Code -eq 1 -and $r.Out -match 'BLOCKED' -and $r.Out -match 'isolated' -and $r.Out -notmatch '3 passed'
+    }
+
+    # G-I: one fresh repository per dialect, because a bootstrap that worked
+    # in the first dialect would leave a venv behind for the second.
+    foreach ($d in @('ps', 'sh')) {
+        if ($d -eq 'sh' -and -not $bashExe) {
+            foreach ($n in 'G', 'H', 'I') { Add-Result "${n}_$d" $false 'no bash interpreter found' }
+            continue
+        }
+        $g = New-Repo "g$d" 'shared' '' ''
+        Add-BootstrapStub $g 0
+        $r = Invoke-Runner $d $g 'run-lint' @('-Scope', 'src') '--scope src'
+        Add-Result "G_no_venv_default_bootstrap_runs_then_lints_$d" (
+            $r.Code -eq 0 -and $r.Out -match 'stub-bootstrap ran' -and $r.Out -match 'no Python files in scope'
+        ) "exit=$($r.Code) out=$($r.Out.Trim())"
+
+        $h = New-Repo "h$d" 'shared' '' 'PY_ENV_BOOTSTRAP=ask'
+        Add-BootstrapStub $h 0
+        $r = Invoke-Runner $d $h 'run-lint' @('-Scope', 'src') '--scope src'
+        Add-Result "H_no_venv_bootstrap_ask_is_blocked_$d" (
+            $r.Code -eq 1 -and $r.Out -match 'BLOCKED' -and $r.Out -match 'bootstrap-python-env' -and
+            $r.Out -match 'PY_ENV_BOOTSTRAP' -and $r.Out -notmatch 'stub-bootstrap ran'
+        ) "exit=$($r.Code) out=$($r.Out.Trim())"
+
+        $i = New-Repo "i$d" 'shared' '' ''
+        Add-BootstrapStub $i 3
+        $r = Invoke-Runner $d $i 'run-lint' @('-Scope', 'src') '--scope src'
+        Add-Result "I_no_venv_bootstrap_failure_is_blocked_$d" (
+            $r.Code -eq 1 -and $r.Out -match 'stub-bootstrap ran' -and $r.Out -match 'BLOCKED' -and $r.Out -match 'bootstrap.*failed'
+        ) "exit=$($r.Code) out=$($r.Out.Trim())"
+    }
+
+    # J + K: the fake venv ruff reports 0.0.0.
+    $j = New-Repo 'j'
+    $null = New-Venv $j
+    [IO.File]::WriteAllText((Join-Path $j 'requirements-dev.txt'), "pytest`nruff==0.16.2  # CI pin`n")
+    Test-Lint 'J_ruff_differs_from_pin_warns' $j {
+        param($r) $r.Code -eq 0 -and $r.Out -match 'WARN' -and $r.Out -match '0\.0\.0' -and $r.Out -match '0\.16\.2'
+    }
+    $k = New-Repo 'k'
+    $null = New-Venv $k
+    [IO.File]::WriteAllText((Join-Path $k 'requirements-dev.txt'), "ruff==0.0.0`n")
+    Test-Lint 'K_ruff_matches_pin_is_silent' $k {
+        param($r) $r.Code -eq 0 -and $r.Out -match 'no Python files in scope' -and $r.Out -notmatch 'WARN'
+    }
+
+    # L: the hooks find the project's pytest where the runners do. The hooks
+    # are deployed at the payload root, which has no venv of its own here.
+    $l = New-Repo 'l' 'shared' 'flavor'
+    $null = New-Venv $l
+    $lHooks = Join-Path $l 'flavor/.github/hooks/scripts'
+    New-Item -ItemType Directory -Path $lHooks -Force | Out-Null
+    foreach ($f in '_common.ps1', '_common.sh') {
+        Copy-Item (Join-Path $scriptDir "../hooks/scripts/$f") (Join-Path $lHooks $f)
+    }
+    $expect = '/\.venv/(Scripts|bin)/python'
+    $common = Join-Path $lHooks '_common.ps1'
+    $out = & $psHost -NoProfile -ExecutionPolicy Bypass -Command ". '$common'; (Get-AfPytest) -join ' '" 2>&1 | Out-String
+    $norm = $out.Trim() -replace '\\', '/'
+    $lRoot = ((Resolve-Path $l).Path -replace '\\', '/')
+    Add-Result 'L_hook_pytest_uses_toplevel_venv_ps' (
+        $norm.StartsWith("$lRoot/.venv/") -and $norm -match $expect -and $norm -match '-m pytest$'
+    ) "out=$norm"
+    if ($bashExe) {
+        $sh = (Join-Path $lHooks '_common.sh') -replace '\\', '/'
+        $out = & $bashExe -c ". '$sh'; af_resolve_pytest; echo `${AF_PYTEST[*]}" 2>&1 | Out-String
+        $norm = $out.Trim()
+        Add-Result 'L_hook_pytest_uses_toplevel_venv_sh' (
+            $norm -match "$([regex]::Escape((Split-Path $l -Leaf)))/\.venv/" -and $norm -match $expect -and $norm -match '-m pytest$'
+        ) "out=$norm"
+    } else {
+        Add-Result 'L_hook_pytest_uses_toplevel_venv_sh' $false 'no bash interpreter found'
+    }
+
+    # M: the coordinator hook never pip-installs inside its timeout. Under
+    # PY_ENV_BOOTSTRAP=always with no venv, a raw Python command is denied with
+    # the bootstrap named; a runner passes, because it bootstraps itself.
+    $m = New-Repo 'm' 'shared' '' 'PY_ENV_BOOTSTRAP=always'
+    $mHooks = Join-Path $m '.github/hooks/scripts'
+    New-Item -ItemType Directory -Path $mHooks -Force | Out-Null
+    foreach ($f in '_common.ps1', '_common.sh', 'coordinator-pretooluse.ps1', 'coordinator-pretooluse.sh') {
+        Copy-Item (Join-Path $scriptDir "../hooks/scripts/$f") (Join-Path $mHooks $f)
+    }
+    $raw = '{"tool_name":"run_in_terminal","tool_input":{"command":"python -c 1"}}'
+    $runner = '{"tool_name":"run_in_terminal","tool_input":{"command":".github/scripts/run-lint.ps1 -Scope changed"}}'
+    foreach ($d in @('ps', 'sh')) {
+        if ($d -eq 'sh' -and -not $bashExe) { Add-Result "M_coordinator_hook_$d" $false 'no bash interpreter found'; continue }
+        $outs = foreach ($payload in $raw, $runner) {
+            if ($d -eq 'ps') {
+                $payload | & $psHost -NoProfile -ExecutionPolicy Bypass -File (Join-Path $mHooks 'coordinator-pretooluse.ps1') 2>&1 | Out-String
+            } else {
+                $payload | & $bashExe ((Join-Path $mHooks 'coordinator-pretooluse.sh') -replace '\\', '/') 2>&1 | Out-String
+            }
+        }
+        Add-Result "M_coordinator_hook_denies_raw_python_passes_runner_$d" (
+            $outs[0] -match '"deny"' -and $outs[0] -match 'bootstrap-python-env' -and $outs[1] -notmatch 'deny|ask' -and
+            -not (Test-Path (Join-Path $m '.venv'))
+        ) "raw=$($outs[0].Trim()) runner=$($outs[1].Trim())"
     }
 } finally {
     foreach ($p in $fixtures) {

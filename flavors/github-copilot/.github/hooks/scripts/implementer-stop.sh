@@ -125,14 +125,8 @@ if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 5 ]; then
     [ -n "$merge_base" ] && diff_base_args="--diff-base $merge_base"
 
     # Resolve Python once -- the authorship filter and both gates need it.
-    python_exe=""
-    if [ -x ".venv/bin/python" ]; then
-        python_exe=".venv/bin/python"
-    elif [ -x ".venv/Scripts/python.exe" ]; then
-        python_exe=".venv/Scripts/python.exe"
-    else
-        python_exe="$AF_PYTHON"
-    fi
+    # The project venv, found where the runners find it (#579).
+    python_exe=$(af_project_python "$AF_CODE_ROOT") || python_exe="$AF_PYTHON"
     quality_script=".github/scripts/check-python-quality.py"
 
     # A provenance marker is a claim of authorship, so it may only be demanded
