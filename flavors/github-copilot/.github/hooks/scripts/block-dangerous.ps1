@@ -424,11 +424,27 @@ function Invoke-AfBlockDangerousPolicy {
     # 'prose' -- only recognised prose carriers are exempted. SQL clients take a
     #            statement positionally (`sqlite3 db "DROP TABLE x"`) as well as
     #            behind a flag, so blanket stripping would launder the real case.
+    # The shell tool decides how literals are lexed (#581). In PowerShell a
+    # backtick is the escape character, not command substitution, and
+    # here-strings (@'...'@, @"..."@) span lines and may hold unbalanced quotes.
+    # agent-hooks.json reports Copilot's shell tool as `Bash` even on Windows,
+    # where it runs PowerShell (measured in #447); this twin runs only there.
+    $isPsDialect = ([string]$toolName -match '^(powershell|pwsh)$') -or
+                   ([string]$toolName -ceq 'Bash' -and $env:OS -eq 'Windows_NT')
     function Get-RawTargets([string]$cmd, [string]$Strength) {
         $payloads = Get-InterpreterPayloads $cmd
         if ($Strength -eq 'exec') {
             $t = $cmd
             foreach ($pl in $payloads) { $t = $t.Replace('"' + $pl + '"', ' ').Replace("'" + $pl + "'", ' ') }
+            if ($isPsDialect) {
+                # Here-strings first, so their quotes cannot pair with anything outside.
+                # Single-quoted ones never interpolate; double-quoted ones execute only via $(.
+                $t = [regex]::Replace($t, '(?s)@''\r?\n.*?\r?\n''@|@"\r?\n.*?\r?\n"@', {
+                        param($m) if ($m.Value.StartsWith('@"') -and $m.Value -match '\$\(') { $m.Value } else { ' ' } })
+                $t = [regex]::Replace($t, '"(?:[^"`]|`[\s\S]|"")*"|''(?:[^'']|'''')*''', {
+                        param($m) if ($m.Value.StartsWith('"') -and $m.Value -match '\$\(') { $m.Value } else { '' } })
+                return , (@($t) + $payloads)
+            }
             # An interpolation elsewhere no longer makes every literal a command (#122, 2026-09-29):
             # single quotes never interpolate; a double-quoted string executes only via $( or a backtick.
             $t = [regex]::Replace($t, '"[^"]*"|''[^'']*''', {

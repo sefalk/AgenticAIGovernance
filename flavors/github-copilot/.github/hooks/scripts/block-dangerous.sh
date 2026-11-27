@@ -379,7 +379,7 @@ matches_stripped() { echo "$stripped_guard" | grep -qEi -e "$1"; }
 # returns every view the tiers need, RS-separated: 1 deny-tier units,
 # 2 raw exec targets, 3 raw prose targets, 4 plain statements (TIER 2).
 # ---------------------------------------------------------------------------
-SPLIT_PY='import sys, re
+SPLIT_PY='import os, sys, re
 # A command may not contain the section separator, or it could forge a break.
 s = sys.stdin.read().replace("\x1e", " ")
 
@@ -407,6 +407,11 @@ segs = split_top(s)
 DATA = re.compile(r"^\s*(echo|printf|Write-Host|Write-Output|Write-Error|Write-Verbose|Write-Debug)\b|^\s*git\s+(commit|tag|notes|stash)\b", re.I)
 PAYLOAD = re.compile(r"(?:^|\s)(?:-c|--command|-Command|-e|--eval|-ScriptBlock|-ArgumentList|-Args|/c|/k|iex|Invoke-Expression|eval)\s+(?:\"([^\"]*)\"|\x27([^\x27]*)\x27)", re.I)
 BARE = re.compile(r"^\s*(\"[^\"]*\"|\x27[^\x27]*\x27)\s*$")
+
+# The shell tool decides how literals are lexed (#581); see build_raw.
+PS_DIALECT = os.environ.get("AF_BD_DIALECT") == "ps"
+PS_HERE = re.compile(r"@\x27\r?\n.*?\r?\n\x27@|@\"\r?\n.*?\r?\n\"@", re.S)
+PS_QUOTED = re.compile(r"\"(?:[^\"`]|`[\s\S]|\"\")*\"|\x27(?:[^\x27]|\x27\x27)*\x27")
 
 # Git global options sit between git and the subcommand, where every rule
 # anchored at git <subcommand> could not see past them (#431). Deny side only.
@@ -441,6 +446,13 @@ def build_raw(strength):
         t = s
         for p in pls:
             t = t.replace("\"" + p + "\"", " ").replace("\x27" + p + "\x27", " ")
+        if PS_DIALECT:
+            # PowerShell (#581): a backtick escapes, it does not execute, and
+            # here-strings span lines with possibly unbalanced quotes inside.
+            # Here-strings first; only $( makes a double-quoted literal execute.
+            t = PS_HERE.sub(lambda m: m.group(0) if m.group(0).startswith("@\"") and "$(" in m.group(0) else " ", t)
+            t = PS_QUOTED.sub(lambda m: m.group(0) if m.group(0).startswith("\"") and "$(" in m.group(0) else "", t)
+            return [t] + pls
         # An interpolation elsewhere no longer makes every literal a command (#122, 2026-09-29):
         # single quotes never interpolate; a double-quoted string executes only via $( or a backtick.
         t = re.sub(r"\"[^\"]*\"|\x27[^\x27]*\x27",
@@ -477,7 +489,20 @@ sys.stdout.write("\n\x1e\n".join([
     flat(build_units()), flat(build_raw("exec")), flat(build_raw("prose")), flat(segs),
 ]))'
 
-split_command() { printf '%s' "$1" | "$PYTHON" -c "$SPLIT_PY"; }
+# The shell tool decides how the splitter lexes literals (#581): PowerShell
+# reads a backtick as an escape and has here-strings. agent-hooks.json reports
+# Copilot's shell tool as `Bash` on every host, and on Windows it runs
+# PowerShell (measured in #447) -- so `Bash` follows the host there.
+case "$tool_name" in
+    powershell|PowerShell|pwsh) bd_dialect=ps ;;
+    Bash)
+        case "$(uname -s 2>/dev/null)" in
+            MINGW*|MSYS*|CYGWIN*) bd_dialect=ps ;;
+            *) bd_dialect=sh ;;
+        esac ;;
+    *) bd_dialect=sh ;;
+esac
+split_command() { printf '%s' "$1" | AF_BD_DIALECT="$bd_dialect" "$PYTHON" -c "$SPLIT_PY"; }
 
 # Section n of the splitter output, separated by a lone RS. Pure parameter
 # expansion, so this stays portable and costs no extra process.
