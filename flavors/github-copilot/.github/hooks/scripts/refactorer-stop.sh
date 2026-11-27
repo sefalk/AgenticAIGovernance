@@ -168,14 +168,8 @@ fi
 
 # Resolve Python once -- Gate 3 and Gate 5 both need it. Gate 5 must still run
 # when only tests/ changed, so this cannot live inside the Gate 3 branch.
-python_exe=""
-if [ -x ".venv/bin/python" ]; then
-    python_exe=".venv/bin/python"
-elif [ -x ".venv/Scripts/python.exe" ]; then
-    python_exe=".venv/Scripts/python.exe"
-else
-    python_exe="$AF_PYTHON"
-fi
+# The project venv, found where the runners find it (#579).
+python_exe=$(af_project_python "$AF_CODE_ROOT") || python_exe="$AF_PYTHON"
 
 # The quality gate reports per changed function, not per changed file (issue
 # #45). It reuses the base resolved above rather than deriving its own, so the

@@ -133,8 +133,10 @@ if ($exitCode -eq 0 -or $exitCode -eq 5) {
     if ($mergeBase) { $diffBaseArgs = @('--diff-base', $mergeBase) }
 
     # Resolve Python once -- the authorship filter and both gates need it.
-    $pythonExe = Join-Path $codeRoot '.venv/Scripts/python.exe'
-    if (-not (Test-Path $pythonExe)) {
+    # The project venv, found where the runners find it (#579): the quality
+    # gate needs that venv's ruff and radon, which AfPython lacks.
+    $pythonExe = Get-AfProjectPython $codeRoot
+    if (-not $pythonExe) {
         $pythonExe = if ($AfPython) { $AfPython } else { $null }
     }
     $qualityScript = Join-Path $mainRoot '.github/scripts/check-python-quality.py'

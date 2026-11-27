@@ -42,8 +42,10 @@ Use `run_task` with the task label. Arguments are fixed — no dynamic params.
 
 All `lint:` tasks call `.github/scripts/run-lint.ps1`, which resolves the venv
 interpreter itself — the workspace `.venv`, else the git toplevel's, else in a
-`WORKTREE_VENV_MODE=shared` worktree the main checkout's; nothing found is
-BLOCKED with the setup command a human runs (#579) — and derives the rule set
+`WORKTREE_VENV_MODE=shared` worktree the main checkout's; when nothing is found
+it runs `bootstrap-python-env` itself (`PY_ENV_BOOTSTRAP=always`, default) or
+reports BLOCKED (`ask`/`off`) (#579). It warns when the venv's ruff differs
+from the `ruff==` pin in `DEP_DEV_FILE` — and derives the rule set
 from `LINTING_STRICTNESS` in
 `af-env.conf`. **Never invoke `ruff` directly** — task shells do not activate
 the venv, so a bare `ruff` command fails with `CommandNotFoundException`, and a

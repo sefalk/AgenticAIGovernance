@@ -49,7 +49,7 @@ if (Test-Path $confPath) {
 
 # Resolve venv python (search order in _venv.ps1)
 . (Join-Path $PSScriptRoot '_venv.ps1')
-$venv = Resolve-AfVenv $workspaceRoot
+$venv = Resolve-AfVenv $workspaceRoot -Bootstrap
 if (-not $venv.Python) {
     Write-Output $venv.Message
     exit 1

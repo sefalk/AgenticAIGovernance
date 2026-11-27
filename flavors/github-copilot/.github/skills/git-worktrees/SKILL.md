@@ -131,7 +131,9 @@ their own (#579, `.github/scripts/_venv.ps1` / `_venv.sh`): workspace `.venv`,
 then the git toplevel's, then — in `shared` mode only — the main checkout's.
 They print `NOTE: venv: shared -> {repo_root}` when they borrow it. In
 `isolated` mode a worktree without its own `.venv` is BLOCKED, never silently
-pointed at the parent. `run-tests` also refuses a shared venv that holds an
+pointed at the parent. When nothing resolves and `PY_ENV_BOOTSTRAP=always`
+(the default) the runner runs `bootstrap-python-env` itself and continues — no
+human step; `ask`/`off` report BLOCKED instead. `run-tests` also refuses a shared venv that holds an
 editable install of the main checkout (pytest would import the main
 checkout's code, not the worktree's): switch that workflow to `isolated`.
 
@@ -236,17 +238,10 @@ Agents do NOT rebase. If merge conflicts arise, human resolves.
 ### Problem: venv missing in new worktree
 
 Worktrees don't automatically inherit the venv from the main checkout.  
-**Resolution:** Run the bootstrap script (see `scripts/setup-worktree.ps1/.sh`):
-```bash
-cd ../wt/{id}
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"       # or: pip install -r requirements-dev.txt
-```
-Alternatively, symlink the existing venv:
-```bash
-ln -s ../../{repo}/.venv ../wt/{id}/.venv   # only if paths are stable
-```
+**Resolution:** with `PY_ENV_BOOTSTRAP=always` (default) nothing to do — the
+next `run-lint` / `run-tests` / `run-metrics` call creates it. Otherwise run
+the task `env: bootstrap python`, or `.github/scripts/bootstrap-python-env.ps1`
+/ `.sh` from the worktree root. Do not symlink another checkout's venv.
 
 ### Problem: VS Code opens the wrong folder
 

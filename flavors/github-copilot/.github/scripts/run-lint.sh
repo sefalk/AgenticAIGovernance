@@ -74,8 +74,9 @@ esac
 # Resolve venv python (same contract as run-tests.sh; search order in _venv.sh)
 # shellcheck source=_venv.sh
 . "$SCRIPT_DIR/_venv.sh"
-af_resolve_venv "$WORKSPACE_ROOT" || exit 1
+af_resolve_venv "$WORKSPACE_ROOT" bootstrap || exit 1
 af_enable_venv
+af_ruff_pin_warning "$WORKSPACE_ROOT"
 PYTHON="$AF_VENV_PYTHON"
 
 cd "$WORKSPACE_ROOT"

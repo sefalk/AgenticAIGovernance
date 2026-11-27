@@ -202,19 +202,37 @@ function Record-AfAsk {
     return $true
 }
 
+# The project's venv interpreter, found exactly where the runners find it
+# (.github/scripts/_venv.ps1, #579): workspace, git toplevel, then the main
+# checkout's venv for a worktree in shared mode. Never bootstraps -- a pip
+# install cannot finish inside a hook's timeout. Returns a path or $null.
+# Loaded per call, not at dot-source time: most hooks never need it (#570).
+function Get-AfProjectPython {
+    param([string]$Root = $script:AfCodeRoot)
+    $resolver = Join-Path $script:AfMainRoot '.github/scripts/_venv.ps1'
+    if (-not $Root) { return $null }
+    if (-not (Test-Path -LiteralPath $resolver)) {
+        # A partial deployment without the resolver still finds the workspace venv.
+        foreach ($rel in @('.venv/Scripts/python.exe', '.venv/bin/python')) {
+            $p = Join-Path $Root $rel
+            if (Test-Path -LiteralPath $p -PathType Leaf) { return $p }
+        }
+        return $null
+    }
+    . $resolver
+    return (Resolve-AfVenv $Root).Python
+}
+
 # The project's test runner: the venv interpreter run-tests.ps1 itself uses,
 # PATH last. The extension host starts hooks without the venv on PATH, so a
 # PATH lookup alone found nothing and every producer test gate skipped (#473).
 # Returns the command as an array (exe, args...), or an empty array.
 function Get-AfPytest {
     param([string]$Root = $script:AfCodeRoot)
-    foreach ($base in @($Root, $script:AfMainRoot) | Where-Object { $_ } | Select-Object -Unique) {
-        foreach ($rel in '.venv/Scripts/python.exe', '.venv/bin/python') {
-            $py = Join-Path $base $rel
-            if (-not (Test-Path -LiteralPath $py -PathType Leaf)) { continue }
-            & $py -c 'import pytest' *> $null
-            if ($LASTEXITCODE -eq 0) { return , @($py, '-m', 'pytest') }
-        }
+    $py = Get-AfProjectPython $Root
+    if ($py) {
+        & $py -c 'import pytest' *> $null
+        if ($LASTEXITCODE -eq 0) { return , @($py, '-m', 'pytest') }
     }
     $cmd = Get-Command pytest -ErrorAction SilentlyContinue
     if ($cmd -and $cmd.Source) { return , @($cmd.Source) }
